@@ -2156,6 +2156,17 @@ One stage, built and tested together.
 yellow; an output on a screen plugged in after launch lights; menus breathe; a right-click offers the
 three pictures; CI is green.
 
+### More fixes for 0.1.1, a snapshot's grid, and a DCA's opacity (2026-10-17)
+
+The author's second list on the same release: the projector after Hide and Show with the monitor open;
+a WFS-DIY snapshot showing its first parameter; the footer while dragging; Autom.'s faders; dragging a
+section; Freeze's picture; an Advance cue made inside a playing group; a snapshot's grid in its own
+window; a DCA's level as opacity for pictures. Namespace draft §80; ATF-ATJ his, ATK-ATR mine. One
+stage.
+
+**Done when:** each of the nine does what §80.2 says, the tests of §80.3 pass in C and fr_FR, the strict
+build is green, and CI is green; the projector, the grid and the D700's row are the author's to see.
+
 ---
 
 ## Cross-cutting, every phase

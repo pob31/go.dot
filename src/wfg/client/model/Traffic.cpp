@@ -224,6 +224,7 @@ namespace wfg::client::model
             shape.address = addressOf (capture.bytes, capture.size);
             shape.problem = "long packet: only the first " + std::to_string (capture.size) + " of "
                               + std::to_string (capture.fullSize) + " bytes were kept";
+            shape.clipped = true;
             out.push_back (std::move (shape));
             return out;
         }

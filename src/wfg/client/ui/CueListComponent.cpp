@@ -1376,6 +1376,17 @@ namespace wfg::client::ui
                 return;
             }
 
+            /*  AN OSC CUE DOUBLE-CLICKED AWAY FROM THE CELLS THAT OPEN FOR TYPING
+                shows its messages as a grid, in a window of their own (the
+                author, 2026-10-17; namespace draft §80) - under the lock too,
+                where the grid is read only. */
+            if (second && aimed == model::EditCell::none && entry.kind == "osc" && actions.showGrid)
+            {
+                lastClickAt = 0;
+                actions.showGrid (entry.id);
+                return;
+            }
+
             if (actions.pick)
                 actions.pick (entry.id, event.mods.isShiftDown(), event.mods.isCommandDown());
 
@@ -1763,13 +1774,25 @@ namespace wfg::client::ui
             const auto* row = over >= 0 && static_cast<std::size_t> (over) < rows.size()
                                 ? &rows[static_cast<std::size_t> (over)] : nullptr;
 
-            /*  STICKY WHILE THE HAND IS ON ONE OF THE BANDS ITSELF, or they
-                would vanish the moment somebody moved towards them. */
-            const auto keep = row != nullptr && row->rowKind == model::RowKind::band
-                                && row->parent == bandsFor;
+            if (row == nullptr)
+                showEmptyBands ({}, false);
+            else if (row->isGroup)
+                showEmptyBands (row->id, true);
 
-            if (! keep)
-                showEmptyBands (row != nullptr && row->isGroup ? row->id : std::string {});
+            /*  STICKY WHILE THE HAND IS ANYWHERE INSIDE THE GROUP (the author,
+                2026-10-17: the footer "disappears if you move away from the top
+                of the group. It should appear when hovering inside the bounds
+                of the group"): its members, its sections, its bands. They went
+                the moment the hand left the title, on its way to the footer. */
+            else if (! bandsFor.empty() && insideBandsGroup (over))
+                ;
+
+            /*  AND A GROUP ENTERED BELOW ITS TITLE grows its footer alone: the
+                footer comes after everything the group holds, below the hand,
+                so nothing under the hand moves. The header still wants the
+                title, where it appears just under the hand. */
+            else
+                showEmptyBands (row->parent, false);
         }
 
         auto at = -1;
@@ -1847,15 +1870,18 @@ namespace wfg::client::ui
         outer group's header from inside a nested one, hover the outer group's
         own name - the same gesture, one row up.
 
-        AND THE ROWS BELOW THE TITLE MOVE, which is why it is the TITLE row
-        rather than any row of the group: nothing above the insertion shifts,
-        so the pointer stays on the thing it was pointing at. */
-    void CueListComponent::showEmptyBands (const std::string& groupId)
+        AND THE ROWS BELOW THE TITLE MOVE, which is why the HEADER waits for the
+        TITLE row: nothing above the insertion shifts, so the pointer stays on
+        the thing it was pointing at. The footer goes after everything the
+        group holds, so any row of the group may grow it (2026-10-17). */
+    void CueListComponent::showEmptyBands (const std::string& groupId, bool withHeader)
     {
-        if (groupId == bandsFor)
+        //  The same group: only a header asked for and not yet there changes anything.
+        if (groupId == bandsFor && (groupId.empty() || ! withHeader || bandsWithHeader))
             return;
 
         bandsFor = groupId;
+        bandsWithHeader = withHeader;
 
         /*  Whatever was spliced in last time goes with the group it was for -
             and only that. The persistent band has no section behind it and
@@ -1876,6 +1902,7 @@ namespace wfg::client::ui
             if (group == nullptr || ! group->isGroup)
             {
                 bandsFor.clear();
+                bandsWithHeader = false;
             }
             else
             {
@@ -1892,12 +1919,16 @@ namespace wfg::client::ui
                     return false;
                 };
 
-                const auto make = [this, group] (model::Section which, const char* word)
+                /*  The depth by value: an insert below may move `rows`, and
+                    `group` points into it. */
+                const auto bandDepth = group->depth + 1;
+
+                const auto make = [this, bandDepth] (model::Section which, const char* word)
                 {
                     model::Row band;
                     band.rowKind = model::RowKind::band;
                     band.section = which;
-                    band.depth = group->depth + 1;
+                    band.depth = bandDepth;
                     band.parent = bandsFor;
                     band.name = word;
                     band.count = 0;         //  what marks it as one of ours
@@ -1920,7 +1951,7 @@ namespace wfg::client::ui
                     if (! has (model::Section::footer))
                         after = rows.insert (after, make (model::Section::footer, "Footer"));
 
-                    if (! has (model::Section::header))
+                    if (withHeader && ! has (model::Section::header))
                     {
                         at = std::find_if (rows.begin(), rows.end(),
                                            [this] (const model::Row& row) { return row.id == bandsFor; });
@@ -1934,13 +1965,37 @@ namespace wfg::client::ui
         list.repaint();
     }
 
+    bool CueListComponent::insideBandsGroup (int row) const
+    {
+        if (bandsFor.empty() || row < 0 || static_cast<std::size_t> (row) >= rows.size())
+            return false;
+
+        /*  THE GROUP'S ROWS ARE ITS TITLE AND EVERY ROW AFTER IT DRAWN DEEPER,
+            its bands among them: the list draws a group's contents, sections
+            and bands one level in from its title, and nothing else between. */
+        for (std::size_t title = 0; title < rows.size(); ++title)
+        {
+            if (rows[title].id != bandsFor || ! rows[title].isGroup)
+                continue;
+
+            auto end = title + 1;
+
+            while (end < rows.size() && rows[end].depth > rows[title].depth)
+                ++end;
+
+            return static_cast<std::size_t> (row) >= title && static_cast<std::size_t> (row) < end;
+        }
+
+        return false;
+    }
+
     void CueListComponent::itemDragExit (const SourceDetails&)
     {
         const auto was = dropRow;
 
         stopTimer();
         lastDrag = SourceDetails { juce::var(), nullptr, {} };
-        showEmptyBands ({});
+        showEmptyBands ({}, false);
 
         dropRow = -1;
         dropWouldLink = false;
@@ -1973,7 +2028,7 @@ namespace wfg::client::ui
         refusalSaid.clear();
 
         //  The bands were the hand's, and the hand has gone.
-        showEmptyBands ({});
+        showEmptyBands ({}, false);
 
         repaint();
 
@@ -2063,6 +2118,19 @@ namespace wfg::client::ui
             const auto luaLine = juce::String::fromUTF8 (wfg::process::scriptLineToFireCue ("lua", cueId).c_str());
 
             menu.addSeparator();
+
+            //  An OSC cue's messages as a grid (namespace draft §80).
+            if (const auto* row = rowById (cueId); row != nullptr && row->kind == "osc" && actions.showGrid)
+            {
+                menu.addItem ("Show its messages as a grid",
+                              [safe = juce::Component::SafePointer<CueListComponent> (this), cueId]
+                              {
+                                  if (safe != nullptr && safe->actions.showGrid)
+                                      safe->actions.showGrid (cueId);
+                              });
+                menu.addSeparator();
+            }
+
             menu.addItem ("Copy for a patch", [words] { juce::SystemClipboard::copyTextToClipboard (words); });
             //  And the line a script fires it with (namespace draft §66, AMV).
             menu.addItem ("Copy for a script", [line] { juce::SystemClipboard::copyTextToClipboard (line); });

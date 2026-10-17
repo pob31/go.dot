@@ -114,6 +114,11 @@ namespace wfg::client::ui
                 picks nothing, so a paste lands at the end of the list. */
             std::function<void()> cut, copy, paste;
 
+            /*  AN OSC CUE'S MESSAGES AS A GRID, in a window of their own (the
+                author, 2026-10-17; namespace draft §80): a double click on the
+                cue away from its typing cells, or its right-click. */
+            std::function<void (const std::string& cueId)> showGrid;
+
             /*  F FLAGS OR UNFLAGS THE PICKED CUES, SHIFT+F FLAGS THE CUE THE
                 LAST GO FIRED (the author, 2026-10-15; namespace draft §63,
                 ALM). Under the lock too: a flag is a state row. */
@@ -356,14 +361,22 @@ namespace wfg::client::ui
         std::string editId;                  ///< the cue the open box is about, so a rebuild can follow it
         std::string editAttribute;
         bool editable = true;
-        /*  THE GROUP WHOSE EMPTY BANDS ARE SHOWING, while a drag is over its
-            title row (author, 2026-09-22: "showing temporarily the bands while
-            dragging over a group might be best"). Empty the rest of the time,
-            which is every moment nobody is dragging. */
+        /*  THE GROUP WHOSE EMPTY BANDS ARE SHOWING, while a drag is over it
+            (author, 2026-09-22: "showing temporarily the bands while dragging
+            over a group might be best"; 2026-10-17: "It should appear when
+            hovering inside the bounds of the group not just the top line").
+            Empty the rest of the time, which is every moment nobody is
+            dragging. `bandsWithHeader`: the header's band too, which only the
+            group's title row asks for. */
         std::string bandsFor;
+        bool bandsWithHeader = false;
 
-        /** Grows `rows` the two bands of `bandsFor`, or takes them away again. */
-        void showEmptyBands (const std::string& groupId);
+        /*  Grows `rows` the empty bands of `groupId` - its footer, and its
+            header when `withHeader` - or takes them away again. */
+        void showEmptyBands (const std::string& groupId, bool withHeader);
+
+        /** Whether drawn row `row` lies inside `bandsFor`: its title, what it holds, its bands. */
+        bool insideBandsGroup (int row) const;
 
         /*  WHAT A DRAG IS DOING, re-asked while the hand holds still.
 

@@ -59,6 +59,7 @@
 #include <wfg/engine/surface/SurfaceBridge.h>
 #include <wfg/engine/surface/DcaColour.h>
 #include <wfg/engine/surface/DcaKnob.h>
+#include <wfg/engine/video/DcaOpacity.h>
 #include <wfg/engine/surface/SurfaceCommands.h>
 #include <wfg/engine/surface/SurfacePages.h>
 #include <wfg/engine/surface/SurfaceProfile.h>
@@ -4911,6 +4912,53 @@ namespace
             hands (bytes);
         }
     };
+}
+
+TEST_CASE ("dca level words: decibels for sound, the opacity for a picture through its curve, both for both (§80)")
+{
+    /*  The author, 2026-10-17: "When a DCA has only video can the opacity % be
+        shown instead of the dB? When a DCA has both then show both. The
+        percentage should take into account the curve if possible. This may
+        change depending on the running cues assigned to the DCA." */
+    const surface::DcaContents nothing {};
+    const surface::DcaContents pictures { false, true };
+    const surface::DcaContents both { true, true };
+
+    const auto percentAt = [] (double decibels, double curve)
+    {
+        return std::to_string (std::llround (wfg::video::shapedOpacity (wfg::video::opacityForTrim (decibels), curve) * 100.0));
+    };
+
+    //  Sound, or nothing at all: the level as ever.
+    CHECK (surface::dcaLevelWords (-6.2, {}, nothing, 12) == "-6.2 dB");
+    CHECK (surface::dcaLevelWords (-120.0, {}, nothing, 12) == "-inf dB");
+
+    //  Pictures assigned and nothing playing: the opacity, straight.
+    CHECK (surface::dcaLevelWords (-20.0, {}, pictures, 12) == percentAt (-20.0, 0.0) + " %");
+    CHECK (surface::dcaLevelWords (0.0, {}, pictures, 12) == "100 %");
+    CHECK (surface::dcaLevelWords (-120.0, {}, pictures, 12) == "0 %");
+
+    //  Both assigned: both, compact in fewer than eleven characters.
+    CHECK (surface::dcaLevelWords (-20.0, {}, both, 12) == "-20.0 dB " + percentAt (-20.0, 0.0) + "%");
+    CHECK (surface::dcaLevelWords (-20.0, {}, both, 7) == "-20 " + percentAt (-20.0, 0.0) + "%");
+
+    //  WHAT PLAYS DECIDES: a picture with its curve - the first shown - though sound is assigned too.
+    std::vector<surface::DcaMark> playing (2);
+    playing[0].cue = "MOV00001";
+    playing[0].picture = true;
+    playing[0].curve = 100.0;
+    playing[1].cue = "MOV00002";
+    playing[1].picture = true;
+    playing[1].curve = -100.0;
+
+    CHECK (surface::dcaLevelWords (-20.0, playing, both, 12) == percentAt (-20.0, 100.0) + " %");
+    CHECK (percentAt (-20.0, 100.0) != percentAt (-20.0, 0.0));
+
+    //  And a sound alone playing under a DCA with pictures assigned: decibels.
+    std::vector<surface::DcaMark> sound (1);
+    sound[0].cue = "SND00001";
+    sound[0].sound = true;
+    CHECK (surface::dcaLevelWords (-20.0, sound, both, 12) == "-20.0 dB");
 }
 
 TEST_CASE ("surface bridge: the knob above a DCA strip turns the curve of the pictures playing under it, a press switches it to their sound's offset (§50)")

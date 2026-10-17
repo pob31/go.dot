@@ -24,8 +24,10 @@
 #include <algorithm>
 #include <bit>
 #include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <utility>
 #include <map>
 #include <optional>
 #include <string_view>
@@ -525,6 +527,22 @@ namespace wfg::client::model
         const auto after = index + 1 < sections.size() ? starts[index + 1] - sections[index].length()
                                                        : std::numeric_limits<double>::max();
         return { before, std::max (before, after) };
+    }
+
+    std::vector<SectionRow> withOrder (std::vector<SectionRow> sections, std::size_t index, int slot)
+    {
+        if (index >= sections.size() || slot < 0 || static_cast<std::size_t> (slot) >= sections.size()
+              || static_cast<std::size_t> (slot) == index)
+            return sections;
+
+        auto moved = std::move (sections[index]);
+        sections.erase (sections.begin() + static_cast<std::ptrdiff_t> (index));
+        sections.insert (sections.begin() + slot, std::move (moved));
+
+        for (std::size_t at = 0; at < sections.size(); ++at)
+            sections[at].index = static_cast<int> (at);
+
+        return sections;
     }
 
     std::vector<SectionRow> withPlace (std::vector<SectionRow> sections, std::size_t index, double seconds)

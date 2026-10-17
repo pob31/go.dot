@@ -31626,3 +31626,112 @@ display found again are the author's to see.
 The author's look at the tabs, the menus and the three pictures, and his review of the words (the
 tooltips). A screen plugged in while Go.dot runs, its output chosen and lit, on Windows - the case
 reported - and on a Mac.
+
+## 80. More fixes for 0.1.1, a snapshot's grid, and a DCA's opacity
+
+Asked by the author on 2026-10-17, evening, on the same release: *"1. If I hide the video and reenable
+it, the video doesn't show anymore on it"* - *"it happens when hiding while the video monitor window
+is open"*; *"2. The items sent from WFS-DIY ... only create one cue for the first parameter of several.
+The network log on Go.dot's side shows a red packet"* - then *"the content of the cue was misleading,
+but yes, the 8 positions were recalled even if it only showed the first position"*; *"3. The footer of
+a group when dragging only appears when on the title of the group"*; *"4. When playing a file from the
+waveform editor with the Autom. toggle engaged the faders don't follow the existing curve"*; *"5.
+splitting and dragging a segment (top) doesn't move the audio"*; *"6. Freezing the file doesn't show
+the frozen audio's waveform and spectral colours"*; *"An advance cue on a looped sample ... The loop
+kept looping on and not play into the next one"*; *"Could clicking with the mouse cursor show the same
+grid as the scope of WFS-DIY with the columns relevant to the cue and the values in the cells where
+something was recorded? ... Don't add columns"*; and *"When a DCA has only video can the opacity % be
+shown instead of the dB? When a DCA has both then show both. The percentage should take into account
+the curve if possible. This may change depending on the running cues assigned to the DCA."* Part of
+0.1.1 (§79). Decisions from ATF.
+
+### 80.1 What was wrong
+
+- **The projector after Hide and Show.** Not proven without the screen; what the code shows. A
+  display's wake - the swap chain's frame-latency signal - is used up by the frame it asks for and given
+  back only when that frame is presented. A projector woken that drew nothing - its output missing from
+  a pass's configuration, its swap chain not ready while its window was coming up - was never woken
+  again, and said nothing wrong. Showing again is start-up without start-up's time: the device is open,
+  frames present within milliseconds, and the monitor's work keeps the renderer's message thread busy,
+  so the new window's own black paint landed after them.
+- **WFS-DIY's snapshot.** Every capture landed whole - "Snapshot 20261017_200636" in 27 datagrams, the
+  later ones in one each - as one cue, its first parameter the cue's own message and the rest further
+  messages. The window showed the first: a fade, a patch and a script open their panel when picked; an
+  OSC cue did not. The red line was the network monitor's own: it kept 448 bytes of a datagram and drew
+  the rest as a packet that "could not be read", which the engine had read whole. (WFS-DIY's own log
+  says each export left out 8 parameters it has no OSC name for - WFS-DIY's, not Go.dot's.)
+- **The footer while dragging.** The empty Header and Footer lines were grown only while the pointer was
+  on the group's title; on the way down to the footer, which comes after everything the group holds,
+  they went.
+- **Autom.** Outside a recording pass every flipped fader sat at its lane where the cue starts (DG),
+  every tick, whatever the cue was doing: the sound followed its curve and the faders did not.
+- **Dragging a section.** The lower half slid a section only into the room beside it, stopping at its
+  neighbours: after a split there is none, and nothing moved. The top half selected time, the strip
+  above reordered with its block drawn well away from the hand. A cue playing while edited kept the
+  file it started with until its next run (ADP).
+- **Freeze.** The bounce had no analysis yet when the panel first drew it, and that empty answer was
+  kept for good; and the sections kept for Unfreeze laid the bounce's picture at their source seconds.
+- **Advance.** The Advance cue was made inside the group while the group played. A manual group launches
+  the members of the round it drew at its GO; the cue made after was spawned by its GO and never
+  launched, so it never reached the loop - nor ended, 212 s later. Any cue made or moved into a playing
+  manual group did the same.
+
+### 80.2 Decisions
+
+The author's (2026-10-17; the options' words mine):
+
+- **ATF** **Outside a pass, a flipped fader follows the cue's curve while the cue plays**, and sits where
+  the lane starts (DG) when it does not. Nothing is written outside a pass, whatever a hand does.
+- **ATG** **The strip above the waveform and the top half select a range; the lower half drags the
+  section** (his words: "The time strip above the waveform and top half of the waveform should be for
+  range. The lower half of the waveform should drag"). Amends ADZ and §55.13's "the row above reorders".
+- **ATH** **An edit made while the cue plays is heard at once** - a render that lands, a freeze, an
+  unfreeze - as a loop point is (§33). Overrules ADP.
+- **ATI** **A snapshot's grid in a window of its own**, its cells typed in.
+- **ATJ** **A DCA strip's level says what it does**: the opacity for pictures, both for both, through
+  the curve, following what plays.
+
+Mine (proposed):
+
+- **ATK** Picking an OSC cue that has further messages opens its Messages panel, as a fade, a patch and a
+  script open theirs; shut, it stays shut for that cue.
+- **ATL** The network monitor keeps 1472 bytes of a datagram, a whole one on an Ethernet link; one it
+  must cut is said in grey, never as a fault.
+- **ATM** A drag anywhere inside a group keeps its empty bands; entered below its title it grows only
+  the footer, which comes after the hand, so nothing under the hand moves; the header still wants the
+  title.
+- **ATN** The lower half's drag slides a section into the room beside it and, carried past a
+  neighbour's middle, takes that place in the order: one `section.place` or one `section.move` on
+  release. A click on the strip above picks its section and leaves the playhead.
+- **ATO** A projector a quarter of a second without a frame is drawn anyway, which gives its wake back;
+  and its window is painted before the render thread is handed its view.
+- **ATP** A member made or moved into a playing manual group is launched by its GO like the round's; the
+  round, which says when the group is over, stays as its record drew it. A pruned member is not.
+- **ATQ** The grid: an address's first number is the channel - what comes before it the family, a
+  table each; what comes after the parameter, a row each in the order the cue first holds them; the
+  columns only the channels the cue holds, in their order as numbers. A message with no number is
+  counted, not drawn. One window, opened by a double click on an OSC cue away from its typing cells or
+  by its right-click, following the OSC cue picked while it is open; a filled cell typed in is one
+  `node.set` of its message's value at its own types, Esc in the box takes it back, an empty cell stays
+  empty, read only under the lock.
+- **ATR** The DCA's words: what plays under it decides, else what is assigned; "75 %" for pictures
+  alone - the fader's travel (WE) through the curve of the mark shown first, the run that started last,
+  straight with nothing playing - "-6.2 dB 75%" for both, "-6 75%" in fewer than eleven characters, the
+  level as ever for sound. On the D700's level row and the window's panel; the Mackie shows no level.
+
+### 80.3 Tests
+
+`ClientTests`: an OSC cue's messages read as a grid (places, tables, columns in number order, empty
+cells, a cell's words and what typing writes). `LaneRecordTests`: outside a pass the flipped faders
+follow the cue playing, and go back to its start when it stops. `EditPlaybackTests`: a launched run
+follows a new render at once (was: keeps its file). `GoTests`: a member made inside a playing manual
+group is launched by its GO. `SurfaceBridgeTests`: the DCA's words. `wfg_audio_ui_tests`: a drag
+inside a group keeps its footer's band; the lower half carries a section past its neighbour, the strip
+above selects; a frozen edit draws its bounce whole once analysed; the grid's window, hidden - its
+cells, a value typed, a wrong word said, an empty cell, the lock. The projector's wake has no test: no
+test opens a projector, and the fake one that would is not written.
+
+### 80.4 Owed
+
+On the author's screen: Hide and Show with the monitor open, the projector lit again; the grid against a
+real snapshot; the D700's DCA row with a movie, a sound, and both. The words of ATK-ATR.

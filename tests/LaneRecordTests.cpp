@@ -611,6 +611,57 @@ TEST_CASE ("lane record: the faders flip to the cue's level and its mixes, each 
 }
 
 //==============================================================================
+TEST_CASE ("lane record: outside a pass the flipped faders follow the cue playing, and go back to its start when it stops")
+{
+    /*  The author, 2026-10-17: "When playing a file from the waveform editor
+        with the Autom. toggle engaged the faders don't follow the existing
+        curve." The editor's play is a `cue.fire`, not a pass; the faders sat
+        at the lane's start (DG) for as long as it played. */
+    Rig rig;
+    const auto face = rig.mix ("Face");
+    rig.set ("/godot/cue/" + rig.mediaId + "/levelLane", "0 0 20 -20");
+
+    const auto send = rig.sendTo (face, "-6");
+    rig.set ("/godot/send/" + send + "/levelLane", "0 0 20 -20");
+
+    REQUIRE (rig.send ("lane.arm", { osc::Value::string (rig.mediaId) }).applied == 1);
+    rig.tickOnce();
+
+    //  Nothing playing: at the start (DG).
+    CHECK (rig.rideDb ("level") == doctest::Approx (0.0));
+    CHECK (rig.rideDb (face) == doctest::Approx (-6.0));
+
+    //  Played as the editor plays it: each fader where the file is, a second in about -1 dB down.
+    REQUIRE (rig.send ("cue.fire", { osc::Value::string (rig.mediaId) }, "window").applied >= 1);
+    const auto* fired = rig.liveRunOf (rig.mediaId);
+    REQUIRE (fired != nullptr);
+
+    const auto runId = fired->id;
+    rig.land (runId);
+    rig.play (50);
+
+    CHECK_FALSE (rig.lanes.recording);
+    CHECK (rig.rideDb ("level") < -0.5);
+    CHECK (rig.rideDb ("level") > -1.5);
+    CHECK (rig.rideDb (face) < -6.5);
+    CHECK (rig.rideDb (face) > -7.5);
+    CHECK (osc::parseDouble (rig.published (rideOf ("level"))).value_or (0.0) < -0.5);
+
+    //  And on with it.
+    rig.play (50);
+    CHECK (rig.rideDb ("level") < -1.5);
+
+    //  Stopped: back to the start - and nothing written, a hand or no hand.
+    rig.send ("node.set", { osc::Value::string (rideOf ("level")), osc::Value::float64 (-9.0) }, "window");
+    REQUIRE (rig.send ("run.kill", { osc::Value::string (runId) }).applied == 1);
+    rig.play (5);
+
+    CHECK (rig.rideDb ("level") == doctest::Approx (0.0));
+    CHECK (rig.rideDb (face) == doctest::Approx (-6.0));
+    CHECK (rig.laneOfCue().size() == 2u);
+}
+
+//==============================================================================
 TEST_CASE ("lane record: a pass writes the ride from its first touch, latched until it stops, in one step")
 {
     Rig rig;

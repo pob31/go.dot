@@ -62,8 +62,13 @@ namespace wfg::monitor
         one), or a MIDI port. */
     enum class Road : std::uint8_t { udp, page, midi };
 
-    /** How much of one packet is kept: enough for any cue's message, cut after that. */
-    inline constexpr std::size_t maxBytes = 448;
+    /*  HOW MUCH OF ONE PACKET IS KEPT: a whole datagram as an Ethernet link
+        carries it unbroken (1500 bytes, less the IP and UDP headers), cut after
+        that. It was 448, enough for any cue's message - and a processor's
+        capture, WFS-DIY's at up to 1200 bytes a chunk, was shown in red as a
+        packet the monitor could not read, when Go.dot had read it whole (the
+        author, 2026-10-17). */
+    inline constexpr std::size_t maxBytes = 1472;
 
     /** How long a peer's name may be: an address and port, or a MIDI port's name. */
     inline constexpr std::size_t maxPeer = 64;
@@ -99,7 +104,7 @@ namespace wfg::monitor
     class TrafficTap
     {
     public:
-        /** A power of two: 2048 slots, a megabyte, allocated once and never again. */
+        /** A power of two: 2048 slots, about three megabytes, allocated once and never again. */
         static constexpr std::size_t capacity = 2048;
 
         TrafficTap();

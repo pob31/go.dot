@@ -3063,7 +3063,18 @@ namespace wfg::surface
                 if (changed (strip.rows[0], name))
                     send (port, d700DisplayRow (element, 0, name));
 
-                if (level.has_value())
+                /*  A DCA STRIP SAYS WHAT ITS FADER DOES TO WHAT IT RIDES (the
+                    author, 2026-10-17; namespace draft §80): the level for
+                    sound, the opacity for a picture, both for both. */
+                if (level.has_value() && isDca && ! strip.dcaId.empty())
+                {
+                    const auto& assigned = dcaContentsNow();
+                    const auto found = assigned.find (strip.dcaId);
+
+                    levelScratch = dcaLevelWords (*level, marksUnder (strip.dcaId),
+                                                  found != assigned.end() ? found->second : DcaContents {}, 12);
+                }
+                else if (level.has_value())
                     levelText (*level, levelScratch);
                 else
                     levelScratch.assign (word);

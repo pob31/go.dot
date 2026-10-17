@@ -417,16 +417,20 @@ namespace wfg::client::ui
         double gripValue = 0.0;
         std::optional<std::pair<double, double>> selection;
         bool selecting = false;
+        bool selectingFromRow = false;      ///< begun on the row above, where a click picks and moves no playhead
         double selectFrom = 0.0;
         int selectPressX = 0;
         bool lowerPress = false;
 
         /*  A SECTION SLID FROM THE LOWER HALF (§55.13): which, where it began,
             the second the hand pressed at, where it would now begin, and the
-            edit so - drawn, waveform and all, until the one write on release. */
+            edit so - drawn, waveform and all, until the one write on release.
+            Carried past a neighbour (2026-10-17), `slideSlot` is the place in
+            the order it would take, and -1 while it only slides. */
         std::size_t slidSection = static_cast<std::size_t> (-1);
         double slideFrom = 0.0, slidePress = 0.0, slideValue = 0.0;
         bool slideMoved = false;
+        int slideSlot = -1;
         std::vector<model::SectionRow> slidePreview;
         std::optional<std::pair<std::size_t, bool>> curveTarget;
         double curveHeld = 0.0;

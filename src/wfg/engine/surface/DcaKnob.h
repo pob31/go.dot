@@ -111,4 +111,20 @@ namespace wfg::surface
     /*  Where the ring stands, 0..1 with the middle at straight and at nought dB
         - the offset's two halves of unequal size, so nought is the middle. */
     double knobRingFraction (KnobMode mode, double value) noexcept;
+
+    /*  A DCA STRIP'S LEVEL IN WORDS (the author, 2026-10-17: "When a DCA has
+        only video can the opacity % be shown instead of the dB? When a DCA has
+        both then show both. The percentage should take into account the curve
+        if possible. This may change depending on the running cues assigned to
+        the DCA."; namespace draft §80).
+
+        What plays under the DCA decides - `playing`, as `dcaMarksPlaying` has
+        it - else, with nothing playing, what is assigned to it. Sound alone, or
+        nothing at all: the level, "-6.2 dB" as ever. A picture alone: the
+        opacity the DCA gives it, "75 %" - the fader's travel (37.5, WE) through
+        the curve of the mark shown first, the run that started last, straight
+        with nothing playing. Both: "-6.2 dB 75%", or "-6 75%" in fewer than
+        eleven characters. Digit by digit, so no locale moves the point. */
+    std::string dcaLevelWords (double levelDb, const std::vector<DcaMark>& playing, const DcaContents& assigned,
+                               int width);
 }

@@ -321,11 +321,11 @@ def run(locale: str) -> int:
             if slid is not None:
                 report.check(abs(sample_at(slid, 2.75)) < 1e-6, "silence where it was", str(sample_at(slid, 2.75)))
 
-                # --- 6. Edited while it sounds: its render kept, then let go of (55.1, ADP) ---
+                # --- 6. Edited while it sounds: heard at once (§80, ATH; overrules ADP) ---
                 # At an eighth of its speed the cue sounds for thirty-two seconds, so the edit lands
-                # while it plays, however slow the machine. The run keeps the render it was launched
-                # on; once it is over, nothing plays that render and it goes - asked again every tick
-                # until then, not only when the renders next move (2026-10-13), since nothing else moves.
+                # while it plays, however slow the machine. The run goes on from where it is on the
+                # new render - one run.seek of the engine's, in the log - so nothing plays the old
+                # one any more and it goes while the cue still sounds.
                 send(server, "/godot/cmd/node/set", [cue + "rate", 0.125])
                 first_sound.wait_for(server, cue + "rate", 0.125)
                 send(server, "/godot/cmd/node/set", [f"/godot/list/{LIST}/standby", CUE])
@@ -350,19 +350,21 @@ def run(locale: str) -> int:
                 if sounding and edited is not None:
                     report.equal(first_sound.value_of(server, f"/godot/run/{sounding}/state"), "playing",
                                  "and the cue plays on through it")
-                    report.check(slid.is_file(), "the render it plays is kept while it plays (ADP)")
+                    report.check(common.wait_until(lambda: not slid.exists(), timeout=10) is not None,
+                                 "the render it was playing let go of while it still sounds: it plays the edit now")
+                    report.equal(first_sound.value_of(server, f"/godot/run/{sounding}/state"), "playing",
+                                 "the same run, still playing")
 
                     send(server, "/godot/cmd/run/stopAll", [])
                     first_sound.wait_for_run_state(server, sounding, "done")
-                    report.check(common.wait_until(lambda: not slid.exists(), timeout=10) is not None,
-                                 "and let go of once the run that played it is over")
                     left = sorted(p.name for p in (media / ".edits").glob("*.wav"))
                     report.equal(left, [edited.name], "the edit's render alone under media/.edits")
 
         text = log.read_text(encoding="utf-8", errors="replace") if log.is_file() else ""
 
+        #  " engine run.seek": the playing run moved onto the edit's new render (§80, ATH).
         for record in (" section.split", " section.move", " media.freeze", " media.frozen", " media.unfreeze",
-                       " section.deleteSpan", " section.fade", " section.curve", " section.place"):
+                       " section.deleteSpan", " section.fade", " section.curve", " section.place", " engine run.seek"):
             report.check(record in text, f"the log holds{record}")
 
         code, out, err = common.run_wfg("replay", str(log), f"--bundle={bundle}", f"--out={replayed}",

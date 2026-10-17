@@ -191,6 +191,12 @@ namespace wfg::client::model
     std::pair<double, double> placeLimits (const std::vector<SectionRow>&, std::size_t index);
     std::vector<SectionRow> withPlace (std::vector<SectionRow>, std::size_t index, double seconds);
 
+    /*  A SECTION CARRIED PAST A NEIGHBOUR (the author, 2026-10-17: "The lower
+        half of the waveform should drag"), section.move restated: the edit
+        with section `index` at place `slot` among them, each keeping its gap,
+        as the engine moves it. Out of range, the edit as it was. */
+    std::vector<SectionRow> withOrder (std::vector<SectionRow>, std::size_t index, int slot);
+
     /*  THE FADE UNDER THE POINTER, for the wheel (55.9): the section and side
         whose fade spans `seconds`, with `slack` seconds of grace either side
         of a short one; at a join, the side the pointer is on. */

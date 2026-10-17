@@ -309,7 +309,7 @@ TEST_CASE ("edit playback: an edit with no render fails its arm as rendering, an
     CHECK (show.lastRun()->error.empty());
 }
 
-TEST_CASE ("edit playback: a cue on standby follows a new render once the edits stop, and a launched one keeps its file")
+TEST_CASE ("edit playback: a cue on standby follows a new render once the edits stop, and a launched one follows it at once")
 {
     EditShow show;
 
@@ -337,16 +337,26 @@ TEST_CASE ("edit playback: a cue on standby follows a new render once the edits 
     show.audio.completeArms (show.engine);
     show.ticks (2);
 
-    /*  Launched, the run keeps the file it plays whatever lands. */
+    /*  LAUNCHED, THE RUN FOLLOWS WHAT LANDS AT ONCE (the author, 2026-10-17:
+        an edit made while the cue plays is heard at once, as a loop point is):
+        a seek to where it is, armed on the new render. Nothing while the
+        render is being made. */
     show.submitAndTick ("go");
     show.ticks (20);
     REQUIRE (show.lastRun() != nullptr);
     CHECK (show.lastRun()->state == cue::runState::playing);
+    const auto runId = show.lastRun()->id;
 
     REQUIRE (show.document.trimSection (second, 14.0, 30.0).ok);
-    show.renderLands (".edits/third.wav");
     show.ticks (20);
     CHECK (show.audio.arms.empty());
+
+    show.renderLands (".edits/third.wav");
+    show.ticks (20);
+    REQUIRE (show.audio.arms.size() == 1u);
+    CHECK (show.audio.arms.front().mediaFile.find ("third.wav") != std::string::npos);
+    REQUIRE (show.lastRun() != nullptr);
+    CHECK (show.lastRun()->id == runId);
 }
 
 TEST_CASE ("edit playback: a freeze arms the standby on the bounce, and an unfreeze on the render again")

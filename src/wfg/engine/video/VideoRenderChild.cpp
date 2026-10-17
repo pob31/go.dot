@@ -2300,6 +2300,14 @@ namespace wfg::video
                 coverDisplay (getWindowHandle(), covering, overhang);
                 view = render::makeNativeView (getWindowHandle(), pixelWidth(), pixelHeight());
                 render::fitNativeView (view, getWindowHandle(), pixelWidth(), pixelHeight());
+
+                /*  ITS BLACK PAINTED BEFORE THE RENDER THREAD IS HANDED ITS VIEW
+                    (2026-10-17), as at start-up, where opening the device left
+                    time for it. A window made again - put away and shown - while
+                    the monitor kept this thread busy painted later, over frames
+                    already presenting. */
+                if (auto* peer = getPeer())
+                    peer->performAnyPendingRepaintsNow();
             }
 
             ~ProjectorWindow() override
@@ -2455,7 +2463,16 @@ namespace wfg::video
             {
                 std::int64_t last = 0;
                 double jitterMs = 0.0;
+
+                /*  When its surface last showed a frame, or was made: what tells
+                    a projector left behind from one that is only waiting. */
+                std::int64_t shownAt = 0;
             };
+
+            /*  How long a projector may go without a frame before it is drawn
+                anyway: well past any display's refresh, short enough not to be
+                seen as a fault. */
+            static constexpr std::int64_t leftBehindNanos = 250'000'000;
 
             /*  A VIDEO INPUT AS THE RENDER THREAD HOLDS IT (§44, YB): what it
                 was made for - its kind and sender - its receiver, why there is
@@ -2904,6 +2921,9 @@ namespace wfg::video
 
                         frames.assign (specs.size(), Frames {});
 
+                        for (auto& one : frames)
+                            one.shownAt = steadyNanos();
+
                         for (const auto& spec : specs)
                         {
                             std::string why = deviceProblem;
@@ -3051,7 +3071,26 @@ namespace wfg::video
                     //  THE CARDS' SOUND (§71, APK): what the audio thread made, placed.
                     feedCardSound (carding, clock, began);
 
-                    if (! refreshed && sendNow.empty() && ! insertBeat && cardNow.empty())
+                    /*  A PROJECTOR NEVER LEFT BEHIND (the author, 2026-10-17: put
+                        away and shown again while the monitor was open, it stayed
+                        dark). A display's wake is used up by the frame it asks for
+                        and given back only when that frame is presented; one woken
+                        that drew nothing - its output missing from the pass's
+                        configuration, its swap chain not ready while its window was
+                        coming up - was never woken again, and said nothing wrong.
+                        One a quarter of a second without a frame is drawn anyway,
+                        which gives its wake back. */
+                    auto revived = false;
+
+                    for (std::size_t n = 0; n < surfaces.size() && n < frames.size(); ++n)
+                        if (surfaces[n] != nullptr && ! surfaces[n]->due && began - frames[n].shownAt > leftBehindNanos)
+                        {
+                            surfaces[n]->due = true;
+                            frames[n].shownAt = began;    // one try a quarter second, not every pass
+                            revived = true;
+                        }
+
+                    if (! refreshed && ! revived && sendNow.empty() && ! insertBeat && cardNow.empty())
                         continue;
 
                     region::ConfigReading config;
@@ -3241,6 +3280,7 @@ namespace wfg::video
                     {
                         surfaces[n]->present();
                         countFrame (specs[n], frames[n], began);
+                        frames[n].shownAt = began;
                     }
 
                     for (auto& [insertId, held] : inserting)

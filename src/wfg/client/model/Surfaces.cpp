@@ -591,7 +591,10 @@ namespace wfg::client::model
                     row.dcaMarks = under->second;
 
                 if (const auto assigned = contents.find (row.dca); assigned != contents.end())
+                {
                     row.dcaPictures = assigned->second.picture;
+                    row.dcaSound = assigned->second.sound;
+                }
             }
 
             /*  WHAT IS UNDER THE FADER NOW, read off the node the fader rides -

@@ -5911,6 +5911,40 @@ namespace
     };
 }
 
+TEST_CASE ("manual group: a member made inside it while it plays is launched by its GO")
+{
+    /*  The author, 2026-10-17: an Advance cue made inside a playing group did
+        nothing - its GO spawned the run and the group, having drawn its round
+        before the cue existed, never launched it. */
+    ManualRig rig;
+    rig.setStandby (rig.first);
+
+    CHECK (rig.submitAndTick ("go").applied == 1);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.first).empty(); }));
+    const auto groupRun = rig.runOf (rig.groupId);
+    REQUIRE (! groupRun.empty());
+
+    //  Made after the round was drawn, between the first and the second.
+    const auto made = rig.document.createCue (rig.groupId, 1, "memo", "Late").id;
+    REQUIRE (! made.empty());
+    rig.setStandby (made);
+
+    //  (Not counted: the same tick can apply the `run.launch` the group asks for.)
+    CHECK (rig.submitAndTick ("go").rejected == 0);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (made).empty(); }));
+    CHECK (rig.runs.find (rig.runOf (made))->parent == groupRun);
+
+    //  Launched, and so over at once as a memo is - not left armed for ever.
+    REQUIRE (rig.tickUntil ([&]
+    {
+        const auto id = rig.runOf (made);
+        return ! id.empty() && rig.runs.find (id)->isFinished();
+    }));
+
+    //  And the group still waits for the rest of its round.
+    CHECK_FALSE (rig.runs.find (groupRun)->isFinished());
+}
+
 TEST_CASE ("manual group: each GO fires one member, and the pointer walks through it")
 {
     ManualRig rig;

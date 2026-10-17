@@ -96,6 +96,7 @@
 #include <wfg/client/model/Scrub.h>
 #include <wfg/client/model/Selection.h>
 #include <wfg/client/model/OscCurves.h>
+#include <wfg/client/model/OscGrid.h>
 #include <wfg/client/model/OscMessages.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Surfaces.h>
@@ -3372,6 +3373,80 @@ TEST_CASE ("client: a group copied with the cues in it carries each once, and is
     //  A cue picked without its group is sent as itself.
     picked.set (first);
     CHECK (picked.outermost (show.rows()) == std::vector<std::string> { first });
+}
+
+//==============================================================================
+TEST_CASE ("client: an OSC cue's messages read as a grid - a family a table, a channel a column, a parameter a row")
+{
+    /*  The author, 2026-10-17: "the same grid as the scope of WFS-DIY with the
+        columns relevant to the cue and the values in the cells where
+        something was recorded ... Don't add columns." (namespace draft §80) */
+    const auto row = [] (const std::string& address, const std::string& value,
+                         std::vector<std::pair<char, std::string>> values)
+    {
+        model::OscMessageRow made;
+        made.base = "/godot/message/" + address + "/";
+        made.address = address;
+        made.value = value;
+
+        for (const auto& [tag, payload] : values)
+        {
+            model::OscArgument arg;
+            arg.tag = tag;
+            arg.payload = payload;
+            made.args.push_back (arg);
+        }
+
+        return made;
+    };
+
+    model::OscMessagesReading reading;
+    reading.cueId = "OSC00001";
+    reading.rows = { row ("/wfs/input/3/positionX", "f:0.5", { { 'f', "0.5" } }),
+                     row ("/wfs/input/10/positionX", "f:1", { { 'f', "1" } }),
+                     row ("/wfs/input/3/positionY", "f:-2", { { 'f', "-2" } }),
+                     row ("/wfs/input/1/eq/2/gain", "f:3", { { 'f', "3" } }),
+                     row ("/wfs/input/snapshot/load", "s:\"Act 1\"", { { 's', "Act 1" } }),
+                     row ("/wfs/effect/2/mix", "i:4 i:5", { { 'i', "4" }, { 'i', "5" } }) };
+
+    //  Where an address sits: the first number is the channel, never the first or last segment.
+    const auto place = model::gridPlaceOf ("/wfs/input/1/eq/2/gain");
+    REQUIRE (place.has_value());
+    CHECK (place->family == "/wfs/input");
+    CHECK (place->column == "1");
+    CHECK (place->parameter == "eq/2/gain");
+    CHECK_FALSE (model::gridPlaceOf ("/wfs/input/snapshot/load").has_value());
+    CHECK_FALSE (model::gridPlaceOf ("/3/x").has_value());
+    CHECK_FALSE (model::gridPlaceOf ("/wfs/input/3").has_value());
+
+    const auto grid = model::gridOf (reading);
+    REQUIRE (grid.tables.size() == 2u);
+    CHECK (grid.outside == 1u);
+
+    //  The channels the cue holds and no others, in their order as numbers; the parameters as they came.
+    const auto& inputs = grid.tables[0];
+    CHECK (inputs.family == "/wfs/input");
+    CHECK (inputs.columns == std::vector<std::string> { "1", "3", "10" });
+    CHECK (inputs.parameters == std::vector<std::string> { "positionX", "positionY", "eq/2/gain" });
+
+    CHECK (inputs.cells[0][1] == 0);      // positionX of 3
+    CHECK (inputs.cells[0][2] == 1);      // positionX of 10
+    CHECK (inputs.cells[1][1] == 2);      // positionY of 3
+    CHECK (inputs.cells[2][0] == 3);      // eq/2/gain of 1
+    CHECK (inputs.cells[0][0] == -1);     // nothing recorded: an empty cell
+    CHECK (inputs.cells[1][2] == -1);
+
+    CHECK (grid.tables[1].family == "/wfs/effect");
+    CHECK (grid.tables[1].columns == std::vector<std::string> { "2" });
+
+    //  A cell's words, and what typing in it writes - at the values' own types.
+    CHECK (model::cellText (reading.rows[0]) == "0.5");
+    CHECK (model::cellText (reading.rows[5]) == "4 5");
+    CHECK (model::cellEdit (reading.rows[0], "0.25") == std::optional<std::string> ("f:0.25"));
+    CHECK_FALSE (model::cellEdit (reading.rows[0], "loud").has_value());
+    CHECK (model::cellEdit (reading.rows[5], "6 7") == std::optional<std::string> ("i:6 i:7"));
+    CHECK_FALSE (model::cellEdit (reading.rows[5], "6").has_value());
+    CHECK (model::cellEdit (reading.rows[4], "Act 2 bis") == std::optional<std::string> ("s:\"Act 2 bis\""));
 }
 
 //==============================================================================

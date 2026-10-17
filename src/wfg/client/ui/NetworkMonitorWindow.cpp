@@ -271,7 +271,13 @@ namespace wfg::client::ui
                     break;
 
                 case valuesColumn:
-                    if (! row.problem.empty())
+                    //  The monitor's own cut is said plainly, never in the failure's red.
+                    if (row.clipped)
+                    {
+                        g.setColour (Look::colour (theme, "ink-dim"));
+                        said = juce::String::fromUTF8 (row.problem.c_str());
+                    }
+                    else if (! row.problem.empty())
                     {
                         g.setColour (Look::colour (theme, "failed"));
                         said = "could not be read: " + juce::String::fromUTF8 (row.problem.c_str());

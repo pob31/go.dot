@@ -621,9 +621,18 @@ namespace wfg::client::ui
 
             g.setColour (Look::colour (theme, riding ? "ink-dim" : "ink-off"));
             g.setFont (Look::font (theme, 11.0f));
-            g.drawText (riding && (strip.hasLevel || grabbed) ? juce::String (model::faderText (level))
-                                                              : juce::String::fromUTF8 ("\xe2\x80\x93"),
-                        parts.value, juce::Justification::centred, false);
+
+            /*  A DCA STRIP SAYS WHAT ITS FADER DOES TO WHAT IT RIDES (the author,
+                2026-10-17; namespace draft §80): the level for sound, the opacity
+                for a picture, both for both - the desk's own words. */
+            const auto shown = ! strip.dca.empty()
+                                 ? juce::String (surface::dcaLevelWords (level, strip.dcaMarks,
+                                                                         surface::DcaContents { strip.dcaSound, strip.dcaPictures },
+                                                                         10))
+                                 : juce::String (model::faderText (level));
+
+            g.drawFittedText (riding && (strip.hasLevel || grabbed) ? shown : juce::String::fromUTF8 ("\xe2\x80\x93"),
+                              parts.value, juce::Justification::centred, 1, 0.8f);
         }
 
         /*  ON A FLIPPED FADER THE PAD IS ITS LANE'S REC (namespace draft §34,

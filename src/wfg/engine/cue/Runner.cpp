@@ -17872,8 +17872,25 @@ namespace wfg::cue
                          && child.launchRequestedAtTick == 0 && ! child.launchRequested;
             };
 
+            /*  AND A MEMBER MADE OR MOVED INTO A RUNNING MANUAL GROUP after its
+                round was drawn is still one the operator's GO asked for (the
+                author, 2026-10-17: an Advance cue made inside the playing group
+                was spawned by its GO and never launched, and the loop it aimed at
+                went on for ever). Its run is taken and launched like the round's;
+                the round itself - which says when the group is over - stays as
+                its record drew it. A member pruned from this round is not. */
+            const auto manualMembers = job.phase == groupPhase::members && isManual (groupMode (group));
+            const auto members = manualMembers ? membersOf (group) : std::vector<std::string> {};
+
+            const auto askedByGo = [&] (const Run& child)
+            {
+                return manualMembers
+                    && std::find (members.begin(), members.end(), child.cue) != members.end()
+                    && std::find (run->pruned.begin(), run->pruned.end(), child.cue) == run->pruned.end();
+            };
+
             for (const auto* child : runs.childrenOf (job.run))
-                if (inPhase (child->cue) && ! job.hasTaken (child->id)
+                if ((inPhase (child->cue) || askedByGo (*child)) && ! job.hasTaken (child->id)
                      && child->prepare.empty() && ! armedAhead (*child))
                 {
                     job.taken.push_back (child->id);
@@ -22863,6 +22880,28 @@ namespace wfg::cue
                 continue;
             }
 
+            /*  AN EDIT OF A SOUNDING RUN'S SOUND IS HEARD AT ONCE (the author,
+                2026-10-17, as a loop point edited while sounding is: §33): a
+                render of its edit that landed, a freeze, an unfreeze, and the
+                run goes on from the same second of the new file - by the seek a
+                hand would make, so the log says it and a replay makes it.
+                Overrules ADP's "keeps its file until its next run". A render
+                still being made names no file, and the run plays on meanwhile. */
+            if (run->kind == "media" && run->state == runState::playing && run->track >= 0
+                  && ! run->stopIssued && ! run->killIssued && ! run->launchRequested)
+            {
+                if (const auto cue = document.findById (run->cue); cue.isValid())
+                {
+                    if (const auto played = playedMediaOf (cue, durations, renders);
+                        ! played.name.empty() && played.name != run->media)
+                    {
+                        run->media = played.name;
+                        engine.submit (origin::engine, "run.seek",
+                                       { osc::Value::string (run->id), osc::Value::float64 (std::max (0.0, run->position)) });
+                    }
+                }
+            }
+
             if (run->slicesRevision == revision)
                 continue;
 
@@ -23217,12 +23256,40 @@ namespace wfg::cue
             return std::clamp (book.written + doc::laneLevelDb (book.lane, seconds), silenceDb, 12.0);
         };
 
+        /*  WHAT A LANE SOUNDS AT IN A RUN OF THE CUE: the number as written and
+            the run's own term for it this tick - its level lane, or its send's
+            offset - which is the curve where the file is. */
+        const auto followed = [] (const LaneBook& book, const std::string& key, const Run& playing)
+        {
+            if (key == levelLaneKey)
+                return std::clamp (book.written + playing.laneDb, silenceDb, 12.0);
+
+            if (! book.sends)
+                return silenceDb;
+
+            const auto offset = playing.sendLaneDb.find (key);
+            return std::clamp (book.written + (offset != playing.sendLaneDb.end() ? offset->second : 0.0),
+                               silenceDb, 12.0);
+        };
+
         /*  OUTSIDE A PASS, EACH FADER SITS WHERE ITS LANE STARTS (DG): at the
-            cue's start offset, or at the in-point of its first slice. */
+            cue's start offset, or at the in-point of its first slice - UNLESS
+            THE CUE IS PLAYING, when it follows the curve where the file is (the
+            author, 2026-10-17: "When playing a file from the waveform editor
+            with the Autom. toggle engaged the faders don't follow the existing
+            curve"). Only a run still playing: one stopping or killed has let go
+            of its lanes, and the fader goes back to the start. Nothing is
+            written outside a pass, whatever a hand does (LiveRows). */
         if (! lanes->recording)
         {
             heldBuses.clear();
             rideWritten.clear();
+
+            const auto* playing = liveUntakenRunOf (lanes->cue());
+
+            if (playing != nullptr && (playing->kind != "media" || playing->state != runState::playing
+                                         || playing->killIssued))
+                playing = nullptr;
 
             auto start = 0.0;
 
@@ -23236,7 +23303,8 @@ namespace wfg::cue
             {
                 book.ride.clear();
                 book.wasTouched = false;
-                lanes->rideOf (key).rideDb = heardAt (book, start);
+                lanes->rideOf (key).rideDb = playing != nullptr ? followed (book, key, *playing)
+                                                                : heardAt (book, start);
             }
 
             return;

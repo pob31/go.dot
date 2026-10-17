@@ -109,6 +109,7 @@ namespace wfg::client::model
             to it, which is where its knob starts. */
         std::vector<surface::DcaMark> dcaMarks;
         bool dcaPictures = false;
+        bool dcaSound = false;  // and sound assigned to it: with pictures, its level reads in both (§80)
 
         bool hasLevel = false;   // whether `target` names a node with a value
         double levelDb = -120.0; // that value

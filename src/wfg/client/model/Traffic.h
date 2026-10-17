@@ -60,6 +60,10 @@ namespace wfg::client::model
             own sentence, or that the monitor kept only the first part of a
             long packet. Empty for a message read whole. */
         std::string problem;
+
+        /*  THE LATTER: the monitor's own cut, not a fault on the wire - the
+            engine read the packet whole - so it is not said as a failure. */
+        bool clipped = false;
     };
 
     /** One capture as lines: one, or one per message of a bundle. */

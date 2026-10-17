@@ -18,6 +18,7 @@
 
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
+#include <wfg/engine/video/DcaOpacity.h>
 
 #include <algorithm>
 #include <cmath>
@@ -283,6 +284,56 @@ namespace wfg::surface
             word += " ";
 
         return word + signedNumber (reading.value, mode == KnobMode::offset);
+    }
+
+    std::string dcaLevelWords (double levelDb, const std::vector<DcaMark>& playing, const DcaContents& assigned,
+                               int width)
+    {
+        auto picture = assigned.picture;
+        auto sound = assigned.sound;
+        auto curve = 0.0;
+
+        if (! playing.empty())
+        {
+            picture = std::any_of (playing.begin(), playing.end(), [] (const DcaMark& mark) { return mark.picture; });
+            sound = std::any_of (playing.begin(), playing.end(), [] (const DcaMark& mark) { return mark.sound; });
+
+            //  The mark shown first that holds a picture: the run that started last.
+            for (const auto& mark : playing)
+                if (mark.picture)
+                {
+                    curve = mark.curve;
+                    break;
+                }
+        }
+
+        const auto silent = levelDb <= -120.0;
+        const auto clamped = std::clamp (levelDb, -120.0, 12.0);
+
+        //  "-6.2", one decimal, or the whole number when `whole`.
+        const auto decibels = [&] (bool whole)
+        {
+            if (silent)
+                return std::string ("-inf");
+
+            const auto scaled = static_cast<long long> (std::llround (std::abs (clamped) * (whole ? 1.0 : 10.0)));
+            auto digits = whole ? std::to_string (scaled)
+                                : std::to_string (scaled / 10) + "." + std::to_string (scaled % 10);
+
+            return (clamped < 0.0 && scaled != 0 ? "-" : "") + digits;
+        };
+
+        if (! picture)
+            return decibels (false) + " dB";
+
+        const auto percent = static_cast<long long> (std::llround (
+                                 video::shapedOpacity (video::opacityForTrim (silent ? -120.0 : clamped), curve) * 100.0));
+
+        if (! sound)
+            return std::to_string (percent) + (width >= 5 ? " %" : "%");
+
+        return width >= 11 ? decibels (false) + " dB " + std::to_string (percent) + "%"
+                           : decibels (true) + " " + std::to_string (percent) + "%";
     }
 
     double knobRingFraction (KnobMode mode, double value) noexcept

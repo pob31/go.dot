@@ -81,6 +81,7 @@
 #include <wfg/client/ui/KeyNames.h>
 #include <wfg/client/ui/Look.h>
 #include <wfg/client/ui/NetworkMonitorWindow.h>
+#include <wfg/client/ui/OscGridWindow.h>
 #include <wfg/client/ui/AboutWindow.h>
 #include <wfg/client/ui/UpdateCheck.h>
 #include <wfg/client/ui/VideoMonitorWindow.h>
@@ -305,6 +306,7 @@ namespace wfg::client
                 listActions.cut             = [this] { if (! refusedWhileLocked()) { copyChosen(); removeChosen(); } };
                 listActions.copy            = [this] { copyChosen(); };
                 listActions.paste           = [this] { pasteFromClipboard(); };
+                listActions.showGrid        = [this] (const std::string& cueId) { openGrid (cueId); };
 
                 /*  F AND SHIFT+F (the author, 2026-10-15; namespace draft §63):
                     the picked cues' flags written as one gesture, and the
@@ -609,7 +611,8 @@ namespace wfg::client
                     if (shell->footSubject().kind == model::Subject::Kind::curve
                           || shell->footSubject().kind == model::Subject::Kind::fade
                           || shell->footSubject().kind == model::Subject::Kind::patch
-                          || shell->footSubject().kind == model::Subject::Kind::code)
+                          || shell->footSubject().kind == model::Subject::Kind::code
+                          || shell->footSubject().kind == model::Subject::Kind::messages)
                         shutCurveFor = shell->footSubject().objectId;
 
                     shell->setFoot ({});
@@ -2119,6 +2122,50 @@ namespace wfg::client
                 networkMonitor->open();
             }
 
+            /*  AN OSC CUE'S MESSAGES AS A GRID (the author, 2026-10-17: "the same
+                grid as the scope of WFS-DIY with the columns relevant to the cue
+                and the values in the cells where something was recorded";
+                namespace draft §80): a window of its own, his pick, one for the
+                show, on the cue asked for and then on each OSC cue picked while
+                it is open. A cell typed in is one `node.set` of that message's
+                value, refused under the lock as any edit is. */
+            void openGrid (const std::string& cueId)
+            {
+                if (latest == nullptr || cueId.empty())
+                    return;
+
+                if (! gridWindow)
+                {
+                    ui::OscGridWindow::Actions gridActions;
+                    gridActions.set = [this] (const std::string& address, const std::string& text)
+                    {
+                        if (! refusedWhileLocked())
+                            send (gesture::setNode (address, text));
+                    };
+                    gridActions.panic = [this] { panic(); };
+
+                    gridWindow = std::make_unique<ui::OscGridWindow> (theme, std::move (gridActions));
+                }
+
+                gridWindow->show (model::readOscMessages (*latest, cueId), model::shownCueName (*latest, cueId));
+                gridWindow->open();
+            }
+
+            //  While it is open: the cue it shows read again, or the OSC cue picked since.
+            void followGrid (const tree::TreeSnapshot& snapshot)
+            {
+                if (! gridWindow || ! gridWindow->isVisible())
+                    return;
+
+                auto cueId = gridWindow->cueId();
+                const auto& picked = selection.anchor();
+
+                if (! picked.empty() && picked != cueId && model::text (snapshot, "/godot/cue/" + picked + "/kind") == "osc")
+                    cueId = picked;
+
+                gridWindow->show (model::readOscMessages (snapshot, cueId), model::shownCueName (snapshot, cueId));
+            }
+
             //======================================================================
             /*  A NEWER GO.DOT (namespace draft §78). The author's: say so and link
                 to the release page (ASO), real releases only (ASP), the Help menu
@@ -3046,6 +3093,27 @@ namespace wfg::client
                     shell->setFoot ({ model::Subject::Kind::code, selection.anchor() });
                     menuItemsChanged();
                 }
+
+                /*  AND AN OSC CUE OF SEVERAL MESSAGES ITS MESSAGES (namespace draft
+                    45; the author, 2026-10-17: a WFS-DIY snapshot written into the
+                    show seemed to "only create one cue for the first parameter of
+                    several"). The inspector shows the cue's own message, the first;
+                    the rest - a snapshot's every parameter - are the panel's, and
+                    were there all along, unseen. A cue of one message has nothing
+                    the inspector does not say, and opens nothing. */
+                if (! selection.anchor().empty()
+                      && model::text (*snapshot, "/godot/cue/" + selection.anchor() + "/kind") == "osc"
+                      && ! model::text (*snapshot, "/godot/cue/" + selection.anchor() + "/messages").empty()
+                      && shutCurveFor != selection.anchor()
+                      && ! (shell->footSubject().kind == model::Subject::Kind::messages
+                              && shell->footSubject().objectId == selection.anchor()))
+                {
+                    shell->setFoot ({ model::Subject::Kind::messages, selection.anchor() });
+                    menuItemsChanged();
+                }
+
+                //  The grid's window, while open, on the OSC cue picked (§80).
+                followGrid (*snapshot);
 
                 if (shutCurveFor != selection.anchor())
                     shutCurveFor.clear();
@@ -5730,6 +5798,7 @@ namespace wfg::client
             std::unique_ptr<ui::ShowSettingsWindow> audioSettings;
             std::unique_ptr<ui::SurfaceWindow> surfaces;    // Show > Surfaces..., made on first open
             std::unique_ptr<ui::NetworkMonitorWindow> networkMonitor;   // Show > Network monitor...
+            std::unique_ptr<ui::OscGridWindow> gridWindow;              // an OSC cue's messages as a grid (§80)
             std::unique_ptr<ui::VideoMonitorWindow> videoMonitor;       // Show > Video monitor...
             std::unique_ptr<ui::AboutWindow> about;                     // Help > About Go.dot
 

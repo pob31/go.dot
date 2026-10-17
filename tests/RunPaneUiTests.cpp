@@ -28,6 +28,7 @@
 #include <wfg/client/ui/NewCueMenu.h>
 #include <wfg/client/ui/Look.h>
 #include <wfg/client/ui/NetworkMonitorWindow.h>
+#include <wfg/client/ui/OscGridWindow.h>
 #include <wfg/client/ui/ImportWindow.h>
 #include <wfg/client/model/NewCue.h>
 #include <wfg/client/model/NewCueMenus.h>
@@ -307,6 +308,102 @@ TEST_CASE ("cue list: how ready each cue is, a mark in a cell of its own beside 
         CHECK (juce::PNGImageFormat().writeImageToStream (after, out));
         MESSAGE ("wrote " << file.getFullPathName().toStdString());
     }
+}
+
+TEST_CASE ("cue list: a drag anywhere inside a group keeps its footer's band to drop on, and its title shows the header's too")
+{
+    /*  The author, 2026-10-17: the footer "disappears if you move away from
+        the top of the group. It should appear when hovering inside the bounds
+        of the group not just the top line." A group of three with no header
+        or footer, and a cue after it, dragged over. */
+    wfg::doc::ShowDocument document;
+    const auto list = document.createList ("Main");
+    REQUIRE (list.ok);
+    const auto group = document.createCue (list.id, 0, "group", "Scene").id;
+    REQUIRE (! group.empty());
+    REQUIRE (document.createCue (group, 0, "memo", "One").ok);
+    REQUIRE (document.createCue (group, 1, "memo", "Two").ok);
+    const auto last = document.createCue (group, 2, "memo", "Three").id;
+    const auto after = document.createCue (list.id, 1, "memo", "After").id;
+    REQUIRE (! after.empty());
+
+    wfg::Engine engine;
+    wfg::cue::RunTable runs;
+    wfg::tree::MountTable mounts;
+    wfg::tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
+    parameters.markStale();
+
+    wfg::tree::EngineState state;
+    const auto snapshot = parameters.publish (0, state);
+    REQUIRE (snapshot != nullptr);
+
+    model::ShowModel show;
+    REQUIRE (show.refresh (*snapshot, list.id));
+
+    const auto indexOf = [&show] (const std::string& id)
+    {
+        for (std::size_t at = 0; at < show.rows().size(); ++at)
+            if (show.rows()[at].id == id)
+                return static_cast<int> (at);
+
+        return -1;
+    };
+
+    const auto title = indexOf (group);
+    const auto lastMember = indexOf (last);
+    const auto afterRow = indexOf (after);
+    REQUIRE (title >= 0);
+    REQUIRE (lastMember == title + 3);
+    REQUIRE (afterRow > lastMember);
+
+    const model::Theme theme;
+    ui::CueListComponent cues (theme, {});
+    cues.setSize (900, 600);
+    cues.show (show, {}, {});
+
+    juce::ListBox* box = nullptr;
+
+    for (auto* child : cues.getChildren())
+        if (auto* found = dynamic_cast<juce::ListBox*> (child))
+            box = found;
+
+    REQUIRE (box != nullptr);
+    REQUIRE (box->getListBoxModel() != nullptr);
+
+    auto& drawn = *box->getListBoxModel();
+    auto& target = static_cast<juce::DragAndDropTarget&> (cues);
+    const auto plain = drawn.getNumRows();
+
+    const auto over = [&] (int row)
+    {
+        return juce::DragAndDropTarget::SourceDetails (juce::var (juce::String (after)), nullptr,
+                                                       juce::Point<int> (300, box->getY() + row * box->getRowHeight()
+                                                                                + box->getRowHeight() / 2));
+    };
+
+    //  On the title: its header's band under it, its footer's after the three.
+    target.itemDragEnter (over (title));
+    CHECK (drawn.getNumRows() == plain + 2);
+
+    //  Down to the last member - one row further, under the header's band - and onto the footer's: both stay.
+    target.itemDragMove (over (lastMember + 1));
+    CHECK (drawn.getNumRows() == plain + 2);
+    target.itemDragMove (over (lastMember + 2));
+    CHECK (drawn.getNumRows() == plain + 2);
+
+    //  Out of the group, onto the cue after it: they go.
+    target.itemDragMove (over (afterRow + 2));
+    CHECK (drawn.getNumRows() == plain);
+    target.itemDragExit (over (afterRow));
+
+    //  A group entered on a member grows its footer alone, below the hand; its title then adds the header.
+    target.itemDragEnter (over (lastMember));
+    CHECK (drawn.getNumRows() == plain + 1);
+    target.itemDragMove (over (title));
+    CHECK (drawn.getNumRows() == plain + 2);
+
+    target.itemDragExit (over (title));
+    CHECK (drawn.getNumRows() == plain);
 }
 
 TEST_CASE ("cue list: a cue that needs something missing wears the warning in the readiness cell, and its word after the name (§64)")
@@ -4919,6 +5016,99 @@ TEST_CASE ("new-cue bar: four buttons open their list under themselves, the rest
     bar.setLookAndFeel (nullptr);
 }
 
+TEST_CASE ("osc grid: a cue's messages in a window of their own, a value typed in a cell written to its message")
+{
+    /*  The author, 2026-10-17: the grid of WFS-DIY's scope for a snapshot cue,
+        in its own window, a cell typed in (namespace draft §80). Never opened
+        here, so nothing comes up on a screen: what it holds and writes is
+        asked of it hidden. */
+    std::vector<std::pair<std::string, std::string>> written;
+
+    ui::OscGridWindow::Actions actions;
+    actions.set = [&written] (const std::string& address, const std::string& text) { written.emplace_back (address, text); };
+
+    ui::OscGridWindow window (model::Theme {}, actions);
+
+    const auto row = [] (const std::string& id, const std::string& address, const std::string& payload)
+    {
+        model::OscMessageRow made;
+        made.id = id;
+        made.base = id.empty() ? std::string ("/godot/cue/OSC00001/") : "/godot/message/" + id + "/";
+        made.address = address;
+        made.value = "f:" + payload;
+
+        model::OscArgument arg;
+        arg.tag = 'f';
+        arg.payload = payload;
+        arg.number = true;
+        made.args.push_back (arg);
+        return made;
+    };
+
+    model::OscMessagesReading reading;
+    reading.cueId = "OSC00001";
+    reading.rows = { row ({}, "/wfs/input/1/positionX", "0.5"),
+                     row ("MSG00001", "/wfs/input/2/positionX", "1"),
+                     row ("MSG00002", "/wfs/input/1/positionY", "2") };
+
+    window.show (reading, "Snapshot");
+    CHECK (window.cueId() == "OSC00001");
+
+    const auto& grid = window.gridForTest();
+    REQUIRE (grid.tables.size() == 1u);
+    CHECK (grid.tables[0].columns.size() == 2u);
+    CHECK (grid.tables[0].parameters.size() == 2u);
+    CHECK (window.statusForTest().contains ("3 values"));
+
+    //  Its cells lie in a row, left to right, the parameter's label before them.
+    const auto first = window.cellBoundsForTest (0, 0, 0);
+    const auto second = window.cellBoundsForTest (0, 0, 1);
+    CHECK (second.getX() > first.getX());
+    CHECK (second.getY() == first.getY());
+
+    //  The cue's own message typed into: its value row, at its type.
+    CHECK (window.typeIntoCellForTest (0, 0, 0, "0.75"));
+    REQUIRE (written.size() == 1u);
+    CHECK (written[0].first == "/godot/cue/OSC00001/value");
+    CHECK (written[0].second == "f:0.75");
+
+    //  A further message's.
+    CHECK (window.typeIntoCellForTest (0, 0, 1, "3"));
+    REQUIRE (written.size() == 2u);
+    CHECK (written[1].first == "/godot/message/MSG00001/value");
+
+    //  Words that are not its type: nothing written, and said.
+    CHECK (window.typeIntoCellForTest (0, 1, 0, "loud"));
+    CHECK (written.size() == 2u);
+    CHECK (window.statusForTest().contains ("loud"));
+
+    //  An empty cell stays empty - the grid adds nothing.
+    CHECK_FALSE (window.typeIntoCellForTest (0, 1, 1, "4"));
+    CHECK (written.size() == 2u);
+
+    //  Locked: read only, and said.
+    reading.locked = true;
+    window.show (reading, "Snapshot");
+    CHECK_FALSE (window.typeIntoCellForTest (0, 0, 0, "9"));
+    CHECK (written.size() == 2u);
+    CHECK (window.statusForTest().contains ("locked"));
+
+    //  With WFG_SNAPSHOT_DIR set, osc-grid.png: the window's content, drawn without a screen.
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+        if (auto* content = window.getContentComponent())
+        {
+            const auto picture = content->createComponentSnapshot (content->getLocalBounds());
+            const juce::File file { juce::File (dir).getChildFile ("osc-grid.png") };
+            file.getParentDirectory().createDirectory();
+            file.deleteFile();
+
+            juce::FileOutputStream out { file };
+            REQUIRE (out.openedOk());
+            CHECK (juce::PNGImageFormat().writeImageToStream (picture, out));
+            MESSAGE ("wrote " << file.getFullPathName().toStdString());
+        }
+}
+
 TEST_CASE ("network monitor: opening listens, shutting stops, and the filters choose the lines")
 {
     /*  The author, 2026-09-30: a network monitor "similar to the one in
@@ -7005,13 +7195,24 @@ TEST_CASE ("waveform: a sound's sections row - the blocks, a pick, a drag into a
     CHECK (splitCue.empty());
     CHECK (said.contains ("already a cut"));
 
-    //  The chorus dragged before the intro: one move, on release.
-    editor.mouseDown (mouse ({ xOf (25.0), rowY }, 1, false, left));
-    editor.mouseDrag (mouse ({ xOf (12.0), rowY }, 1, true, left));
-    editor.mouseDrag (mouse ({ xOf (1.0), rowY }, 1, true, left));
-    editor.mouseUp (mouse ({ xOf (1.0), rowY }, 1, true, left));
+    /*  The chorus carried before the intro from the LOWER HALF of the bar: one
+        move, on release (the author, 2026-10-17: "The lower half of the
+        waveform should drag"). Away from its middle, where its volume is held. */
+    const auto lowerY = static_cast<float> (editor.barBounds().getBottom() - editor.barBounds().getHeight() / 4);
+    editor.mouseDown (mouse ({ xOf (22.0), lowerY }, 1, false, left));
+    editor.mouseDrag (mouse ({ xOf (12.0), lowerY }, 1, true, left));
+    editor.mouseDrag (mouse ({ xOf (1.0), lowerY }, 1, true, left));
+    editor.mouseUp (mouse ({ xOf (1.0), lowerY }, 1, true, left));
     CHECK (moved == "SEC00003");
     CHECK (movedTo == 0);
+
+    //  The row above selects time now, and moves nothing.
+    moved.clear();
+    editor.mouseDown (mouse ({ xOf (25.0), rowY }, 1, false, left));
+    editor.mouseDrag (mouse ({ xOf (12.0), rowY }, 1, true, left));
+    editor.mouseUp (mouse ({ xOf (12.0), rowY }, 1, true, left));
+    CHECK (moved.empty());
+    CHECK (said.contains ("selection"));
 
     /*  THE BAR'S HANDLES (55.9): the chorus's fade in dragged from its top
         handle a third of a second into it - one section.fade of two thirds
@@ -7074,9 +7275,9 @@ TEST_CASE ("waveform: a sound's sections row - the blocks, a pick, a drag into a
     CHECK_FALSE (split->isEnabled());
 
     moved.clear();
-    editor.mouseDown (mouse ({ xOf (25.0), rowY }, 1, false, left));
-    editor.mouseDrag (mouse ({ xOf (1.0), rowY }, 1, true, left));
-    editor.mouseUp (mouse ({ xOf (1.0), rowY }, 1, true, left));
+    editor.mouseDown (mouse ({ xOf (22.0), lowerY }, 1, false, left));
+    editor.mouseDrag (mouse ({ xOf (1.0), lowerY }, 1, true, left));
+    editor.mouseUp (mouse ({ xOf (1.0), lowerY }, 1, true, left));
     CHECK (moved.empty());
     CHECK (said.contains ("frozen"));
 
@@ -7162,6 +7363,91 @@ TEST_CASE ("waveform: a sound's sections row - the blocks, a pick, a drag into a
     CHECK_FALSE (split->isVisible());
 }
 
+TEST_CASE ("waveform: a frozen edit draws its bounce whole, once the analyser has read it")
+{
+    /*  The author, 2026-10-17: "Freezing the file doesn't show the frozen
+        audio's waveform and spectral colours." The bounce had no analysis yet
+        when the panel first drew it, and that empty answer was kept; and the
+        sections kept for Unfreeze laid the bounce's picture at their SOURCE
+        seconds - here twenty to thirty, past the bounce's end. */
+    ui::WaveformEditorComponent editor (model::Theme {}, {});
+    editor.setRightColumn (360, 12);
+    editor.setSize (1000, 260);
+
+    auto pyramid = std::make_shared<wfg::audio::TimbrePyramid>();
+    pyramid->sampleRate = 48000;
+    pyramid->samples = 48000ull * 20ull;
+
+    for (const auto count : { 512, 256, 128, 64 })
+    {
+        std::vector<wfg::audio::timbre::Frame> level;
+
+        for (auto at = 0; at < count; ++at)
+        {
+            wfg::audio::timbre::Frame frame;
+            frame.peak = 220;
+            frame.saturation = 180;
+            frame.lightness = 160;
+            level.push_back (frame);
+        }
+
+        pyramid->levels.push_back (std::move (level));
+    }
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::waveform, "CUE00001" };
+    reading.cueName = "The bed";
+    reading.cueKind = "media";
+    reading.file = "bed (edit).wav";
+    reading.editSource = "bed.wav";
+    reading.frozen = true;
+    reading.fileLength = 20.0;
+    reading.sections = { { "SEC00001", 0, 0.0, 10.0, 0.0, 0.01 },
+                         { "SEC00002", 1, 20.0, 30.0, 0.0, 0.01 } };
+
+    const auto paint = [&editor]
+    {
+        juce::Image canvas (juce::Image::RGB, 1000, 260, true, juce::SoftwareImageType());
+        juce::Graphics g (canvas);
+        editor.paintEntireComponent (g, false);
+        return canvas;
+    };
+
+    //  Not analysed yet.
+    auto noBounce = std::make_shared<wfg::audio::MediaRecords>();
+    editor.show (reading, noBounce);
+    const auto before = paint();
+
+    //  Analysed: the same panel, nothing else moved.
+    auto withBounce = std::make_shared<wfg::audio::MediaRecords>();
+    wfg::audio::MediaRecord record;
+    record.seconds = 20.0;
+    record.contentHash = "bounce";
+    record.pyramid = pyramid;
+    withBounce->emplace ("bed (edit).wav", record);
+
+    editor.show (reading, withBounce);
+    const auto after = paint();
+
+    const auto bar = editor.barBounds();
+    const auto changedIn = [&] (int fromX, int toX)
+    {
+        int changed = 0;
+
+        for (int y = bar.getY(); y < bar.getBottom(); ++y)
+            for (int x = fromX; x < toX; ++x)
+                if (before.getPixelAt (x, y) != after.getPixelAt (x, y))
+                    ++changed;
+
+        return changed;
+    };
+
+    //  The wave is drawn, and across the whole bar - its second half too, which the source's seconds missed.
+    const auto quarter = bar.getWidth() / 4;
+    CHECK (changedIn (bar.getX(), bar.getX() + quarter) > 100);
+    CHECK (changedIn (bar.getRight() - quarter, bar.getRight()) > 100);
+}
+
 TEST_CASE ("waveform: the top half selects time and the lower half a section; x splits, Backspace leaves silence, Shift+Backspace closes up; the wheel bends a fade (namespace draft §55.9)")
 {
     std::string splitCue, spanCue, removed, curvedId, placedId;
@@ -7180,6 +7466,10 @@ TEST_CASE ("waveform: the top half selects time and the lower half a section; x 
     actions.curveSection = [&] (const std::string& id, bool inSide, double value, bool alone)
     { curvedId = id; curvedIn = inSide; curve = value; curvedAlone = alone; };
     actions.placeSection = [&] (const std::string& id, double seconds) { placedId = id; placedAt = seconds; };
+
+    std::string movedId;
+    int movedTo = -1;
+    actions.moveSection = [&] (const std::string& id, int index) { movedId = id; movedTo = index; };
 
     ui::WaveformEditorComponent editor (model::Theme {}, actions);
     editor.setRightColumn (360, 12);
@@ -7255,7 +7545,7 @@ TEST_CASE ("waveform: the top half selects time and the lower half a section; x 
     editor.mouseDown (mouse ({ xOf (27.0), lowY }, false, left));
     editor.mouseDrag (mouse ({ xOf (29.0), lowY }, true, left));
     editor.mouseDrag (mouse ({ xOf (31.0), lowY }, true, left));
-    CHECK (said.contains ("stops at its neighbours"));
+    CHECK (said.contains ("carried past a neighbour"));
     editor.mouseUp (mouse ({ xOf (31.0), lowY }, true, left));
     CHECK (placedId == "SEC00002");
     CHECK (placedAt == doctest::Approx (24.0).epsilon (0.01));
@@ -7265,6 +7555,17 @@ TEST_CASE ("waveform: the top half selects time and the lower half a section; x 
     editor.mouseDrag (mouse ({ xOf (6.0), lowY }, true, left));
     editor.mouseUp (mouse ({ xOf (6.0), lowY }, true, left));
     CHECK (placedId.empty());
+
+    /*  AND CARRIED PAST ITS NEIGHBOUR'S MIDDLE IT TAKES THAT PLACE (2026-10-17):
+        the first, with no room beside it, carried to the end is one move. */
+    editor.mouseDown (mouse ({ xOf (3.0), lowY }, false, left));
+    editor.mouseDrag (mouse ({ xOf (20.0), lowY }, true, left));
+    editor.mouseDrag (mouse ({ xOf (29.0), lowY }, true, left));
+    CHECK (said.contains ("to place 3 of 3"));
+    editor.mouseUp (mouse ({ xOf (29.0), lowY }, true, left));
+    CHECK (placedId.empty());
+    CHECK (movedId == "SEC00001");
+    CHECK (movedTo == 2);
 
     //  THE LOWER HALF picks the section under it; Backspace leaves its silence, Shift+Backspace closes up.
     editor.mouseDown (mouse ({ xOf (13.0), lowY }, false, left));

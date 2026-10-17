@@ -1078,7 +1078,12 @@ namespace wfg::client::ui
             laid where the section is, so a cut or a move redraws it. */
         std::string editKey;
 
-        if (editShown())
+        /*  NOT A FROZEN ONE (the author, 2026-10-17: "Freezing the file doesn't
+            show the frozen audio's waveform and spectral colours"): its file is
+            the bounce, already the edited timeline, and is drawn whole. Its
+            sections are kept for Unfreeze, and read at their source seconds they
+            laid the bounce's picture in the wrong places. */
+        if (editShown() && ! reading.frozen)
             for (const auto& section : shownSections)
                 editKey += section.id + ":" + osc::formatDouble (section.in) + "-" + osc::formatDouble (section.out)
                          + "@" + osc::formatDouble (section.gap) + "*" + osc::formatDouble (section.trimDb) + ";";
@@ -1095,14 +1100,23 @@ namespace wfg::client::ui
         barsFrom = view.from;
         barsTo = view.to;
 
+        /*  NOT ANALYSED YET IS NOT CACHED (the run pane's rule): a file the
+            analyser has not reached - a bounce Freeze just wrote - would
+            otherwise stay blank until a zoom or a resize asked again. */
         if (media == nullptr || drawnFile.empty() || bar.getWidth() <= 0)
+        {
+            barsFile.clear();
             return bars;
+        }
 
         const auto& analysed = *media;
         const auto found = analysed.find (drawnFile);
 
         if (found == analysed.end() || found->second.pyramid == nullptr)
+        {
+            barsFile.clear();
             return bars;
+        }
 
         if (editKey.empty())
         {
@@ -2545,8 +2559,12 @@ namespace wfg::client::ui
             return;
         }
 
-        /*  THE SECTIONS ROW (namespace draft §55): a join handle held, or a
-            block picked and perhaps about to be dragged. */
+        /*  THE SECTIONS ROW (namespace draft §55): a press picks the block under
+            it, and a drag selects time, as the top half of the bar does (the
+            author, 2026-10-17: "The time strip above the waveform and top half
+            of the waveform should be for range"). It reordered, with the block
+            drawn well away from the hand; the lower half of the bar carries a
+            section now, past its neighbours too. */
         if (const auto row = sectionsArea(); ! row.isEmpty() && row.contains (event.getPosition()))
         {
             const auto hit = model::hitSection (sectionLayout(), static_cast<double> (event.x - barArea().getX()),
@@ -2555,11 +2573,23 @@ namespace wfg::client::ui
             if (hit.hit == model::SectionHit::block || hit.hit == model::SectionHit::join)
             {
                 pickedSection = hit.index;
-                draggedSection = hit.index;
-                sectionMoved = false;
-                pressX = dragX = event.x;
                 showPickedSection();
                 sayEdit();
+            }
+
+            selecting = true;
+            selectingFromRow = true;
+            selectPressX = event.x;
+            selectFrom = secondsAt (event.x);
+
+            if (! event.mods.isAltDown())
+            {
+                std::vector<double> targets { headSeconds() };
+
+                for (const auto start : model::sectionStarts (reading.sections))
+                    targets.push_back (start);
+
+                selectFrom = model::snapTo (selectFrom, targets, toleranceSeconds());
             }
 
             repaint();
@@ -2633,6 +2663,7 @@ namespace wfg::client::ui
             if (event.y < bar.getCentreY())
             {
                 selecting = true;
+                selectingFromRow = false;
                 selectPressX = event.x;
                 selectFrom = secondsAt (event.x);
 
@@ -2649,9 +2680,10 @@ namespace wfg::client::ui
                 return;
             }
 
-            /*  THE LOWER HALF PICKS AND SLIDES (§55.13): a press picks the section
-                under it, a drag slides it along the timeline between its
-                neighbours; the row above reorders. */
+            /*  THE LOWER HALF PICKS AND CARRIES (§55.13; 2026-10-17): a press
+                picks the section under it, a drag slides it along the timeline
+                into the room beside it, and carried past a neighbour it takes
+                that place in the order. */
             if (const auto under = model::sectionAt (reading.sections, secondsAt (event.x)))
             {
                 pickedSection = *under;
@@ -2659,6 +2691,7 @@ namespace wfg::client::ui
                 slideFrom = slideValue = model::sectionStarts (reading.sections)[*under];
                 slidePress = secondsAt (event.x);
                 slideMoved = false;
+                slideSlot = -1;
                 slidePreview.clear();
                 lowerPress = true;
                 pressX = dragX = event.x;
@@ -2780,12 +2813,29 @@ namespace wfg::client::ui
                     start = byEnd;
             }
 
+            /*  PAST A NEIGHBOUR'S MIDDLE IT TAKES THAT PLACE (the author,
+                2026-10-17: "The lower half of the waveform should drag (this is
+                the missing bit)"): a split leaves no room either side, and a
+                slide that stops at the neighbours moved nothing at all. */
+            const auto bar = barArea();
+            slideSlot = model::dropSlotFor (reading.sections, view, bar.getWidth(), slidSection,
+                                            static_cast<double> (event.x - bar.getX()));
+
+            if (slideSlot >= 0)
+            {
+                slidePreview = model::withOrder (reading.sections, slidSection, slideSlot);
+                tell ("section " + juce::String (static_cast<int> (slidSection) + 1) + " to place "
+                        + juce::String (slideSlot + 1) + " of " + juce::String (static_cast<int> (reading.sections.size())));
+                repaint();
+                return;
+            }
+
             const auto limits = model::placeLimits (reading.sections, slidSection);
             start = std::clamp (start, limits.first, limits.second);
             slidePreview = model::withPlace (reading.sections, slidSection, start);
             slideValue = model::sectionStarts (slidePreview)[slidSection];
             tell ("section " + juce::String (static_cast<int> (slidSection) + 1) + " from " + clockText (slideValue)
-                    + " - it stops at its neighbours; the row above reorders");
+                    + " - carried past a neighbour, it takes that place");
             repaint();
             return;
         }
@@ -3045,11 +3095,17 @@ namespace wfg::client::ui
             {
                 if (! reading.editable)
                     refuseEdit();
+                else if (slideSlot >= 0)
+                {
+                    if (actions.moveSection != nullptr)
+                        actions.moveSection (reading.sections[index].id, slideSlot);
+                }
                 else if (std::abs (slideValue - slideFrom) >= 0.0005 && actions.placeSection != nullptr)
                     actions.placeSection (reading.sections[index].id, slideValue);
             }
 
             slideMoved = false;
+            slideSlot = -1;
             slidePreview.clear();
             lowerPress = false;
             tell ({});
@@ -3063,13 +3119,18 @@ namespace wfg::client::ui
         {
             selecting = false;
 
+            //  On the row above, a click picked its block and leaves the playhead be.
             if (std::abs (event.x - selectPressX) <= 3)
             {
                 selection.reset();
-                moveHeadTo (event.x, true, ! event.mods.isAltDown());
+
+                if (! selectingFromRow)
+                    moveHeadTo (event.x, true, ! event.mods.isAltDown());
+
                 tell ({});
             }
 
+            selectingFromRow = false;
             repaint();
             return;
         }
