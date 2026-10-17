@@ -1158,14 +1158,22 @@ TEST_CASE ("video host: a renderer with no window blurs the edge on its canvas's
 
         std::int64_t seen = -1;
         std::uint32_t colour = 0;
+        int probes = 0;
+
+        /*  SAID BEFORE THE WAIT, so a run that never sees the grey says what it
+            saw instead: the colour last read, how many probes came, and the
+            renderer's state (macOS CI missed it once in C, 2026-10-14). */
+        INFO ("the middle last read " << colour << " over " << probes << " probe(s); the renderer "
+                                      << host.readouts().renderer);
         CHECK (tickUntil (host, clock, [&]
         {
+            const auto before = seen;
             colour = probeOf (r, 0, seen);
+            probes += seen != before ? 1 : 0;
             const auto red = static_cast<int> ((colour >> 16) & 0xffu);
             return red > 96 && red < 160;
         }));
 
-        INFO ("the middle reads " << colour);
         CHECK (((colour >> 16) & 0xffu) == (colour & 0xffu));
     }
 
@@ -2313,6 +2321,54 @@ TEST_CASE ("video region: a layer's alpha switch and key written, read back and 
     CHECK (layers[0].useAlpha);
     CHECK (layers[0].key.mode == video::KeyMode::luma);
     CHECK_FALSE (layers[0].key.invert);
+}
+
+TEST_CASE ("video region: a carried font's face file, its place in a collection and the styles Go.dot adds, written, read back and restated (§62, AKZ)")
+{
+    Memory memory;
+    auto& r = *memory.region;
+    video::RegionSink sink { r };
+
+    auto spec = quarters();
+    spec.source = "text";
+    spec.text.words = "Act One";
+    spec.text.font = "DejaVu Sans Mono";
+    spec.text.bold = true;
+    spec.text.italic = true;
+    spec.text.align = video::TextAlign::right;
+    spec.text.alignV = video::TextAlignV::bottom;
+    spec.text.fontFile = "/shows/Lazzi/fonts/Pair.ttc";
+    spec.text.fontFace = 1;
+    spec.text.embolden = true;
+    spec.text.slant = true;
+    sink.show (spec);
+
+    auto layers = layersOf (r);
+    REQUIRE (layers.size() == 1);
+    CHECK (layers[0].text.fontFile == "/shows/Lazzi/fonts/Pair.ttc");
+    CHECK (layers[0].text.fontFace == 1);
+    CHECK (layers[0].text.embolden);
+    CHECK (layers[0].text.slant);
+    CHECK (layers[0].text.bold);
+    CHECK (layers[0].text.italic);
+    CHECK (layers[0].text.align == video::TextAlign::right);
+    CHECK (layers[0].text.alignV == video::TextAlignV::bottom);
+    CHECK (video::sameTextLook (layers[0].text, spec.text));
+
+    //  The family no longer carried: drawn by name, restated.
+    spec.text.fontFile.clear();
+    spec.text.fontFace = 0;
+    spec.text.embolden = false;
+    spec.text.slant = false;
+    sink.restate (spec);
+
+    layers = layersOf (r);
+    REQUIRE (layers.size() == 1);
+    CHECK (layers[0].text.fontFile.empty());
+    CHECK (layers[0].text.fontFace == 0);
+    CHECK_FALSE (layers[0].text.embolden);
+    CHECK_FALSE (layers[0].text.slant);
+    CHECK (layers[0].text.bold);
 }
 
 namespace

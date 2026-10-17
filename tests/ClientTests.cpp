@@ -12117,6 +12117,74 @@ TEST_CASE ("client: a text cue's panel reads its fields - each blank once, in or
     CHECK (model::readFoot (*rig.publish (2), { model::Subject::Kind::picture, still.id }).picture.fields.empty());
 }
 
+TEST_CASE ("client: a text cue's panel reads the fonts the show carries and what the last fonts command did; each outcome said in words (§62, ALA)")
+{
+    Rig rig;
+    const auto cue = rig.document.createCue ("7K2QM9X4", 0, "video", "", {}, { { "source", "text" }, { "words", "Act One" } });
+    REQUIRE (cue.ok);
+
+    EngineState state;
+    state.fonts = "DejaVu Sans Mono\tBold, Book\t\t\nStage Sans\tRegular\taround\trestricted\n";
+    state.fontsJob = "3\tdone\tcarry\tDejaVu Sans Mono\tcarried\tDejaVuSansMono.ttf, DejaVuSansMono-Bold.ttf";
+    rig.parameters.markStale();
+    const auto reading = model::readFoot (*rig.parameters.publish (1, state), { model::Subject::Kind::picture, cue.id }).picture;
+
+    REQUIRE (reading.carried.size() == 2u);
+    CHECK (reading.carried[0].family == "DejaVu Sans Mono");
+    CHECK (reading.carried[0].styles == "Bold, Book");
+    CHECK_FALSE (reading.carried[0].around);
+    CHECK_FALSE (reading.carried[0].restricted);
+    CHECK (reading.carried[1].family == "Stage Sans");
+    CHECK (reading.carried[1].around);
+    CHECK (reading.carried[1].restricted);
+
+    const auto job = model::fontsJobOf (reading.fontsJob);
+    CHECK (job.number == 3u);
+    CHECK (job.state == "done");
+    CHECK (job.verb == "carry");
+    CHECK (job.subject == "DejaVu Sans Mono");
+    CHECK (job.result == "carried");
+    CHECK (job.detail == "DejaVuSansMono.ttf, DejaVuSansMono-Bold.ttf");
+
+    CHECK (model::carriedFamilies ("").empty());
+    CHECK (model::carriedFamilies ("\n\n").empty());
+    CHECK (model::carriedFamilies ("Lone").at (0).family == "Lone");
+    CHECK (model::fontsJobOf ("").number == 0u);
+
+    const auto words = [] (const char* text) { return model::fontsJobWords (model::fontsJobOf (text)); };
+    CHECK (words ("1\tworking\tcarry\tArial\t\t") == "Carrying Arial in the show...");
+    CHECK (words ("1\tworking\tremove\tArial\t\t") == "Taking Arial out of the show...");
+    CHECK (words ("1\tdone\tcarry\tArial\tcarried\tarial.ttf, arialbd.ttf") == "Arial carried in the show");
+    CHECK (words ("2\tdone\tadd\tC:/fonts/Title.otf\tcarried\tTitle.otf") == "Title.otf carried in the show");
+    CHECK (words ("3\tdone\tremove\tArial\tremoved\tarial.ttf") == "Arial taken out of the show");
+    CHECK (words ("4\tdone\tadd\t/home/me/Licensed.ttf\trestricted\tLicensed Regular")
+             == "Licensed.ttf: its licence restricts carrying it");
+    CHECK (words ("5\tdone\tadd\t/x/notes.ttf\tnot-a-font\tnotes.ttf: too short to be a font file")
+             == "Not carried: notes.ttf: too short to be a font file is not a font Go.dot reads");
+    CHECK (words ("6\tdone\tcarry\tNowhere\tnot-installed\t") == "Not carried: Nowhere is not installed on the engine's machine");
+    CHECK (words ("7\tdone\tremove\tNowhere\tnot-carried\t") == "Nowhere is not in the show's fonts");
+    CHECK (words ("8\tdone\tcarry\tArial\tno-folder\t") == "The show has no folder yet: save it, then carry the font");
+    CHECK (words ("9\tdone\tadd\tx.ttf\tfailed\tx.ttf could not be copied into the show") == "Not done: x.ttf could not be copied into the show");
+}
+
+TEST_CASE ("client: the show's fonts are carried, added and taken out by a command each, the licence's yes said (§62, ALA, ALB)")
+{
+    const auto carry = gesture::carryFont ("DejaVu Sans Mono", false);
+    CHECK (carry.command == "fonts.carry");
+    REQUIRE (carry.args.size() == 2u);
+    CHECK (carry.args[0].getString() == "DejaVu Sans Mono");
+    CHECK_FALSE (carry.args[1].getBool());
+
+    const auto add = gesture::addFontFile ("C:/fonts/Title.otf", true);
+    CHECK (add.command == "fonts.add");
+    CHECK (add.args[0].getString() == "C:/fonts/Title.otf");
+    CHECK (add.args[1].getBool());
+
+    const auto remove = gesture::removeFont ("DejaVu Sans Mono");
+    CHECK (remove.command == "fonts.remove");
+    REQUIRE (remove.args.size() == 1u);
+}
+
 TEST_CASE ("client: a blur cue is offered on each canvas, and its panel reads its radius and outline as a mask's (§61, AKN)")
 {
     Rig rig;

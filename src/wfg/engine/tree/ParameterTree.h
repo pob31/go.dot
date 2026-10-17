@@ -131,6 +131,12 @@ namespace wfg::tree
             `MediaAnalyser::sweepText` writes it; empty before any. */
         std::string mediaCacheSweep;
 
+        /*  THE FONTS THE SHOW CARRIES (namespace draft §62), as
+            `ShowFonts::listing` writes them, and what the last of the fonts.*
+            commands did, as `FontShelf::jobText` says it. */
+        std::string fonts;
+        std::string fontsJob;
+
         /*  The renders of the open edits (namespace draft §55), one a line:
             cue, state, percent, problem. A readout, never stored. */
         std::string editRender;

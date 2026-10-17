@@ -25,6 +25,7 @@
 #include <wfg/engine/video/Grade.h>
 #include <wfg/engine/video/Key.h>
 #include <wfg/engine/video/Mask.h>
+#include <wfg/engine/video/ShowFonts.h>
 #include <wfg/engine/video/TextLook.h>
 #include <wfg/engine/video/VideoRamp.h>
 
@@ -90,6 +91,13 @@ namespace wfg::cue
     video::LayerSpec pictureSpecOf (const doc::ShowDocument& document, const std::string& cueId,
                                     const std::string& mediaFolder, const PlayedMedia* played,
                                     const TextFields* fields)
+    {
+        return pictureSpecOf (document, cueId, mediaFolder, played, fields, nullptr);
+    }
+
+    video::LayerSpec pictureSpecOf (const doc::ShowDocument& document, const std::string& cueId,
+                                    const std::string& mediaFolder, const PlayedMedia* played,
+                                    const TextFields* fields, const video::ShowFonts* fonts)
     {
         video::LayerSpec spec;
 
@@ -197,6 +205,16 @@ namespace wfg::cue
         text.fontSize = std::clamp (numberOf ("fontSize"), 0.1, 100.0);
         text.bold = textOf ("bold") == "true";
         text.italic = textOf ("italic") == "true";
+
+        /*  A FAMILY THE SHOW CARRIES is drawn from its own file (§62, AKW, AKZ). */
+        if (fonts != nullptr)
+            if (const auto choice = fonts->choose (text.font, text.bold, text.italic))
+            {
+                text.fontFile = choice->file;
+                text.fontFace = choice->face;
+                text.embolden = choice->embolden;
+                text.slant = choice->slant;
+            }
         text.align = video::textAlignFrom (textOf ("align"));
         text.alignV = video::textAlignVFrom (textOf ("alignV"));
         text.lineSpacing = std::clamp (numberOf ("lineSpacing"), 50.0, 400.0);

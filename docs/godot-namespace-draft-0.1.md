@@ -22900,7 +22900,9 @@ that could not be read - a version neither 4 nor 5 among them - or a folder that
 ### 46.4 Named limits
 
 - **Video geometry, surfaces and effects**, camera cues and text cues: PRD §3.19's equivalents are not one to
-  one; a camera or a text cue is a memo.
+  one; a camera or a text cue is a memo. *Amended 2026-10-13, at the author's direction (§62, AKT):* text
+  and video cues come over, with their stages as canvases and the fades that move them; a camera cue
+  stays a memo.
 - **Light cues** are a memo: Go.dot drives a desk over OSC or MIDI and has no lighting model.
 - **Script cues are never run** (PRD §3.20): a memo holding the source.
 - **Audio effects on a cue and QLab 5's audio maps** are reported.
@@ -22989,7 +22991,7 @@ lists and 396 cues, its auto-follows 27 groups of their own, its 68 video and ca
 validate` calls it valid.
 
 **What waits:** the probe workspaces (QL.1), and with them the MIDI and Video cues, the 2D path fades and
-the triggers; what QLab's S-curve and parametric shapes are, measured, rather than a raised cosine
+the triggers (the Video and Text cues are §62's, 2026-10-13); what QLab's S-curve and parametric shapes are, measured, rather than a raised cosine
 sampled at nine points; a comparison of an imported show with what QLab reports over OSC, which the
 extraction (§9.2) did by hand; and a run through an imported show's first scenes against the rig.
 
@@ -29234,10 +29236,13 @@ Mine, the author's to overrule:
   left, centre or right, and set at the top, middle or bottom, the top and bottom as far from the
   canvas's edges as the box is from its sides (5 % of the width when nothing wraps). Then the whole
   slide is offset, scaled, turned about the canvas's centre and flipped, as a fill is; `fit` is not read.
+  *Noted 2026-10-13 (§62, ALE):* a `wrap` of nought is QLab's own text box with no fixed width - as
+  wide as its longest line, the lines aligned in it, centred, then placed - which the importer uses.
 - **AKK** (mine) **The text rows and their units.** The words are `words`, not `text`, which stays the
   fields' address word (61.3) and is a function's name in the Runner. The size is a % of the canvas's
   height, as offsets are a % of it (VQ); the outline's width and its blur are canvas pixels, as a mask's
-  feather is. The fill is `paint`, whose description widens; the window makes a new text cue white,
+  feather is. *Amended 2026-10-13 (§62, ALD, proposed):* the size is the letters' em - what a designer
+  calls 48 points - not the line's height, which is a fifth more. The fill is `paint`, whose description widens; the window makes a new text cue white,
   as it makes a new mask with a square.
 - **AKL** (mine) **The renderer draws the words** on a thread of its own: the glyphs' outlines filled,
   the outline stroked beneath the fill and blurred on the processor, only the words' own bounds drawn,
@@ -29245,7 +29250,8 @@ Mine, the author's to overrule:
   new one is ready, so a field changing never flashes; a text cue fired before its first drawing comes
   up a frame or two late (as AAN for a picture not read ahead). The font is a family installed on the
   machine, checked by `wfg validate` on that machine - a main and a backup can differ - and a missing
-  one draws in the default sans-serif.
+  one draws in the default sans-serif. *Amended 2026-10-13 (§62, AKV, AKW, AKX-ALC):* or a family the
+  show carries in its `fonts/` folder, which then wins over an installed one of the same name.
 - **AKM** (mine) **Fields.** Addressed `/godot/text/<name>`, a name of letters, digits, `-` and `_`, at
   most 32; written by any client, OSC included, the first argument taken, a number written as text
   without the locale. A blank no value has reached shows nothing; `{{` and `}}` are a brace; a blank
@@ -29273,7 +29279,8 @@ Mine, the author's to overrule:
 - **AKR** (mine) **Left out**: a QLab text cue imported (still a memo, 46.4); the old OpenGL renderer
   (`--renderer=gl`, to be deleted in R.4), which draws nothing for the three new things; font files
   carried in the show's media; a fade of a key, a text's style or its colours; a blur on one picture's
-  own image (the option not taken in AKD).
+  own image (the option not taken in AKD). *Amended 2026-10-13, at the author's direction:* the QLab
+  text cue and the carried fonts are §62's.
 - **AKS** (mine) **The screen words** - the key's modes, the panel's labels, the automatic names - are
   put to the author before they ship (VFX.12).
 
@@ -29291,13 +29298,13 @@ Mine, the author's to overrule:
 | `cue/<id>/keySpill` | `d` | 0..100 %, how much of the key colour's spill is taken off; 50 |
 | `videoInput/<id>/alpha` | `T` | the program sending it sends a meaningful alpha; `false` (AKF) |
 | `cue/<id>/words` | `s` | a text cue's words, lines split by a line break, `{name}` a field |
-| `cue/<id>/font` | `s` | an installed family; empty is the default sans-serif |
-| `cue/<id>/fontSize` | `d` | 0.1..100 % of the canvas's height; 8 |
+| `cue/<id>/font` | `s` | an installed family, or one the show carries (§62); empty is the default sans-serif |
+| `cue/<id>/fontSize` | `d` | 0.1..100 % of the canvas's height, the letters' em (§62, ALD); 8 |
 | `cue/<id>/bold`, `cue/<id>/italic` | `T` | `false` |
 | `cue/<id>/align` | `s` | `left`, `centre` or `right`; `centre` |
 | `cue/<id>/alignV` | `s` | `top`, `middle` or `bottom`; `middle` |
 | `cue/<id>/lineSpacing` | `d` | 50..400 %; 100 |
-| `cue/<id>/wrap` | `d` | 0..100 % of the canvas's width, the box the words wrap in; 90; nought never wraps |
+| `cue/<id>/wrap` | `d` | 0..100 % of the canvas's width, the box the words wrap in; 90; nought never wraps, the box as wide as the longest line (§62, ALE) |
 | `cue/<id>/outlineColour` | `s` | `#RRGGBB`; `#000000` |
 | `cue/<id>/outline` | `d` | 0..200 canvas px, the outline's width; 0 |
 | `cue/<id>/outlineBlur` | `d` | 0..200 canvas px, how far the outline is blurred; 0 |
@@ -29588,6 +29595,371 @@ tiles cost the renderer's message thread with a blur in them.
 - **VFX.12**, 2026-10-13: the tester guides, in English and French - keys, text cues with their fields,
   blur cues - and the README's status; a summary for the author beside the build. The full suite ran once,
   at the plan's end.
+
+## 62. Fonts carried by the show, and QLab's text and video cues
+
+### 62.1 What it does
+
+Written 2026-10-13, the day §61 landed, from the author's words: *"Importing QLab text cues is a must.
+Carrying fonts with the show is a good idea especially for cross platform portability."* §61 had left
+both out (AKR), and a QLab text cue was a memo (46.4).
+
+**A show can carry its fonts.** A show folder gains `fonts/`, beside `media/`. A font is put there on
+request, one family at a time: *Carry it in the show* beside a font installed on this machine copies
+its files - the regular face, the bold, the italic, whatever the family has here - and *Add a font
+file...* takes a `.ttf`, `.otf` or `.ttc` from anywhere. Nothing is copied unasked: a font is licensed
+software, and the fonts a computer comes with are often licensed to that computer alone (AKV). A
+family the show carries draws the show's words on every machine the show opens on - a Mac or a PC, the
+main or its backup - even where a font of the same name is installed, and that is the point: the same
+letters everywhere (AKW).
+
+**QLab's text and video cues come over** with the rest of a workspace (46). A text cue becomes a Go.dot
+text cue: its words, its font, size and colour, its alignment, line spacing and width, its outline,
+and where it sits on the stage. A video cue becomes a picture or a movie cue: its file, found and
+copied as a sound's is, its start, end and loops, and where it sits, how big, turned how far, how
+opaque. A fade that moves one of them becomes a fade of the picture. Each QLab stage (a surface, in
+QLab 4) becomes a canvas of its size, and its outputs become video outputs waiting for a projector to
+be picked here. A camera cue stays a memo (AKT).
+
+**One thing changes in a text cue** to meet QLab, and it is what anyone typing a title expects: the
+size is the letters' size as a designer means it - the em, what QLab and every layout program call
+48 points - where it was the line's height, about a fifth more (ALD). A width of nought already was
+QLab's own text box with no fixed width: the box as wide as the longest line, the lines aligned in it,
+the block centred, then placed (ALE).
+
+### 62.2 Decisions
+
+The author's, 2026-10-13, each picked from options whose words were mine:
+
+- **AKT** (the author's) **Text and video cues are imported**, with the fades that move them; a camera
+  cue stays a memo. Offered as "Text and video"; the other options were text cues alone, and text,
+  video and cameras.
+- **AKU** (the author's) **A QLab text cue mixing styles takes one look**: the first run's font, size and
+  colour for all its words, and the report names the cue. Offered as "One look, reported"; the other
+  option was styled runs in Go.dot's own text cue.
+- **AKV** (the author's) **A font is carried on request, one family at a time**: beside an installed
+  font, or from a file. Offered as "On request, per font"; the other options were every font a text
+  cue uses copied by itself, and fonts from files only.
+- **AKW** (the author's) **The show's copy wins** over an installed font of the same name. Offered as
+  "The show's copy"; the other option was the installed one, the show's a fallback.
+
+Mine, the author's to overrule:
+
+- **AKX** (mine) **`fonts/` sits at the show folder's root**, beside `media/` and `namespaces/`. A
+  performance finds its show's fonts as it finds its sounds, in its own folder and then in the one
+  around it (§25). Save as copies the folder whole, as it copies `namespaces/`; the cache sweep never
+  looks in it (§52). Nothing in show.xml lists it: the files are the record, as `media/` is.
+- **AKY** (mine) **Go.dot reads a font file itself**, with a small reader of its own (the OpenType
+  `name`, `OS/2` and `head` tables; a `.ttf`, an `.otf` or each face of a `.ttc`): the family (the
+  typographic family, name 16, else name 1), whether the face is bold or italic (OS/2's selection bits
+  and weight), its PostScript name (name 6) and what its licence allows (OS/2's embedding bits). The
+  same file thus names the same family on every system; JUCE's own reading of a file differs between
+  Windows, macOS and Linux.
+- **AKZ** (mine) **How a carried font is drawn.** The engine turns a text cue's family, bold and italic
+  into one face file - a family the show carries first, then an installed family by its name, as
+  before - and hands the renderer that file's path with the layer, as it hands it a picture's
+  (`Layer::fontFile`; the region's version goes 20 to 21). The renderer keeps one typeface per file,
+  made and dropped on its text thread, and draws with it directly: JUCE, asked for a family by name,
+  finds the installed one first on Windows, and a typeface loaded from a file is given no bold or
+  italic of its own. A carried family with no bold face is emboldened, one with no italic face slanted,
+  by Go.dot on the glyphs' outlines, and `wfg validate` says so.
+- **ALA** (mine) **Three commands, on the engine's machine**: `fonts.carry <family>` copies every face
+  of an installed family into `fonts/`; `fonts.add <path>` copies one font file; `fonts.remove
+  <family>` deletes the family's files. None is an undo step or the show's dirt - files, as
+  `media.cleanCache`'s. A command is answered at once and its work done on a thread of its own, never
+  the tick's, which runs GO; the engine then reads its fonts again. `/godot/engine/fonts` lists the
+  families carried and `/godot/engine/fontsJob` says what the last command did, for every client, the
+  console's included - the machine's, as each machine has its own copy of the show folder.
+- **ALB** (mine) **A licence that forbids it is asked about.** A face whose embedding bits say
+  "restricted licence" is carried only after a question naming it, which the command learns as
+  `fonts.carry <family> restricted`; one that says "no subsetting" or "bitmap only" is carried with no
+  question - the show keeps the whole file.
+- **ALC** (mine) **`wfg validate`** warns of a font only when it is neither carried nor installed, and
+  notes a style Go.dot emboldens or slants itself. When RD.10's fingerprint of the show is built, it
+  counts the carried font files beside the sounds, so a backup with other fonts is told at link-up.
+- **ALD** (mine) **`fontSize` is the letters' em** (JUCE's point height), a % of the canvas's height, as
+  QLab and every layout program size type, so an imported size needs no font measured. The same number
+  draws about a fifth larger than on 2026-10-13's build; no show had text cues before it.
+- **ALE** (mine) **A `wrap` of nought stays what it is**: the block as wide as its longest line, its
+  lines aligned inside it, centred and then placed by the offsets - QLab's text box when it has no
+  fixed width, so an imported text with none is written with nought. Only the top and the bottom keep
+  a margin, 5 % of the width, which an imported text, set in the middle, never meets. *(Written first
+  as a change; the drawing already did this.)*
+- **ALF** (mine) **Stages are canvases.** Each QLab 5 stage, or QLab 4 surface, becomes a canvas of its
+  name and its size in pixels; a workspace drawing straight onto a screen gets one canvas per screen, of
+  the size QLab last saw it. Each of a stage's outputs becomes a video output of its name with no
+  display picked, which `wfg validate` names: the screens of the Mac that saved it are not this
+  machine's. Edge blends, warps and a stage's masks are reported.
+- **ALG** (mine) **Placement.** QLab's pixels become a % of the canvas: the offsets the translation over
+  the canvas's size, the opacity a percentage, the layer kept, at most 999, in the same order. A cue
+  filling the stage keeps its aspect (`fit` fit), or fills or stretches as QLab's fill style says; one
+  that does not is drawn at its own size times its scale, which the importer turns into a `scale` from
+  the picture's or the movie's own dimensions. Unequal X and Y scales take X, and are reported; an
+  origin away from the centre is folded into the offsets, and the report says a fade of that cue now
+  turns and scales it about its centre; the turn about the screen's axis is `rotation`, a tilt about X
+  or Y is reported; a blend mode Go.dot has (normal, add, screen, multiply) is kept, another is normal,
+  reported; a crop and a video effect are reported. Which way QLab's Y and turn run, and what its blend
+  and fill-style numbers mean, the probe settles (62.6).
+- **ALH** (mine) **Video cues.** The file is found and copied as a sound's is (`findMedia`, `placeFile`);
+  a picture's extension makes a picture cue, anything else a movie cue. Its rate, start and end, slices
+  and play counts are Ranges, as a sound's are (ZT). Holding the last frame is reported, since a Go.dot
+  movie ends with its last pass. A movie whose sound QLab plays - its main above the workspace's
+  minimum - gets its locked sound cue (WN), its levels routed as a sound cue's are (ZU). *Amended
+  2026-10-13 at QF.8 (proposed):* the import makes no locked sound itself. A movie Go.dot cannot play as
+  it is - H.264 or ProRes, QLab's usual - is a preview until converted to HAP (WF), and the conversion
+  rewrites the cue and makes its locked sound (WH); a second path would make two. The report names each
+  movie whose sound QLab played, at what level, to be set on that sound once converted.
+- **ALI** (mine) **Text cues.** The words are the plain string, `{` and `}` doubled, since a Go.dot text
+  reads `{name}` as a field (§61, AKM). The font is the family behind QLab's PostScript name: one the show
+  carries, then one installed here, then the name QLab last saw split into family and style; bold and
+  italic come from the face. The size is QLab's points over the canvas's height (ALD); the colour is
+  `paint`, an alpha below one multiplied into the opacity; the alignment and the line height are
+  QLab's; a fixed width is `wrap`, none is nought (ALE); the block sits in the middle and is placed as
+  ALG places a picture. QLab's stroke is the outline - its width a % of the size, halved, as QLab
+  strokes the letters' edge both ways - and a shadow with no stroke is the outline's blur in the
+  shadow's colour, its offset reported. A background colour, kerning, underlines and strikethroughs are
+  reported; several runs take the first run's look, reported (AKU).
+- **ALJ** (mine) **Fades of a picture or a text.** QLab's opacity, translation, scale and rotation
+  switches become the fade's `opacity:`, `offsetX:` and `offsetY:`, `scale:` and `rotation:`, its rate
+  on a movie `rate:`; QLab's S-curve is `sCurve`, linear is linear, a custom shape `sCurve`,
+  approximated; stopping the target is `stopWhenDone`. A relative fade adds to the target's own
+  imported value, right when the show runs in order, as a group's trims are (ZV), and reported. A fade
+  that also moves a movie's level moves its locked sound beside it.
+- **ALK** (mine) **The report names the fonts**: every font the workspace uses, each carried, installed
+  here, or missing - "carry it from a machine that has it". The import copies none (AKV).
+
+### 62.3 Rows
+
+| Address | Type | Notes |
+|---|---|---|
+| `engine/fonts` | `s` | read-only, the machine's: the families the show carries, a line each - the family, its styles, `around` when from the folder around, `restricted` when a face's licence restricts it, a tab between (ALA) |
+| `engine/fontsJob` | `s` | read-only, the machine's: what the last `fonts.*` command did - its number, `working` or `done`, the verb, the subject, the result and the detail, a tab between (ALA, ALB) |
+| `cue/<id>/font` | `s` | a family carried or installed; the show's copy wins (AKW) |
+| `cue/<id>/fontSize` | `d` | the letters' em, a % of the canvas's height (ALD) |
+
+### 62.4 Commands
+
+| Command | What it does |
+|---|---|
+| `fonts.carry <family> [restricted]` | every face of an installed family copied into `fonts/`; `restricted` once the operator has said yes to a restricted licence (ALB) |
+| `fonts.add <path>` | one font file copied into `fonts/` |
+| `fonts.remove <family>` | the family's files deleted from `fonts/`; its cues fall back to an installed font, and `wfg validate` says so |
+
+Refused: `no-folder` (a show never saved has no folder yet), `not-installed`, `not-a-font`,
+`restricted` (naming the faces), `not-carried`. A file whose family the show already carries replaces
+that face when its bytes differ, as a sound of the same name is asked about (§30.10) - the window asks
+first.
+
+### 62.5 QLab's keys, read
+
+| QLab | Go.dot |
+|---|---|
+| `TitlesCue` | a `video` cue of `source` `text` (ALI) |
+| `VideoCue` | `source` `picture` or `movie` (ALH) |
+| `titlesAttributedString` | `NSString` the words; `NSAttributes` one run, or `NSAttributeInfo` and an array of them; `NSFont` (`NSName`, `NSSize`), `NSColor`, `NSParagraphStyle` (`NSAlignment`, `NSLineHeightMultiple`), stroke and shadow |
+| `fixedWidth`, `lastSeenFontNames` | `wrap`; the font's name as QLab last saw it |
+| `translationX`, `translationY` | `offsetX`, `offsetY` |
+| `scaleX`, `scaleY`, `fullScreen`, `fillStyle`, `preserveAspectRatio` | `scale`, `fit` |
+| `originX`, `originY`, `quaternion` | folded into the offsets; `rotation` |
+| `opacity`, `layer`, `blendMode` | `opacity`, `layer`, `blend` |
+| `crop*`, `videoEffects` (QLab 4 `effect`) | reported |
+| `viewportID` (QLab 5), `surfaceID` (QLab 4) | `canvas` |
+| settings `stages` (`VideoStage`), QLab 4 `surfaces` | canvases and video outputs (ALF) |
+| `FadeCue` `doOpacity`, `doTranslation`, `doScale`, `doRotation`, `geoMode`, `rotationType`, `stopTargetWhenDone` | the fade's `video` pairs and `stopWhenDone` (ALJ) |
+
+None of the author's 126 workspaces holds a real text cue - every QLab 5 file has the one in its cue
+templates, which is where 62.5's text keys were read. Real video cues are in La Reprise (QLab 4: 18 of
+them, the "Title" pictures among them, drawn at their own size, scaled 0.81, faded up from nought)
+and in Justice-s (QLab 5: 8 to 12, on one to four stages).
+
+### 62.6 The probe
+
+The author's, offered 2026-10-13: a QLab 5 workspace with a 1920 by 1080 stage and a smaller second
+one, its media beside it, and a picture of the output for each numbered cue - which settles M67 and
+the units, signs and numbers ALG to ALJ leave open:
+
+1. A text cue at QLab's defaults.
+2. Text at 48 and at 96 points.
+3. Helvetica Neue Bold, Arial, and an italic face.
+4. Three lines aligned left, centre and right.
+5. A line height of 1.5.
+6. A fixed width that wraps.
+7. Red words on a blue background, one with an outline and one with a shadow (the Fonts panel).
+8. One cue with a bold word and a red word.
+9. Words holding `{` and `}`.
+10. On a text and on a PNG with transparency: moved 200 px right and 100 px up; scaled to half, and
+    unevenly; turned 30 degrees, and tilted about X; at half opacity; on layer 500; blended by screen,
+    multiply and add; its origin moved; cropped; each fill style, full screen off.
+11. A movie with sound, with start and end times and a loop; one holding its last frame.
+12. Fades: of opacity in; out, stopping its target; of position, scale and turn together; a relative
+    one; one on a custom curve.
+
+### 62.7 Stages
+
+Built in the worktree `D:\dev\go.dot-qtext`, branch `qtext` from `48e1499`, beside the time groups'
+close (§60), which keeps the shared checkout.
+
+| Stage | What the author sees |
+|---|---|
+| QF.0 | This section; §61 and §46 amended; PRD §3.19, §3.20, §6.9 and §6.11 (M67); the devplan |
+| QF.1 | Nothing yet: the font file reader (AKY), and a small free family committed for the tests |
+| QF.2 | A carried font drawing a text cue, winning over an installed one; Save as carrying `fonts/` |
+| QF.3 | Nothing yet: an installed family's files found on Windows, macOS and Linux |
+| QF.4 | The font menu: the show's fonts, Carry it in the show, Add a font file..., Remove from the show |
+| QF.5 | The size as the em |
+| QF.6 | The probe (the author's), 62.6 filled in |
+| QF.7 | Nothing yet: QLab's words, styles, placement, stages and fades read |
+| QF.8 | Nothing yet: the walk to canvases, pictures, movies, texts and fades |
+| QF.9 | A QLab workspace imported with its text and video cues, the report naming fonts and canvases |
+| QF.10 | La Reprise and Justice-s imported; the probe against its pictures (M67) |
+| QF.11 | The guides, the README, the screen words |
+
+### 62.8 Built so far
+
+- **QF.0**, 2026-10-13: this section; §61's AKJ, AKK, AKL, AKR and rows amended; §46.4 and §46.7
+  pointing here; PRD §3.19, §3.20, §6.9 and §6.11 (M67); the devplan's item.
+- **QF.1**, 2026-10-13: `video/FontFile.{h,cpp}` (AKY), std only. Each face's names - name 16 else 1
+  for the family, the legacy family kept, 17 else 2, 4, 6 - in American English from Windows' Unicode
+  records first, then another English, another language, the Unicode platform's, the Macintosh's in
+  Mac Roman, a symbol font's; OS/2's weight, bold, italic and oblique bits and its embedding bits,
+  head's style bits where there is no OS/2. Every read checked against the file's end, a file that does
+  not read an error in words, a collection keeping its good faces. `pickFace` takes the right slant
+  first, then the nearest weight, the heavier of two as near (as CSS takes Medium before Light), and says
+  what Go.dot must add. The tests read DejaVu Sans Mono from Pure Data's own folder, so no font file is
+  committed.
+- **QF.2**, 2026-10-13: the engine. `video/ShowFonts.{h,cpp}`: `ShowFonts` reads `<show>/fonts` and
+  `<show>/../fonts`, files by name, and `choose` turns a family, bold and italic into a face file - the
+  typographic family before Windows' four-style one, the show's own folder before the one around, a
+  family in its own folder never mixed with the one around's faces. `FontShelf` does `fonts.add`,
+  `.carry` and `.remove` on a thread of its own and says each in `/godot/engine/fontsJob`;
+  `/godot/engine/fonts` lists what is carried. `extractFace` copies a collection's face out as a file of
+  its own, since JUCE loads only a font's first face. `TextLook` gains `fontFile`, `fontFace`,
+  `embolden` and `slant`, the region the file and the face (version 21) and two style bits;
+  `pictureSpecOf` chooses the face; the Runner draws its text cues again when the fonts are read again,
+  as when a field moves; the tile too. The renderer makes one typeface per file, kept while drawn and
+  made again when the file changes on disk, and leans a missing italic about each glyph's baseline and
+  thickens a missing bold by a twenty-fourth of the size, as FreeType does. Save as copies `fonts/`
+  whole. `wfg validate` names a family neither carried nor installed, a file in `fonts/` that does not
+  read, and notes a style Go.dot draws itself without failing. Two things written in QF.0 were wrong:
+  a `wrap` of nought already was QLab's text box with no fixed width (ALE, rewritten); and the
+  readouts are the machine's, `engine/fonts` and `engine/fontsJob`, since each machine keeps its own
+  copy of the show folder, not `document/fonts`. Until QF.3, `fonts.carry` answers not-installed. Tests
+  under C and fr_FR: FontFileTests, ShowFontsTests (the folders, the choice, the shelf's jobs, the
+  commands, Save as), VideoTextTests (a carried face drawn whatever the family is called, a missing file
+  giving way to the name, Go.dot's bold and italic, a collection's second face, a file changed on disk),
+  VideoHostTests (the region), VideoTests (the Runner); 160 cases across the touched files. Nine
+  deliberate breakages each turned their own cases red.
+- **QF.3**, 2026-10-13: an installed family's files, found (`video/InstalledFonts`). JUCE names the
+  installed families but never says where their files are, so each system is asked: DirectWrite's
+  system collection on Windows, through its local file loader, a face it makes up from another adding
+  no file; CoreText's C interface on macOS, a family's faces by its family name and a PostScript name
+  kept only when CoreText matched that very name; fontconfig on Linux, a list rather than a match,
+  which always answers. They only find files: `byPostScript` reads them with Go.dot's own reader for
+  the family, the style and a collection's face, the same everywhere. `serve`'s shelf carries with it,
+  so `fonts.carry` works. The tests look up the first family this machine lists whose files Go.dot can
+  read, a face of it again by its PostScript name, and one of each system's usual families' bold by
+  name, then carry the family into a show; here that family is an AutoCAD one, carried. The macOS and
+  Linux halves are compiled first by CI's jobs: this machine builds neither.
+- **QF.4**, 2026-10-13: the font menu. A text cue's menu lists the default, then the families the show
+  carries under *In this show*, then this machine's others under *On this machine*, the cue's own last
+  when neither has it ("not in the show, not on this machine"); under them *Carry it in the show* - its
+  installed font, not carried yet - *Add a font file...* and *Remove it from the show* - its font, carried
+  in its own folder - none under the lock. Carrying and adding answer in the panel's head as the engine
+  works ("Carrying Arial in the show...", "Arial carried in the show"), only for the job this panel
+  asked; a restricted licence asks "Carry it all the same?" and asks again with yes; taking a family out
+  asks first, since its files are deleted. The words are the implementer's, listed for the author with
+  the others at QF.11. The console's inspector keeps the font as a text row: carrying is the window's.
+  Tests under C and fr_FR: ClientTests (the families and the job read, every outcome in words, the three
+  commands), RunPaneUiTests (the menu's order and what it offers, the carry asked and followed,
+  another's job not said, the lock); 219 client cases and 5 panel cases. Three deliberate breakages each
+  turned their own cases red.
+- **QF.5**, 2026-10-13: the size is the letters' em (ALD). The renderer sizes a text by JUCE's point
+  height - the em square - rather than its height, which is the line's: 48 points on a canvas 1080 high
+  is 4.44 %, as QLab sets it, and the same number draws about a sixth larger than the day before (an
+  "H" of DejaVu Sans Mono at 10 %, 68 pixels then, 78.7 now). The spacing goes by the line the font sets,
+  and Go.dot's bold by the em. `fontSize`'s description says so; the schema and `show.rng` regenerated.
+  Nothing else moves: a `wrap` of nought already was QLab's box (ALE). Tests under C and fr_FR:
+  VideoTextTests (a capital's height in the em; twice the size twice the letters), the video and font
+  cases, 161; the schema and GPU gates. One deliberate breakage - the line's height again - turned it red.
+- **QF.7**, 2026-10-13: QLab's text and video cues read, in QLab's own terms (62.5), before the probe:
+  the keys were read from QLab 5's own cue templates and from La Reprise (QLab 4) and Justice-s (QLab 5).
+  A video, text or camera cue's stage - QLab 5's viewport UUID, which is what a cue names, not its
+  stage's; QLab 4's surface number - and its placement: translation, scale per axis, origin, turn,
+  opacity, layer, blend mode (an object holding an index in QLab 5), whether it fills its stage and how,
+  crop. A turn is a quaternion that every workspace so far wrote as nothing: an array, text or data of
+  four numbers is read, anything else marked unread for the report. A video cue's file and timing as a
+  sound's, its sound's levels and patch from the audio cue QLab keeps inside it; holding the last frame;
+  effects. A text cue's words, its fixed width, the fonts QLab last saw, and its runs: one dictionary
+  for the whole, or several with `NSAttributeInfo`'s run lengths - seven bits a byte, low first - in
+  UTF-16 units as Cocoa counts; each run's font by PostScript name and size, colour (RGB, grey, CMYK,
+  components, a named colour's fallback, written numbers read without the locale), alignment and line
+  height as archived, stroke, shadow, background, underline, strikethrough, kerning. A fade's picture
+  switches, its targets read as a placement, its geometry mode and turn type. The workspace's QLab 5
+  stages (name, size, the routes of its regions, an edge blend, a mask) or QLab 4 surfaces (the displays
+  of their facets), and its default: QLab 4's surface, or QLab 5's screen when it has no stages, each cue
+  then saying the screen it last saw and its size. Read on the two shows: Justice2's four stages
+  (three of 1920 by 1080 and a triptych of 5760), every picture cue on one; La Reprise's four surfaces,
+  its movies at their own size, scaled 0.81 and moved 10 and 30, faded up from nought, its actors'
+  monitors filling a second surface. Tests under C and fr_FR (QlabReaderTests): a text cue's run and
+  placement in both versions, several runs - a two-byte length, a mask in UTF-16, a run past the words
+  dropped - a stroke, a shadow, a background and a grey; a video cue and its fade in both versions with
+  a triptych; a QLab 5 workspace drawing on a screen and a turn unread; and, with WFG_QLAB_CORPUS, every
+  picture cue of the author's shows on a stage they have. Two deliberate breakages - the run lengths
+  read high byte first, a stage named by its own id - each turned their cases red.
+- **QF.8**, 2026-10-13: the walk (ALF-ALK). Every QLab stage a canvas of its name and size, its outputs
+  video outputs with no display chosen - a display never chosen draws nothing (`findDisplay`), so an
+  imported rig opens no window - QLab 4's default surface for a cue naming none it has, and a canvas per
+  screen for QLab 5 drawing on one directly, of the size it last saw; stages' edge blends and masks
+  said. A video cue a picture or, by its file's extension, a movie, its rate and Ranges as a sound's
+  (ZT), a held last frame said, its sound's level said for the sound its conversion makes (ALH as
+  amended). Placement (ALG): QLab's pixels a % of the canvas; a picture QLab drew at its own size scaled
+  from its own size over what fits the canvas, known from the file (QF.9) or said; one filling its stage
+  by its fill style; unequal scales, a tilt, an origin, a crop, effects and an unknown blend said; layer
+  999 at most. A text cue (ALI): its words with braces doubled, its first run's font - the family this
+  machine has under QLab's PostScript name, through a lookup the importer gives the walk, or one read
+  from the name QLab last saw or the PostScript name itself ("Avenir-HeavyOblique": Avenir, bold,
+  italic) - its size over the canvas's height, colour and its alpha in the opacity, alignment (Cocoa's 0
+  left, 1 right, 2 centre, provisional), line height, fixed width as `wrap` or nought, a stroke as the
+  outline - half its width, Cocoa stroking both ways - a shadow as a glow; a background, underline,
+  kerning and changes of style said; each font once in the plan for the report (ALK). A fade of either
+  (ALJ): its `video` pairs from QLab's switches, sorted - opacity, offsets, a scale converted as its
+  target's, a turn from its quaternion - a relative move added to the target's own values, a fade of
+  effects or of the movie's sound said, one moving nothing a memo. Provisional until the probe, in the
+  code as here: Y up and turns counter-clockwise in QLab, fill styles 0 fit 1 fill 2 stretch, a point a
+  stage pixel, geometry mode 1 relative. A camera cue stays a memo (AKT). Tests under C and fr_FR
+  (QlabWalkTests): canvases and screens, QLab 4's default surface; placement - a movie at its own size
+  and at half of it, a size unknown, a turn, a tilt, unequal scales, layer, opacity and what is said; a
+  movie's Ranges, last frame and sound; three text cues - a missing font, an installed one, one read from
+  its PostScript name - with braces, colour and alpha, stroke, shadow and runs; fades absolute and
+  relative, one moving nothing; the ZX case now a camera's memo. 28 QLab cases. Four deliberate
+  breakages - the turn's sign, the own-size factor, the braces, the relative move - each turned their
+  cases red.
+- **QF.9**, 2026-10-13: the import. Canvases written at their sizes; each output QLab drew to made
+  once, with no display chosen, showing the stage drawn to it alone - Justice-s's three projectors carry
+  its three single stages, and its triptych, drawn to all three, is said, to be laid over them as a zone
+  (ALF, refined here: a projector several stages share is one output, not one per stage). A video cue's
+  file found and copied as a sound's; a still's own size read by its image reader, a movie's own size
+  and codec from its QuickTime or MP4 boxes - the video track's header and sample description - without
+  reading a frame, so a movie of gigabytes costs a few reads; a movie not in HAP said, to be converted.
+  Each item's canvas and file written; the walk handed this machine's fonts through
+  `installed::byPostScript`. The report gains "The canvases" (each stage's size and what it was drawn to)
+  and "The fonts" (QLab's name, the family, installed or missing), and "Files not found" for "Sounds not
+  found". A fade of the movie's sound alone is a memo saying so. Imported for real from the author's
+  drive with `--no-media`: Justice2 (QLab 5) into four canvases and three outputs, and La Reprise
+  (QLab 4) into its four surfaces and three outputs named by their displays, its movies faded up from
+  nought by 24 fades of the picture; each `wfg validate` calls valid. Tests under C and fr_FR:
+  QlabImportTests (a stage, its outputs, a picture, a text and a fade written; a whole import from a
+  folder - a PNG's own size, a hand-built QuickTime file's 1280 by 720 and its codec, the report),
+  QlabWalkTests (a projector several stages share), `blackbox.import-qlab` (a stage, a text cue whose
+  braces are doubled, a PNG at its own size, its fade; DejaVu carried into the show so `wfg validate`
+  passes on any machine); 31 QLab cases. Two deliberate breakages - the canvas not written, the movie
+  header read four bytes early - each turned their cases red.
+- **QF.11** (in part), 2026-10-14: `main` merged in after the time groups landed (ff8f5ac, clean; the
+  edited Tracktion patch re-applied by the build); the tester guides, English and French - a *Fonts in
+  the show* row beside the text cues, QLab's text and video cues in the import's paragraph - and the
+  README's video, import and status lines; a summary for the author beside the build, listing every
+  word of mine on the screen. The full suite on the merged branch, 210 of 210. Waiting: the author's
+  probe workspace (QF.6), which settles the provisional units and signs and M67 (QF.10).
 
 ## 63. Flags: a cue marked to look at afterwards
 

@@ -18,8 +18,11 @@
 
 #include <wfg/engine/import/Bplist.h>
 
+#include <juce_core/juce_core.h>
+
 #include <algorithm>
 #include <cstdlib>
+#include <cstring>
 #include <set>
 #include <string_view>
 
@@ -85,6 +88,262 @@ namespace wfg::import::qlab
                 return {};
             }
         };
+
+        /*  NUMBERS WRITTEN AS TEXT, "0.5 0.25 1 1" - Cocoa's colour components,
+            and its geometry strings "{{0, 0}, {1920, 1080}}" - read without the
+            locale: a French machine reads 0.5, never 0. */
+        std::vector<double> numbersIn (std::string_view text)
+        {
+            std::vector<double> numbers;
+            std::string token;
+            const auto flush = [&numbers, &token]
+            {
+                if (! token.empty())
+                    numbers.push_back (juce::String (token).getDoubleValue());
+                token.clear();
+            };
+
+            for (const char c : text)
+            {
+                if ((c >= '0' && c <= '9') || c == '.' || c == '-' || c == '+' || c == 'e' || c == 'E')
+                    token += c;
+                else
+                    flush();
+            }
+            flush();
+            return numbers;
+        }
+
+        std::string bytesAsText (const std::vector<std::uint8_t>* bytes)
+        {
+            return bytes == nullptr ? std::string {} : std::string (bytes->begin(), bytes->end());
+        }
+
+        /*  A COLOUR AS COCOA ARCHIVES IT: components with a colour space of
+            their own, or RGB, a grey, CMYK, or a named colour's fallback. */
+        Colour colourOf (const Fields& f, Handle colour, int depth = 0)
+        {
+            Colour out;
+            if (colour == Archive::none || depth > 4)
+                return out;
+
+            const auto components = numbersIn (bytesAsText (f.archive.bytes (f.at (colour, "NSComponents"))));
+            const auto rgb = numbersIn (bytesAsText (f.archive.bytes (f.at (colour, "NSRGB"))));
+            const auto white = numbersIn (bytesAsText (f.archive.bytes (f.at (colour, "NSWhite"))));
+            const auto cmyk = numbersIn (bytesAsText (f.archive.bytes (f.at (colour, "NSCMYK"))));
+
+            const auto fromRgb = [&out] (const std::vector<double>& n)
+            {
+                out = { n[0], n[1], n[2], n.size() > 3 ? n[3] : 1.0, true };
+            };
+            const auto fromWhite = [&out] (const std::vector<double>& n)
+            {
+                out = { n[0], n[0], n[0], n.size() > 1 ? n[1] : 1.0, true };
+            };
+
+            if (rgb.size() >= 3)
+                fromRgb (rgb);
+            else if (components.size() >= 3)
+                fromRgb (components);
+            else if (! white.empty())
+                fromWhite (white);
+            else if (! components.empty())
+                fromWhite (components);
+            else if (cmyk.size() >= 4)
+                out = { (1.0 - cmyk[0]) * (1.0 - cmyk[3]), (1.0 - cmyk[1]) * (1.0 - cmyk[3]),
+                        (1.0 - cmyk[2]) * (1.0 - cmyk[3]), cmyk.size() > 4 ? cmyk[4] : 1.0, true };
+            else
+                return colourOf (f, f.at (colour, "NSColor"), depth + 1);    // a named colour's fallback
+
+            return out;
+        }
+
+        /*  THE UTF-16 UNITS OF UTF-8 WORDS, as Cocoa counts a run's length:
+            two for a character past the first plane. */
+        std::size_t utf16Length (const std::string& words)
+        {
+            std::size_t units = 0;
+            for (const char c : words)
+            {
+                const auto byte = static_cast<unsigned char> (c);
+                if ((byte & 0xC0u) != 0x80u)
+                    units += byte >= 0xF0u ? 2 : 1;
+            }
+            return units;
+        }
+
+        /*  ONE RUN'S ATTRIBUTES, from the dictionary Cocoa archives them in. */
+        TextRun styleOf (const Fields& f, Handle attributes)
+        {
+            TextRun run;
+
+            for (const auto& [name, value] : f.archive.entries (attributes))
+            {
+                if (name == "NSFont")
+                {
+                    run.font = f.text (value, "NSName");
+                    run.size = f.number (value, "NSSize");
+                }
+                else if (name == "NSColor")
+                    run.colour = colourOf (f, value);
+                else if (name == "NSParagraphStyle")
+                {
+                    run.alignment = f.whole (value, "NSAlignment", -1);
+                    run.lineHeightMultiple = f.number (value, "NSLineHeightMultiple");
+                    run.lineSpacing = f.number (value, "NSLineSpacing");
+                }
+                else if (name == "NSStrokeWidth")
+                    run.strokeWidth = f.archive.number (value).value_or (0.0);
+                else if (name == "NSStrokeColor")
+                    run.strokeColour = colourOf (f, value);
+                else if (name == "NSShadow")
+                {
+                    run.shadow = true;
+                    run.shadowBlur = f.number (value, "NSShadowBlurRadius");
+                    run.shadowX = f.number (value, "NSShadowHoriz");
+                    run.shadowY = f.number (value, "NSShadowVert");
+                    run.shadowColour = colourOf (f, f.at (value, "NSShadowColor"));
+                }
+                else if (name == "NSBackgroundColor")
+                    run.background = colourOf (f, value);
+                else if (name == "NSUnderline")
+                    run.underline = static_cast<int> (f.archive.integer (value).value_or (0));
+                else if (name == "NSStrikethrough")
+                    run.strikethrough = static_cast<int> (f.archive.integer (value).value_or (0));
+                else if (name == "NSKern")
+                    run.kern = f.archive.number (value).value_or (0.0);
+            }
+            return run;
+        }
+
+        /*  THE RUNS OF AN ATTRIBUTED STRING: one dictionary for the whole of
+            it, or an array of dictionaries and `NSAttributeInfo` - pairs of
+            numbers, each seven bits a byte, low first, the high bit saying
+            another byte follows: a run's length, then which dictionary. */
+        std::vector<TextRun> runsOf (const Fields& f, Handle attributed, const std::string& words)
+        {
+            std::vector<TextRun> runs;
+            const auto attributes = f.at (attributed, "NSAttributes");
+            const auto* info = f.archive.bytes (f.at (attributed, "NSAttributeInfo"));
+            const auto length = utf16Length (words);
+
+            if (info == nullptr)
+            {
+                if (attributes != Archive::none)
+                {
+                    auto run = styleOf (f, attributes);
+                    run.length = length;
+                    runs.push_back (std::move (run));
+                }
+                return runs;
+            }
+
+            const auto dictionaries = f.archive.items (attributes);
+            std::vector<std::uint64_t> numbers;
+            std::uint64_t value = 0;
+            int shift = 0;
+
+            for (const auto byte : *info)
+            {
+                if (shift < 63)
+                    value |= static_cast<std::uint64_t> (byte & 0x7Fu) << shift;
+                shift += 7;
+                if ((byte & 0x80u) == 0)
+                {
+                    numbers.push_back (value);
+                    value = 0;
+                    shift = 0;
+                }
+            }
+
+            std::size_t start = 0;
+            for (std::size_t at = 0; at + 1 < numbers.size() && start < length; at += 2)
+            {
+                const auto which = static_cast<std::size_t> (numbers[at + 1]);
+                auto run = which < dictionaries.size() ? styleOf (f, dictionaries[which]) : TextRun {};
+                run.start = start;
+                run.length = std::min<std::size_t> (static_cast<std::size_t> (numbers[at]), length - start);
+                start += run.length;
+                runs.push_back (std::move (run));
+            }
+            return runs;
+        }
+
+        /*  A QUATERNION, in whichever shape QLab keeps one: none is written
+            `$null` in every workspace read so far; an array, a string or data
+            of four numbers is read, anything else marked unread. */
+        void quaternionOf (const Fields& f, Handle value, Placement& placement)
+        {
+            if (value == Archive::none)
+                return;
+
+            std::vector<double> numbers;
+            for (const auto item : f.archive.items (value))
+                if (const auto n = f.archive.number (item); n.has_value())
+                    numbers.push_back (*n);
+
+            if (numbers.empty())
+                if (const auto words = f.archive.text (value); words.has_value())
+                    numbers = numbersIn (*words);
+
+            if (numbers.empty())
+                if (const auto* bytes = f.archive.bytes (value); bytes != nullptr && (bytes->size() == 16 || bytes->size() == 32))
+                {
+                    const auto wide = bytes->size() == 32;
+                    for (std::size_t at = 0; at < bytes->size(); at += wide ? 8 : 4)
+                    {
+                        if (wide)
+                        {
+                            double d = 0.0;
+                            std::memcpy (&d, bytes->data() + at, 8);
+                            numbers.push_back (d);
+                        }
+                        else
+                        {
+                            float x = 0.0f;
+                            std::memcpy (&x, bytes->data() + at, 4);
+                            numbers.push_back (static_cast<double> (x));
+                        }
+                    }
+                }
+
+            if (numbers.size() == 4)
+                placement.quaternion = std::array<double, 4> { numbers[0], numbers[1], numbers[2], numbers[3] };
+            else
+                placement.quaternionUnread = true;
+        }
+
+        /*  WHERE A PICTURE GOES, or where a fade takes it: the same keys. */
+        Placement placementOf (const Fields& f, Handle handle)
+        {
+            Placement p;
+            p.translationX = f.number (handle, "translationX");
+            p.translationY = f.number (handle, "translationY");
+            p.scaleX = f.number (handle, "scaleX", 1.0);
+            p.scaleY = f.number (handle, "scaleY", 1.0);
+            p.originX = f.number (handle, "originX");
+            p.originY = f.number (handle, "originY");
+            p.rotation = f.number (handle, "rotation");
+            p.opacity = f.number (handle, "opacity", 1.0);
+            p.layer = f.number (handle, "layer", 1000.0);
+            p.fullScreen = f.flag (handle, "fullScreen", true);
+            p.fillStyle = f.whole (handle, "fillStyle");
+            p.preserveAspectRatio = f.flag (handle, "preserveAspectRatio", true);
+            p.cropLeft = f.number (handle, "cropLeft");
+            p.cropRight = f.number (handle, "cropRight");
+            p.cropTop = f.number (handle, "cropTop");
+            p.cropBottom = f.number (handle, "cropBottom");
+
+            //  The blend mode: an object holding its index in QLab 5, a number elsewhere.
+            const auto blend = f.at (handle, "blendMode");
+            if (const auto index = f.archive.integer (blend); index.has_value())
+                p.blendMode = static_cast<int> (*index);
+            else
+                p.blendMode = f.whole (blend, "index");
+
+            quaternionOf (f, f.at (handle, "quaternion"), p);
+            return p;
+        }
 
         Shape shapeOf (const Fields& f, Handle shape)
         {
@@ -152,8 +411,63 @@ namespace wfg::import::qlab
                 {
                     cue.source = f.text (handle, "source");
                 }
+                else if (type == "Video" || type == "Titles" || type == "Camera")
+                {
+                    readPicture (handle, cue);
+                }
 
                 return cue;
+            }
+
+            /*  A VIDEO, TEXT OR CAMERA CUE (namespace draft §62): its stage, its
+                place, its effects; a video cue's file and timing as an audio
+                cue's, its sound from the audio cue QLab keeps inside it; a text
+                cue's words and their runs. */
+            void readPicture (Handle handle, Cue& cue)
+            {
+                cue.stage = major >= 5 ? f.text (handle, "viewportID") : f.idText (handle, "surfaceID");
+                cue.placement = placementOf (f, handle);
+                cue.holdLastFrame = f.flag (handle, "holdLastFrame");
+
+                const auto effects = f.at (handle, "videoEffects");
+                cue.hasEffects = f.flag (handle, "doEffect")
+                              || ! f.archive.items (f.entry (effects, "effectEntries")).empty();
+
+                //  QLab 5's last look at a screen drawn on directly: its name and its size.
+                const auto lastSeen = f.at (handle, "lastSeenViewportInfo");
+                if (lastSeen != Archive::none)
+                {
+                    cue.lastSeenScreen = f.archive.text (f.entry (lastSeen, "nameForMenuItem")).value_or (std::string {});
+                    const auto bounds = numbersIn (f.archive.text (f.entry (lastSeen, "boundsOnStage")).value_or (std::string {}));
+                    if (bounds.size() == 4)
+                    {
+                        cue.lastSeenWidth = static_cast<int> (bounds[2]);
+                        cue.lastSeenHeight = static_cast<int> (bounds[3]);
+                    }
+                }
+
+                if (cue.type == "Video")
+                {
+                    readAudio (handle, cue);
+
+                    const auto sound = f.at (handle, "audioCue");
+                    if (sound != Archive::none)
+                    {
+                        cue.levels = levelsOf (f.at (sound, "levels"));
+                        cue.audioPatch = f.idText (sound, major >= 5 ? "audioOutputPatchID" : "patch");
+                    }
+                }
+                else if (cue.type == "Titles")
+                {
+                    const auto attributed = f.at (handle, "titlesAttributedString");
+                    cue.words = f.archive.text (attributed).value_or (std::string {});
+                    cue.runs = runsOf (f, attributed, cue.words);
+                    cue.fixedWidth = f.number (handle, "fixedWidth");
+
+                    for (const auto name : f.archive.items (f.at (handle, "lastSeenFontNames")))
+                        if (const auto words = f.archive.text (name); words.has_value())
+                            cue.lastSeenFontNames.push_back (*words);
+                }
             }
 
             void readGroup (Handle handle, Cue& cue, int depth)
@@ -260,6 +574,16 @@ namespace wfg::import::qlab
                 });
 
                 cue.shape = shapeOf (f, upShape (fade));
+
+                //  AND A PICTURE'S (§62): what it moves, and where to.
+                cue.fadesOpacity = f.flag (handle, "doOpacity");
+                cue.fadesTranslation = f.flag (handle, "doTranslation");
+                cue.fadesScale = f.flag (handle, "doScale");
+                cue.fadesRotation = f.flag (handle, "doRotation");
+                cue.fadesEffects = ! f.archive.entries (f.at (handle, "doVideoEffectInputs")).empty();
+                cue.geoMode = f.whole (handle, "geoMode");
+                cue.rotationType = f.whole (handle, "rotationType");
+                cue.placement = placementOf (f, handle);
             }
 
             /*  THE RISING SHAPE: under `shapes` in QLab 5, on the fade itself in 4. */
@@ -395,6 +719,57 @@ namespace wfg::import::qlab
             }
         }
 
+        /*  THE STAGES (namespace draft §62.5): QLab 5's, each its viewport's UUID
+            the id cues name, its outputs the routes of its regions; QLab 4's
+            surfaces, each its number, its outputs the displays of its facets. */
+        void readVideoSettings (const Fields& f, Handle video, Workspace& workspace)
+        {
+            for (const auto stage : f.archive.items (f.entry (video, "stages")))
+            {
+                Stage out;
+                out.id = f.text (f.at (stage, "viewport"), "uniqueID");
+                out.name = f.text (stage, "name");
+                out.width = f.whole (stage, "width");
+                out.height = f.whole (stage, "height");
+                out.masked = f.at (f.at (stage, "viewport"), "maskAlias") != Archive::none;
+
+                for (const auto region : f.archive.items (f.at (stage, "regions")))
+                {
+                    const auto route = f.text (f.at (region, "route"), "name");
+                    if (! route.empty() && std::find (out.outputs.begin(), out.outputs.end(), route) == out.outputs.end())
+                        out.outputs.push_back (route);
+
+                    for (const auto* edge : { "edgeBlendLeftPixels", "edgeBlendRightPixels", "edgeBlendTopPixels", "edgeBlendBottomPixels" })
+                        out.blended = out.blended || f.number (region, edge) > 0.0;
+                }
+                workspace.stages.push_back (std::move (out));
+            }
+
+            for (const auto surface : f.archive.items (f.entry (video, "surfaces")))
+            {
+                Stage out;
+                out.id = f.idText (surface, "surfaceID");
+                out.name = f.text (surface, "name");
+                out.width = static_cast<int> (f.number (surface, "width"));
+                out.height = static_cast<int> (f.number (surface, "height"));
+                out.masked = f.at (surface, "maskImage") != Archive::none;
+
+                for (const auto facet : f.archive.items (f.at (surface, "facets")))
+                {
+                    const auto display = f.text (f.at (facet, "display"), "name");
+                    if (! display.empty() && std::find (out.outputs.begin(), out.outputs.end(), display) == out.outputs.end())
+                        out.outputs.push_back (display);
+                }
+                workspace.stages.push_back (std::move (out));
+            }
+
+            const auto fallback = f.entry (video, "defaultSurfaceID");
+            if (const auto number = f.archive.integer (fallback); number.has_value())
+                workspace.defaultStage = std::to_string (*number);
+            else
+                workspace.defaultStage = f.archive.text (f.entry (video, "simpleStageKeyPath")).value_or (std::string {});
+        }
+
         void count (const Cue& cue, int& n)
         {
             for (const auto& child : cue.children)
@@ -468,6 +843,7 @@ namespace wfg::import::qlab
         const auto settings = f.entry (root, "settings");
         readAudioSettings (f, f.entry (settings, "Audio"), workspace);
         readNetworkSettings (f, f.entry (settings, "Network"), f.entry (settings, "OSC"), workspace);
+        readVideoSettings (f, f.entry (settings, "Video"), workspace);
 
         //  --- The cues: an archive held as data inside this one ----------------
         const auto* held = f.archive.bytes (f.entry (root, "cueLists"));

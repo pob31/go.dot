@@ -39,11 +39,13 @@ from __future__ import annotations
 
 import math
 import plistlib
+import shutil
 import struct
 import subprocess
 import sys
 import tempfile
 import wave
+import zlib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -90,7 +92,8 @@ class Keyed:
 
 def workspace_bytes(version: str = "5.6.3") -> bytes:
     """A small QLab 5 workspace: one list, a scene of a playlist of two messages,
-    a timeline of a sound and its fade, an OSC fade, a script cue."""
+    a timeline of a sound and its fade, an OSC fade, a script cue - and, on a
+    stage of its own (namespace draft 62), a text cue, a picture and its fade."""
     cues = Keyed()
     made = [0]
 
@@ -139,7 +142,24 @@ def workspace_bytes(version: str = "5.6.3") -> bytes:
                 fadeType=1, startValue=-18.0, endValue=0.0, duration=5.0, fadingFloats=True, fade=fader_fade)
     script = cue("ScriptCue", "a script", source="tell application id \"com.figure53.QLab.5\"")
 
-    scene = group("1 - Doors", 1, [doors, rain, fader, script])
+    # Words and a picture on a stage (62): the text's braces doubled, the picture
+    # drawn at its own size, 960 by 540 on a stage of 1920, faded up.
+    font = cues.object("NSFont", NSName=cues.string("DejaVuSansMono-Bold"), NSSize=96.0, NSfFlags=16)
+    white = cues.object("NSColor", NSColorSpace=3, NSWhite=b"1 1\x00")
+    paragraph = cues.object("NSMutableParagraphStyle", NSAlignment=2, NSLineHeightMultiple=1.0)
+    attributes = cues.dictionary({"NSFont": font, "NSColor": white, "NSParagraphStyle": paragraph})
+    words = cues.object("NSAttributedString", NSString=cues.string("Act {One}"), NSAttributes=attributes)
+    title = cue("TitlesCue", "Title", titlesAttributedString=words, viewportID="VIEW-1", translationY=270.0,
+                lastSeenFontNames=cues.array([cues.string("DejaVu Sans Mono Bold")]))
+    still_alias = cues.object("F53Alias", lastKnownPath="/Volumes/Gone/video/title.png", relativePath="video/title.png")
+    still = cue("VideoCue", "Card", fileTarget=still_alias, viewportID="VIEW-1", fullScreen=False, opacity=0.0,
+                scaleX=1.0, scaleY=1.0)
+    card_fade = cue("FadeCue", "", cueTargetUniqueID="BB-0010", duration=2.0, stopTargetWhenDone=False,
+                    doOpacity=True, opacity=1.0,
+                    fade=cues.object("Fade", fadeMode=1, duration=2.0,
+                                     shapes=cues.object("FadeShapesFunction", upShape=shape(3))))
+
+    scene = group("1 - Doors", 1, [doors, rain, fader, script, title, still, card_fade])
     the_list = group("Main", 0, [scene])
     root = cues.object("GroupCue", groupMode=3, cues=cues.array([the_list]))
     inner = cues.archive(root)
@@ -155,7 +175,14 @@ def workspace_bytes(version: str = "5.6.3") -> bytes:
                                  "clientStates": outer.array([state])})
         return outer.dictionary({"data": data})
 
+    route = outer.object("F53VideoOutputRoute", name="Output 1")
+    region = outer.object("VideoStageRegion", route=route, edgeBlendLeftPixels=0.0)
+    viewport = outer.object("VideoStageViewport", uniqueID="VIEW-1", name="main")
+    stage = outer.object("VideoStage", uniqueID="STAGE-1", name="Stage 1", width=1920, height=1080,
+                         viewport=viewport, regions=outer.array([region]))
+
     settings = outer.dictionary({
+        "Video": outer.dictionary({"stages": outer.array([stage]), "simpleStageKeyPath": ""}),
         "Audio": outer.dictionary({"audioOutputPatches": outer.array([audio_patch]), "minVolume": -80.0}),
         "Network": outer.dictionary({"networkPatches": outer.array([
             destination("PATCH-WFS", "WFS", "192.168.1.32", 8051),
@@ -179,6 +206,18 @@ def write_wav(path: Path) -> None:
             sample = int(8000 * math.sin(2 * math.pi * 440 * n / 48000))
             frames += struct.pack("<hh", sample, sample)
         out.writeframes(bytes(frames))
+
+
+def write_png(path: Path, width: int, height: int) -> None:
+    """A black picture, written as PNG by hand - no imaging library."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF)
+
+    rows = b"".join(b"\x00" + bytes(width * 3) for _ in range(height))
+    path.write_bytes(b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+                     + chunk(b"IDAT", zlib.compress(rows, 9)) + chunk(b"IEND", b""))
 
 
 def run(*args: str) -> "tuple[int, str]":
@@ -206,17 +245,24 @@ def main(argv: "list[str]") -> int:
             workspace = show_folder / "Doors.qlab5"
             workspace.write_bytes(workspace_bytes())
             write_wav(show_folder / "audio" / "rain.wav")
+            write_png(show_folder / "video" / "title.png", 960, 540)
 
             first, second = room / "Doors", room / "Again"
 
             code, said = run("import-qlab", str(workspace), f"--into={first}", *with_locale)
             report.equal(code, 1, "the workspace imports, with something in its report to read", said.strip()[-300:])
-            report.check("1 cue list(s), 9 cue(s)" in said, "one list and nine cues", said.strip()[-300:])
+            report.check("1 cue list(s), 12 cue(s)" in said, "one list and twelve cues", said.strip()[-300:])
             report.check("0 sound(s) not found" in said, "its sound found beside it, through an accented folder",
                          said.strip()[-300:])
 
-            for name in ("Doors.wfg", "show.xml", "state.xml", "import-report.md", "media/rain.wav"):
+            for name in ("Doors.wfg", "show.xml", "state.xml", "import-report.md", "media/rain.wav", "media/title.png"):
                 report.check((first / name).exists(), f"the folder holds {name}")
+
+            # Its font carried in the show, from Pure Data's folder (62): valid on any machine, DejaVu installed or not.
+            fonts = first / "fonts"
+            fonts.mkdir()
+            for face in ("DejaVuSansMono.ttf", "DejaVuSansMono-Bold.ttf"):
+                shutil.copyfile(REPO_ROOT / "ThirdParty" / "pure-data" / "font" / face, fonts / face)
 
             code, said = run("validate", str(first), *with_locale)
             report.check(code == 0 and "is valid" in said, "the engine opens the show it wrote", said.strip()[-300:])
@@ -238,7 +284,18 @@ def main(argv: "list[str]") -> int:
                                 ('<Fade', "the fade"),
                                 ('curve="sCurve"', "QLab's S-curve"),
                                 ('points="0 -18 5 0"', "the #v# fade a curve"),
-                                ('[QLab] a script', "the script a memo in its place")):
+                                ('[QLab] a script', "the script a memo in its place"),
+                                ('name="Stage 1"', "the stage a canvas (62)"),
+                                ('<VideoOutput', "its output a video output with no display"),
+                                ('source="text"', "the text cue"),
+                                ('words="Act {{One}}"', "its words, their braces doubled"),
+                                ('font="DejaVu Sans Mono"', "its font's family"),
+                                ('bold="true"', "its font bold"),
+                                ('offsetY="25"', "the text moved up a quarter of the stage"),
+                                ('source="picture"', "the picture"),
+                                ('file="title.png"', "the picture's file copied in"),
+                                ('scale="50"', "the picture at its own size, half the stage's width"),
+                                ('video="opacity:100"', "the picture's fade")):
                 report.check(words in show, f"the show holds {what}")
 
             # The same workspace, again: the same show, byte for byte (ZY).
@@ -262,7 +319,8 @@ def main(argv: "list[str]") -> int:
             # The report says what the import could not carry.
             text = (first / "import-report.md").read_text(encoding="utf-8")
             for words in ("## The outputs", "FOH L", "## The devices", "192.168.1.221:8024", "## Not imported",
-                          "a script is never run"):
+                          "a script is never run", "## The canvases", "| Stage 1 | 1920 x 1080 | Output 1 |",
+                          "## The fonts", "DejaVuSansMono-Bold"):
                 report.check(words in text, f"the report says \"{words}\"")
     except HarnessError as error:
         print(f"harness: {error}", file=sys.stderr)

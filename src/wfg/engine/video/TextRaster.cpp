@@ -17,9 +17,14 @@
 #include <wfg/engine/video/TextRaster.h>
 
 #include <wfg/engine/video/Blur.h>
+#include <wfg/engine/video/FontFile.h>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <map>
+#include <mutex>
+#include <utility>
 #include <vector>
 
 namespace wfg::video
@@ -42,6 +47,100 @@ namespace wfg::video
 
             return juce::Justification::horizontallyCentred;
         }
+
+        /*  THE TYPEFACES OF FONTS THE SHOW CARRIES (namespace draft §62, AKZ),
+            each made once from its file and kept while it is drawn: JUCE, asked
+            for a family by name, finds the installed one first on Windows, so a
+            carried family is drawn from its own file, never looked up. A file
+            changed on disk - the same name, carried again - is made again.
+            Made and dropped under one lock: on Linux JUCE's list of faces has
+            none of its own. */
+        struct Carried
+        {
+            juce::MemoryBlock data;         ///< the face's bytes, kept with the typeface made from them
+            juce::Typeface::Ptr typeface;
+            juce::Time modified;
+            juce::int64 bytes = 0;
+            std::uint64_t used = 0;
+        };
+
+        constexpr std::size_t carriedMost = 32;
+
+        juce::Typeface::Ptr carriedTypeface (const std::string& path, int face)
+        {
+            static std::mutex lock;
+            static std::map<std::pair<std::string, int>, Carried> cache;
+            static std::uint64_t uses = 0;
+
+            const juce::File file (juce::String::fromUTF8 (path.c_str()));
+            const auto modified = file.getLastModificationTime();
+            const auto bytes = file.getSize();
+
+            const std::lock_guard<std::mutex> guard { lock };
+            const auto key = std::make_pair (path, face);
+
+            if (auto found = cache.find (key); found != cache.end())
+            {
+                if (found->second.modified == modified && found->second.bytes == bytes)
+                {
+                    found->second.used = ++uses;
+                    return found->second.typeface;
+                }
+                cache.erase (found);
+            }
+
+            juce::MemoryBlock whole;
+            if (! file.loadFileAsData (whole))
+                return nullptr;
+
+            //  A collection's later face as a file of its own: JUCE reads a font's first face only.
+            const auto one = fontfile::extractFace (static_cast<const std::uint8_t*> (whole.getData()), whole.getSize(), face);
+            if (one.empty())
+                return nullptr;
+
+            Carried carried;
+            carried.data = juce::MemoryBlock (one.data(), one.size());
+            carried.typeface = juce::Typeface::createSystemTypefaceFor (carried.data.getData(), carried.data.getSize());
+            if (carried.typeface == nullptr)
+                return nullptr;
+
+            carried.modified = modified;
+            carried.bytes = bytes;
+            carried.used = ++uses;
+
+            if (cache.size() >= carriedMost)
+                cache.erase (std::min_element (cache.begin(), cache.end(),
+                                               [] (const auto& a, const auto& b) { return a.second.used < b.second.used; }));
+
+            return cache.emplace (key, std::move (carried)).first->second.typeface;
+        }
+
+        /*  A FAMILY'S FACE, OR BY NAME: the carried file when there is one and
+            it reads, else the installed family of that name, else the default
+            sans-serif - as before §62. SIZED BY ITS EM (§62, ALD): the letters'
+            size as a designer means it, JUCE's point height, never the line's. */
+        juce::Font fontFor (const TextLook& look, float em)
+        {
+            if (! look.fontFile.empty())
+                if (auto typeface = carriedTypeface (look.fontFile, look.fontFace))
+                    return juce::Font (juce::FontOptions (typeface).withPointHeight (em));
+
+            const auto style = (look.bold ? juce::Font::bold : 0) | (look.italic ? juce::Font::italic : 0);
+            const auto fallback = juce::Font (juce::FontOptions (em, style).withPointHeight (em));
+
+            if (look.font.empty())
+                return fallback;
+
+            /*  A FAMILY THIS MACHINE HAS NOT GOT draws in the default sans-serif
+                (61, AKL): on Linux JUCE finds no typeface for it at all, and
+                the words would draw nothing; Windows and macOS pick one of their own. */
+            const juce::Font named (juce::FontOptions (juce::String::fromUTF8 (look.font.c_str()), em, style).withPointHeight (em));
+            return named.getTypefacePtr() != nullptr ? named : fallback;
+        }
+
+        /*  WHAT A FACE LACKS, DRAWN BY GO.DOT (AKZ): the slant of an oblique,
+            each glyph leaned about its own baseline, as FreeType leans one. */
+        constexpr float slantShear = 0.21f;
 
         /*  THE WORDS SET IN A BOX `width` WIDE, each line aligned in it, the
             first line's top at nought. */
@@ -69,11 +168,10 @@ namespace wfg::video
         const auto frameWidth = canvasWidth * times;
         const auto frameHeight = canvasHeight * times;
 
-        const auto height = static_cast<float> (std::max (1.0, look.fontSize / 100.0 * frameHeight));
-        const auto style = (look.bold ? juce::Font::bold : 0) | (look.italic ? juce::Font::italic : 0);
-        const juce::Font font (look.font.empty() ? juce::FontOptions (height, style)
-                                                 : juce::FontOptions (juce::String::fromUTF8 (look.font.c_str()), height, style));
-        const auto leading = static_cast<float> ((std::max (50.0, look.lineSpacing) / 100.0 - 1.0) * height);
+        //  THE SIZE IS THE EM (§62, ALD); the spacing goes by the line the font sets, a fifth more or so.
+        const auto em = static_cast<float> (std::max (1.0, look.fontSize / 100.0 * frameHeight));
+        const auto font = fontFor (look, em);
+        const auto leading = static_cast<float> ((std::max (50.0, look.lineSpacing) / 100.0 - 1.0) * font.getHeight());
         const auto justification = justificationOf (look.align);
 
         /*  THE BOX: `wrap` % of the frame's width, centred - or, nothing
@@ -94,7 +192,25 @@ namespace wfg::video
             return out;
 
         juce::Path letters;
-        glyphs.createPath (letters);
+
+        if (look.slant)
+        {
+            for (int i = 0; i < glyphs.getNumGlyphs(); ++i)
+            {
+                const auto& glyph = glyphs.getGlyph (i);
+                juce::Path one;
+                glyph.createPath (one);
+                const auto base = glyph.getBaselineY();
+                one.applyTransform (juce::AffineTransform::translation (0.0f, -base)
+                                        .sheared (-slantShear, 0.0f)
+                                        .translated (0.0f, base));
+                letters.addPath (one);
+            }
+        }
+        else
+        {
+            glyphs.createPath (letters);
+        }
 
         //  WHERE THE BLOCK GOES: centred across; at the top, the middle or the bottom.
         const auto block = glyphs.getBoundingBox (0, -1, true);
@@ -113,6 +229,15 @@ namespace wfg::video
                                                                static_cast<float> (top) - block.getY());
         letters.applyTransform (shift);
 
+        /*  AND THE WEIGHT OF A BOLD, a face that has none thickened by a stroke
+            about its edge - a twenty-fourth of the size, as FreeType's. */
+        const auto heavier = look.embolden ? em / 24.0f : 0.0f;
+        juce::Path thickened;
+
+        if (heavier > 0.0f)
+            juce::PathStrokeType (heavier, juce::PathStrokeType::mitered, juce::PathStrokeType::square)
+                .createStrokedPath (thickened, letters);
+
         /*  THE OUTLINE beneath the letters: a stroke twice its width about
             their edge, half of it under the fill - and its blur's reach. */
         const auto outlineWidth = static_cast<float> (std::max (0.0, look.outline) * times);
@@ -120,10 +245,11 @@ namespace wfg::video
         juce::Path outline;
 
         if (outlineWidth > 0.0f)
-            juce::PathStrokeType (2.0f * outlineWidth, juce::PathStrokeType::curved, juce::PathStrokeType::rounded)
+            juce::PathStrokeType (2.0f * outlineWidth + heavier, juce::PathStrokeType::curved, juce::PathStrokeType::rounded)
                 .createStrokedPath (outline, letters);
 
-        const auto ink = outlineWidth > 0.0f ? outline.getBounds() : letters.getBounds();
+        const auto ink = outlineWidth > 0.0f ? outline.getBounds()
+                       : (heavier > 0.0f ? letters.getBounds().getUnion (thickened.getBounds()) : letters.getBounds());
         const auto room = static_cast<float> (std::ceil (blurRadius)) + 2.0f;
         auto area = ink.expanded (room).getSmallestIntegerContainer();
 
@@ -180,6 +306,9 @@ namespace wfg::video
             juce::Graphics g (image);
             g.setColour (colourOf (fill));
             g.fillPath (letters, toImage);
+
+            if (heavier > 0.0f)
+                g.fillPath (thickened, toImage);
         }
 
         out.image = image;

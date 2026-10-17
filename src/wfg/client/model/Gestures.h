@@ -286,6 +286,13 @@ namespace wfg::client::gesture
     Event freezeEdit (const std::string& cueId);
     Event unfreezeEdit (const std::string& cueId);
 
+    /*  THE SHOW'S FONTS (namespace draft §62, ALA): an installed family carried,
+        a file added, a family taken out; `restricted` once the operator has said
+        yes to a licence that restricts carrying it (ALB). */
+    Event carryFont (const std::string& family, bool restricted);
+    Event addFontFile (const std::string& path, bool restricted);
+    Event removeFont (const std::string& family);
+
     /** Deletes a cue or a group: ctrl/⌘-Backspace on the picked one. Undo brings it back with its ids. */
     Event deleteObject (const std::string& id);
 

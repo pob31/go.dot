@@ -81,6 +81,8 @@
 #include <wfg/engine/video/Conversion.h>
 #include <wfg/engine/video/VideoProbe.h>
 #include <wfg/engine/video/FfmpegInstall.h>
+#include <wfg/engine/video/InstalledFonts.h>
+#include <wfg/engine/video/ShowFonts.h>
 #include <wfg/engine/video/TextRaster.h>
 #include <wfg/engine/video/VideoCommands.h>
 #include <wfg/engine/video/VideoHost.h>
@@ -436,6 +438,7 @@ namespace
         wfg::oscquery::registerRemoteCommands (engine.commands(), nullptr);
         wfg::video::registerConversionCommands (engine.commands(), document, nullptr, &runner.runNames());
         wfg::audio::registerAnalyserCommands (engine.commands(), nullptr);
+        wfg::video::registerFontCommands (engine.commands(), nullptr);
         wfg::doc::registerSectionCommands (engine.commands(), document);
         wfg::audio::registerEditRenderCommands (engine.commands(), nullptr, document);
         wfg::video::ffmpeg::registerInstallCommands (engine.commands(), nullptr);
@@ -766,6 +769,7 @@ namespace
         wfg::oscquery::registerRemoteCommands (engine.commands(), nullptr);
         wfg::video::registerConversionCommands (engine.commands(), document, nullptr, &runner.runNames());
         wfg::audio::registerAnalyserCommands (engine.commands(), nullptr);
+        wfg::video::registerFontCommands (engine.commands(), nullptr);
         wfg::doc::registerSectionCommands (engine.commands(), document);
         wfg::audio::registerEditRenderCommands (engine.commands(), nullptr, document);
         wfg::video::ffmpeg::registerInstallCommands (engine.commands(), nullptr);
@@ -1498,6 +1502,7 @@ namespace
         wfg::oscquery::registerRemoteCommands (engine.commands(), nullptr);
         wfg::video::registerConversionCommands (engine.commands(), document, nullptr, &runner.runNames());
         wfg::audio::registerAnalyserCommands (engine.commands(), nullptr);
+        wfg::video::registerFontCommands (engine.commands(), nullptr);
         wfg::doc::registerSectionCommands (engine.commands(), document);
         wfg::audio::registerEditRenderCommands (engine.commands(), nullptr, document);
         wfg::video::ffmpeg::registerInstallCommands (engine.commands(), nullptr);
@@ -2228,8 +2233,16 @@ namespace
             AKL): its words draw in the system's sans-serif instead. Asked here,
             of the machine the show is validated on, and never by the document,
             which knows no machine - a main and a backup can differ, and each is
-            validated where it runs. */
+            validated where it runs. A family the show carries in its fonts/
+            folder is had wherever the show goes (§62, ALC); a style it has no
+            face for is drawn by Go.dot, which is said, and changes no exit
+            code; a file there that does not read is a problem. */
         {
+            const auto carried = wfg::video::ShowFonts::scan (target.isDirectory() ? target : target.getParentDirectory());
+
+            for (const auto& unread : carried.unreadable())
+                result.problems.push_back ("fonts/" + unread);
+
             std::vector<std::pair<juce::ValueTree, std::string>> texts;
             std::function<void (const juce::ValueTree&)> find = [&] (const juce::ValueTree& node)
             {
@@ -2245,16 +2258,37 @@ namespace
             std::vector<std::string> families;
 
             for (const auto& [cue, family] : texts)
-                families.push_back (family);
+                if (! carried.carries (family))
+                    families.push_back (family);
 
             const auto missing = wfg::video::fontsNotInstalled (families);
 
             for (const auto& [cue, family] : texts)
+            {
+                const auto named = "cue " + cue.getProperty ("number").toString().toStdString() + " \""
+                                 + wfg::cue::AutoNames { cue.getRoot() }.shownAs (cue) + "\": its font " + family;
+
                 if (std::find (missing.begin(), missing.end(), family) != missing.end())
-                    result.problems.push_back ("cue " + cue.getProperty ("number").toString().toStdString() + " \""
-                                               + wfg::cue::AutoNames { cue.getRoot() }.shownAs (cue) + "\": its font "
-                                               + family + " is not installed on this machine - its words draw in the"
-                                                 " system's sans-serif");
+                    result.problems.push_back (named + " is neither carried by the show nor installed on this machine"
+                                                       " - its words draw in the system's sans-serif");
+
+                //  As the cue is read when it plays: through the document, a switch written "true".
+                const auto row = [&document, &cue] (const char* name)
+                {
+                    return document.getAttribute ("/godot/cue/" + cue.getProperty ("id").toString().toStdString() + "/" + name)
+                               .value_or (std::string {});
+                };
+                const auto bold = row ("bold") == "true";
+                const auto italic = row ("italic") == "true";
+
+                if (const auto choice = carried.choose (family, bold, italic); choice && (choice->embolden || choice->slant))
+                    std::cerr << "    " << named << " has no "
+                              << (choice->embolden && choice->slant ? "bold italic" : (choice->embolden ? "bold" : "italic"))
+                              << " face in the show - Go.dot "
+                              << (choice->embolden && choice->slant ? "thickens and slants"
+                                                                    : (choice->embolden ? "thickens" : "slants"))
+                              << " the one it has" << std::endl;
+            }
         }
 
         for (const auto& problem : result.problems)
@@ -4599,6 +4633,13 @@ namespace
             exist, and nothing a replay could need. */
         wfg::audio::MediaAnalyser analyser { mediaInfo, mediaFolder };
 
+        /*  AND THE FONTS THE SHOW CARRIES (namespace draft §62): its fonts/
+            folder and the one around it, read now, and read again after each
+            of the fonts.* commands - which the shelf does on a thread of its
+            own, never the tick's. */
+        wfg::video::FontShelf fontShelf { target.isDirectory() ? target : juce::File(),
+                                          wfg::video::installed::filesOfFamily };
+
         /*  AND THE RENDERS OF THE OPEN EDITS (namespace draft §55, ADM): what
             a sound cue cut into sections plays until it is frozen, made on a
             thread of its own after every change; a freeze's bounce too, which
@@ -5363,6 +5404,9 @@ namespace
         /*  AND THE ANALYSIS CACHE SWEPT when somebody asks (namespace draft §52). */
         wfg::audio::registerAnalyserCommands (engine.commands(), &analyser);
 
+        /*  AND THE SHOW'S FONTS CARRIED, ADDED AND REMOVED (namespace draft §62, ALA). */
+        wfg::video::registerFontCommands (engine.commands(), &fontShelf);
+
         /*  AND A SOUND'S EDIT (namespace draft §55): the first split of a cue
             with no sections needs its file's length, which the session knows
             and writes back on the record for a replay to read. */
@@ -5421,6 +5465,7 @@ namespace
         wfg::process::scriptedit::registerCommands (engine.commands(), document, &scriptEditing);
         std::string patchEditorFound;
         std::uint32_t mediaCacheSweepSeen = 0;
+        std::uint32_t fontsSeen = 0;
         std::uint32_t editRenderSeen = 0;
         bool rendersHeld = false;           // a replaced render a run still plays, asked again each tick
         std::string serialPortsFound;
@@ -5474,6 +5519,7 @@ namespace
 
         //  And the fields' revision: a text cue's tile drawn again when a value moves (61, AKN).
         std::uint64_t tileFieldsSeen = 0;
+        std::uint32_t tileFontsSeen = 0;
         std::string tileFileShown;
 
         /*  And the lock it was read under: a projector put away while the show
@@ -7408,19 +7454,22 @@ namespace
 
                                      const auto rendersNow = renderer.changes();
                                      const auto fieldsNow = textFields.revision();
+                                     const auto fontsNow = fontShelf.changes();
 
                                      if (tileSerial != tileWishSeen
                                            || (! tileCue.empty() && (revision != tileRevisionSeen || rendersNow != tileRendersSeen
-                                                                        || fieldsNow != tileFieldsSeen)))
+                                                                        || fieldsNow != tileFieldsSeen || fontsNow != tileFontsSeen)))
                                      {
                                          tileWishSeen = tileSerial;
                                          tileRevisionSeen = revision;
                                          tileRendersSeen = rendersNow;
                                          tileFieldsSeen = fieldsNow;
+                                         tileFontsSeen = fontsNow;
 
+                                         const auto carried = fontShelf.current();
                                          auto spec = tileCue.empty() ? wfg::video::LayerSpec {}
                                                                      : wfg::cue::pictureSpecOf (document, tileCue, mediaFolder,
-                                                                                                nullptr, &textFields);
+                                                                                                nullptr, &textFields, carried.get());
 
                                          if (spec.source.empty())
                                          {
@@ -8733,6 +8782,18 @@ namespace
                                 {
                                     mediaCacheSweepSeen = moved;
                                     state.mediaCacheSweep = wfg::audio::MediaAnalyser::sweepText (analyser.sweepStatus());
+                                }
+
+                                /*  THE SHOW'S FONTS READ AGAIN (namespace draft §62): the
+                                    Runner draws its text cues from them, and the two
+                                    readouts say what is carried and what was last done. */
+                                if (const auto moved = fontShelf.changes(); moved != fontsSeen)
+                                {
+                                    fontsSeen = moved;
+                                    const auto carried = fontShelf.current();
+                                    runner.setFonts (carried);
+                                    state.fonts = carried->listing();
+                                    state.fontsJob = fontShelf.jobText();
                                 }
                                 if (const auto install = pdInstaller.status(); ! install.state.empty())
                                     state.patchEditorInstall = install.state + "\t" + std::to_string (install.percent)

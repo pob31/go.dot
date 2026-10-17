@@ -1914,6 +1914,13 @@ fade moves how far. Proposed (§6.9): the switch on by default; a capture's alph
 input says it sends one; the key read before the grade; a text's frame the canvas; fields left alone by
 Esc and Doh!; a blur with no outline covering the whole canvas (AKE-AKS).
 
+*Amended 2026-10-13, at the author's direction* (namespace draft §62, AKT-AKW): **a show carries its
+fonts.** A show folder holds the fonts its words use, put there on request, one family at a time - an
+installed font carried, or a font file added - and never copied unasked, since a font is licensed. A
+font the show carries draws its words on every machine, Mac or PC, main or backup, even where one of
+the same name is installed. Proposed (§6.9): the folder `fonts/` beside `media/`; Go.dot reading a font
+file's names itself; the size of a text as the letters' em (AKX-ALE).
+
 *Amended 2026-10-16, at the author's direction* (namespace draft §71, AOX-AOY): **DeckLink cards.** An
 output may be a **Blackmagic DeckLink card**, showing its canvas through its mapping as a display does,
 at a broadcast **format** chosen from those the card offers - 1080p50 to start - and paced by the card's
@@ -2199,6 +2206,12 @@ talking to a running QLab. The file holds what somebody decided; what QLab
 derives from a group's mode is QLab's to derive (§4.10). A script cue is read
 and never run, and a kind with no equivalent here stays in its place as a memo,
 so one GO in QLab is still one GO.
+
+*Amended 2026-10-13, at the author's direction* (namespace draft §62, AKT, AKU): **QLab's text and
+video cues come over** - a text cue as a text cue, its words, font, size, colour and place; a video cue
+as a picture or a movie, its file, timing, place and opacity; the fades that move them as fades of the
+picture; each stage as a canvas. A text cue mixing styles takes its first look, and the report says so.
+A camera cue stays a memo.
 
 ### 3.21 Control-rate dataflow graph
 
@@ -4490,6 +4503,24 @@ implementer's calls from AKE in §61.2 are the author's to overrule:
 
 What the work leaves out: a QLab text cue imported; the old OpenGL renderer; font files carried in
 the show's media; a fade of a key, a text's style or its colours; a blur of one picture's own image.
+*(The QLab text cue and the carried fonts became §62's on 2026-10-13, below.)*
+
+Added 2026-10-13 *(proposed)*, with the carried fonts and QLab's text and video cues (§3.19, §3.20,
+namespace draft §62). The implementer's calls from AKX in §62.2 are the author's to overrule:
+
+- **`fonts/` beside `media/`**, found by a performance in its show as a sound is, copied whole by Save
+  as, never swept, listed nowhere in show.xml. **Go.dot reads a font file's names itself**, so a file
+  names the same family everywhere; the renderer draws with the carried file directly and emboldens or
+  slants a family that lacks the face. **Three commands** carry, add and remove a family, none an undo
+  step; a face whose licence restricts it is carried only after a question.
+- **A text's size is the letters' em**, as QLab and layout programs size type; a width of nought is
+  already QLab's own text box, as wide as the longest line.
+- **QLab, mapped**: a stage is a canvas of its size, its outputs waiting for their projector; placement
+  turned into a % of the canvas, an off-centre origin folded into the offsets, a tilt, a crop, an effect
+  and an unknown blend reported; a picture at its own size given the `scale` that draws it so; a movie's
+  sound the locked sound its conversion to HAP makes, QLab's level for it reported; a text's font found carried, then installed, then by the name QLab saw;
+  its stroke the outline; relative fades added to the target's imported values; every font listed in
+  the report, none copied.
 
 Added 2026-10-15 *(proposed)*, with MQTT (§3.21, namespace draft §67). The implementer's calls from
 AND in §67.2 are the author's to overrule:
@@ -4746,6 +4777,10 @@ Mackie vs HUI first — first week with the D700.
   adds 0.04-0.38 ms a frame at 1080p and 0.14-1.72 ms at 4K, three up to 1.2 and 5.6 ms, the 20 px radius
   the dearest; the monitor's previews 3-9 ms and its tile 12-23 ms on the processor, a tenth of a second
   apart. The Intel Arc the projectors run on, and the whole road from a datagram to light, are the bench's.
+- **A QLab picture, imported** (§3.20, 2026-10-13, namespace draft §62): **M67** - a text and a picture
+  from the probe workspace (62.6), imported and drawn by the renderer with no window, against QLab's own
+  output in the probe's pictures: how far apart their edges are, in canvas pixels, for each placement,
+  size, alignment and turn.
 - **Script cues** (§3.21, 2026-10-15, namespace draft §66): **M69** - what a tick of a script costs,
   JavaScript and Lua, beside M56's patch; **M70** - ten scripts at once in the budget, beside M58;
   **M71** - from an endless loop to its run failed and its instance freed. *Measured 2026-10-15*

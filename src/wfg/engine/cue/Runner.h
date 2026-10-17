@@ -114,6 +114,11 @@ namespace wfg::tree
     class TreeSnapshot;
 }
 
+namespace wfg::video
+{
+    class ShowFonts;
+}
+
 namespace wfg::cue
 {
     class DcaTable;
@@ -688,6 +693,16 @@ namespace wfg::cue
         void setTextFields (TextFields* fields) noexcept
         {
             textFields = fields;
+        }
+
+        /*  THE FONTS THE SHOW CARRIES (namespace draft §62, AKZ), as its
+            folders were last read: a text cue of a family they hold is drawn
+            from the family's own file. Set on the tick's thread; when they
+            change, every text cue up is drawn again. Null: by name only. */
+        void setFonts (std::shared_ptr<const video::ShowFonts> carried) noexcept
+        {
+            fonts = std::move (carried);
+            ++fontsRevision;
         }
 
         /*  THE CLOCK A VIDEO POINT IS PLACED ON, now: the audio's samples when
@@ -3578,6 +3593,9 @@ namespace wfg::cue
         //  The fields' revision last seen: a value moved draws every text cue up again (61).
         TextFields* textFields = nullptr;      ///< read, and replaced whole by a seat (RD.8)
         std::uint64_t fieldsRevision = 0;
+        std::shared_ptr<const video::ShowFonts> fonts;     ///< the show's carried fonts (§62)
+        std::uint64_t fontsRevision = 0;
+        std::uint64_t fontsSeen = 0;
 
         /*  A MOVIE'S PLAYHEAD AS ITS RUN READS IT (namespace draft §47, AAC):
             the file's second at the clock's now, the speed it goes at, the

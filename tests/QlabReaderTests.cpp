@@ -36,6 +36,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -346,4 +347,285 @@ TEST_CASE ("qlab reader: the author's own workspaces read whole, when WFG_QLAB_C
     }
 
     CHECK (workspaces > 0);
+}
+
+//==============================================================================
+/*  QF.7: QLAB'S TEXT AND VIDEO CUES READ (namespace draft §62.5), in QLab's
+    own terms - the words and their runs, the placement, the stages - in both
+    versions. What they become is the walk's (QF.8). */
+
+namespace
+{
+    const Cue& onlyCue (const Workspace& workspace)
+    {
+        REQUIRE (workspace.lists.size() == 1);
+        REQUIRE (workspace.lists[0].children.size() >= 1);
+        return workspace.lists[0].children[0];
+    }
+}
+
+TEST_CASE ("qlab reader: a text cue's words, its run's font, size, colour and paragraph, its place on its stage (§62.5)")
+{
+    for (const int major : { 5, 4 })
+    {
+        CAPTURE (major);
+        fixture::Workspace w (major);
+        const auto stage = major >= 5 ? std::string ("VIEW-1") : std::string ("1351739545");
+        fixture::Workspace::Run run;
+        run.length = 15;
+        run.font = "HelveticaNeue-Bold";
+        run.size = 96.0;
+        run.colour = w.colour (1.0, 0.5, 0.25, 0.8);
+        run.alignment = 0;
+        run.lineHeight = 1.5;
+        const auto words = w.attributed ("Act One\n{Scene}", { run });
+        const auto title = w.titles ("Title", words, stage,
+                                     { { "translationX", Value::number (200.0) }, { "translationY", Value::number (100.0) },
+                                       { "scaleX", Value::number (0.5) }, { "scaleY", Value::number (0.25) },
+                                       { "originX", Value::number (12.0) }, { "originY", Value::number (-6.0) },
+                                       { "opacity", Value::number (0.5) }, { "layer", Value::number (500.0) },
+                                       { "blendMode", Value::uid (w.cues.object ("F53VideoBlendMode", { { "index", Value::integer (2) } })) },
+                                       { "fullScreen", Value::boolean (false) }, { "fillStyle", Value::integer (1) },
+                                       { "fixedWidth", Value::number (800.0) }, { "cropLeft", Value::number (10.0) } });
+        w.stages = { { stage, "Stage 1", 1920, 1080, { "Output 1" }, false } };
+        const auto workspace = read (w.bytes ({ w.group ("Main", 0, { title }) }));
+
+        const auto& cue = onlyCue (workspace);
+        CHECK (cue.type == "Titles");
+        CHECK (cue.words == "Act One\n{Scene}");
+        CHECK (cue.fixedWidth == doctest::Approx (800.0));
+        CHECK (cue.lastSeenFontNames == std::vector<std::string> { "Helvetica Neue Bold" });
+        CHECK (cue.stage == stage);
+
+        REQUIRE (cue.runs.size() == 1);
+        const auto& style = cue.runs[0];
+        CHECK (style.start == 0);
+        CHECK (style.length == 15);     // "Act One", a line break, "{Scene}"
+        CHECK (style.font == "HelveticaNeue-Bold");
+        CHECK (style.size == doctest::Approx (96.0));
+        CHECK (style.colour.set);
+        CHECK (style.colour.r == doctest::Approx (1.0));
+        CHECK (style.colour.g == doctest::Approx (0.5));
+        CHECK (style.colour.b == doctest::Approx (0.25));
+        CHECK (style.colour.a == doctest::Approx (0.8));
+        CHECK (style.alignment == 0);
+        CHECK (style.lineHeightMultiple == doctest::Approx (1.5));
+        CHECK_FALSE (style.shadow);
+
+        const auto& place = cue.placement;
+        CHECK (place.translationX == doctest::Approx (200.0));
+        CHECK (place.translationY == doctest::Approx (100.0));
+        CHECK (place.scaleX == doctest::Approx (0.5));
+        CHECK (place.scaleY == doctest::Approx (0.25));
+        CHECK (place.originX == doctest::Approx (12.0));
+        CHECK (place.originY == doctest::Approx (-6.0));
+        CHECK (place.opacity == doctest::Approx (0.5));
+        CHECK (place.layer == doctest::Approx (500.0));
+        CHECK (place.blendMode == 2);
+        CHECK_FALSE (place.fullScreen);
+        CHECK (place.fillStyle == 1);
+        CHECK (place.cropLeft == doctest::Approx (10.0));
+        CHECK_FALSE (place.quaternion.has_value());
+        CHECK_FALSE (place.quaternionUnread);
+    }
+}
+
+TEST_CASE ("qlab reader: a text cue of several runs read from Cocoa's run lengths; a stroke, a shadow, a background, a grey (§62.5)")
+{
+    fixture::Workspace w (5);
+    fixture::Workspace::Run first, second, third, beyond;
+    first.length = 4;
+    first.colour = w.white (1.0);
+    first.strokeWidth = -3.0;
+    first.strokeColour = w.colour (0.0, 0.0, 0.0);
+    second.length = 130;     // more than 127: two bytes in Cocoa's run lengths
+    second.font = "Helvetica-Oblique";
+    second.size = 48.0;
+    second.colour = w.colour (1.0, 0.0, 0.0);
+    second.shadow = true;
+    second.shadowBlur = 6.0;
+    second.shadowColour = w.colour (0.0, 0.0, 1.0, 0.5);
+    second.background = w.colour (0.0, 0.0, 1.0);
+    second.underline = 1;
+    third.length = 3;
+    third.font = "Helvetica";
+    beyond.length = 5;
+
+    //  "Bold", 130 x's, then "e" and a mask, which counts two UTF-16 units as Cocoa counts them.
+    const auto words = w.attributed ("Bold" + std::string (130, 'x') + "e\xF0\x9F\x8E\xAD", { first, second, third, beyond });
+    const auto title = w.titles ("Mixed", words, "VIEW-1");
+    const auto workspace = read (w.bytes ({ w.group ("Main", 0, { title }) }));
+    const auto& cue = onlyCue (workspace);
+
+    REQUIRE (cue.runs.size() == 3);     // the fourth starts past the end of the words: dropped
+    CHECK (cue.runs[0].start == 0);
+    CHECK (cue.runs[0].length == 4);
+    CHECK (cue.runs[0].colour.set);
+    CHECK (cue.runs[0].colour.r == doctest::Approx (1.0));
+    CHECK (cue.runs[0].colour.b == doctest::Approx (1.0));
+    CHECK (cue.runs[0].strokeWidth == doctest::Approx (-3.0));
+    CHECK (cue.runs[0].strokeColour.set);
+    CHECK (cue.runs[0].strokeColour.r == doctest::Approx (0.0));
+
+    CHECK (cue.runs[1].start == 4);
+    CHECK (cue.runs[1].length == 130);
+    CHECK (cue.runs[1].font == "Helvetica-Oblique");
+    CHECK (cue.runs[1].colour.r == doctest::Approx (1.0));
+    CHECK (cue.runs[1].colour.g == doctest::Approx (0.0));
+    CHECK (cue.runs[1].shadow);
+    CHECK (cue.runs[1].shadowBlur == doctest::Approx (6.0));
+    CHECK (cue.runs[1].shadowX == doctest::Approx (3.0));
+    CHECK (cue.runs[1].shadowY == doctest::Approx (-3.0));
+    CHECK (cue.runs[1].shadowColour.a == doctest::Approx (0.5));
+    CHECK (cue.runs[1].background.set);
+    CHECK (cue.runs[1].background.b == doctest::Approx (1.0));
+    CHECK (cue.runs[1].underline == 1);
+
+    CHECK (cue.runs[2].start == 134);
+    CHECK (cue.runs[2].length == 3);
+    CHECK (cue.runs[2].font == "Helvetica");
+}
+
+TEST_CASE ("qlab reader: a video cue's file, timing and sound, its stage and place; a fade of it, what it moves and where to (§62.5)")
+{
+    for (const int major : { 5, 4 })
+    {
+        CAPTURE (major);
+        fixture::Workspace w (major);
+        const auto stage = major >= 5 ? std::string ("VIEW-2") : std::string ("77");
+        const auto movie = w.video ("Tableau", "video/tableau.mov", stage, { { 0, 0, -6.0 }, { 0, 1, 0.0 } },
+                                    { { "startTime", Value::number (2.5) }, { "endTime", Value::number (30.0) },
+                                      { "playCount", Value::integer (3) }, { "holdLastFrame", Value::boolean (true) },
+                                      { "opacity", Value::number (0.0) }, { "layer", Value::number (0.0) },
+                                      { "doEffect", Value::boolean (major < 5) } });
+        const auto fadeIn = w.pictureFade ("", movie, 4.0, { { "doOpacity", Value::boolean (true) }, { "opacity", Value::number (1.0) },
+                                                             { "doTranslation", Value::boolean (true) },
+                                                             { "translationX", Value::number (10.0) }, { "translationY", Value::number (30.0) },
+                                                             { "doScale", Value::boolean (true) },
+                                                             { "scaleX", Value::number (0.81) }, { "scaleY", Value::number (0.81) },
+                                                             { "geoMode", Value::integer (1) }, { "rotationType", Value::integer (3) } },
+                                           true, 3);
+        w.stages = { { stage, "triptyque", 5760, 1080, { "Gauche", "Centre", "Droite" }, true } };
+        const auto workspace = read (w.bytes ({ w.group ("Main", 0, { movie, fadeIn }) }));
+
+        const auto& list = workspace.lists[0];
+        REQUIRE (list.children.size() == 2);
+        const auto& cue = list.children[0];
+        CHECK (cue.type == "Video");
+        CHECK (cue.file.relativePath == (major >= 5 ? "video/tableau.mov" : "Show/video/tableau.mov"));
+        CHECK (cue.stage == stage);
+        CHECK (cue.startTime == doctest::Approx (2.5));
+        CHECK (cue.endTime == doctest::Approx (30.0));
+        CHECK (cue.playCount == 3);
+        CHECK (cue.holdLastFrame);
+        CHECK (cue.hasEffects == (major < 5));
+        CHECK (cue.placement.opacity == doctest::Approx (0.0));
+        CHECK (cue.placement.layer == doctest::Approx (0.0));
+        REQUIRE (cue.levels.size() == 2);
+        CHECK (cue.levels[0].gain == doctest::Approx (fixture::gain (-6.0)));
+        CHECK (cue.audioPatch == (major >= 5 ? "PATCH-AUDIO" : "1"));
+
+        const auto& fade = list.children[1];
+        CHECK (fade.type == "Fade");
+        CHECK (fade.target == cue.id);
+        CHECK (fade.fadesOpacity);
+        CHECK (fade.fadesTranslation);
+        CHECK (fade.fadesScale);
+        CHECK_FALSE (fade.fadesRotation);
+        CHECK (fade.placement.opacity == doctest::Approx (1.0));
+        CHECK (fade.placement.translationX == doctest::Approx (10.0));
+        CHECK (fade.placement.translationY == doctest::Approx (30.0));
+        CHECK (fade.placement.scaleX == doctest::Approx (0.81));
+        CHECK (fade.geoMode == 1);
+        CHECK (fade.rotationType == 3);
+        CHECK (fade.stopTargetWhenDone);
+        CHECK (fade.shape.type == 3);
+        CHECK (fade.fadeLevels.empty());
+
+        REQUIRE (workspace.stages.size() == 1);
+        const auto& s = workspace.stages[0];
+        CHECK (s.id == stage);
+        CHECK (s.name == "triptyque");
+        CHECK (s.width == 5760);
+        CHECK (s.height == 1080);
+        CHECK (s.outputs == std::vector<std::string> { "Gauche", "Centre", "Droite" });
+        CHECK (s.blended == (major >= 5));      // QLab 4's surfaces keep their blends elsewhere: not read
+        if (major < 5)
+            CHECK (workspace.defaultStage == stage);
+    }
+}
+
+TEST_CASE ("qlab reader: a QLab 5 workspace with no stages draws on a screen; a turn kept in a shape not read is said (§62.5)")
+{
+    fixture::Workspace w (5);
+    w.screen = "screen.screenID.1";
+    const auto seen = w.cues.dictionary ({ { w.cues.add (Value::string ("boundsOnStage")), w.cues.add (Value::string ("{{0, 0}, {3024, 1964}}")) },
+                                           { w.cues.add (Value::string ("nameForMenuItem")), w.cues.add (Value::string ("Built-in Retina Display")) } });
+    const auto picture = w.video ("Still", "video/still.png", "", {},
+                                  { { "lastSeenViewportInfo", Value::uid (seen) },
+                                    { "quaternion", Value::uid (w.cues.add (Value::string ("a turn"))) } });
+    const auto turned = w.video ("Turned", "video/still.png", "", {},
+                                 { { "quaternion", Value::uid (w.cues.array ({ w.cues.add (Value::number (0.0)), w.cues.add (Value::number (0.0)),
+                                                                               w.cues.add (Value::number (0.258819)), w.cues.add (Value::number (0.965926)) })) } });
+    const auto workspace = read (w.bytes ({ w.group ("Main", 0, { picture, turned }) }));
+
+    CHECK (workspace.stages.empty());
+    CHECK (workspace.defaultStage == "screen.screenID.1");
+    const auto& still = workspace.lists[0].children[0];
+    CHECK (still.stage.empty());
+    CHECK (still.lastSeenScreen == "Built-in Retina Display");
+    CHECK (still.lastSeenWidth == 3024);
+    CHECK (still.lastSeenHeight == 1964);
+    CHECK_FALSE (still.placement.quaternion.has_value());
+    CHECK (still.placement.quaternionUnread);
+
+    const auto& other = workspace.lists[0].children[1];
+    REQUIRE (other.placement.quaternion.has_value());
+    CHECK ((*other.placement.quaternion)[2] == doctest::Approx (0.258819));
+    CHECK ((*other.placement.quaternion)[3] == doctest::Approx (0.965926));
+}
+
+TEST_CASE ("qlab reader: the author's workspaces' stages and picture cues read, each cue on a stage the workspace has, when WFG_QLAB_CORPUS names a folder of them (§62.5)")
+{
+    const auto folder = juce::SystemStats::getEnvironmentVariable ("WFG_QLAB_CORPUS", {});
+    if (folder.isEmpty())
+        return;
+
+    for (const auto& file : juce::File (folder).findChildFiles (juce::File::findFiles, true, "*.qlab4;*.qlab5"))
+    {
+        if (file.getFileName().startsWith ("._"))
+            continue;
+
+        const auto result = readWorkspace (file);
+        if (! result.workspace.has_value())
+            continue;
+
+        const auto& workspace = *result.workspace;
+        for (const auto& stage : workspace.stages)
+            MESSAGE (file.getFileName() << " stage " << stage.name << " " << stage.width << "x" << stage.height
+                                        << " outputs " << stage.outputs.size() << std::string (stage.blended ? " blended" : ""));
+
+        std::function<void (const Cue&)> each = [&] (const Cue& cue)
+        {
+            if (cue.type == "Video" || cue.type == "Titles" || cue.type == "Camera")
+            {
+                const auto& p = cue.placement;
+                MESSAGE (file.getFileName() << " " << cue.type << " \"" << cue.name << "\" " << cue.file.name()
+                                            << " stage " << cue.stage << " full " << p.fullScreen << " fill " << p.fillStyle
+                                            << " scale " << p.scaleX << "," << p.scaleY << " at " << p.translationX << ","
+                                            << p.translationY << " opacity " << p.opacity << " layer " << p.layer
+                                            << " blend " << p.blendMode << std::string (cue.hasEffects ? " effects" : ""));
+
+                const auto known = std::any_of (workspace.stages.begin(), workspace.stages.end(),
+                                                [&cue] (const Stage& s) { return s.id == cue.stage; });
+                CHECK_MESSAGE ((known || cue.stage == workspace.defaultStage || (cue.stage.empty() && cue.lastSeenWidth > 0)
+                                || workspace.stages.empty()),
+                               file.getFileName() << ": " << cue.name << " names stage " << cue.stage);
+            }
+            for (const auto& child : cue.children)
+                each (child);
+        };
+        for (const auto& list : workspace.lists)
+            each (list);
+    }
 }

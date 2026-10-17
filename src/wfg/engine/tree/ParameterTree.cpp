@@ -3895,6 +3895,8 @@ namespace wfg::tree
             else if (name == "serialPorts")    text = state.serialPorts;
             else if (name == "serialScans")    text = std::to_string (state.serialScans);
             else if (name == "mediaCacheSweep") text = state.mediaCacheSweep;
+            else if (name == "fonts")           text = state.fonts;
+            else if (name == "fontsJob")        text = state.fontsJob;
             else if (name == "editRender")      text = state.editRender;
             else if (name == "sampleZeroAt")    text = std::to_string (state.sampleZeroAt);
             else                               text = std::string (row->defaultText);

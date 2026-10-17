@@ -19,10 +19,16 @@
 #include <wfg/engine/document/Sequence.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/osc/OscValue.h>
+#include <wfg/engine/video/InstalledFonts.h>
+
+#include <juce_graphics/juce_graphics.h>
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
+#include <optional>
 #include <sstream>
+#include <tuple>
 
 namespace wfg::import::qlab
 {
@@ -38,14 +44,163 @@ namespace wfg::import::qlab
             return out;
         }
 
-        /*  EVERY AUDIO CUE OF THE LISTS TICKED, in show order. */
+        /*  EVERY AUDIO CUE OF THE LISTS TICKED, in show order - and every video
+            cue's, whose files are found and copied as a sound's (§62, ALH). */
         void sounds (const Cue& cue, std::vector<const Cue*>& out)
         {
-            if (cue.type == "Audio")
+            if (cue.type == "Audio" || cue.type == "Video")
                 out.push_back (&cue);
 
             for (const auto& child : cue.children)
                 sounds (child, out);
+        }
+
+        /*  A PICTURE'S OR A MOVIE'S OWN SIZE, AND A MOVIE'S CODEC (§62, ALG,
+            ALH): a still's from its own reader; a movie's from its QuickTime or
+            MP4 boxes - the video track's header and sample description - walked
+            without reading the frames, so a movie of gigabytes costs a few reads. */
+        struct PictureFacts
+        {
+            int width = 0;
+            int height = 0;
+            std::string codec;          ///< a movie's four letters, "avc1", "apcn", "Hap1"; empty for a still
+        };
+
+        std::uint32_t big32 (const std::uint8_t* p)
+        {
+            return (static_cast<std::uint32_t> (p[0]) << 24) | (static_cast<std::uint32_t> (p[1]) << 16)
+                 | (static_cast<std::uint32_t> (p[2]) << 8) | static_cast<std::uint32_t> (p[3]);
+        }
+
+        /*  The boxes inside `data` from `begin` to `end`, each its type and where
+            its contents lie; a box that claims more than there is ends the walk. */
+        std::vector<std::tuple<std::string, std::size_t, std::size_t>> boxesIn (const std::vector<std::uint8_t>& data,
+                                                                                std::size_t begin, std::size_t end)
+        {
+            std::vector<std::tuple<std::string, std::size_t, std::size_t>> boxes;
+            auto at = begin;
+
+            while (at + 8 <= end && boxes.size() < 4096)
+            {
+                std::uint64_t size = big32 (data.data() + at);
+                const std::string type (reinterpret_cast<const char*> (data.data() + at + 4), 4);
+                std::size_t header = 8;
+
+                if (size == 1 && at + 16 <= end)
+                {
+                    size = (static_cast<std::uint64_t> (big32 (data.data() + at + 8)) << 32) | big32 (data.data() + at + 12);
+                    header = 16;
+                }
+                else if (size == 0)
+                    size = end - at;
+
+                if (size < header || size > end - at)
+                    break;
+
+                boxes.emplace_back (type, at + header, at + static_cast<std::size_t> (size));
+                at += static_cast<std::size_t> (size);
+            }
+            return boxes;
+        }
+
+        PictureFacts movieFacts (const juce::File& file)
+        {
+            PictureFacts facts;
+            juce::FileInputStream in (file);
+            if (! in.openedOk())
+                return facts;
+
+            //  The top level, read box by box until `moov`: a movie's frames are skipped, never read.
+            std::vector<std::uint8_t> moov;
+            while (! in.isExhausted() && moov.empty())
+            {
+                std::uint8_t head[16] {};
+                const auto start = in.getPosition();
+                if (in.read (head, 8) != 8)
+                    break;
+
+                std::uint64_t size = big32 (head);
+                std::int64_t header = 8;
+                if (size == 1)
+                {
+                    if (in.read (head + 8, 8) != 8)
+                        break;
+                    size = (static_cast<std::uint64_t> (big32 (head + 8)) << 32) | big32 (head + 12);
+                    header = 16;
+                }
+                if (size == 0)
+                    size = static_cast<std::uint64_t> (in.getTotalLength() - start);
+                if (size < static_cast<std::uint64_t> (header))
+                    break;
+
+                if (std::string (reinterpret_cast<const char*> (head + 4), 4) == "moov")
+                {
+                    const auto contents = size - static_cast<std::uint64_t> (header);
+                    if (contents > 64u * 1024u * 1024u)
+                        break;
+                    moov.resize (static_cast<std::size_t> (contents));
+                    if (in.read (moov.data(), static_cast<int> (moov.size())) != static_cast<int> (moov.size()))
+                        moov.clear();
+                    break;
+                }
+                in.setPosition (start + static_cast<std::int64_t> (size));
+            }
+            if (moov.empty())
+                return facts;
+
+            const auto find = [&moov] (std::size_t begin, std::size_t end, const char* type) -> std::pair<std::size_t, std::size_t>
+            {
+                for (const auto& [t, from, to] : boxesIn (moov, begin, end))
+                    if (t == type)
+                        return { from, to };
+                return { 0, 0 };
+            };
+
+            for (const auto& [type, from, to] : boxesIn (moov, 0, moov.size()))
+            {
+                if (type != "trak")
+                    continue;
+
+                const auto [mdiaFrom, mdiaTo] = find (from, to, "mdia");
+                const auto [hdlrFrom, hdlrTo] = find (mdiaFrom, mdiaTo, "hdlr");
+                if (hdlrTo < hdlrFrom + 12 || std::string (reinterpret_cast<const char*> (moov.data() + hdlrFrom + 8), 4) != "vide")
+                    continue;
+
+                //  The track header: its size, 16.16, after a header longer in version 1.
+                const auto [tkhdFrom, tkhdTo] = find (from, to, "tkhd");
+                const auto at = tkhdFrom + (moov[tkhdFrom] == 1 ? 88u : 76u);
+                if (tkhdTo >= at + 8)
+                {
+                    facts.width = static_cast<int> (big32 (moov.data() + at) >> 16);
+                    facts.height = static_cast<int> (big32 (moov.data() + at + 4) >> 16);
+                }
+
+                //  The sample description's first entry: its four letters.
+                const auto [minfFrom, minfTo] = find (mdiaFrom, mdiaTo, "minf");
+                const auto [stblFrom, stblTo] = find (minfFrom, minfTo, "stbl");
+                const auto [stsdFrom, stsdTo] = find (stblFrom, stblTo, "stsd");
+                if (stsdTo >= stsdFrom + 16)
+                    facts.codec = std::string (reinterpret_cast<const char*> (moov.data() + stsdFrom + 12), 4);
+                break;
+            }
+            return facts;
+        }
+
+        PictureFacts pictureFacts (const juce::File& file, bool still)
+        {
+            if (! still)
+                return movieFacts (file);
+
+            PictureFacts facts;
+            const auto image = juce::ImageFileFormat::loadFrom (file);
+            facts.width = image.getWidth();
+            facts.height = image.getHeight();
+            return facts;
+        }
+
+        bool isStillFile (const juce::File& file)
+        {
+            return file.hasFileExtension ("png;jpg;jpeg;gif;tif;tiff;bmp;psd;heic;heif;webp;tga;exr");
         }
 
         //======================================================================
@@ -89,6 +244,19 @@ namespace wfg::import::qlab
 
                     if (named != media.end() && named->second.second > 0)
                         attributes.push_back ({ "channels", std::to_string (named->second.second) });
+                }
+
+                //  A PICTURE, A MOVIE OR A TEXT (§62): its canvas, and a picture's or a movie's file.
+                if (item.kind == "video")
+                {
+                    if (const auto canvas = made.find (item.canvas); canvas != made.end())
+                        attributes.push_back ({ "canvas", canvas->second });
+
+                    if (! item.cueId.empty())
+                    {
+                        const auto named = media.find (item.cueId);
+                        attributes.push_back ({ "file", named != media.end() ? named->second.first : item.file.name() });
+                    }
                 }
 
                 const auto created = document.createCue (parent, doc::endOfSequence, item.kind, item.name, id, attributes);
@@ -243,6 +411,31 @@ namespace wfg::import::qlab
                         said (Note::Kind::approximated, device.name, "QLab sent to it over TCP; Go.dot sends OSC over UDP");
                 }
 
+                //  --- The canvases, and their outputs with no display chosen (§62, ALF) ---
+                for (const auto& canvas : plan.canvases)
+                {
+                    const auto id = ids.of (canvas.key);
+                    const auto created = document.createCanvas (canvas.name, id);
+
+                    if (! created.ok)
+                    {
+                        said (Note::Kind::dropped, canvas.name, "its canvas could not be made (" + created.reason + ")");
+                        continue;
+                    }
+
+                    made[canvas.key] = id;
+                    write ("/godot/canvas/" + id + "/width", std::to_string (canvas.width), canvas.name);
+                    write ("/godot/canvas/" + id + "/height", std::to_string (canvas.height), canvas.name);
+                }
+
+                for (const auto& output : plan.outputs)
+                {
+                    const auto canvas = made.find (output.canvas);
+                    if (! document.createVideoOutput (output.name, canvas != made.end() ? canvas->second : std::string {},
+                                                      ids.of (output.key)).ok)
+                        said (Note::Kind::dropped, output.name, "its video output could not be made");
+                }
+
                 //  --- The lists and their cues ------------------------------------------
                 for (const auto& list : plan.lists)
                 {
@@ -320,6 +513,34 @@ namespace wfg::import::qlab
                     out << "| " << device.name << " | " << device.host << ":" << device.port << " | `" << device.prefix << "` |\n";
             }
 
+            if (! plan.canvases.empty())
+            {
+                out << "\n## The canvases\n\nA canvas for each QLab stage, of its size, and a video output for each "
+                       "output QLab drew to, once each - none showing anything until a projector is picked for it in "
+                       "Show settings, Video.\n\n| Canvas | Size | Drawn to |\n|---|---|---|\n";
+
+                for (const auto& canvas : plan.canvases)
+                {
+                    std::string outputs;
+                    for (const auto& output : canvas.outputs)
+                        outputs += (outputs.empty() ? "" : ", ") + output;
+                    out << "| " << canvas.name << " | " << canvas.width << " x " << canvas.height << " | "
+                        << (outputs.empty() ? std::string ("none") : outputs) << " |\n";
+                }
+            }
+
+            if (! plan.fonts.empty())
+            {
+                out << "\n## The fonts\n\nEach font a text cue names, as QLab names it, and the family it draws in "
+                       "here. A missing one draws in the system's sans-serif until it is installed, or carried in the "
+                       "show from a machine that has it (the font menu's Carry it in the show).\n\n"
+                       "| QLab's font | Family | Here |\n|---|---|---|\n";
+
+                for (const auto& font : plan.fonts)
+                    out << "| " << font.postScript << " | " << font.family << " | "
+                        << (font.where == "installed" ? "installed on this machine" : "missing") << " |\n";
+            }
+
             const auto listName = [&workspace] (int index)
             {
                 return index >= 0 && static_cast<std::size_t> (index) < workspace.lists.size()
@@ -352,7 +573,7 @@ namespace wfg::import::qlab
 
             if (! outcome.missingMedia.empty())
             {
-                out << "\n## Sounds not found\n\nEach keeps its cue, naming the file; put the file in the show's "
+                out << "\n## Files not found\n\nEach keeps its cue, naming the file; put the file in the show's "
                        "`media/` and it plays.\n\n";
 
                 for (const auto& missing : outcome.missingMedia)
@@ -514,11 +735,35 @@ namespace wfg::import::qlab
                 outcome.missingMedia.push_back (placed.name);
             }
 
+            if (sound->type == "Video")
+            {
+                //  A PICTURE'S OWN SIZE, which a cue QLab drew at its own size is scaled from (ALG); a movie not in HAP said.
+                const auto facts = pictureFacts (source, isStillFile (source));
+                media[sound->id] = { placed.name, 0 };
+
+                if (facts.width > 0 && facts.height > 0)
+                    walkOptions.pictureSizes[sound->id] = { facts.width, facts.height };
+
+                if (! facts.codec.empty() && facts.codec.rfind ("Hap", 0) != 0)
+                    notes.push_back ({ Note::Kind::info, -1, placed.name, "a movie in " + facts.codec + ", which Go.dot shows "
+                                       "as a preview until it is converted to HAP, which also makes its locked sound" });
+                continue;
+            }
+
             media[sound->id] = { placed.name, placed.channels };
 
             if (placed.channels > 0)
                 walkOptions.channels[sound->id] = placed.channels;
         }
+
+        /*  A TEXT CUE'S FONT, as this machine has it under QLab's PostScript
+            name (§62, ALI): asked of the system here, never by the walk. */
+        walkOptions.fontOf = [] (const std::string& postScript) -> std::optional<FontFace>
+        {
+            if (const auto face = video::installed::byPostScript (postScript))
+                return FontFace { face->family, face->bold, face->italic };
+            return std::nullopt;
+        };
 
         //  --- Walked, built, saved, reported ------------------------------------
         say ("walking the cues");

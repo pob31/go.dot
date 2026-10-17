@@ -30,6 +30,132 @@ namespace wfg::import::qlab
     {
         constexpr double silence = -120.0;
         constexpr double tiny = 0.0005;
+        constexpr double pi = 3.14159265358979323846;
+
+        /*  A FILE GO.DOT SHOWS AS A STILL (§62, ALH); anything else is a movie. */
+        bool isStill (const std::string& name)
+        {
+            const auto dot = name.find_last_of ('.');
+            if (dot == std::string::npos)
+                return false;
+
+            std::string extension;
+            for (const char c : name.substr (dot + 1))
+                extension += static_cast<char> (std::tolower (static_cast<unsigned char> (c)));
+
+            static const std::set<std::string> stills { "png", "jpg", "jpeg", "gif", "tif", "tiff", "bmp", "psd",
+                                                        "heic", "heif", "webp", "tga", "exr" };
+            return stills.count (extension) != 0;
+        }
+
+        /*  A TEXT CUE'S WORDS WITH THEIR BRACES DOUBLED (§62, ALI): Go.dot reads
+            `{name}` as a field (§61, AKM), QLab as the words it is. */
+        std::string bracesKept (const std::string& words)
+        {
+            std::string out;
+            for (const char c : words)
+            {
+                out += c;
+                if (c == '{' || c == '}')
+                    out += c;
+            }
+            return out;
+        }
+
+        std::string hexOf (const Colour& colour)
+        {
+            const auto byte = [] (double v) { return static_cast<int> (std::lround (std::clamp (v, 0.0, 1.0) * 255.0)); };
+            static const char* digits = "0123456789ABCDEF";
+            std::string out = "#";
+            for (const auto v : { byte (colour.r), byte (colour.g), byte (colour.b) })
+            {
+                out += digits[(v >> 4) & 0xF];
+                out += digits[v & 0xF];
+            }
+            return out;
+        }
+
+        bool sameLook (const TextRun& a, const TextRun& b)
+        {
+            const auto colour = [] (const Colour& x, const Colour& y)
+            {
+                return x.set == y.set && std::abs (x.r - y.r) < 0.002 && std::abs (x.g - y.g) < 0.002
+                    && std::abs (x.b - y.b) < 0.002 && std::abs (x.a - y.a) < 0.002;
+            };
+            return a.font == b.font && std::abs (a.size - b.size) < 0.01 && colour (a.colour, b.colour);
+        }
+
+        /*  A FAMILY FROM A FONT'S NAME, where this machine has not got it (ALI):
+            the name QLab last saw, "Helvetica Neue Bold", less its style words;
+            or the PostScript name, "HelveticaNeue-Bold", its parts spaced. */
+        FontFace faceFromName (const std::string& seen, const std::string& postScript)
+        {
+            static const std::vector<std::string> boldWords { "Bold", "Semibold", "SemiBold", "Demibold", "DemiBold",
+                                                              "Black", "Heavy", "ExtraBold", "UltraBold" };
+            static const std::vector<std::string> italicWords { "Italic", "Oblique" };
+            static const std::vector<std::string> otherWords { "Regular", "Roman", "Book", "Light", "Medium", "Thin",
+                                                               "UltraLight", "ExtraLight", "Condensed", "Narrow", "Plain" };
+            FontFace face;
+
+            const auto styleWord = [&] (const std::string& word)
+            {
+                const auto in = [&word] (const std::vector<std::string>& words)
+                {
+                    return std::find (words.begin(), words.end(), word) != words.end();
+                };
+                face.bold = face.bold || in (boldWords);
+                face.italic = face.italic || in (italicWords);
+                return in (boldWords) || in (italicWords) || in (otherWords);
+            };
+
+            if (! seen.empty() && seen.find (' ') != std::string::npos)
+            {
+                std::vector<std::string> words;
+                std::string word;
+                for (const char c : seen + " ")
+                {
+                    if (c == ' ')
+                    {
+                        if (! word.empty())
+                            words.push_back (word);
+                        word.clear();
+                    }
+                    else
+                        word += c;
+                }
+                while (words.size() > 1 && styleWord (words.back()))
+                    words.pop_back();
+                for (std::size_t at = 0; at < words.size(); ++at)
+                    face.family += (at == 0 ? "" : " ") + words[at];
+                return face;
+            }
+
+            const auto dash = postScript.find ('-');
+            const auto family = postScript.substr (0, dash);
+            if (dash != std::string::npos)
+            {
+                //  "BoldItalic", "BoldOblique": each capitalised word of the style.
+                std::string word;
+                for (const char c : postScript.substr (dash + 1) + "A")
+                {
+                    if (std::isupper (static_cast<unsigned char> (c)) && ! word.empty())
+                    {
+                        styleWord (word);
+                        word.clear();
+                    }
+                    word += c;
+                }
+            }
+
+            for (std::size_t at = 0; at < family.size(); ++at)
+            {
+                const auto c = family[at];
+                if (at > 0 && std::isupper (static_cast<unsigned char> (c)) && std::islower (static_cast<unsigned char> (family[at - 1])))
+                    face.family += ' ';
+                face.family += c;
+            }
+            return face;
+        }
 
         bool isWhole (const std::string& text)
         {
@@ -152,6 +278,7 @@ namespace wfg::import::qlab
             {
                 static const std::map<std::string, std::string> kinds {
                     { "Group", "group" }, { "Audio", "media" }, { "Mic", "mic" }, { "Fade", "fade" },
+                    { "Video", "video" }, { "Titles", "video" },
                     { "OSC", "osc" }, { "Start", "start" }, { "Stop", "transport" }, { "Goto", "transport" },
                     { "Arm", "transport" }, { "Disarm", "transport" }, { "Devamp", "transport" },
                     { "Memo", "memo" }, { "Wait", "memo" } };
@@ -263,7 +390,391 @@ namespace wfg::import::qlab
                 if (cue.type == "Script")
                     return placeholder (cue, "a script is never run (PRD §3.20)", cue.source);
 
+                if (cue.type == "Video")   return picture (cue);
+                if (cue.type == "Titles")  return text (cue);
+                if (cue.type == "Camera")  return placeholder (cue, "a camera cue stays a memo (§62, AKT)", {});
+
                 return placeholder (cue, "Go.dot has no " + cue.type + " cue (§46.4)", {});
+            }
+
+            //  --- Pictures and words (namespace draft §62, ALF-ALK) --------------------
+            //  Provisional where the probe (§62.6) is to settle a unit, a sign or a number:
+            //  QLab's Y up and its turn counter-clockwise, its fill styles 0 fit 1 fill 2
+            //  stretch, a point a stage pixel, Cocoa's alignments 0 left 1 right 2 centre,
+            //  a fade's geometry mode 1 relative.
+
+            std::map<std::string, std::size_t> canvasAt;
+            std::set<std::string> fontsSaid;
+
+            Canvas canvas (const std::string& key, const std::string& name, int width, int height,
+                           const std::vector<std::string>& outputs)
+            {
+                if (const auto found = canvasAt.find (key); found != canvasAt.end())
+                    return plan.canvases[found->second];
+
+                canvasAt[key] = plan.canvases.size();
+                plan.canvases.push_back ({ key, name, std::clamp (width, 16, 16384), std::clamp (height, 16, 16384), outputs });
+                return plan.canvases.back();
+            }
+
+            /*  THE CANVAS A PICTURE IS ON (ALF): its stage, or QLab 4's default
+                surface where it names none the workspace has; QLab 5 drawing on
+                a screen directly, a canvas for that screen of the size QLab last
+                saw it. */
+            Canvas canvasFor (const Cue& cue)
+            {
+                const auto stageNamed = [this] (const std::string& id) -> const Stage*
+                {
+                    if (id.empty())
+                        return nullptr;
+                    for (const auto& stage : workspace.stages)
+                        if (stage.id == id)
+                            return &stage;
+                    return nullptr;
+                };
+
+                const auto* stage = stageNamed (cue.stage);
+                if (stage == nullptr)
+                    stage = stageNamed (workspace.defaultStage);
+
+                if (stage != nullptr)
+                    return canvas ("stage:" + stage->id, stage->name.empty() ? std::string ("Stage") : stage->name,
+                                   stage->width, stage->height, stage->outputs);
+
+                const auto name = cue.lastSeenScreen.empty() ? std::string ("Screen") : cue.lastSeenScreen;
+                const auto known = cue.lastSeenWidth > 0 && cue.lastSeenHeight > 0;
+                if (! known && canvasAt.count ("screen:" + name) == 0)
+                    note (Note::Kind::approximated, cue, "the stage it is on is not in the workspace: it is put on a "
+                          "canvas of 1920 by 1080 called " + name);
+                return canvas ("screen:" + name, name, known ? cue.lastSeenWidth : 1920, known ? cue.lastSeenHeight : 1080,
+                               { name });
+            }
+
+            /*  HOW MUCH LARGER GO.DOT'S `scale` IS THAN QLAB'S (ALG): a picture
+                QLab drew at its own size is scaled from what fits the canvas, so
+                its own size over the fitted one; a picture filling its stage, and
+                a text, one. Nought when its own size is not known. */
+            double scaleFactorOf (const Cue& cue, const Canvas& on) const
+            {
+                if (cue.type == "Titles" || cue.placement.fullScreen)
+                    return 1.0;
+
+                const auto size = options.pictureSizes.find (cue.id);
+                if (size == options.pictureSizes.end() || size->second.first <= 0 || size->second.second <= 0)
+                    return 0.0;
+
+                const auto fits = std::min (static_cast<double> (on.width) / size->second.first,
+                                            static_cast<double> (on.height) / size->second.second);
+                return fits > 0.0 ? 1.0 / fits : 0.0;
+            }
+
+            //  A turn about the screen's axis, from QLab's quaternion: counter-clockwise there, clockwise here.
+            static double turnOf (const std::array<double, 4>& q)
+            {
+                return -2.0 * std::atan2 (q[2], q[3]) * 180.0 / pi;
+            }
+
+            static bool tilted (const std::array<double, 4>& q)
+            {
+                return std::abs (q[0]) > 1.0e-4 || std::abs (q[1]) > 1.0e-4;
+            }
+
+            /*  WHERE IT GOES (ALG): QLab's pixels a % of the canvas, its scale,
+                turn, opacity, layer; what Go.dot has not got said. `opacityTimes`
+                is a text colour's own alpha, multiplied in. */
+            void place (const Cue& cue, const Canvas& on, Item& item, double opacityTimes)
+            {
+                const auto& p = cue.placement;
+                const auto words = cue.type == "Titles";
+
+                if (std::abs (p.translationX) > tiny)
+                    item.attributes.push_back ({ "offsetX", number (p.translationX / on.width * 100.0, 4) });
+                if (std::abs (p.translationY) > tiny)
+                    item.attributes.push_back ({ "offsetY", number (p.translationY / on.height * 100.0, 4) });
+
+                if (! words && p.fullScreen)
+                {
+                    const std::string fit = ! p.preserveAspectRatio ? "stretch"
+                                          : p.fillStyle == 1 ? "fill" : p.fillStyle == 2 ? "stretch" : "fit";
+                    if (fit != "fit")
+                        item.attributes.push_back ({ "fit", fit });
+                }
+
+                const auto factor = scaleFactorOf (cue, on);
+                if (factor <= 0.0)
+                    note (Note::Kind::approximated, cue, "QLab drew it at its own size, which is not known here - its file "
+                          "was not read: it is fitted to its canvas, then scaled as QLab scaled it");
+
+                const auto scale = p.scaleX * 100.0 * (factor > 0.0 ? factor : 1.0);
+                if (std::abs (scale - 100.0) > 0.005)
+                    item.attributes.push_back ({ "scale", number (std::clamp (scale, 0.0, 1000.0), 4) });
+
+                if (std::abs (p.scaleX - p.scaleY) > tiny)
+                    note (Note::Kind::approximated, cue, "QLab scaled it " + number (p.scaleX * 100.0, 1) + " % across and "
+                          + number (p.scaleY * 100.0, 1) + " % up and down: Go.dot scales both ways alike, as across");
+
+                if (p.quaternion.has_value())
+                {
+                    if (const auto turn = turnOf (*p.quaternion); std::abs (turn) > 0.005)
+                        item.attributes.push_back ({ "rotation", number (turn, 3) });
+                    if (tilted (*p.quaternion))
+                        note (Note::Kind::approximated, cue, "QLab tilted it in depth: only its turn about the screen's axis "
+                              "is imported");
+                }
+                if (p.quaternionUnread)
+                    note (Note::Kind::dropped, cue, "QLab kept its turn in a form Go.dot does not read: not imported");
+
+                const auto opacity = std::clamp (p.opacity, 0.0, 1.0) * std::clamp (opacityTimes, 0.0, 1.0);
+                if (opacity < 1.0 - tiny)
+                    item.attributes.push_back ({ "opacity", number (opacity * 100.0, 2) });
+
+                if (const auto layer = static_cast<int> (std::clamp (std::round (p.layer), 0.0, 999.0)); layer != 0)
+                    item.attributes.push_back ({ "layer", std::to_string (layer) });
+
+                if (p.blendMode != 0)
+                    note (Note::Kind::approximated, cue, "QLab's blend mode " + std::to_string (p.blendMode) + " is drawn "
+                          "normally: which mode QLab's number is waits for the probe workspace (§62.6)");
+                if (std::abs (p.originX) > tiny || std::abs (p.originY) > tiny)
+                    note (Note::Kind::approximated, cue, "QLab moved its origin: it is placed by its middle, and a fade turns "
+                          "or scales it about its middle");
+                if (p.cropLeft > tiny || p.cropRight > tiny || p.cropTop > tiny || p.cropBottom > tiny)
+                    note (Note::Kind::dropped, cue, "QLab cropped it: Go.dot has no crop, so it is shown whole");
+                if (cue.hasEffects)
+                    note (Note::Kind::dropped, cue, "its video effects are not imported");
+            }
+
+            /*  A VIDEO CUE (ALH): a still or a movie on its canvas, its file
+                found and copied as a sound's, a movie's timing its Ranges. */
+            Item picture (const Cue& cue)
+            {
+                Item item;
+                item.kind = "video";
+                item.key = "cue:" + cue.id;
+                item.cueId = cue.id;
+                item.name = displayName (cue);
+                item.file = cue.file;
+                item.attributes = common (cue);
+
+                const auto on = canvasFor (cue);
+                item.canvas = on.key;
+
+                const auto still = isStill (cue.file.name());
+                item.attributes.push_back ({ "source", still ? "picture" : "movie" });
+
+                if (! still)
+                {
+                    if (std::abs (cue.rate - 1.0) > tiny)
+                        item.attributes.push_back ({ "rate", number (std::clamp (cue.rate, -20.0, 20.0), 4) });
+                    ranges (cue, item);
+
+                    if (cue.holdLastFrame)
+                        note (Note::Kind::approximated, cue, "QLab held its last frame: a Go.dot movie ends with its last "
+                              "pass, its picture going with it");
+
+                    const auto main = std::find_if (cue.levels.begin(), cue.levels.end(),
+                                                    [] (const Level& l) { return l.row == 0 && l.column == 0; });
+                    if (main != cue.levels.end() && decibels (main->gain, workspace.minVolume) > silence)
+                        note (Note::Kind::info, cue, "its sound played in QLab, at " + number (decibels (main->gain, workspace.minVolume), 2)
+                              + " dB: Go.dot plays a movie's sound from the sound cue its conversion to HAP makes beside it, "
+                              "locked to it - set that cue's level there");
+                }
+
+                place (cue, on, item, 1.0);
+                kindOf[cue.id] = "video";
+                return item;
+            }
+
+            /*  ITS FONT (ALI): the family this machine has under QLab's
+                PostScript name, else the family read from the name QLab saw -
+                each named once in the report (ALK). */
+            void font (const Cue& cue, const TextRun& run, Item& item)
+            {
+                if (run.font.empty())
+                    return;
+
+                std::optional<FontFace> face;
+                if (options.fontOf)
+                    face = options.fontOf (run.font);
+
+                FontUse use { run.font, {}, face.has_value() ? "installed" : "missing" };
+                if (! face.has_value())
+                {
+                    const auto seen = cue.lastSeenFontNames.size() == 1 && cue.runs.size() <= 1
+                                    ? cue.lastSeenFontNames.front() : std::string {};
+                    face = faceFromName (seen, run.font);
+                    note (Note::Kind::approximated, cue, "its font " + run.font + " is not installed on this machine: its "
+                          "family is taken to be " + face->family + " - carry the font in the show from a machine that has it");
+                }
+                use.family = face->family;
+
+                if (fontsSaid.insert (run.font).second)
+                    plan.fonts.push_back (use);
+
+                item.attributes.push_back ({ "font", face->family });
+                if (face->bold)
+                    item.attributes.push_back ({ "bold", "true" });
+                if (face->italic)
+                    item.attributes.push_back ({ "italic", "true" });
+            }
+
+            /*  A TEXT CUE (ALI): its words, braces doubled; its first run's look
+                for all of them (AKU); the size in the canvas's height, the box
+                QLab's fixed width or none; the stroke the outline, a shadow a glow. */
+            Item text (const Cue& cue)
+            {
+                Item item;
+                item.kind = "video";
+                item.key = "cue:" + cue.id;
+                item.name = displayName (cue);
+                item.attributes = common (cue);
+
+                const auto on = canvasFor (cue);
+                item.canvas = on.key;
+                item.attributes.push_back ({ "source", "text" });
+                item.attributes.push_back ({ "words", bracesKept (cue.words) });
+
+                const auto run = cue.runs.empty() ? TextRun {} : cue.runs.front();
+                font (cue, run, item);
+
+                if (run.size > 0.0)
+                    item.attributes.push_back ({ "fontSize", number (std::clamp (run.size / on.height * 100.0, 0.1, 100.0), 4) });
+
+                //  Cocoa's own colour where none is said: black.
+                const auto colour = run.colour.set ? run.colour : Colour { 0.0, 0.0, 0.0, 1.0, true };
+                item.attributes.push_back ({ "paint", hexOf (colour) });
+
+                const std::string align = run.alignment == 1 ? "right" : run.alignment == 2 ? "centre" : "left";
+                if (align != "centre")
+                    item.attributes.push_back ({ "align", align });
+                if (run.alignment == 3)
+                    note (Note::Kind::approximated, cue, "its lines are justified in QLab: aligned left here");
+
+                if (run.lineHeightMultiple > 0.0 && std::abs (run.lineHeightMultiple - 1.0) > tiny)
+                    item.attributes.push_back ({ "lineSpacing", number (std::clamp (run.lineHeightMultiple * 100.0, 50.0, 400.0), 2) });
+                if (run.lineSpacing > tiny)
+                    note (Note::Kind::approximated, cue, "QLab adds " + number (run.lineSpacing, 1) + " points between its "
+                          "lines: not imported");
+
+                item.attributes.push_back ({ "wrap", number (cue.fixedWidth > 0.0 ? std::clamp (cue.fixedWidth / on.width * 100.0, 0.0, 100.0) : 0.0, 4) });
+
+                if (std::abs (run.strokeWidth) > tiny)
+                {
+                    //  Cocoa strokes the letters' edge both ways, by a % of the size: half of it is outside.
+                    item.attributes.push_back ({ "outline", number (std::clamp (std::abs (run.strokeWidth) / 100.0 * run.size / 2.0, 0.0, 200.0), 2) });
+                    item.attributes.push_back ({ "outlineColour", hexOf (run.strokeColour.set ? run.strokeColour : colour) });
+                    if (run.strokeWidth > 0.0)
+                        note (Note::Kind::approximated, cue, "QLab drew its letters hollow, the outline alone: here they are "
+                              "filled, inside their outline");
+                }
+                else if (run.shadow)
+                {
+                    const auto shade = run.shadowColour.set ? run.shadowColour : Colour { 0.0, 0.0, 0.0, 1.0 / 3.0, true };
+                    item.attributes.push_back ({ "outline", "1" });
+                    item.attributes.push_back ({ "outlineBlur", number (std::clamp (run.shadowBlur, 0.0, 200.0), 2) });
+                    item.attributes.push_back ({ "outlineColour", hexOf (shade) });
+                    note (Note::Kind::approximated, cue, "QLab's shadow is drawn as a glow about the letters: its offset of "
+                          + number (run.shadowX, 1) + ", " + number (run.shadowY, 1) + " points is not imported");
+                }
+
+                if (run.background.set)
+                    note (Note::Kind::dropped, cue, "its background colour is not imported");
+                if (run.underline != 0 || run.strikethrough != 0)
+                    note (Note::Kind::dropped, cue, "its underline or strikethrough is not imported");
+                if (std::abs (run.kern) > tiny)
+                    note (Note::Kind::dropped, cue, "its letter spacing is not imported");
+
+                const auto changes = std::count_if (cue.runs.begin() + (cue.runs.empty() ? 0 : 1), cue.runs.end(),
+                                                    [&run] (const TextRun& r) { return ! sameLook (r, run); });
+                if (changes > 0)
+                    note (Note::Kind::approximated, cue, "its words change font, size or colour in QLab: the first run's look "
+                          "is used for all of them (AKU)");
+
+                place (cue, on, item, colour.a);
+                kindOf[cue.id] = "video";
+                return item;
+            }
+
+            /*  A FADE OF A PICTURE OR A TEXT (ALJ): the fade's `video` pairs,
+                where QLab's switches say it moves something - a relative move
+                added to where the picture was put. */
+            Item pictureFade (const Cue& cue, const Cue& aimed)
+            {
+                const auto on = canvasFor (aimed);
+                const auto factor = scaleFactorOf (aimed, on);
+                const auto relative = cue.geoMode == 1;
+                const auto& p = cue.placement;
+                const auto& from = aimed.placement;
+
+                std::vector<std::pair<std::string, std::string>> pairs;
+
+                if (cue.fadesOpacity)
+                    pairs.push_back ({ "opacity", number (std::clamp (p.opacity, 0.0, 1.0) * 100.0, 2) });
+
+                if (cue.fadesTranslation)
+                {
+                    const auto x = relative ? from.translationX + p.translationX : p.translationX;
+                    const auto y = relative ? from.translationY + p.translationY : p.translationY;
+                    pairs.push_back ({ "offsetX", number (x / on.width * 100.0, 4) });
+                    pairs.push_back ({ "offsetY", number (y / on.height * 100.0, 4) });
+                }
+
+                if (cue.fadesScale)
+                {
+                    const auto s = relative ? from.scaleX * p.scaleX : p.scaleX;
+                    pairs.push_back ({ "scale", number (std::clamp (s * 100.0 * (factor > 0.0 ? factor : 1.0), 0.0, 1000.0), 4) });
+                }
+
+                if (cue.fadesRotation)
+                {
+                    double turn = p.quaternion.has_value() ? turnOf (*p.quaternion) : -p.rotation;
+                    if (relative && from.quaternion.has_value())
+                        turn += turnOf (*from.quaternion);
+                    pairs.push_back ({ "rotation", number (turn, 3) });
+                }
+
+                const auto sound = std::any_of (cue.fadeLevels.begin(), cue.fadeLevels.end(),
+                                                [] (const FadeLevel& f) { return f.row == 0 && f.column == 0; });
+
+                if (pairs.empty() && sound)
+                    return placeholder (cue, "it fades only the movie's sound, which in Go.dot is the sound cue the movie's "
+                                        "conversion to HAP makes - a fade of that cue", displayName (cue));
+
+                if (cue.fadesEffects)
+                    note (Note::Kind::dropped, cue, "it fades video effects too: not imported");
+                if (sound)
+                    note (Note::Kind::dropped, cue, "it fades the movie's sound too: a Go.dot movie's sound is the sound cue "
+                          "its conversion to HAP makes, which a fade of its own moves");
+
+                if (pairs.empty())
+                    return placeholder (cue, "it moves nothing a Go.dot fade of a picture moves", displayName (cue));
+
+                if (relative && (cue.fadesTranslation || cue.fadesScale || cue.fadesRotation))
+                    note (Note::Kind::approximated, cue, "a relative move in QLab, added to where the picture was put: right "
+                          "when the show runs in order");
+
+                std::sort (pairs.begin(), pairs.end());
+                std::string video;
+                for (const auto& [name, value] : pairs)
+                    video += (video.empty() ? "" : " ") + name + ":" + value;
+
+                Item item;
+                item.kind = "fade";
+                item.key = "cue:" + cue.id;
+                item.name = displayName (cue);
+                item.attributes = common (cue);
+                item.target = "cue:" + cue.target;
+                item.attributes.push_back ({ "duration", number (std::max (0.0, cue.duration), 4) });
+                item.attributes.push_back ({ "video", video });
+
+                if (cue.stopTargetWhenDone)
+                    item.attributes.push_back ({ "stopWhenDone", "true" });
+
+                if (cue.shape.type != 3)
+                    item.attributes.push_back ({ "curve", "sCurve" });
+                if (cue.shape.type != 1 && cue.shape.type != 3)
+                    note (Note::Kind::approximated, cue, "a shape drawn in QLab, taken as Go.dot's S-curve");
+
+                return item;
             }
 
             //  --- Groups and chains (ZS) --------------------------------------------
@@ -679,6 +1190,9 @@ namespace wfg::import::qlab
                                                 [] (const FadeLevel& f) { return f.row == 0 && f.column == 0; });
                 const auto others = cue.fadeLevels.size() - (main == cue.fadeLevels.end() ? 0u : 1u);
 
+                if (target == "video")
+                    return pictureFade (cue, aimed);
+
                 if (target != "media" && target != "mic" && target != "group")
                     return placeholder (cue, "it fades a " + aimed.type + " cue", displayName (cue));
 
@@ -996,6 +1510,20 @@ namespace wfg::import::qlab
                         for (const auto& child : workspace.lists[at].children)
                             classify (child);
 
+                /*  EVERY STAGE A CANVAS (ALF), in the workspace's order, whether a
+                    cue of the lists ticked is on it or not: the rig, as QLab had it. */
+                for (const auto& stage : workspace.stages)
+                {
+                    canvas ("stage:" + stage.id, stage.name.empty() ? std::string ("Stage") : stage.name,
+                            stage.width, stage.height, stage.outputs);
+                    if (stage.blended)
+                        plan.notes.push_back ({ Note::Kind::dropped, -1, {}, "the stage " + stage.name + "'s edge blends "
+                                                "are not imported" });
+                    if (stage.masked)
+                        plan.notes.push_back ({ Note::Kind::dropped, -1, {}, "the stage " + stage.name + "'s mask is not "
+                                                "imported" });
+                }
+
                 for (std::size_t at = 0; at < workspace.lists.size(); ++at)
                 {
                     if (! options.lists.empty() && options.lists.count (static_cast<int> (at)) == 0)
@@ -1027,6 +1555,38 @@ namespace wfg::import::qlab
                     plan.notes.push_back ({ Note::Kind::info, -1, {}, "each QLab cue output in use is a mono bus on the "
                                             "interface output of the same number - a QLab patch that routed its cue outputs "
                                             "elsewhere needs the buses patched again" });
+
+                /*  EACH OUTPUT ONCE (ALF): a projector QLab drew several stages to is
+                    one output here, showing the stage drawn to it alone; the others
+                    are said, to be laid over it as zones. */
+                std::map<std::string, std::string> shows;
+                for (const auto alone : { true, false })
+                    for (const auto& each : plan.canvases)
+                        if ((each.outputs.size() == 1) == alone)
+                            for (const auto& output : each.outputs)
+                                if (shows.count (output) == 0)
+                                {
+                                    shows[output] = each.key;
+                                    plan.outputs.push_back ({ "output:" + output, output, each.key });
+                                }
+
+                for (const auto& each : plan.canvases)
+                {
+                    std::string elsewhere;
+                    for (const auto& output : each.outputs)
+                        if (shows[output] != each.key)
+                            elsewhere += (elsewhere.empty() ? "" : ", ") + output;
+
+                    if (! elsewhere.empty())
+                        plan.notes.push_back ({ Note::Kind::info, -1, {}, "the stage " + each.name + " was drawn to " + elsewhere
+                                                + ", which show another canvas here: lay it over them as a zone (Show settings, "
+                                                  "Video) to see it on those projectors" });
+                }
+
+                if (! plan.canvases.empty())
+                    plan.notes.push_back ({ Note::Kind::info, -1, {}, "each QLab stage is a canvas of its size, and each output "
+                                            "QLab drew to a video output with no display chosen, which draws nothing until a "
+                                            "projector is picked for it in Show settings, Video" });
             }
         };
     }
@@ -1134,7 +1694,7 @@ namespace wfg::import::qlab
 
     Plan walk (const Workspace& workspace, const WalkOptions& options)
     {
-        Walker walker { workspace, options, {}, {}, {}, {}, {}, {}, -1 };
+        Walker walker { workspace, options, {}, {}, {}, {}, {}, {}, -1, {}, {} };
         walker.run();
         return std::move (walker.plan);
     }

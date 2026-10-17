@@ -31,6 +31,7 @@
 
 #include "TestSupport.h"
 #include "FakeVideoSink.h"
+#include "FontFixture.h"
 
 #include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/Readiness.h>
@@ -58,6 +59,7 @@
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/video/Compositor.h>
 #include <wfg/engine/video/Conversion.h>
+#include <wfg/engine/video/ShowFonts.h>
 #include <wfg/engine/video/DcaOpacity.h>
 #include <wfg/engine/video/Ffmpeg.h>
 #include <wfg/engine/video/Key.h>
@@ -3517,4 +3519,54 @@ TEST_CASE ("video: an automatic Gapless sequence of movies places each on the en
 
     REQUIRE (rig.runOf (second) != nullptr);
     CHECK (rig.runOf (second)->shownAtSample == rig.runOf (first)->shownAtSample + 2 * 48000);
+}
+
+TEST_CASE ("video: a text cue of a family the show carries is drawn from its file, the face chosen by bold and italic, and drawn again when the fonts change (§62, AKZ)")
+{
+    VideoRig rig;
+    const auto set = [&rig] (const char* row, osc::Value value)
+    {
+        return rig.submitAndTick ("node.set", { osc::Value::string (std::string ("/godot/cue/VD000002/") + row),
+                                                std::move (value) }).applied;
+    };
+
+    REQUIRE (set ("source", osc::Value::string ("text")) == 1);
+    REQUIRE (set ("words", osc::Value::string ("Act One")) == 1);
+    REQUIRE (set ("font", osc::Value::string ("DejaVu Sans Mono")) == 1);
+    REQUIRE (set ("bold", osc::Value::string ("true")) == 1);
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000002") });
+    rig.ticks (3);
+
+    //  Nothing carried: the family by name, as before §62.
+    REQUIRE (rig.sink.shown.size() == 1);
+    CHECK (rig.sink.shown.front().text.fontFile.empty());
+
+    test::fonts::Folder place;
+    const auto show = place.file.getChildFile ("Show");
+    const auto fonts = show.getChildFile ("fonts");
+    fonts.createDirectory();
+    REQUIRE (test::fonts::dejaVu ("DejaVuSansMono.ttf").copyFileTo (fonts.getChildFile ("DejaVuSansMono.ttf")));
+    REQUIRE (test::fonts::dejaVu ("DejaVuSansMono-Bold.ttf").copyFileTo (fonts.getChildFile ("DejaVuSansMono-Bold.ttf")));
+
+    //  Carried now: the bold face's own file, restated while it plays.
+    rig.runner.setFonts (std::make_shared<const video::ShowFonts> (video::ShowFonts::scan (show)));
+    rig.ticks (2);
+    REQUIRE_FALSE (rig.sink.restated.empty());
+    CHECK (juce::File (rig.sink.restated.back().text.fontFile) == fonts.getChildFile ("DejaVuSansMono-Bold.ttf"));
+    CHECK_FALSE (rig.sink.restated.back().text.embolden);
+    CHECK_FALSE (rig.sink.restated.back().text.slant);
+    CHECK (rig.sink.shown.size() == 1);
+
+    //  Italic asked of a family carried with none: the bold face, leaned by Go.dot.
+    REQUIRE (set ("italic", osc::Value::string ("true")) == 1);
+    rig.ticks (2);
+    CHECK (juce::File (rig.sink.restated.back().text.fontFile) == fonts.getChildFile ("DejaVuSansMono-Bold.ttf"));
+    CHECK (rig.sink.restated.back().text.slant);
+
+    //  The fonts gone: by name again.
+    rig.runner.setFonts (std::make_shared<const video::ShowFonts>());
+    rig.ticks (2);
+    CHECK (rig.sink.restated.back().text.fontFile.empty());
+    CHECK_FALSE (rig.sink.restated.back().text.slant);
 }

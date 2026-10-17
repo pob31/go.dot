@@ -45,6 +45,12 @@ namespace wfg::client::ui
         constexpr int defaultFontId = 1;
         constexpr int missingFontId = 1000000;
 
+        //  The show's own families (§62), and the three things the menu does with fonts.
+        constexpr int carriedFontId = 100000;
+        constexpr int carryFontId = 2000001;
+        constexpr int addFontFileId = 2000002;
+        constexpr int removeFontId = 2000003;
+
         //  A number as a row takes it: four decimals at most, in no locale's spelling.
         std::string numberText (double value)
         {
@@ -762,13 +768,52 @@ namespace wfg::client::ui
         addAndMakeVisible (wordsBox);
 
         fontMenu.setWantsKeyboardFocus (false);
-        fontMenu.setTooltip ("The font, one this machine has");
+        fontMenu.setTooltip ("The font: one the show carries, or one this machine has");
         fontMenu.onChange = [this]
         {
             const auto id = fontMenu.getSelectedId();
 
             if (id == defaultFontId)
                 write ("font", "");
+            else if (id >= carriedFontId && id - carriedFontId < static_cast<int> (reading.carried.size()))
+                write ("font", reading.carried[static_cast<std::size_t> (id - carriedFontId)].family);
+            else if (id == carryFontId)
+            {
+                askFontJob ("carry", reading.font, false);
+                refreshFonts();
+            }
+            else if (id == addFontFileId)
+            {
+                refreshFonts();
+                fontChooser = std::make_unique<juce::FileChooser> ("Add a font file to the show", juce::File(),
+                                                                   "*.ttf;*.otf;*.ttc;*.otc");
+                fontChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                                          [safe = juce::Component::SafePointer<PicturePanelComponent> (this)] (const juce::FileChooser& chooser)
+                                          {
+                                              const auto file = chooser.getResult();
+                                              if (safe != nullptr && file.existsAsFile())
+                                                  safe->askFontJob ("add", file.getFullPathName().toStdString(), false);
+                                          });
+            }
+            else if (id == removeFontId)
+            {
+                const auto family = reading.font;
+                refreshFonts();
+                juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                                .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                                                .withTitle ("Take " + juce::String::fromUTF8 (family.c_str()) + " out of the show?")
+                                                .withMessage ("Its files are deleted from the show's fonts folder. Its text cues"
+                                                              " then draw in the font of that name each machine has, or in the"
+                                                              " system's sans-serif where there is none.")
+                                                .withButton ("Take it out")
+                                                .withButton ("Keep it")
+                                                .withAssociatedComponent (this),
+                                              [safe = juce::Component::SafePointer<PicturePanelComponent> (this), family] (int result)
+                                              {
+                                                  if (result == 1 && safe != nullptr)
+                                                      safe->askFontJob ("remove", family, false);
+                                              });
+            }
             else if (id > defaultFontId && id - 2 < fonts.size())
                 write ("font", fonts[id - 2].toStdString());
         };
@@ -987,29 +1032,139 @@ namespace wfg::client::ui
             write ("words", typed);
     }
 
-    /*  THE FONT MENU: the default first, then this machine's families, and the
-        cue's own last, said as missing, when this machine has not got it (61,
-        AKL) - kept in the menu so it is not lost by looking. */
+    /*  THE FONT MENU: the default first, then the families the show carries
+        (§62), which draw the same on every machine, then this machine's others,
+        and the cue's own last, said as missing, when neither has it (61, AKL) -
+        kept in the menu so it is not lost by looking. Under them, what can be
+        done with fonts: carry the cue's installed font in the show, add a font
+        file, take the cue's font out of the show - each offered only where it
+        means something, never under the lock. */
     void PicturePanelComponent::refreshFonts()
     {
         fontsFilled = true;
         fontShown = reading.font;
+        carriedShown.clear();
+        for (const auto& carried : reading.carried)
+            carriedShown += carried.family + "\t" + carried.styles + "\n";
+
         fontMenu.clear (juce::dontSendNotification);
         fontMenu.addItem ("System sans-serif", defaultFontId);
 
-        for (int at = 0; at < fonts.size(); ++at)
-            fontMenu.addItem (fonts[at], at + 2);
-
         const auto own = juce::String::fromUTF8 (reading.font.c_str());
+        int selected = own.isEmpty() ? defaultFontId : 0;
 
-        if (own.isEmpty())
-            fontMenu.setSelectedId (defaultFontId, juce::dontSendNotification);
-        else if (const auto found = fonts.indexOf (own, true); found >= 0)
-            fontMenu.setSelectedId (found + 2, juce::dontSendNotification);
-        else
+        if (! reading.carried.empty())
         {
-            fontMenu.addItem (own + " (not on this machine)", missingFontId);
-            fontMenu.setSelectedId (missingFontId, juce::dontSendNotification);
+            fontMenu.addSectionHeading ("In this show");
+            for (std::size_t at = 0; at < reading.carried.size(); ++at)
+            {
+                const auto& carried = reading.carried[at];
+                const auto name = juce::String::fromUTF8 (carried.family.c_str());
+                fontMenu.addItem (name, carriedFontId + static_cast<int> (at));
+                if (selected == 0 && name.equalsIgnoreCase (own))
+                    selected = carriedFontId + static_cast<int> (at);
+            }
+            fontMenu.addSectionHeading ("On this machine");
+        }
+
+        for (int at = 0; at < fonts.size(); ++at)
+            if (! carries (fonts[at].toStdString()))
+            {
+                fontMenu.addItem (fonts[at], at + 2);
+                if (selected == 0 && fonts[at].equalsIgnoreCase (own))
+                    selected = at + 2;
+            }
+
+        if (selected == 0)
+        {
+            fontMenu.addItem (own + " (not in the show, not on this machine)", missingFontId);
+            selected = missingFontId;
+        }
+
+        const auto installedHere = fonts.contains (own, true);
+        const auto carriedHere = carries (reading.font);
+        const auto ownCarried = std::any_of (reading.carried.begin(), reading.carried.end(), [&own] (const model::CarriedFamily& c)
+        {
+            return ! c.around && juce::String::fromUTF8 (c.family.c_str()).equalsIgnoreCase (own);
+        });
+
+        fontMenu.addSeparator();
+        fontMenu.addItem ("Carry it in the show", carryFontId);
+        fontMenu.addItem ("Add a font file...", addFontFileId);
+        fontMenu.addItem ("Remove it from the show", removeFontId);
+        fontMenu.setItemEnabled (carryFontId, ! reading.locked && installedHere && ! carriedHere);
+        fontMenu.setItemEnabled (addFontFileId, ! reading.locked);
+        fontMenu.setItemEnabled (removeFontId, ! reading.locked && ownCarried);
+
+        fontMenu.setSelectedId (selected, juce::dontSendNotification);
+    }
+
+    bool PicturePanelComponent::carries (const std::string& family) const
+    {
+        const auto name = juce::String::fromUTF8 (family.c_str());
+        return ! family.empty()
+            && std::any_of (reading.carried.begin(), reading.carried.end(), [&name] (const model::CarriedFamily& c)
+               {
+                   return juce::String::fromUTF8 (c.family.c_str()).equalsIgnoreCase (name);
+               });
+    }
+
+    /*  A fonts.* COMMAND ASKED (§62, ALA), and the job it becomes followed in
+        the panel's head: the engine does it on a thread of its own and says
+        what it did at /godot/engine/fontsJob. */
+    void PicturePanelComponent::askFontJob (const std::string& verb, const std::string& subject, bool restricted)
+    {
+        if (subject.empty())
+            return;
+
+        fontJobWaiting = subject;
+        fontJobSeen = model::fontsJobOf (reading.fontsJob).number;
+
+        if (verb == "carry" && actions.carryFont)
+            actions.carryFont (subject, restricted);
+        else if (verb == "add" && actions.addFontFile)
+            actions.addFontFile (subject, restricted);
+        else if (verb == "remove" && actions.removeFont)
+            actions.removeFont (subject);
+    }
+
+    void PicturePanelComponent::followFontJob()
+    {
+        if (fontJobWaiting.empty())
+            return;
+
+        const auto job = model::fontsJobOf (reading.fontsJob);
+        if (job.number <= fontJobSeen || job.subject != fontJobWaiting)
+            return;
+
+        if (actions.say)
+            actions.say (juce::String::fromUTF8 (model::fontsJobWords (job).c_str()));
+
+        if (job.state != "done")
+            return;
+
+        fontJobWaiting.clear();
+
+        /*  A LICENCE THAT RESTRICTS CARRYING IT (ALB): asked, and carried only
+            on a yes - the same job asked again, saying so. */
+        if (job.result == "restricted")
+        {
+            const auto verb = job.verb;
+            const auto subject = job.subject;
+            juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                            .withIconType (juce::MessageBoxIconType::WarningIcon)
+                                            .withTitle ("Carry it all the same?")
+                                            .withMessage (juce::String::fromUTF8 (job.detail.c_str())
+                                                          + ": the font's licence restricts carrying it in a show. A show given"
+                                                            " to somebody else takes its fonts with it.")
+                                            .withButton ("Carry it")
+                                            .withButton ("Leave it")
+                                            .withAssociatedComponent (this),
+                                          [safe = juce::Component::SafePointer<PicturePanelComponent> (this), verb, subject] (int result)
+                                          {
+                                              if (result == 1 && safe != nullptr)
+                                                  safe->askFontJob (verb, subject, true);
+                                          });
         }
     }
 
@@ -1092,9 +1247,15 @@ namespace wfg::client::ui
         letterSwatch.setColour (juce::TextButton::buttonColourId, paintColour (reading.paint));
         outlineSwatch.setColour (juce::TextButton::buttonColourId, paintColour (reading.outlineColour));
 
-        //  The menu made again only when the cue's font is another: never under an open menu.
-        if (reading.texted() && (! fontsFilled || reading.font != fontShown))
+        //  The menu made again only when the cue's font, or the show's fonts, are others: never under an open menu.
+        std::string carriedNow;
+        for (const auto& carried : reading.carried)
+            carriedNow += carried.family + "\t" + carried.styles + "\n";
+
+        if (reading.texted() && (! fontsFilled || reading.font != fontShown || carriedNow != carriedShown))
             refreshFonts();
+
+        followFontJob();
 
         flipH.setToggleState (reading.flipH, juce::dontSendNotification);
         flipV.setToggleState (reading.flipV, juce::dontSendNotification);

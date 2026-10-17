@@ -1340,6 +1340,14 @@ namespace wfg::doc
                 copyProblems.push_back ("could not copy " + namespaces.getFullPathName().toStdString()
                                         + " into " + destination.getFullPathName().toStdString());
 
+        /*  AND THE FONTS IT CARRIES, WHOLE (namespace draft §62, AKX): a show
+            saved somewhere new draws its words as the old one did. Small
+            files, and the show's own, so never a question. */
+        if (const auto fonts = source.getChildFile ("fonts"); fonts.isDirectory() && source != destination)
+            if (! fonts.copyDirectoryTo (destination.getChildFile ("fonts")))
+                copyProblems.push_back ("could not copy " + fonts.getFullPathName().toStdString()
+                                        + " into " + destination.getFullPathName().toStdString());
+
         auto result = save (destination, snapshot);
 
         for (auto& problem : copyProblems)

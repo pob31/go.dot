@@ -88,8 +88,11 @@ namespace wfg::video
         slot.outlineColour.store (spec.text.outlineColour, std::memory_order_relaxed);
         slot.textStyle.store ((spec.text.bold ? 1u : 0u) | (spec.text.italic ? 2u : 0u)
                                 | (static_cast<std::uint32_t> (spec.text.align) << 2)
-                                | (static_cast<std::uint32_t> (spec.text.alignV) << 4),
+                                | (static_cast<std::uint32_t> (spec.text.alignV) << 4)
+                                | (spec.text.embolden ? 64u : 0u) | (spec.text.slant ? 128u : 0u),
                               std::memory_order_relaxed);
+        region::writeText (slot.fontFile, spec.text.fontFile);
+        slot.fontFace.store (spec.text.fontFace, std::memory_order_relaxed);
 
         slot.shapeCount.store (spec.shape.count, std::memory_order_relaxed);
         slot.shapeFeather.store (spec.shape.feather, std::memory_order_relaxed);
