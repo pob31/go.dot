@@ -17,6 +17,7 @@
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/tree/Mount.h>
+#include <wfg/engine/tree/PresetScanner.h>
 #include <wfg/engine/tree/PresetTable.h>
 
 #include <juce_core/juce_core.h>
@@ -46,13 +47,28 @@ namespace wfg::tree
         create from its own record alone.
 
         YOUR PRESETS (namespace draft §76): `preset.rescan` reads your folder
-        again through `hooks.rescan` - serve's thread that reads it (ARZ). It
-        edits no show and acts on this machine alone; where no hook is given -
-        a replay, a tree dump - it is taken and does nothing. */
+        again through `hooks.rescan` - serve's thread that reads it (ARZ) - and
+        `preset.save <mount> [slug] [vendor] [model]` saves a device's
+        description there as a preset through `hooks.save` (ARY): what is
+        saved, under which name, decided here on the tick and on the record;
+        the file written on the scanner's thread. Neither edits the show,
+        both act on this machine alone; where no hook is given - a replay, a
+        tree dump - they are taken and do nothing.
+
+        A PRESET'S QUERY_PORT (ARY) is written to the device made from it,
+        the eleventh argument of `mount.createFromPreset`'s record. */
     struct PresetHooks
     {
         std::function<void()> rescan {};
+        std::function<void (PresetSave)> save {};
     };
+
+    /*  A NAME FIT FOR A PRESET (ARY): lower-case letters, digits and dashes,
+        one to sixty-four of them - a file name on every system and a part of
+        an address. `presetSlugFrom` makes one of a device's name ("WFS-DIY" is
+        `wfs-diy`), or empty when nothing in it is a letter or a digit. */
+    bool isPresetSlug (const std::string& slug);
+    std::string presetSlugFrom (const std::string& name);
 
     void registerPresetCommands (CommandRegistry& registry, doc::ShowDocument& document, MountTable& mounts,
                                  const juce::File& bundleFolder, const PresetTable* presets,

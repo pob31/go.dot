@@ -30,6 +30,7 @@
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/log/EventLog.h>
 #include <wfg/engine/log/Replay.h>
+#include <wfg/engine/json/JsonValue.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/PresetCommands.h>
 #include <wfg/engine/tree/PresetScanner.h>
@@ -67,6 +68,41 @@ namespace
              + std::to_string (version)
              + R"JSON(, "VENDOR": "Desk Co", "MODEL": "Desk", "SOURCES": ["by hand"]},
                  "CONTENTS": {"go": {"FULL_PATH": "/desk/go", "TYPE": "N", "ACCESS": 2}}})JSON";
+    }
+
+    /*  A DESCRIPTION AS A DEVICE SERVES IT: pretty-printed, no GODOT key, one
+        root - WFS-DIY's shape. */
+    const char* servedDescription = R"JSON({
+  "FULL_PATH": "/wfs",
+  "DESCRIPTION": "WFS-DIY",
+  "CONTENTS": {
+    "input": {"FULL_PATH": "/wfs/input", "CONTENTS": {
+      "gain": {"FULL_PATH": "/wfs/input/gain", "TYPE": "f", "ACCESS": 3, "RANGE": [{"MIN": -60, "MAX": 12}], "DESCRIPTION": "a \"gain\""}
+    }}
+  }
+})JSON";
+
+    /*  The GODOT key of a file, parsed. */
+    json::Object godotOf (const juce::File& file)
+    {
+        const auto parsed = json::parse (file.loadFileAsString().toStdString());
+        REQUIRE (parsed.ok());
+        const auto* godot = parsed.value->find ("GODOT");
+        REQUIRE (godot != nullptr);
+        REQUIRE (godot->isObject());
+        return godot->asObject();
+    }
+
+    std::vector<std::string> stringsOf (const json::Object& fields, const char* key)
+    {
+        std::vector<std::string> out;
+        const auto found = fields.find (key);
+        REQUIRE (found != fields.end());
+
+        for (const auto& each : found->second.asArray())
+            out.push_back (each.asString());
+
+        return out;
     }
 
     /*  An engine and a document as serve has them, one undo step a command. */
@@ -213,4 +249,273 @@ TEST_CASE ("discovery: preset.rescan asks the hook, edits no show, and is this m
     Rig replay;
     tree::registerPresetCommands (replay.engine.commands(), replay.document, replay.mounts, freshFolder ("wfg-bundle"), nullptr);
     CHECK (replay.apply ("window", "preset.rescan", {}).applied == 1u);
+}
+
+TEST_CASE ("discovery: a description saved as a preset gains its header, keeps the rest, and reads back as a preset")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    /*  Namespace draft §76, ARY: the device's description as it came, a GODOT
+        header put in, the whole compact, written to your folder. */
+    const auto root = freshFolder ("wfg-presets-save");
+    const auto bundle = root.getChildFile ("show");
+    const auto yours = root.getChildFile ("yours");
+    REQUIRE (bundle.getChildFile ("namespaces").createDirectory());
+    const auto described = bundle.getChildFile ("namespaces/wfs.json");
+    REQUIRE (described.replaceWithText (servedDescription));
+
+    tree::PresetSave job;
+    job.source = described.getFullPathName().toStdString();
+    job.slug = "wfs-diy";
+    job.deviceName = "WFS-DIY";
+    job.host = "10.0.0.7";
+    job.port = 8000;
+    job.queryPort = 5005;
+    job.readback = "oscquery";
+    job.date = "2026-10-17";
+
+    std::string savedAs;
+    REQUIRE (tree::savePresetNow (job, yours.getFullPathName().toStdString(), savedAs).empty());
+    CHECK (savedAs == "wfs-diy@1");
+
+    const auto file = yours.getChildFile ("wfs-diy.json");
+    REQUIRE (file.existsAsFile());
+
+    const auto fields = godotOf (file);
+    CHECK (fields.at ("PRESET").asString() == "wfs-diy");
+    CHECK (fields.at ("VERSION").asInt() == 1);
+    CHECK (fields.at ("VENDOR").asString() == "WFS-DIY");
+    CHECK (fields.at ("MODEL").asString() == "WFS-DIY (OSCQuery)");
+    CHECK (fields.at ("TRANSPORT").asString() == "udp");
+    CHECK (fields.at ("WIRE").asString() == "osc");
+    CHECK (fields.at ("PORT").asInt() == 8000);
+    CHECK (fields.at ("QUERY_PORT").asInt() == 5005);
+    CHECK (fields.at ("READBACK").asString() == "oscquery");
+    CHECK (fields.count ("FRAMING") == 0u);
+    CHECK (stringsOf (fields, "SOURCES") == std::vector<std::string> { "captured from WFS-DIY at 10.0.0.7:5005 on 2026-10-17" });
+
+    //  Compact, the rest of the description kept: its strings, escapes and all.
+    const auto written = file.loadFileAsString().toStdString();
+    CHECK (written.find ('\n') == std::string::npos);
+    CHECK (written.find (R"JSON("DESCRIPTION":"a \"gain\"")JSON") != std::string::npos);
+    CHECK (written.find (R"JSON("RANGE":[{"MIN":-60,"MAX":12}])JSON") != std::string::npos);
+
+    //  It reads as a preset, whole and quickly, with the query port.
+    const auto preset = tree::readPreset ("wfs-diy", written);
+    INFO ("problem: " << preset.problem);
+    REQUIRE (preset.usable());
+    CHECK (preset.queryPort == 5005);
+    CHECK (preset.roots == std::vector<std::string> { "/wfs" });
+    CHECK (tree::readPresetQuickly ("wfs-diy", written).queryPort == 5005);
+
+    //  Saved again over a version this machine holds: one more.
+    job.knownVersion = 1;
+    REQUIRE (tree::savePresetNow (job, yours.getFullPathName().toStdString(), savedAs).empty());
+    CHECK (savedAs == "wfs-diy@2");
+    CHECK (godotOf (file).at ("VERSION").asInt() == 2);
+
+    //  A copy of a preset: its own header kept and added to, GENERATED gone, the name it was saved under.
+    const auto copied = bundle.getChildFile ("namespaces/adm-osc-v1.json");
+    REQUIRE (juce::File (juce::String (WFG_REPO_ROOT) + "/presets/devices/adm-osc.json").copyFileTo (copied));
+    tree::PresetSave copy;
+    copy.source = copied.getFullPathName().toStdString();
+    copy.slug = "adm-osc";
+    copy.deviceName = "Spat";
+    copy.host = "10.0.0.9";
+    copy.port = 9000;
+    copy.fromPreset = "adm-osc@1";
+    copy.knownVersion = 1;
+    copy.date = "2026-10-17";
+    REQUIRE (tree::savePresetNow (copy, yours.getFullPathName().toStdString(), savedAs).empty());
+    CHECK (savedAs == "adm-osc@2");
+
+    const auto copyFields = godotOf (yours.getChildFile ("adm-osc.json"));
+    CHECK (copyFields.at ("VENDOR").asString() == "ADM-OSC");
+    CHECK (copyFields.at ("PORT").asInt() == 9000);
+    CHECK (copyFields.count ("GENERATED") == 0u);
+    CHECK (copyFields.count ("QUERY_PORT") == 0u);
+    const auto copySources = stringsOf (copyFields, "SOURCES");
+    REQUIRE (copySources.size() >= 2u);
+    CHECK (copySources.back() == "copied from adm-osc@1 on 2026-10-17");
+
+    //  What cannot be read says so, and writes nothing.
+    tree::PresetSave missing = job;
+    missing.source = bundle.getChildFile ("namespaces/none.json").getFullPathName().toStdString();
+    missing.slug = "none";
+    CHECK (tree::savePresetNow (missing, yours.getFullPathName().toStdString(), savedAs).rfind ("could not read", 0) == 0);
+    CHECK_FALSE (yours.getChildFile ("none.json").existsAsFile());
+
+    root.deleteRecursively();
+}
+
+TEST_CASE ("discovery: preset.save decides the name and what the rows say, edits no show, and refuses what has nothing to save")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    Rig rig;
+    const auto bundle = freshFolder ("wfg-bundle-save");
+    REQUIRE (bundle.getChildFile ("namespaces").createDirectory());
+    REQUIRE (bundle.getChildFile ("namespaces/wfs.json").replaceWithText (servedDescription));
+
+    std::vector<tree::PresetSave> asked;
+    tree::registerPresetCommands (rig.engine.commands(), rig.document, rig.mounts, bundle, nullptr,
+                                  { {}, [&asked] (tree::PresetSave job) { asked.push_back (std::move (job)); } });
+
+    const auto* command = rig.engine.commands().find ("preset.save");
+    REQUIRE (command != nullptr);
+    CHECK (command->machineLocal);
+    CHECK_FALSE (command->mutates);
+
+    const auto device = rig.document.createMount ("/wfs", "namespaces/wfs.json").id;
+    const auto base = "/godot/mount/" + device + "/";
+    REQUIRE (rig.document.setAttribute (base + "name", "WFS-DIY").ok);
+    REQUIRE (rig.document.setAttribute (base + "host", "10.0.0.7").ok);
+    REQUIRE (rig.document.setAttribute (base + "port", "8000").ok);
+    REQUIRE (rig.document.setAttribute (base + "queryPort", "5005").ok);
+
+    const auto revision = rig.document.showRevision();
+
+    SUBCASE ("the name from the device's, the facts from its rows")
+    {
+        REQUIRE (rig.apply ("window", "preset.save", { text (device) }).applied == 1u);
+        REQUIRE (asked.size() == 1u);
+        CHECK (asked[0].slug == "wfs-diy");
+        CHECK (asked[0].deviceName == "WFS-DIY");
+        CHECK (asked[0].host == "10.0.0.7");
+        CHECK (asked[0].port == 8000);
+        CHECK (asked[0].queryPort == 5005);
+        CHECK (asked[0].transport == "udp");
+        CHECK (asked[0].source == bundle.getChildFile ("namespaces/wfs.json").getFullPathName().toStdString());
+        CHECK (asked[0].date.size() == 10u);
+        CHECK (asked[0].knownVersion == 0);
+
+        //  The record says the name decided; the show is as it was.
+        const auto record = rig.lastRecord();
+        REQUIRE (record.args.size() == 4u);
+        CHECK (record.args[1].getString() == "wfs-diy");
+        CHECK (rig.document.showRevision() == revision);
+    }
+
+    SUBCASE ("a name given, a vendor and a model given")
+    {
+        REQUIRE (rig.apply ("window", "preset.save", { text (device), text ("my-wfs"), text ("Me"), text ("Rig") }).applied == 1u);
+        REQUIRE (asked.size() == 1u);
+        CHECK (asked[0].slug == "my-wfs");
+        CHECK (asked[0].vendor == "Me");
+        CHECK (asked[0].model == "Rig");
+    }
+
+    SUBCASE ("under the lock: saving a preset is no edit of the show")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+        CHECK (rig.apply ("window", "preset.save", { text (device) }).applied == 1u);
+        CHECK (asked.size() == 1u);
+    }
+
+    SUBCASE ("refused: a name that is not one, a device with no description, a device nobody made, a serial device")
+    {
+        for (const auto* bad : { "My Desk", "../desk", "desk/x", "DESK" })
+        {
+            INFO ("name: " << bad);
+            REQUIRE (rig.apply ("window", "preset.save", { text (device), text (bad) }).rejected == 1u);
+            CHECK (rig.lastRecord().reason == reason::badValue);
+        }
+
+        const auto opaque = rig.document.createMount ("/desk", {}).id;
+        REQUIRE (rig.apply ("window", "preset.save", { text (opaque) }).rejected == 1u);
+        CHECK (rig.lastRecord().reason == reason::badValue);
+
+        REQUIRE (rig.apply ("window", "preset.save", { text ("ZZZZZZZZ") }).rejected == 1u);
+        CHECK (rig.lastRecord().reason == reason::unknownId);
+
+        const auto gone = rig.document.createMount ("/gone", "namespaces/gone.json").id;
+        REQUIRE (rig.apply ("window", "preset.save", { text (gone) }).rejected == 1u);
+        CHECK (rig.lastRecord().reason == reason::badNamespace);
+
+        REQUIRE (rig.document.setAttribute (base + "transport", "serial").ok);
+        REQUIRE (rig.apply ("window", "preset.save", { text (device) }).rejected == 1u);
+        CHECK (rig.lastRecord().reason == reason::badValue);
+
+        CHECK (asked.empty());
+    }
+
+    CHECK (tree::presetSlugFrom ("WFS-DIY") == "wfs-diy");
+    CHECK (tree::presetSlugFrom ("  Desk  A / B ") == "desk-a-b");
+    CHECK (tree::presetSlugFrom ("/wfs") == "wfs");
+    CHECK (tree::presetSlugFrom ("***").empty());
+    CHECK (tree::isPresetSlug ("a-1"));
+    CHECK_FALSE (tree::isPresetSlug (std::string (65, 'a')));
+
+    bundle.deleteRecursively();
+}
+
+TEST_CASE ("discovery: a device saved as a preset is in the menu on the next reading, and made again from it is asked where it was")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    /*  The whole way, as serve wires it: preset.save hands the scanner the
+        job, the scanner writes and reads your folder again, the table takes
+        it, and a device made from the new preset has the query port the
+        first one had. */
+    const auto root = freshFolder ("wfg-presets-way");
+    const auto bundle = root.getChildFile ("show");
+    const auto yours = root.getChildFile ("yours");
+    REQUIRE (bundle.getChildFile ("namespaces").createDirectory());
+    REQUIRE (bundle.getChildFile ("namespaces/wfs.json").replaceWithText (servedDescription));
+
+    tree::PresetTable table;
+    table.scan (std::string (WFG_REPO_ROOT) + "/presets/devices", yours.getFullPathName().toStdString());
+    CHECK (table.find ("wfs-diy") == nullptr);
+
+    tree::PresetScanner scanner;
+    scanner.setFolder (yours.getFullPathName().toStdString());
+    REQUIRE (scanner.start());
+
+    Rig rig;
+    tree::registerPresetCommands (rig.engine.commands(), rig.document, rig.mounts, bundle, &table,
+                                  { [&scanner] { scanner.rescan(); },
+                                    [&scanner] (tree::PresetSave job) { scanner.save (std::move (job)); } });
+
+    const auto device = rig.document.createMount ("/wfs", "namespaces/wfs.json").id;
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + device + "/name", "WFS-DIY").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + device + "/port", "8000").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + device + "/queryPort", "5005").ok);
+
+    const auto statusBefore = scanner.statusRevision();
+    REQUIRE (rig.apply ("window", "preset.save", { text (device) }).applied == 1u);
+
+    auto read = takeWithin (scanner);
+    REQUIRE (read.has_value());
+    CHECK (scanner.statusRevision() > statusBefore);
+    CHECK (scanner.status().problem.empty());
+    CHECK (scanner.status().saved == "wfs-diy@1");
+
+    table.adoptYours (std::move (*read), scanner.folder());
+    const auto* saved = table.find ("wfs-diy");
+    REQUIRE (saved != nullptr);
+    CHECK (saved->origin == "yours");
+    CHECK (saved->usable());
+    CHECK (saved->queryPort == 5005);
+
+    //  Made again from it, in another show: the port and the query port the first one had.
+    REQUIRE (rig.apply ("window", "mount.createFromPreset", { text ("wfs-diy") }).applied == 1u);
+    const auto record = rig.lastRecord();
+    REQUIRE (record.args.size() == 11u);
+    CHECK (record.args[10].getInt32() == 5005);
+    const auto again = record.args[1].getString();
+    CHECK (rig.attribute ("/godot/mount/" + again + "/queryPort") == "5005");
+    CHECK (rig.attribute ("/godot/mount/" + again + "/port") == "8000");
+    CHECK (rig.attribute ("/godot/mount/" + again + "/preset") == "wfs-diy@1");
+    CHECK (rig.mounts.isLoaded (again));
+
+    //  A save that fails says why, and the reading after it still comes.
+    REQUIRE (bundle.getChildFile ("namespaces/wfs.json").replaceWithText ("[1, 2]"));
+    REQUIRE (rig.apply ("window", "preset.save", { text (device), text ("broken") }).applied == 1u);
+    REQUIRE (takeWithin (scanner).has_value());
+    CHECK_FALSE (scanner.status().problem.empty());
+    CHECK (scanner.status().saved == "wfs-diy@1");
+    CHECK_FALSE (yours.getChildFile ("broken.json").existsAsFile());
+
+    scanner.stop();
+    root.deleteRecursively();
 }

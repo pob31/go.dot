@@ -4433,7 +4433,9 @@ namespace
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
         wfg::tree::registerDescriptionCommands (engine.commands(), document, mounts, target, answers);
         wfg::tree::registerPresetCommands (engine.commands(), document, mounts, target, &presets,
-                                           { [&presetScanner] { presetScanner.rescan(); } });
+                                           { [&presetScanner] { presetScanner.rescan(); },
+                                             [&presetScanner] (wfg::tree::PresetSave job)
+                                             { presetScanner.save (std::move (job)); } });
         wfg::doc::registerBundleCommands (engine.commands(), document, session, writer);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
         wfg::audio::registerAudioSettingsCommands (engine, document, runner, runs, audioState);

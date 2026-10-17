@@ -873,7 +873,7 @@ TEST_CASE ("preset command: a device from a preset copies the file once, writes 
 
     REQUIRE (rig.apply ("window", "mount.createFromPreset", { text ("adm-osc") }).applied == 1u);
     const auto record = rig.lastRecord();
-    REQUIRE (record.args.size() == 10u);
+    REQUIRE (record.args.size() == 11u);
     const auto deviceId = record.args[1].getString();
     REQUIRE (deviceId.size() == 8u);
     CHECK (record.args[2].getString() == "/adm");
@@ -1043,7 +1043,7 @@ TEST_CASE ("preset command: a device from the Eos preset is reached over a conne
 
     REQUIRE (rig.apply ("window", "mount.createFromPreset", { text ("etc-eos-osc") }).applied == 1u);
     const auto record = rig.lastRecord();
-    REQUIRE (record.args.size() == 10u);
+    REQUIRE (record.args.size() == 11u);
     const auto deviceId = record.args[1].getString();
     CHECK (record.args[2].getString() == "/eos");
     CHECK (record.args[4].getInt32() == 3032);
@@ -1088,7 +1088,7 @@ TEST_CASE ("preset command: a device from the Yamaha RCP preset is reached over 
 
     REQUIRE (rig.apply ("window", "mount.createFromPreset", { text ("yamaha-rcp") }).applied == 1u);
     const auto record = rig.lastRecord();
-    REQUIRE (record.args.size() == 10u);
+    REQUIRE (record.args.size() == 11u);
     const auto deviceId = record.args[1].getString();
     CHECK (record.args[5].getString() == "tcp");
     CHECK (record.args[8].getString() == "rcp");
@@ -1253,7 +1253,7 @@ TEST_CASE ("preset command: a preset that says how it is heard back gives the de
     CHECK (x32->readback == "xremote");
     REQUIRE (rig.apply ("window", "mount.createFromPreset", { text ("behringer-x32-osc") }).applied == 1u);
     const auto record = rig.lastRecord();
-    REQUIRE (record.args.size() == 10u);
+    REQUIRE (record.args.size() == 11u);
     const auto deviceId = record.args[1].getString();
     CHECK (record.args[9].getString() == "xremote");
     CHECK (rig.attribute ("/godot/mount/" + deviceId + "/readback") == "xremote");

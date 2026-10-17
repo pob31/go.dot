@@ -126,6 +126,14 @@ namespace wfg::tree
         if (preset.port < 0 || preset.port > 65535)
             return (slug + ": PORT is 0 to 65535");
 
+        /*  WHERE IT IS ASKED (namespace draft §76, ARY): a device saved as a
+            preset from an OSCQuery server keeps the port that server answers
+            on, so one made from the preset is asked there too. */
+        preset.queryPort = intOf (godot, "QUERY_PORT", 0);
+
+        if (preset.queryPort < 0 || preset.queryPort > 65535)
+            return (slug + ": QUERY_PORT is 0 to 65535");
+
         /*  PROVENANCE IS NOT OPTIONAL (presets/devices/README.md): a file
             written from memory of a protocol proves nothing, so one that names
             no document is refused rather than shipped. */

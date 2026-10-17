@@ -50,6 +50,7 @@ namespace wfg::tree
         std::string framing = "length";   ///< GODOT.FRAMING, OSC over TCP only: length or slip
         std::string readback;             ///< GODOT.READBACK (DP.10): how the device is heard back, empty for none
         int port = 0;                     ///< GODOT.PORT, the device's usual one; nought when it has none
+        int queryPort = 0;                ///< GODOT.QUERY_PORT (§76, ARY): where it answers OSCQuery; nought for nowhere
         std::vector<std::string> roots;   ///< what a device made from it answers at (`rootsOfNamespace`)
         std::vector<std::string> sources; ///< GODOT.SOURCES: the documents it was written from, one line each
         std::string generated;            ///< GODOT.GENERATED: the script that writes it, or empty

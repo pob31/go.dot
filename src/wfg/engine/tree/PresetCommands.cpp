@@ -17,6 +17,7 @@
 #include <wfg/engine/command/Command.h>
 #include <wfg/engine/tree/TreeCommands.h>
 
+#include <algorithm>
 #include <cstdlib>
 #include <utility>
 #include <vector>
@@ -79,6 +80,39 @@ namespace wfg::tree
         }
     }
 
+    bool isPresetSlug (const std::string& slug)
+    {
+        return ! slug.empty() && slug.size() <= 64
+            && std::all_of (slug.begin(), slug.end(),
+                            [] (char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-'; });
+    }
+
+    std::string presetSlugFrom (const std::string& name)
+    {
+        std::string slug;
+
+        for (const auto c : name)
+        {
+            if (c >= 'A' && c <= 'Z')
+                slug += static_cast<char> (c - 'A' + 'a');
+            else if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))
+                slug += c;
+            else if (! slug.empty() && slug.back() != '-')
+                slug += '-';
+        }
+
+        while (! slug.empty() && slug.back() == '-')
+            slug.pop_back();
+
+        if (slug.size() > 64)
+            slug.resize (64);
+
+        while (! slug.empty() && slug.back() == '-')
+            slug.pop_back();
+
+        return slug;
+    }
+
     std::string presetFileFor (const std::string& slug, int version)
     {
         return "namespaces/" + slug + "-v" + std::to_string (version) + ".json";
@@ -105,6 +139,78 @@ namespace wfg::tree
                             return Outcome::ok (args);
                         } }));
 
+        /*  A DEVICE SAVED AS A PRESET (namespace draft §76, ARY): its
+            description, kept in the bundle, written to your folder with a
+            header saying what it is and where it came from. Decided here -
+            the name, from the device's when none is given, and what the rows
+            say - and written by the scanner's thread. The device needs a
+            description: an opaque one has nothing to save. */
+        registry.add (machineLocal ({ "preset.save",
+                        "Saves a device's description to your device presets (namespace draft 76): a device"
+                        " that declared itself, one found on the network or one made from a preset. The name is"
+                        " the device's own unless one is given; the file is written beside your other presets"
+                        " and the menu offers it. Edits no show.",
+                        { { "mount", 's', false }, { "slug", 's', true }, { "vendor", 's', true }, { "model", 's', true } },
+                        false,
+                        [&document, &bundleFolder, presets, write = std::move (hooks.save)]
+                        (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto mountId = args[0].getString();
+                            const auto declaration = mountDeclarationFor (document, mountId);
+
+                            if (! declaration)
+                                return Outcome::rejected (reason::unknownId);
+
+                            if (declaration->namespaceFile.empty())
+                                return Outcome::rejected (reason::badValue);
+
+                            const auto source = bundleFolder.getChildFile (juce::String (declaration->namespaceFile));
+
+                            if (! source.isAChildOf (bundleFolder) || ! source.existsAsFile())
+                                return Outcome::rejected (reason::badNamespace);
+
+                            //  A preset names a datagram, a connection or a MIDI port, and nothing else.
+                            if (declaration->transport != "udp" && declaration->transport != "tcp"
+                                && declaration->transport != "midi")
+                                return Outcome::rejected (reason::badValue);
+
+                            const auto fromPreset = attributeOf (document, "/godot/mount/" + mountId + "/preset");
+                            const auto given = args.size() > 1 ? args[1].getString() : std::string {};
+                            const auto slug = ! given.empty() ? given
+                                            : ! fromPreset.empty() ? fromPresetOf (fromPreset).slug
+                                            : presetSlugFrom (declaration->name.empty() ? declaration->prefix
+                                                                                        : declaration->name);
+
+                            if (! isPresetSlug (slug))
+                                return Outcome::rejected (reason::badValue);
+
+                            PresetSave job;
+                            job.source = source.getFullPathName().toStdString();
+                            job.slug = slug;
+                            job.vendor = args.size() > 2 ? args[2].getString() : std::string {};
+                            job.model = args.size() > 3 ? args[3].getString() : std::string {};
+                            job.deviceName = declaration->name.empty() ? declaration->prefix : declaration->name;
+                            job.host = declaration->host;
+                            job.transport = declaration->transport;
+                            job.wire = declaration->wire;
+                            job.framing = declaration->framing;
+                            job.readback = declaration->readback;
+                            job.port = declaration->port;
+                            job.queryPort = declaration->queryPort;
+                            job.fromPreset = fromPreset;
+                            job.date = juce::Time::getCurrentTime().formatted ("%Y-%m-%d").toStdString();
+
+                            if (const auto* known = presets != nullptr ? presets->find (slug) : nullptr)
+                                job.knownVersion = std::max (known->version, known->shadows);
+
+                            if (write)
+                                write (std::move (job));
+
+                            return Outcome::ok ({ osc::Value::string (mountId), osc::Value::string (slug),
+                                                  osc::Value::string (args.size() > 2 ? args[2].getString() : std::string {}),
+                                                  osc::Value::string (args.size() > 3 ? args[3].getString() : std::string {}) });
+                        } }));
+
         registry.add ({ "mount.createFromPreset",
                         "Makes a device from an installed preset: the preset copied into the bundle, the device"
                         " made at the preset's roots with its port and transport, and loaded. The trailing"
@@ -112,7 +218,7 @@ namespace wfg::tree
                         { { "slug", 's', false }, { "id", 's', true }, { "prefix", 's', true },
                           { "namespace", 's', true }, { "port", 'i', true }, { "transport", 's', true },
                           { "version", 'i', true }, { "framing", 's', true }, { "wire", 's', true },
-                          { "readback", 's', true } },
+                          { "readback", 's', true }, { "queryPort", 'i', true } },
                         true,
                         [&document, &mounts, &bundleFolder, presets] (CommandContext&, const std::vector<osc::Value>& args)
                         {
@@ -130,6 +236,7 @@ namespace wfg::tree
                             std::string prefixRow, file, transport, framing = "length", wire = "osc", readback;
                             int port = 0;
                             int version = 0;
+                            int queryPort = 0;
 
                             if (args.size() >= 7)
                             {
@@ -147,6 +254,9 @@ namespace wfg::tree
 
                                 if (args.size() >= 10)
                                     readback = args[9].getString();
+
+                                if (args.size() >= 11)
+                                    queryPort = args[10].getInt32();
                             }
                             else if (preset != nullptr && preset->usable())
                             {
@@ -158,6 +268,7 @@ namespace wfg::tree
                                 framing = preset->framing;
                                 wire = preset->wire;
                                 readback = preset->readback;
+                                queryPort = preset->queryPort;
                             }
                             else
                             {
@@ -202,6 +313,10 @@ namespace wfg::tree
                             if (! readback.empty())
                                 writes.push_back ({ "readback", readback });
 
+                            //  And where it answers OSCQuery, for a preset saved from such a device (§76, ARY).
+                            if (queryPort > 0)
+                                writes.push_back ({ "queryPort", std::to_string (queryPort) });
+
                             if (const auto written = writeRows (document, made.id, writes); ! written.applied)
                                 return written;
 
@@ -214,7 +329,8 @@ namespace wfg::tree
                                                   osc::Value::string (prefixRow), osc::Value::string (file),
                                                   osc::Value::int32 (port), osc::Value::string (transport),
                                                   osc::Value::int32 (version), osc::Value::string (framing),
-                                                  osc::Value::string (wire), osc::Value::string (readback) });
+                                                  osc::Value::string (wire), osc::Value::string (readback),
+                                                  osc::Value::int32 (queryPort) });
                         } });
 
         registry.add ({ "mount.refreshPreset",

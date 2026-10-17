@@ -16,10 +16,123 @@
 
 #include <wfg/engine/tree/PresetScanner.h>
 
+#include <wfg/engine/json/JsonValue.h>
+#include <wfg/engine/json/JsonWrite.h>
+
+#include <juce_core/juce_core.h>
+
+#include <algorithm>
 #include <utility>
 
 namespace wfg::tree
 {
+    namespace
+    {
+        json::Value text (const std::string& words) { return json::Value (words); }
+        json::Value number (int value) { return json::Value (static_cast<double> (value)); }
+
+        std::string stringIn (const json::Object& fields, const char* key)
+        {
+            const auto found = fields.find (key);
+            return found != fields.end() && found->second.isString() ? found->second.asString() : std::string {};
+        }
+    }
+
+    std::string savePresetNow (const PresetSave& save, const std::string& folderPath, std::string& savedAs)
+    {
+        const juce::File source (juce::String::fromUTF8 (save.source.c_str()));
+        juce::MemoryBlock bytes;
+
+        if (! source.loadFileAsData (bytes))
+            return "could not read " + save.source;
+
+        const std::string description (static_cast<const char*> (bytes.getData()), bytes.getSize());
+
+        //  THE FILE'S OWN HEADER, when it has one: a copy of a shipped preset keeps what it says.
+        json::Object fields;
+
+        if (const auto span = rootGodotSpan (description))
+            if (const auto parsed = json::parse (std::string_view (description).substr (span->begin, span->end - span->begin));
+                parsed.ok() && parsed.value->isObject())
+                fields = parsed.value->asObject();
+
+        const auto ownVersion = stringIn (fields, "PRESET") == save.slug && fields.count ("VERSION") > 0
+                                  ? fields.at ("VERSION").asInt() : 0;
+        const auto highest = std::max (save.knownVersion, ownVersion);
+        const auto version = highest > 0 ? highest + 1 : 1;
+
+        const auto vendor = ! save.vendor.empty() ? save.vendor
+                          : ! stringIn (fields, "VENDOR").empty() ? stringIn (fields, "VENDOR") : save.deviceName;
+        const auto model = ! save.model.empty() ? save.model
+                         : ! stringIn (fields, "MODEL").empty() ? stringIn (fields, "MODEL")
+                         : save.deviceName + " (OSCQuery)";
+
+        fields["PRESET"] = text (save.slug);
+        fields["VERSION"] = number (version);
+        fields["VENDOR"] = text (vendor);
+        fields["MODEL"] = text (model);
+        fields["TRANSPORT"] = text (save.transport);
+        fields["WIRE"] = text (save.wire);
+
+        if (save.transport == "tcp")
+            fields["FRAMING"] = text (save.framing);
+        else
+            fields.erase ("FRAMING");
+
+        if (save.port > 0)
+            fields["PORT"] = number (save.port);
+        else
+            fields.erase ("PORT");
+
+        if (save.queryPort > 0)
+            fields["QUERY_PORT"] = number (save.queryPort);
+        else
+            fields.erase ("QUERY_PORT");
+
+        if (! save.readback.empty() && save.readback != "none")
+            fields["READBACK"] = text (save.readback);
+        else
+            fields.erase ("READBACK");
+
+        /*  WHERE IT CAME FROM, one line more: a capture of a device, or a copy
+            of a preset. No script wrote this copy, so GENERATED goes. */
+        json::Array sources;
+
+        if (const auto found = fields.find ("SOURCES"); found != fields.end() && found->second.isArray())
+            sources = found->second.asArray();
+
+        sources.push_back (text (! save.fromPreset.empty()
+                                   ? "copied from " + save.fromPreset + " on " + save.date
+                                   : "captured from " + save.deviceName + " at " + save.host + ":"
+                                       + std::to_string (save.queryPort) + " on " + save.date));
+        fields["SOURCES"] = json::Value (std::move (sources));
+        fields.erase ("GENERATED");
+
+        const auto written = json::compact (withGodotHeader (description, json::Value (std::move (fields))));
+
+        if (written.empty())
+            return "the description of " + save.deviceName + " is not a JSON object";
+
+        //  READ AS A PRESET BEFORE IT IS ONE: a file that would not be offered is not written.
+        if (const auto preset = readPresetQuickly (save.slug, written); ! preset.usable())
+            return preset.problem;
+
+        const auto folder = juce::File (juce::String::fromUTF8 (folderPath.c_str()));
+        const auto target = folder.getChildFile (juce::String (save.slug) + ".json");
+
+        if (! folder.createDirectory())
+            return "could not make the folder " + folderPath;
+
+        juce::TemporaryFile temporary (target);
+
+        if (! temporary.getFile().replaceWithData (written.data(), written.size())
+            || ! temporary.overwriteTargetFileWithTemporary())
+            return "could not write " + target.getFullPathName().toStdString();
+
+        savedAs = save.slug + "@" + std::to_string (version);
+        return {};
+    }
+
     PresetScanner::~PresetScanner()
     {
         stop();
@@ -66,6 +179,16 @@ namespace wfg::tree
         wake.notify_one();
     }
 
+    void PresetScanner::save (PresetSave job)
+    {
+        {
+            const std::lock_guard<std::mutex> lock { guard };
+            saves.push_back (std::move (job));
+        }
+
+        wake.notify_one();
+    }
+
     std::optional<std::vector<Preset>> PresetScanner::take()
     {
         if (! ready.load (std::memory_order_acquire))
@@ -96,15 +219,33 @@ namespace wfg::tree
     {
         for (;;)
         {
+            std::vector<PresetSave> toSave;
+
             {
                 std::unique_lock<std::mutex> lock { guard };
 
-                wake.wait (lock, [this] { return stopping.load (std::memory_order_relaxed) || rescanWanted; });
+                wake.wait (lock, [this] { return stopping.load (std::memory_order_relaxed) || rescanWanted || ! saves.empty(); });
 
                 if (stopping.load (std::memory_order_relaxed))
                     return;
 
                 rescanWanted = false;
+                toSave.swap (saves);
+            }
+
+            //  THE SAVES FIRST, then the reading that offers them.
+            for (const auto& job : toSave)
+            {
+                std::string savedAs;
+                auto problem = savePresetNow (job, yoursPath, savedAs);
+                auto now = status();
+
+                now.problem = std::move (problem);
+
+                if (! savedAs.empty())
+                    now.saved = std::move (savedAs);
+
+                setStatus (std::move (now));
             }
 
             /*  Outside the lock: this is the part that touches the disk. The

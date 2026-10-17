@@ -372,3 +372,16 @@ TEST_CASE ("preset: a header is put in place of the old one, or first when there
         CHECK (withGodotHeader ("[1]", header).empty());
     }
 }
+
+TEST_CASE ("preset: QUERY_PORT is read where it is given, nought where not, and a number outside a port is refused")
+{
+    /*  Namespace draft §76, ARY: a preset saved from an OSCQuery server keeps
+        the port it answers on. */
+    CHECK (readPreset ("eos-osc", withGodot (R"JSON({"PRESET": "eos-osc", "VERSION": 1, "VENDOR": "V", "MODEL": "M",
+                                                   "QUERY_PORT": 5005, "SOURCES": ["s"]})JSON")).queryPort == 5005);
+    CHECK (readPreset ("eos-osc", withGodot (R"JSON({"PRESET": "eos-osc", "VERSION": 1, "VENDOR": "V", "MODEL": "M",
+                                                   "SOURCES": ["s"]})JSON")).queryPort == 0);
+    CHECK (readPreset ("eos-osc", withGodot (R"JSON({"PRESET": "eos-osc", "VERSION": 1, "VENDOR": "V", "MODEL": "M",
+                                                   "QUERY_PORT": 70000, "SOURCES": ["s"]})JSON")).problem.find ("QUERY_PORT")
+           != std::string::npos);
+}
