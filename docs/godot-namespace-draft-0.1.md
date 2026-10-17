@@ -17035,7 +17035,7 @@ until that stage lands.
 | L11 | A hand on the desk that no read-back saw is overridden; so is one that moved before the desk's first read-back of the GO's write | "each desk value goes back" |
 | L12 | A value pre-sent after the GO by a next scene held back by something playing in it can be restored after the put-back | "each desk value goes back" |
 | L13 | MIDI, OSC events and anything sent to an opaque device are never put back; on a device or for a cue that takes back, the corrected GO sends them again, so the device acts a second time; on one left to its operator, it does not | "put back", for what can be read or written back |
-| L14 | Untimed scenes, and members of automatic sequences or timelines, that the GO stopped are said, not relaunched; a scene the GO stopped comes back only once it has ended, footer run; a cue stopped while still arming is said | "a cue it stopped comes back", for what can be placed |
+| L14 | Untimed scenes, and members of automatic sequences or timelines, that the GO stopped are said, not relaunched; a scene the GO stopped comes back only once it has ended, footer run; a cue stopped while still arming is said *(2026-10-17, §77: a sampler bank excepted - armed again, the clips its stop ended back where they would be now - and a clip of a bank still armed)* | "a cue it stopped comes back", for what can be placed |
 | L15 | A scene the GO stopped is relaunched at its elapsed second; what its footer did elsewhere stands, and is said. An act the GO ended is different: its footer is the GO's, taken back whole (HE) | "comes back" |
 | L16 | A relaunch in the tick or two between a sound's stop landing and its end being reported needs a second voice | "comes back" |
 | L17 | A take press that closed a first pass or a layer, and a clear, cannot be undone | "put back", for exact inverses |
@@ -17739,9 +17739,9 @@ undone. And one sentence on the tick after the press says what was put back and 
 | A sound it stopped while still arming | Said: "stopped by the GO while it was still arming - not started again" (L14) |
 | A timed scene it stopped, ended | Put back at its elapsed second (`solve`), nobody's GO, its sounds fading in; the network values its cues placed before that second hold re-sent where they take back, diffed by the flush; those left to their operators planned over and named (HR); those after it sent at their time |
 | A timed scene it stopped, still in its footer | Put back once it has ended: the hook submits `go.dohRelaunch`, whose handler relaunches it then and reports on its own. Dropped by a GO on its list, a jump or Esc. "comes back once it has ended, unless a GO comes first" |
-| An untimed scene, or a member of one the machine paces | Said, not relaunched (L14) |
+| An untimed scene, or a member of one the machine paces | Said, not relaunched (L14). *A sampler bank since 2026-10-17: armed again, its header passed over, and the clips its stop ended back on their strips where they would be now (§77)* |
 | An advance on a slice, a group's `stopAfter` | As they were - withdrawn while the boundary is still to be placed |
-| A sampler bank it closed; a strip a member of its took | Opened again - or, finished since, fired again, nobody's GO; the strip given back |
+| A sampler bank it closed; a strip a member of its took | Opened again - or, finished since, fired again, nobody's GO; the strip given back. *(2026-10-17, §77: the strip given back before the stops are; a bank fired again closes no other bank and keeps lost the strips it had lost before the GO; one the GO also stopped is armed once)* |
 | A take press (its transport cues', its mics' `onGo`) | Undone by its exact inverse while the take is still where the press left it; a first pass or a layer closed, and a clear, said (L17) |
 | Its own fade and stop runs | Ended, taken back - their jobs replaced above; a stop landing sooner than the Doh fade on one of its own sounds keeps landing (HT) |
 | An act it ended that cannot come back (it loops, or sits in a scene the machine paces) | Said: "<act> ended when <cue> was fired; it was not brought back - the next GO enters it again from its header" |
@@ -30964,3 +30964,113 @@ nothing to announce (their presets are written by hand); host names (`.local`) a
 an IPv4 address; a value at the top of a description (an address of one part, `/volume`), which no
 device's root matches (`tree::prefixMatchLength`, as for any described device); a saved preset linked
 back to the device it was saved from; the web console's own Network tab.
+
+## 77. Doh! brings back a sampler bank the GO stopped, and its clips
+
+Reported by the author on 2026-10-17: *"In case of a sampler group, cueing its stop group unloads
+immediately all running files. But Doh! doesn't restore the sampler group nor interrupted running
+files."*
+
+A GO on a stop cue aimed at a sampler bank - §3.27's explicit disarm - ends every clip the bank is
+playing, and the bank with them. Doh! (§24) took that GO back and brought back neither, for two
+reasons, both D3's (§24.13). The stop was recorded on the bank alone: the clips its job then ended
+left no record. And the put-back of a stopped scene refused every group armed until stopped, with
+"stopped by the GO - not started again" (L14, an implementer's call never put to the author). Only a
+bank the GO had *closed*, by arming another that took over the desk, came back. A stop cue aimed at
+one clip of a bank was refused too: a bank is not an act a person runs. The stop itself is
+unchanged - a hard stop cuts the clips, the fade verb fades the bank first (§23.14). PRD §3.32.
+Decisions run from ASD.
+
+### 77.1 What it does
+
+- **The bank is armed again**, nobody's GO, its header passed over as for a bank the GO closed (OD):
+  its members armed on their strips as before. It comes back at the level it had when the GO stopped
+  it, so a bank a stop faded out is back as it was before the fade (OG). It closes no other bank, and
+  the strips it had lost to another bank before the GO stay that bank's.
+- **Each clip it was playing comes back** on its strip, where it would be now - counted from its own
+  start at its cue's speed - fading in over the panic fade at its fader's level, as a cue the GO
+  stopped does (D3). One that would have ended by now stays ended, and is said.
+- **A hold clip** comes back held by the hand that held it, and that hand's release lets it go. If
+  the hand let go of the strip while the bank was stopped, the clip stays stopped, and is said.
+- **A clip a stop cue stopped on its own**, in a bank still armed, comes back on its strip the same
+  way, in place of the idle arm its bank made when it ended. One pressed again since is the
+  performer's: "running again already".
+- **A bank still running its footer** at the Doh comes back once the footer has ended, by
+  `go.dohRelaunch` (§24.13), its clips with it, counted to that moment.
+- The report says it: "<bank>: armed again", then "<clip>: put back where it would be now", or why not.
+
+### 77.2 Decisions
+
+| | Decision | Whose |
+|---|---|---|
+| **ASD** | **The bank and its clips come back**: the bank armed again, its header not run again; each clip that was playing back on its strip where it would be now, fading in over the panic fade at its fader's level. | the author's (offered as "Bank and its clips", recommended) |
+| **ASE** | **A hold clip comes back unless its hand let go**: held by the same hand, unless that hand let go of its strip while the bank was stopped. | the author's (offered as "Back unless let go", recommended) |
+| **ASF** | **A stop cue aimed at one clip of a bank** brings that clip back the same way, the bank left as it is. | the author's (offered as "Stop cue on one clip") |
+| **ASG** | **Time groups are not in this round**: one the GO stopped is still said, not relaunched (L14). | the author's (the option offered beside ASF, not taken) |
+| ASH | **A bank armed again by a Doh closes no other bank**: `fireKind`'s takeover is passed over while a put-back makes it. This mends D3's put-back of a bank the GO closed, which closed a bank that had lived beside it before the GO. | mine |
+| ASI | **Strips stay whose they were**: the strips a member of the GO's took from another bank are given back before the stops are put back, and those a bank had lost before the GO stay lost when it is armed again - the bank that took them keeps them. The same for a closed bank fired again. | mine |
+| ASJ | **Which clips**: a sound of the bank's that had been heard, ended since the GO by the stop its bank's job sent it (an abort's mark - its own end, a release or a MUTE leave none), on a strip the bank still had. A picture is said, not put back; a cart bank's message or script had left, and is neither. | mine |
+| ASK | **Where and how loud**: from where its cue begins - a member its bank armed carries no arm origin of its own - plus the seconds since it started at its cue's speed; a slice at the in-point of the one it was in (L1); at its trim, and at its own level. A solo is not brought back: a hook lets it go, and a replay could not say the same. | mine |
+| ASL | **A release is noted whether or not the strip holds anything**, by strip and by hand (`lettingGo`), from `strip.release` and a release by name, so a release on the free strip of a stopped bank counts. | mine |
+| ASM | **A bank closed by another before the GO, then stopped by it, is not armed again** - it would take back what it had given up - and is said; a bank the horizon had only made ready is not armed. | mine |
+
+### 77.3 Limitations
+
+| | Limitation | Leaves intact |
+|---|---|---|
+| L47 | A fader moved while its strip was free is not seen: a hold clip on a touch fader comes back at its trim, and the fader flies there | ASE, for a pad and a release by name |
+| L48 | A clip stopped from the running pane after the GO, then by its bank's stop, reads as the bank's and comes back | ASJ |
+| L49 | A clip whose strip is still held at the Doh - another bank's clip playing out on it - waits for it, and starts late by up to that wait | "where it would be now" |
+| L50 | A bank armed again runs its footer again when it next ends | OD, for the header |
+| L51 | A follower's seat (§58) does not carry the releases noted (ASL): after a promotion, a Doh brings a hold clip back even if its hand let go before it | ASE |
+
+### 77.4 Pieces
+
+Built 2026-10-17 in 2b031522.
+
+- `Runner::relaunchBank`, reached from `relaunchScene` ahead of its refusal of the groups armed until
+  stopped, so both the put-back at the Doh and `go.dohRelaunch` reach it; `relaunchMember`, reached
+  from `relaunchStopped` for a clip of a bank; `relaunchClip`, `clipComesBack`, `stoppedClipOf`;
+  `levelWouldBe`, `relaunchStopped`'s own level, shared; `armBankAgain`, the D3 bank put-back's own
+  arm, shared; `underActsAPersonRuns`, OC's walk, shared.
+- `fireKind`: the takeover passed over under `makingForPutBack` (ASH).
+- `goDoh`, step 13: the strips given back before the stops (ASI). `putBackStops`: a bank the GO both
+  closed and stopped is opened before it is relaunched, and the closed bank's own put-back passes
+  over a bank running again, so it is armed once.
+- `releaseStrip`, `releaseMember`: `lettingGo` (ASL).
+
+### 77.5 Tests
+
+`SamplerTests`, written first and run on d69188f9: seven failed, and the eighth once it asked for the
+clip as well as the bank.
+
+- A bank a hard stop disarmed: armed again, nobody's GO; its clip back under it on its strip, at its
+  trim and its point, fading in over 50 ticks; the others armed again; the Doh's record naming the
+  bank, then the clip; replayed the same.
+- A bank a stop faded out: back at the level it had.
+- A bank still in its footer: nothing at the Doh, then the bank and its clip by `go.dohRelaunch`,
+  counted to the relaunch; replayed the same.
+- A clip that would have ended by now, and one that had ended before the GO: not put back, the bank
+  back.
+- Strips lost before the GO stay lost, and the bank that took them is not closed.
+- A bank one GO both closed and stopped: armed once, its clip back.
+- A hold clip: back, held by its hand, and let go by its release (replayed the same); let go on the
+  free strip, or between the Doh and its footer's end: not back.
+- A clip stopped alone: back in its bank in place of the idle arm (replayed the same); pressed again
+  since: "running again already".
+
+Every Doh! case (195) and every `SamplerTests` case (62) pass under C and fr_FR; the clang-tidy
+stand-in is clean on `Runner.cpp` and `SamplerTests.cpp`. The full local ctest passed 223 of 224:
+`blackbox.timegroup.C` was red on a timing check under load, a different one alone, and green once
+the machine was quiet; it drives no bank and no Doh.
+
+### 77.6 Owed
+
+The author's bench: a long clip played from a pad and from a fader, a hard stop GO'd on its bank,
+Doh! two seconds later - the clip back at its point, fading in over the panic fade, its fader where
+it was, the other strips armed; then with a hold pad kept down, and let go before the Doh. And the
+author's review of the words (ASH-ASM, L47-L51).
+
+### 77.7 Not built
+
+Time groups (ASG); a picture in a bank (ASJ); a solo (ASK).

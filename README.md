@@ -286,7 +286,7 @@ and says afterwards what was built against what was drawn.
 | Phase 6 | Surfaces, strips, DCAs, sampler groups, the D700 | §16 |
 | Phase 9 | Per-cue EQ, the plugin sandbox and inserts; the live rack; live sampling | §17–§19 |
 | Lanes and speed | Level and send lanes, recorded from faders; varispeed and timestretch; fades on what a cue owns | §20, §22, §26, §28, §34 |
-| Phase 10, in part | The stop levels held to PRD §4.4, the panic fade and GO debounce, Doh!; panic values settled as `park` | §21, §23, §24, §73 |
+| Phase 10, in part | The stop levels held to PRD §4.4, the panic fade and GO debounce, Doh! - a sampler bank a GO's stop cue disarmed brought back with its clips; panic values settled as `park` | §21, §23, §24, §73, §77 |
 | Shows | Shows and performances, Enable/Disable/Jump, Save as | §25, §27, §32 |
 | Imports | Ableton Live and QLab | §29, §46 |
 | Phase 8 | Video: stills, movies, the native renderer, NDI/Spout/Syphon, read-ahead, pictures in sampler groups, the DCA knob; keys, text cues and blur | §35–§37, §40, §44, §47–§50, §61 |

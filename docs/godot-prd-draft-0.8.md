@@ -3584,7 +3584,12 @@ it pressed on a sampling channel (§3.31) is undone by its exact inverse; and wh
 changed since — a hand on the desk, another cue's fade — is left alone and named. **An act the GO
 ended**, by firing its last member or stopping its last sounding one, is brought back to life with
 its footer undone, so the corrected GO joins it: its header does not run again, and its footer runs
-once, after it *(implementer's reading, the author's to overrule)*.
+once, after it *(implementer's reading, the author's to overrule)*. **A sampler bank its stop cue
+disarmed** is armed again, its header not run again, and each clip it was playing comes back on its
+strip where it would be now, fading in over the panic fade at its fader's level — a hold clip only
+while the hand that held it has not let go of its strip since; a clip a stop cue stopped on its own
+comes back in its bank the same way (the author, 2026-10-17; `docs/godot-namespace-draft-0.1.md`
+§77). A time group the GO stopped is still not brought back.
 
 **What reached a device is its operator's** (the author, 2026-10-01). His case: *"on a show I had
 OSC cues sent to the light board that triggered the lights, sometimes sequences, not just a simple

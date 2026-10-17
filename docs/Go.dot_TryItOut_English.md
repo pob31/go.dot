@@ -73,7 +73,7 @@ A show is a folder that contains one or more `.wfg` files plus a `media/` folder
 | Ctrl+L | Lock the show so nothing can be edited by accident |
 | Ctrl+T | Load to time: start the show from the middle of a scene |
 
-**Doh!** exists for the mistake that happens every so often: a GO pressed a beat early. Within a short window (set on the *Playback* tab), F9 stops what that GO started, puts standby back, and returns devices to the state they were in. Sound that already reached the speakers cannot be taken back, and Go.dot does not pretend otherwise.
+**Doh!** exists for the mistake that happens every so often: a GO pressed a beat early. Within a short window (set on the *Playback* tab), F9 stops what that GO started, puts standby back, and returns devices to the state they were in. What that GO stopped comes back where it would be now, fading in: a cue, or a sampler bank with the clips it was playing on their faders and pads. Sound that already reached the speakers cannot be taken back, and Go.dot does not pretend otherwise.
 
 Two GOs closer than half a second are treated as one bounce of the finger and the second is refused. You can change this on the *Playback* tab.
 

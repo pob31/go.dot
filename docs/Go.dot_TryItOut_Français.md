@@ -75,7 +75,7 @@ Un spectacle est un dossier avec au moins un fichier `.wfg` et un dossier `media
 | Ctrl+L | Verrouiller le spectacle pour éviter toute modification accidentelle |
 | Ctrl+T | Charger à un instant : repartir du milieu d'une scène |
 
-**Doh!** existe pour l'erreur qui arrive de temps en temps : un GO parti un temps trop tôt. Dans une courte fenêtre (réglable dans l'onglet *Playback*), F9 arrête ce que ce GO a lancé, remet l'attente en place et ramène les appareils dans l'état d'avant. Le son déjà sorti des enceintes ne se rattrape pas, et Go.dot ne prétend pas le contraire.
+**Doh!** existe pour l'erreur qui arrive de temps en temps : un GO parti un temps trop tôt. Dans une courte fenêtre (réglable dans l'onglet *Playback*), F9 arrête ce que ce GO a lancé, remet l'attente en place et ramène les appareils dans l'état d'avant. Ce que ce GO a arrêté revient là où il en serait, en fondu : une cue, ou un groupe sampler avec les clips qu'il jouait sur ses faders et ses pads. Le son déjà sorti des enceintes ne se rattrape pas, et Go.dot ne prétend pas le contraire.
 
 Deux GO à moins d'une demi-seconde d'intervalle sont pris pour un rebond du doigt : le second est refusé. Réglable dans l'onglet *Playback*.
 
