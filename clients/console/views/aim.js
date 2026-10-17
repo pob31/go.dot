@@ -20,7 +20,8 @@
 import { tree } from "../plumbing/tree.js";
 import { dbl, str } from "../plumbing/osc.js";
 import { selection } from "../model/selection.js";
-import { goList } from "../model/lists.js";
+import { goList, membersOf } from "../model/lists.js";
+import { aimReach, offsetText } from "../model/touch.js";
 import { gesture } from "../gestures/table.js";
 import { el, esc, cueName } from "./common.js";
 import { reconcile } from "./reconcile.js";
@@ -96,6 +97,17 @@ function renderSteps(focus, atCue) {
   reconcile(box, chips);
 }
 
+/*  THE LENGTHS A CUE HOLDS: its own `duration`, a fact about its file the
+    engine read once at open (namespace draft 13.8), and under it every
+    member's, since a group has no length of its own. */
+function lengthsUnder(id, out) {
+  out.push(Number(tree.cue(id, "duration", 0)));
+
+  for (const member of membersOf(id)) lengthsUnder(member, out);
+
+  return out;
+}
+
 function renderAim() {
   //  The list GO acts on, never a cart - a cart has no order to aim into (namespace draft 74).
   const focus = goList();
@@ -119,13 +131,25 @@ function renderAim() {
   el("aim-load").disabled = !atCue;
 
   /*  Not while somebody is dragging it: writing the slider's own value back
-      under a finger is how a control fights the person using it. */
+      under a finger is how a control fights the person using it - and so is
+      moving its end, which moves the thumb under the finger just the same.
+
+      HOW FAR IT REACHES (WT.9): the aimed cue's whole length, its members'
+      summed for a group (`aimReach`), and never short of where the aim
+      already stands, so a shorter cue picked at the old offset shows the
+      engine's offset rather than its own end. The end first, since the
+      browser keeps the value inside it. */
   const slider = el("aim-offset");
 
-  if (document.activeElement !== slider) slider.value = String(atOffset);
+  if (document.activeElement !== slider) {
+    const reach = Math.max(aimReach(atCue ? lengthsUnder(atCue, []) : []), atOffset);
 
-  el("aim-offset-text").textContent = Number(slider.value) < 0
-    ? "before" : Number(slider.value).toFixed(1) + " s";
+    if (Number(slider.max) !== reach) slider.max = String(reach);
+
+    slider.value = String(atOffset);
+  }
+
+  el("aim-offset-text").textContent = offsetText(Number(slider.value));
 
   const landed = String(tree.get("/godot/list/" + focus + "/statePosition", ""));
   el("aim-landed").textContent = landed && landed !== aim

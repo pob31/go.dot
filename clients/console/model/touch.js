@@ -393,8 +393,45 @@ export function numberText(value, integer) {
 export function aimMoved(start, dx, distance, { min, max, step, width }) {
   const span = max - min;
   const moved = start + dx * (span / Math.max(1, width)) * rateFor(distance, NUMBER_UNIT_PX);
-  const stepped = step > 0 ? min + Math.round((moved - min) / step) * step : moved;
+  const stepped = step > 0 ? roundedTo(moved, step) : moved;
   return clamp(stepped, min, max);
+}
+
+//  The aim's slider reaches at least this far, whatever the cue's length.
+export const AIM_REACH_S = 60;
+
+/*  HOW FAR THE AIM'S SLIDER REACHES (WT.9): the whole cue - its own length
+    and, for a group, which has none of its own, everything inside it summed -
+    rounded up to the next ten seconds and never less than a minute. The page
+    stopped at a minute whatever the cue, so a four-minute song could not be
+    aimed at 3:00 from a tablet while the window typed any number. A length
+    the engine could not read is nought and adds nothing; a looping cue has
+    no end a slider could reach and gets the minute, as before. */
+export function aimReach(seconds) {
+  let total = 0;
+
+  for (const length of seconds || [])
+    if (Number.isFinite(length) && length > 0) total += length;
+
+  return Math.max(AIM_REACH_S, Math.ceil(total / 10) * 10);
+}
+
+/*  THE OFFSET AS WORDS: "before" for the pointer on the cue with nothing of
+    it done, seconds to a tenth under a minute, and the clock past it, as the
+    window spells a step under the aimed cue (model/LoadToTime's offsetText).
+    Tenths are counted whole first so 70.3 is never 70 and two tenths. */
+export function offsetText(seconds) {
+  if (!(seconds >= 0)) return "before";
+  if (seconds < 60) return seconds.toFixed(1) + " s";
+
+  const tenths = Math.floor(seconds * 10 + 1e-6);
+  const whole = Math.floor(tenths / 10);
+  const hours = Math.floor(whole / 3600);
+  const minutes = Math.floor(whole / 60) % 60;
+  const two = (n) => String(n).padStart(2, "0");
+
+  return (hours > 0 ? hours + ":" + two(minutes) : String(minutes)) + ":" + two(whole % 60) +
+         "." + (tenths % 10);
 }
 
 /** Whether a number's row is a LEVEL - a decibel row reaching silence - which drags along the fader. */

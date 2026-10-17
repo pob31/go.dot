@@ -122,7 +122,7 @@ document.addEventListener("change", (event) => {
       A STEP FROM THE KEYBOARD IS NOT A RELEASE, though it fires `change`
       just the same, once per key and before the next key arrives. Letting go
       there would give a slider reached with Tab one step and hand the next
-      key to the page: one step per visit, of a hundred and twenty-two. So
+      key to the page: one step per visit, of six hundred and more. So
       the keydown handler marks a key that steps the slider, and the `change`
       that key makes leaves the focus where it was. Up and Down are not among
       those keys: they stay the standby's, as §14.3 asks. */

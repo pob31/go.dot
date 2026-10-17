@@ -56,3 +56,14 @@ export function showList(id) {
   shown = "";
   return false;
 }
+
+/*  THE MEMBERS OF A CONTAINER, asked of whichever of the two publishes them:
+    a list's at `/godot/list/<id>/order`, a group's at `/godot/cue/<id>/order`
+    - the only honest difference between the two identifiers is which address
+    answers. `from` is the tree, or the picture of it a drag holds still
+    (gestures/drag.js); a cue with no members answers none. */
+export function membersOf(parent, from = tree) {
+  const asList = from.node("/godot/list/" + parent + "/order");
+
+  return from.ids((asList ? "/godot/list/" : "/godot/cue/") + parent + "/order");
+}

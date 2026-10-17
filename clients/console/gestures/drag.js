@@ -69,6 +69,7 @@
 import { tree } from "../plumbing/tree.js";
 import { int, str } from "../plumbing/osc.js";
 import { selection } from "../model/selection.js";
+import { membersOf } from "../model/lists.js";
 import { view } from "../views/view.js";
 import { el, cueName } from "../views/common.js";
 import { gesture } from "./table.js";
@@ -272,16 +273,6 @@ function carriedMarks(held) {
     destination and everything over it, as a set. */
 function brokenBy(carried, chain) {
   return carried.filter((one) => !chain.has(one.group));
-}
-
-/*  THE MEMBERS OF A CONTAINER, asked of whichever of the two publishes them.
-    The same question gestures/clicks.js asks before an add, and the same way of
-    telling a list from a group: the only honest difference between the two
-    identifiers is which address answers. */
-function membersOf(parent) {
-  const asList = reading.node("/godot/list/" + parent + "/order");
-
-  return reading.ids((asList ? "/godot/list/" : "/godot/cue/") + parent + "/order");
 }
 
 /*  A SECTION, SAID ALOUD. "a header", "a footer" - and "the persistent band",
@@ -574,7 +565,7 @@ function landingFor(event) {
     if (!tail || event.clientY <= tail.getBoundingClientRect().bottom) return null;
 
     return said({ on: null, mark: "", before: null, rail: "", refused: false,
-                  parent: list, at: dropIndex(membersOf(list), drag.id, "", "after") });
+                  parent: list, at: dropIndex(membersOf(list, reading), drag.id, "", "after") });
   }
 
   /*  WHERE A REFUSAL'S MARK WOULD GO, worked out once for every one of them
@@ -639,7 +630,7 @@ function landingFor(event) {
       group is what carries the meaning either way (§4.8: a box is a shape, and
       the label says it in words as well). */
   if (side === "into") {
-    const members = membersOf(id);
+    const members = membersOf(id, reading);
     const first = members.length ? rowWithKey(pane, "cue:" + members[0]) : null;
 
     return said({ on: row, mark: "drop-into", before: first || elementAfter(row),
@@ -665,7 +656,7 @@ function landingFor(event) {
   }
 
   const parent = reading.cue(id, "parent", "");
-  const members = parent ? membersOf(parent) : [];
+  const members = parent ? membersOf(parent, reading) : [];
 
   /*  A ROW THE PAGE CANNOT PLACE. Neither of these should happen - a cue whose
       role is "member" has a parent, and that parent's `order` names it - and

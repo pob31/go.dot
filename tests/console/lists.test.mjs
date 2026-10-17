@@ -21,7 +21,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { tree } from "../../clients/console/plumbing/tree.js";
-import { goList, isCart, shownList, showList } from "../../clients/console/model/lists.js";
+import { goList, isCart, shownList, showList, membersOf } from "../../clients/console/model/lists.js";
 
 const node = (value) => ({ VALUE: [value] });
 
@@ -57,4 +57,21 @@ test("GO's list is never a cart, and a cart's tab shows it without moving GO's l
   //  A show of carts alone has no list for GO.
   tree.at = { "/godot/list/order": node("CRT00002"), "/godot/list/CRT00002/kind": node("cart") };
   assert.equal(goList(), "");
+});
+
+test("a container's members come from whichever of the two addresses answers", () => {
+  tree.at = {
+    "/godot/list/SHW00001/order": node("CUE00001 GRP00002"),
+    "/godot/cue/GRP00002/order": node("CUE00003 CUE00004"),
+  };
+
+  assert.deepEqual(membersOf("SHW00001"), ["CUE00001", "GRP00002"]);
+  assert.deepEqual(membersOf("GRP00002"), ["CUE00003", "CUE00004"]);
+  assert.deepEqual(membersOf("CUE00003"), []);
+
+  //  A picture of the tree held still - what a drag reads from - answers the same.
+  const held = Object.create(tree, { at: { value: tree.at } });
+  tree.at = {};
+  assert.deepEqual(membersOf("GRP00002", held), ["CUE00003", "CUE00004"]);
+  assert.deepEqual(membersOf("GRP00002"), []);
 });

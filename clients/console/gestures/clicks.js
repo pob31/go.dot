@@ -22,7 +22,7 @@ import { tree } from "../plumbing/tree.js";
 import { dbl, int, str } from "../plumbing/osc.js";
 import { openForKey, panel, save, toggle } from "../model/remember.js";
 import { pickAlso, pickNothing, pickOne, pickThrough, pickSeveral, selection } from "../model/selection.js";
-import { showList } from "../model/lists.js";
+import { membersOf, showList } from "../model/lists.js";
 import { view } from "../views/view.js";
 import { el } from "../views/common.js";
 import { aimedList } from "../views/aim.js";
@@ -268,11 +268,9 @@ document.addEventListener("click", (event) => {
   if (data && data.add) {
     const into = data.into;
 
-    /*  Where in the parent. A list publishes its children at
-        /godot/list/<id>/order and a group at /godot/cue/<id>/order, and which
-        of the two answers settles which this is. */
-    const asList = tree.node("/godot/list/" + into + "/order");
-    const siblings = tree.ids((asList ? "/godot/list/" : "/godot/cue/") + into + "/order");
+    /*  Where in the parent: among its members, a list's or a group's, which
+        the lists model tells apart by which address answers. */
+    const siblings = membersOf(into);
     const after = siblings.indexOf(selection.picked);
     const at = after >= 0 ? after + 1 : siblings.length;
 

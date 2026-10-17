@@ -22,7 +22,8 @@ import assert from "node:assert/strict";
 
 import {
   Panic, Scrub, LevelDrag, DialDrag, rateFor, rateText, outside, swipeKills, dialTurned,
-  fractionForDb, dbForFraction, isLevel, roundedTo, SILENCE_DB, numberText, aimMoved,
+  fractionForDb, dbForFraction, isLevel, roundedTo, SILENCE_DB, numberText, aimMoved, aimReach,
+  offsetText, AIM_REACH_S,
 } from "../../clients/console/model/touch.js";
 
 const near = (actual, wanted, within = 1e-9) =>
@@ -141,4 +142,27 @@ test("a number is sent as a box shows it, and the aim moves from the finger, fin
   assert.equal(aimMoved(10, 40, 48, slider), 15);        // half the rate 48 px off it
   assert.equal(aimMoved(10, -1000, 0, slider), -1);      // never before "before"
   assert.equal(aimMoved(10, 0.8, 0, slider), 10);        // kept to its half-second steps
+
+  //  A tenth of a second is the step now (WT.9), and the number comes out clean: 10.1, never 10.100000000000001.
+  const fine = { min: -1, max: 250, step: 0.1, width: 244 };
+  assert.equal(aimMoved(10, 0.1, 0, fine), 10.1);
+  assert.equal(aimMoved(10, 1, 0, fine), 11);
+  assert.equal(String(aimMoved(-1, 244, 0, fine)), "250");
+});
+
+test("the aim's slider reaches the whole cue, a minute at least, and says the offset as the window does (WT.9)", () => {
+  assert.equal(AIM_REACH_S, 60);
+  assert.equal(aimReach([]), 60);           // nothing aimed at
+  assert.equal(aimReach([12]), 60);         // a short sound: the minute
+  assert.equal(aimReach([250]), 250);       // a four-minute song: its end
+  assert.equal(aimReach([250.4]), 260);     // rounded up to the next ten seconds
+  assert.equal(aimReach([0, 30, 40]), 70);  // a group: its members summed, its own nought adding nothing
+  assert.equal(aimReach([NaN, 0]), 60);     // a length nobody could read
+
+  assert.equal(offsetText(-1), "before");
+  assert.equal(offsetText(0), "0.0 s");
+  assert.equal(offsetText(12.3), "12.3 s");
+  assert.equal(offsetText(70.3), "1:10.3");
+  assert.equal(offsetText(252.3), "4:12.3");
+  assert.equal(offsetText(3600), "1:00:00.0");
 });
