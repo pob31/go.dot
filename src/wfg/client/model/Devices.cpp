@@ -108,6 +108,7 @@ namespace wfg::client::model
             if (name == "name")            row.name = text (node);
             else if (name == "prefix")     row.prefix = text (node);
             else if (name == "host")       row.host = text (node);
+            else if (name == "queryPort")  row.queryPort = number (text (node), 0);
             else if (name == "port")       row.port = number (text (node), 0);
             else if (name == "rx")         row.rx = text (node) == "true";
             else if (name == "tx")         row.tx = text (node) == "true";
@@ -248,6 +249,60 @@ namespace wfg::client::model
                        return a.slug < b.slug;
                    });
         return rows;
+    }
+
+    std::vector<FoundRow> readFound (const std::string& reading)
+    {
+        std::vector<FoundRow> rows;
+        std::size_t start = 0;
+
+        while (start < reading.size())
+        {
+            auto end = reading.find ('\n', start);
+            if (end == std::string::npos)
+                end = reading.size();
+
+            const auto line = reading.substr (start, end - start);
+            const auto first = line.find ('\t');
+            const auto second = first == std::string::npos ? std::string::npos : line.find ('\t', first + 1);
+
+            if (second != std::string::npos)
+            {
+                FoundRow row;
+                row.name = line.substr (0, first);
+                row.host = line.substr (first + 1, second - first - 1);
+                row.queryPort = number (line.substr (second + 1), 0);
+
+                if (! row.host.empty() && row.queryPort > 0)
+                    rows.push_back (std::move (row));
+            }
+
+            start = end + 1;
+        }
+
+        return rows;
+    }
+
+    Discovery readDiscovery (const tree::TreeSnapshot& snapshot)
+    {
+        Discovery discovery;
+        discovery.found = readFound (text (snapshot, "/godot/network/found"));
+        discovery.mode = text (snapshot, "/godot/network/discovery");
+        discovery.problem = text (snapshot, "/godot/network/discoveryProblem");
+
+        if (discovery.mode.empty())
+            discovery.mode = "off";
+
+        return discovery;
+    }
+
+    std::string deviceAt (const FoundRow& server, const std::vector<DeviceRow>& rows)
+    {
+        for (const auto& row : rows)
+            if (row.host == server.host && row.queryPort == server.queryPort && server.queryPort > 0)
+                return row.id;
+
+        return {};
     }
 
     PresetBank readPresetBank (const tree::TreeSnapshot& snapshot)

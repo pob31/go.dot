@@ -1335,6 +1335,20 @@ TEST_CASE ("show settings UI: the Network tab declares devices and switches the 
     CHECK (rig.sent.back().args[0].getString() == "adm-osc");
     CHECK_FALSE (chooser->isVisible());
 
+    /*  FOUND ASKS THE NETWORK AGAIN as its menu opens (namespace draft §76,
+        ARW): one network.browse; what is picked from it is mount.describeAt. */
+    auto* found = button (panel, "FOUND");
+    REQUIRE (found != nullptr);
+    CHECK (found->isVisible());
+    const auto beforeFound = rig.sent.size();
+    found->onClick();
+    REQUIRE (rig.sent.size() == beforeFound + 1);
+    CHECK (rig.sent.back().command == "network.browse");
+    juce::PopupMenu::dismissAllActiveMenus();
+
+    //  And the folder of your presets is there to open.
+    CHECK (button (panel, "Show presets folder") != nullptr);
+
     /*  AND UNDER THE LOCK THE STRIP GOES DEAD, devices included. A show in
         show mode is one nobody can restructure, and a device is structure. */
     REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);

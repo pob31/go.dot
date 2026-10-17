@@ -735,6 +735,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::createBus ("direct", 1, -1), gesture::createBus ("mix", 2, 0),
         gesture::createDevice ("/desk"), gesture::createDeviceFromPreset ("adm-osc"), gesture::refreshPreset ("K3PV7WRB"),
         gesture::savePreset ("K3PV7WRB", "wfs-diy"), gesture::rescanPresets(),
+        gesture::browseNetwork(), gesture::createDeviceAt ("10.0.0.7", 5005, "WFS-DIY"),
         gesture::deleteBus ("J3MT5XYA"), gesture::moveBus ("J3MT5XYA", 2),
         gesture::setBusWidth ("J3MT5XYA", 2),
         gesture::setPatchSettled (true), gesture::setPatchSettled (false),
@@ -13683,6 +13684,54 @@ TEST_CASE ("client: the installed presets are read from the tree, and a device s
     //  Every shipped preset says so (namespace draft §76, ART).
     for (const auto& row : presets)
         CHECK (row.origin == "shipped");
+}
+
+TEST_CASE ("client: the servers found on the network are read a line each, and one already a device is known by its address")
+{
+    /*  Namespace draft §76, ARW: `network/found` is a sentence a line; FOUND
+        lists it, and marks a server a device was already made from. */
+    const auto rows = model::readFound ("WFS-DIY\t10.0.0.7\t5005\nChataigne\t10.0.0.9\t42000\nbroken line\nno port\t10.0.0.1\t0\n");
+    REQUIRE (rows.size() == 2u);
+    CHECK (rows[0].name == "WFS-DIY");
+    CHECK (rows[0].host == "10.0.0.7");
+    CHECK (rows[0].queryPort == 5005);
+    CHECK (rows[1].name == "Chataigne");
+    CHECK (model::readFound ("").empty());
+
+    Rig rig;
+    const auto made = rig.document.createMount ("/wfs", "namespaces/wfs.json").id;
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + made + "/host", "10.0.0.7").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + made + "/queryPort", "5005").ok);
+
+    EngineState state;
+    state.version = "test";
+    state.tick = 1;
+    state.sampleRate = 48000;
+    state.blockSize = 256;
+    state.clock = "dummy";
+    state.audioStatus = "running";
+    state.documentRevision = rig.document.showRevision();
+    state.found = "WFS-DIY\t10.0.0.7\t5005\nChataigne\t10.0.0.9\t42000";
+    state.discovery = "browsing";
+    const auto snapshot = rig.parameters.publish (1, state);
+
+    const auto discovery = model::readDiscovery (*snapshot);
+    CHECK (discovery.mode == "browsing");
+    CHECK (discovery.problem.empty());
+    REQUIRE (discovery.found.size() == 2u);
+
+    const auto devices = model::readDevices (*snapshot);
+    const auto mine = std::find_if (devices.begin(), devices.end(), [&made] (const model::DeviceRow& row) { return row.id == made; });
+    REQUIRE (mine != devices.end());
+    CHECK (mine->queryPort == 5005);
+    CHECK (model::deviceAt (discovery.found[0], devices) == made);
+    CHECK (model::deviceAt (discovery.found[1], devices).empty());
+
+    const auto event = gesture::createDeviceAt ("10.0.0.7", 5005, "WFS-DIY");
+    CHECK (event.command == "mount.describeAt");
+    REQUIRE (event.args.size() == 3u);
+    CHECK (event.args[1].getInt32() == 5005);
+    CHECK (gesture::browseNetwork().command == "network.browse");
 }
 
 TEST_CASE ("client: a device with a description can be saved as a preset, under the name of the preset it came from or its own")

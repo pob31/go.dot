@@ -407,6 +407,11 @@ namespace wfg::client::gesture
     Event savePreset (const std::string& deviceId, const std::string& slug);
     Event rescanPresets();
 
+    /*  THE NETWORK (namespace draft §76): asked now, for FOUND; and a device
+        made from the OSCQuery description at an address, found or typed. */
+    Event browseNetwork();
+    Event createDeviceAt (const std::string& host, int queryPort, const std::string& name);
+
     /*  A MIDI port the show declares, by the name a person reads. Which cable
         it is on this machine is said afterwards with `setNode`, because the
         two are different kinds of fact (PRD 4.10). */

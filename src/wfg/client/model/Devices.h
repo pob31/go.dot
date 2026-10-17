@@ -79,6 +79,7 @@ namespace wfg::client::model
         std::string firstPrefix() const;
 
         std::string host;
+        int queryPort = 0;          ///< where it answers OSCQuery; nought for nowhere (§56, §76)
 
         /** Zero means the document declares none, which is a device that cannot work. */
         int port = 0;
@@ -254,6 +255,34 @@ namespace wfg::client::model
     };
 
     PresetBank readPresetBank (const tree::TreeSnapshot& snapshot);
+
+    /*  AN OSCQUERY SERVER ANNOUNCED ON THE NETWORK (namespace draft §76,
+        ARW), as `/godot/network/found` lists it: a line each, its name, a
+        tab, its address, a tab, its query port. What FOUND offers. */
+    struct FoundRow
+    {
+        std::string name;
+        std::string host;
+        int queryPort = 0;
+    };
+
+    std::vector<FoundRow> readFound (const std::string& reading);
+
+    /*  HOW GO.DOT IS ASKING THE NETWORK, and what it found: `network/found`,
+        `network/discovery` (off, browsing, unicast), `network/discoveryProblem`. */
+    struct Discovery
+    {
+        std::vector<FoundRow> found;
+        std::string mode = "off";
+        std::string problem;
+    };
+
+    Discovery readDiscovery (const tree::TreeSnapshot& snapshot);
+
+    /*  The device already made from a server, by its address and query
+        port, or empty: FOUND marks it, and picking it again moves nothing
+        but its description. */
+    std::string deviceAt (const FoundRow& server, const std::vector<DeviceRow>& rows);
 
     /*  WHETHER A DEVICE CAN BE SAVED AS A PRESET (§76, ARY): it has a
         description, and it is reached in a way a preset names - a datagram,

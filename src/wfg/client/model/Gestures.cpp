@@ -589,6 +589,14 @@ namespace wfg::client::gesture
 
     Event rescanPresets() { return plain ("preset.rescan"); }
 
+    Event browseNetwork() { return plain ("network.browse"); }
+
+    Event createDeviceAt (const std::string& host, int queryPort, const std::string& name)
+    {
+        return { origin::window, "mount.describeAt",
+                 { osc::Value::string (host), osc::Value::int32 (queryPort), osc::Value::string (name) } };
+    }
+
     Event createPort (const std::string& name)
     {
         return { origin::window, "port.create", { osc::Value::string (name) } };

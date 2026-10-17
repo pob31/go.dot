@@ -2672,6 +2672,15 @@ namespace wfg::client::ui
                 addAndMakeVisible (presetsLabel);
                 presetsLabel.setJustificationType (juce::Justification::centredLeft);
 
+                /*  THE NETWORK ASKED (namespace draft §76, ARU, ARW): FOUND asks
+                    it again and opens a menu of what answered, a device made
+                    from one of them already marked; "At an address..." for a
+                    server that does not announce itself. */
+                addAndMakeVisible (foundButton);
+                foundButton.setTooltip ("Devices on the network that describe themselves over OSCQuery: pick one and"
+                                        " it becomes a device of this show, its addresses offered as menus.");
+                foundButton.onClick = [this] { openFoundMenu(); };
+
                 /*  HIDDEN UNTIL A CELL IS CLICKED, and a child of the page
                     rather than of the list, so scrolling cannot leave it drawn
                     over the wrong row: it is placed from the row's live
@@ -2744,6 +2753,32 @@ namespace wfg::client::ui
                     send (gesture::rescanPresets());
             }
 
+            /*  WHAT THE NETWORK ANSWERED (§76): the list FOUND offers, how Go.dot
+                is asking, and - beside the buttons, when it changes - why the
+                last pick made no device. */
+            void showDiscovery (model::Discovery now)
+            {
+                const auto problemChanged = now.problem != answered.problem;
+                answered = std::move (now);
+
+                foundButton.setTooltip (juce::String (answered.mode == "browsing"
+                                                        ? "Devices on the network that describe themselves over OSCQuery."
+                                                        : answered.mode == "unicast"
+                                                            ? "Devices on the network that describe themselves over OSCQuery,"
+                                                              " asked every five seconds: another program holds the port."
+                                                            : "Go.dot is not asking the network; a device can still be"
+                                                              " given by its address.")
+                                        + (answered.found.empty() ? juce::String (" None found yet.")
+                                                                 : " " + juce::String (static_cast<int> (answered.found.size()))
+                                                                     + " found."));
+
+                if (problemChanged && ! answered.problem.empty())
+                {
+                    presetsLabel.setColour (juce::Label::textColourId, Look::colour (theme, "failed"));
+                    presetsLabel.setText ("Not made: " + juce::String (answered.problem), juce::dontSendNotification);
+                }
+            }
+
             /*  YOUR PRESETS' FOLDER AND WHAT THE LAST SAVE SAID (§76), beside
                 the buttons: the sentence when one failed, in the colour of a
                 failure and in words (4.8); the name and version when it
@@ -2798,6 +2833,7 @@ namespace wfg::client::ui
 
                 addDevice.setVisible (editable);
                 addPreset.setVisible (editable);
+                foundButton.setVisible (editable);
 
                 /*  TWO SETTINGS, AND THE WORD SAYS WHICH ONE IS IN FORCE -
                     never a light that is on or off (4.8). WFS-DIY's own two
@@ -2847,6 +2883,7 @@ namespace wfg::client::ui
                 auto bar = area.removeFromTop (30);
                 addDevice.setBounds (bar.removeFromLeft (128).reduced (3, 0));
                 addPreset.setBounds (bar.removeFromLeft (110).reduced (3, 0));
+                foundButton.setBounds (bar.removeFromLeft (110).reduced (3, 0));
                 showPresets.setBounds (bar.removeFromLeft (170).reduced (3, 0));
                 bar.removeFromLeft (8);
                 presetsLabel.setBounds (bar);
@@ -3507,6 +3544,83 @@ namespace wfg::client::ui
                 }
             }
 
+            /*  FOUND'S MENU: what answered, a device already made from it ticked;
+                why nothing did, when something is wrong; then "At an address...".
+                The network is asked again as it opens, as the MIDI menus look
+                for devices - the next opening has what answers to that. */
+            void openFoundMenu()
+            {
+                if (send)
+                    send (gesture::browseNetwork());
+
+                juce::PopupMenu menu;
+                const auto servers = answered.found;
+
+                if (servers.empty())
+                    menu.addItem (-1, answered.mode == "off" ? "Go.dot is not asking the network"
+                                                            : "Nothing has announced itself on the network yet",
+                                  false, false);
+
+                for (std::size_t at = 0; at < servers.size(); ++at)
+                    menu.addItem (static_cast<int> (at) + 1,
+                                  juce::String (servers[at].name) + "  (" + juce::String (servers[at].host) + ":"
+                                    + juce::String (servers[at].queryPort) + ")",
+                                  true, ! model::deviceAt (servers[at], rows).empty());
+
+                menu.addSeparator();
+                menu.addItem (1000, "At an address...");
+
+                menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&foundButton),
+                                    [this, servers] (int chosen)
+                                    {
+                                        if (chosen == 1000)
+                                            askAddress();
+                                        else if (chosen >= 1 && static_cast<std::size_t> (chosen) <= servers.size() && send)
+                                        {
+                                            const auto& server = servers[static_cast<std::size_t> (chosen) - 1];
+                                            send (gesture::createDeviceAt (server.host, server.queryPort, server.name));
+                                        }
+                                    });
+            }
+
+            /*  A SERVER THAT DOES NOT ANNOUNCE ITSELF: its address and the port
+                it answers OSCQuery on, as an IPv4 address - a device's host is
+                one (§76.8). */
+            void askAddress()
+            {
+                auto* ask = new juce::AlertWindow ("A device at an address",
+                                                   "Go.dot asks the OSCQuery server there for its description and"
+                                                   " makes a device of it, its addresses offered as menus.",
+                                                   juce::MessageBoxIconType::NoIcon);
+                ask->addTextEditor ("host", {}, "Address (IPv4)");
+                ask->addTextEditor ("port", {}, "OSCQuery port");
+                ask->addTextEditor ("name", {}, "Name (optional)");
+                ask->addButton ("Make", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                ask->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+                ask->enterModalState (true, juce::ModalCallbackFunction::create (
+                    [this, ask, safe = juce::Component::SafePointer<NetworkPage> (this)] (int result)
+                    {
+                        const auto host = ask->getTextEditorContents ("host").trim();
+                        const auto port = ask->getTextEditorContents ("port").trim().getIntValue();
+                        const auto name = ask->getTextEditorContents ("name").trim();
+
+                        if (safe == nullptr || result != 1 || ! send)
+                            return;
+
+                        //  The engine refuses what is not an address; this says so at once.
+                        if (juce::IPAddress (host).toString() != host || port < 1 || port > 65535)
+                        {
+                            presetsLabel.setColour (juce::Label::textColourId, Look::colour (theme, "failed"));
+                            presetsLabel.setText ("Not made: \"" + host + ":" + juce::String (port)
+                                                    + "\" is not an IPv4 address and a port", juce::dontSendNotification);
+                            return;
+                        }
+
+                        send (gesture::createDeviceAt (host.toStdString(), port, name.toStdString()));
+                    }), true);
+            }
+
             /*  THE KIND CELL'S MENU: the newer preset when one is installed
                 (namespace draft §57, AFO), and saving the device as a preset
                 of yours when it has a description to save (§76, ARY). Nothing
@@ -3594,6 +3708,8 @@ namespace wfg::client::ui
             juce::TextButton showPresets { "Show presets folder" };
             juce::Label presetsLabel;
             model::PresetBank bank;
+            juce::TextButton foundButton { "FOUND" };
+            model::Discovery answered;
             juce::TextButton filter { "OSC Filter: Accept All" };
             juce::TextButton brokerButton { "MQTT broker: Off" };
             juce::Label brokerPortBox;
@@ -9497,6 +9613,7 @@ namespace wfg::client::ui
             network->showPorts (model::readPorts (snapshot));
             network->showRemotes (model::readRemotes (model::text (snapshot, "/godot/network/remotes")));
             network->showPresetBank (model::readPresetBank (snapshot));
+            network->showDiscovery (model::readDiscovery (snapshot));
             model::BrokerRow broker;
             broker.on = model::isYes (model::flag (snapshot, "/godot/network/broker"));
             broker.port = juce::String (model::text (snapshot, "/godot/network/brokerPort")).getIntValue();
