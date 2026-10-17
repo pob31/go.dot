@@ -89,6 +89,15 @@ namespace wfg::tree
         load says when one is made. */
     Preset readPresetQuickly (const std::string& slug, std::string_view json);
 
+    /*  A NAME FIT FOR A PRESET (namespace draft §76, ARY): lower-case letters,
+        digits and dashes, one to sixty-four of them - a file name on every
+        system and a part of an address. `presetSlugFrom` makes one of a
+        device's name ("WFS-DIY" is `wfs-diy`), or empty when nothing in it is
+        a letter or a digit. Std only: the client's model offers the same name
+        the engine would decide. */
+    bool isPresetSlug (const std::string& slug);
+    std::string presetSlugFrom (const std::string& name);
+
     /*  WHERE A DESCRIPTION'S HEADER IS (namespace draft §76, ARY): the root
         object's `GODOT` value, from its `{` to just past its `}`, found by the
         quick read's walk - or nothing, when the root has no GODOT object. */

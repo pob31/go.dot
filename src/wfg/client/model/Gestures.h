@@ -402,6 +402,11 @@ namespace wfg::client::gesture
     Event createDeviceFromPreset (const std::string& slug);
     Event refreshPreset (const std::string& deviceId);
 
+    /*  YOUR PRESETS (namespace draft §76): a device's description saved as
+        one, under a name; your folder read again. Neither edits the show. */
+    Event savePreset (const std::string& deviceId, const std::string& slug);
+    Event rescanPresets();
+
     /*  A MIDI port the show declares, by the name a person reads. Which cable
         it is on this machine is said afterwards with `setNode`, because the
         two are different kinds of fact (PRD 4.10). */

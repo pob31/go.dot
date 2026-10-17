@@ -730,6 +730,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::setLocked (true), gesture::setLocked (false),
         gesture::createBus ("direct", 1, -1), gesture::createBus ("mix", 2, 0),
         gesture::createDevice ("/desk"), gesture::createDeviceFromPreset ("adm-osc"), gesture::refreshPreset ("K3PV7WRB"),
+        gesture::savePreset ("K3PV7WRB", "wfs-diy"), gesture::rescanPresets(),
         gesture::deleteBus ("J3MT5XYA"), gesture::moveBus ("J3MT5XYA", 2),
         gesture::setBusWidth ("J3MT5XYA", 2),
         gesture::setPatchSettled (true), gesture::setPatchSettled (false),
@@ -13678,6 +13679,74 @@ TEST_CASE ("client: the installed presets are read from the tree, and a device s
     //  Every shipped preset says so (namespace draft §76, ART).
     for (const auto& row : presets)
         CHECK (row.origin == "shipped");
+}
+
+TEST_CASE ("client: a device with a description can be saved as a preset, under the name of the preset it came from or its own")
+{
+    /*  Namespace draft §76, ARY, ASC: the Kind cell's menu offers saving to a
+        device with a description, reached in a way a preset names; the name
+        it offers is the engine's rule; a device from a preset of yours says
+        so; and the folder's rows are read. */
+    Rig rig;
+    tree::PresetTable table;
+    table.scan (std::string (WFG_REPO_ROOT) + "/presets/devices");
+
+    auto mine = *table.find ("adm-osc");
+    mine.origin = "yours";
+    std::vector<tree::Preset> yours;
+    yours.push_back (std::move (mine));
+    table.adoptYours (std::move (yours), "/somewhere/yours");
+    rig.parameters.setPresets (&table);
+
+    const auto described = rig.document.createMount ("/wfs", "namespaces/wfs.json").id;
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + described + "/name", "WFS-DIY").ok);
+    const auto opaque = rig.document.createMount ("/desk", {}).id;
+    const auto fromPreset = rig.document.createMount ("/adm", "namespaces/adm-osc-v1.json").id;
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + fromPreset + "/preset", "adm-osc@1").ok);
+    const auto onSerial = rig.document.createMount ("/lamp", "namespaces/lamp.json").id;
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + onSerial + "/transport", "serial").ok);
+
+    const auto snapshot = rig.publish (1);
+    const auto devices = model::readDevices (*snapshot);
+    const auto presets = model::readPresets (*snapshot);
+    const auto rowOf = [&devices] (const std::string& id)
+    {
+        return *std::find_if (devices.begin(), devices.end(), [&id] (const model::DeviceRow& row) { return row.id == id; });
+    };
+
+    CHECK (model::canBeSavedAsPreset (rowOf (described)));
+    CHECK (model::presetNameFor (rowOf (described)) == "wfs-diy");
+    CHECK_FALSE (model::canBeSavedAsPreset (rowOf (opaque)));
+    CHECK (model::presetNameFor (rowOf (opaque)) == "desk");
+    CHECK (model::canBeSavedAsPreset (rowOf (fromPreset)));
+    CHECK (model::presetNameFor (rowOf (fromPreset)) == "adm-osc");
+    CHECK_FALSE (model::canBeSavedAsPreset (rowOf (onSerial)));
+
+    //  A device from a preset of yours says so, in the word.
+    const auto adm = std::find_if (presets.begin(), presets.end(), [] (const model::PresetRow& row) { return row.slug == "adm-osc"; });
+    REQUIRE (adm != presets.end());
+    CHECK (model::kindWordOf (rowOf (fromPreset), presets) == adm->label() + " - yours");
+
+    //  The folder's rows, as serve publishes them.
+    EngineState state;
+    state.version = "test";
+    state.tick = 2;
+    state.sampleRate = 48000;
+    state.blockSize = 256;
+    state.clock = "dummy";
+    state.audioStatus = "running";
+    state.documentRevision = rig.document.showRevision();
+    state.presetsFolder = "/somewhere/yours";
+    state.presetsSaved = "wfs-diy@1";
+    const auto later = rig.parameters.publish (2, state);
+    const auto bank = model::readPresetBank (*later);
+    CHECK (bank.folder == "/somewhere/yours");
+    CHECK (bank.saved == "wfs-diy@1");
+    CHECK (bank.problem.empty());
+
+    CHECK (gesture::savePreset (described, "wfs-diy").command == "preset.save");
+    CHECK (gesture::savePreset (described, "wfs-diy").args.size() == 2u);
+    CHECK (gesture::rescanPresets().command == "preset.rescan");
 }
 
 TEST_CASE ("client: your presets are read with their origin, come first, and a model that begins with its vendor is said once")

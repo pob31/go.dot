@@ -18,6 +18,7 @@
 
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/tree/Mount.h>
+#include <wfg/engine/tree/PresetTable.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <cstddef>
@@ -249,6 +250,28 @@ namespace wfg::client::model
         return rows;
     }
 
+    PresetBank readPresetBank (const tree::TreeSnapshot& snapshot)
+    {
+        PresetBank bank;
+        bank.folder = text (snapshot, "/godot/network/presetsFolder");
+        bank.problem = text (snapshot, "/godot/network/presetsProblem");
+        bank.saved = text (snapshot, "/godot/network/presetsSaved");
+        return bank;
+    }
+
+    bool canBeSavedAsPreset (const DeviceRow& row)
+    {
+        return ! row.opaque() && (row.transport == "udp" || row.transport == "tcp" || row.transport == "midi");
+    }
+
+    std::string presetNameFor (const DeviceRow& row)
+    {
+        if (! row.preset.empty())
+            return row.preset.substr (0, row.preset.find ('@'));
+
+        return tree::presetSlugFrom (row.name.empty() ? row.prefix : row.name);
+    }
+
     std::string kindWordOf (const DeviceRow& row, const std::vector<PresetRow>& presets)
     {
         /*  A broker is its own kind (namespace draft §67, ANJ): no preset
@@ -260,9 +283,11 @@ namespace wfg::client::model
         {
             const auto slug = row.preset.substr (0, row.preset.find ('@'));
 
+            /*  A PRESET OF YOURS SAYS SO (namespace draft §76, ASC), in the
+                word rather than a colour (4.8). */
             for (const auto& preset : presets)
                 if (preset.slug == slug)
-                    return preset.label();
+                    return preset.label() + (preset.yours() ? " - yours" : "");
 
             return slug;
         }

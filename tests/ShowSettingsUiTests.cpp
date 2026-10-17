@@ -1313,7 +1313,10 @@ TEST_CASE ("show settings UI: the Network tab declares devices and switches the 
     REQUIRE (preset != nullptr);
     const auto beforePreset = rig.sent.size();
     preset->onClick();
-    CHECK (rig.sent.size() == beforePreset);
+
+    //  Nothing but a reading of your folder (namespace draft §76, ARZ) until one is chosen.
+    REQUIRE (rig.sent.size() == beforePreset + 1);
+    CHECK (rig.sent.back().command == "preset.rescan");
     auto* chooser = component<juce::ComboBox> (panel);
     REQUIRE (chooser != nullptr);
     CHECK (chooser->isVisible());
@@ -1326,7 +1329,7 @@ TEST_CASE ("show settings UI: the Network tab declares devices and switches the 
     chooser->setSelectedId (admOsc, juce::dontSendNotification);
     REQUIRE (chooser->onChange != nullptr);
     chooser->onChange();
-    REQUIRE (rig.sent.size() == beforePreset + 1);
+    REQUIRE (rig.sent.size() == beforePreset + 2);
     CHECK (rig.sent.back().command == "mount.createFromPreset");
     REQUIRE (rig.sent.back().args.size() == 1u);
     CHECK (rig.sent.back().args[0].getString() == "adm-osc");
@@ -1736,6 +1739,9 @@ TEST_CASE ("show settings UI: a network device's Doh! cell switches between leav
     REQUIRE (tabs != nullptr);
     tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("Network"));
 
+    //  The tab coming up reads your presets again (namespace draft §76); that is not this case's.
+    rig.sent.clear();
+
     auto* list = listOn (*tabs->getCurrentContentComponent());
     REQUIRE (list != nullptr);
     REQUIRE (list->getListBoxModel()->getNumRows() == 1);
@@ -1779,6 +1785,9 @@ TEST_CASE ("show settings UI: a network device's Bundles cell switches its messa
     auto* tabs = component<juce::TabbedComponent> (panel);
     REQUIRE (tabs != nullptr);
     tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("Network"));
+
+    //  The tab coming up reads your presets again (namespace draft §76); that is not this case's.
+    rig.sent.clear();
 
     auto* list = listOn (*tabs->getCurrentContentComponent());
     REQUIRE (list != nullptr);

@@ -244,6 +244,25 @@ namespace wfg::client::model
         as `readDevices`. */
     std::vector<PresetRow> readPresets (const tree::TreeSnapshot& snapshot);
 
+    /*  YOUR PRESETS' FOLDER AND WHAT IT LAST SAID (namespace draft §76):
+        `network/presetsFolder`, `presetsProblem`, `presetsSaved`. */
+    struct PresetBank
+    {
+        std::string folder;
+        std::string problem;
+        std::string saved;
+    };
+
+    PresetBank readPresetBank (const tree::TreeSnapshot& snapshot);
+
+    /*  WHETHER A DEVICE CAN BE SAVED AS A PRESET (§76, ARY): it has a
+        description, and it is reached in a way a preset names - a datagram,
+        a connection, a MIDI port. And the name it would be saved under: the
+        preset it came from, else its own name made one (the engine's rule,
+        `tree::presetSlugFrom`). */
+    bool canBeSavedAsPreset (const DeviceRow& row);
+    std::string presetNameFor (const DeviceRow& row);
+
     /*  A REMOTE CONNECTED TO THIS MACHINE (namespace draft §68, ANT), as
         `/godot/network/remotes` lists it: one a line, the connection's origin,
         the identifier the remote drew at install, the name somebody gave it,

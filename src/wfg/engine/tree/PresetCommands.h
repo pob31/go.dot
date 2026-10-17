@@ -63,12 +63,7 @@ namespace wfg::tree
         std::function<void (PresetSave)> save {};
     };
 
-    /*  A NAME FIT FOR A PRESET (ARY): lower-case letters, digits and dashes,
-        one to sixty-four of them - a file name on every system and a part of
-        an address. `presetSlugFrom` makes one of a device's name ("WFS-DIY" is
-        `wfs-diy`), or empty when nothing in it is a letter or a digit. */
-    bool isPresetSlug (const std::string& slug);
-    std::string presetSlugFrom (const std::string& name);
+    //  `isPresetSlug` and `presetSlugFrom`, the rule for a preset's name, are PresetTable.h's.
 
     void registerPresetCommands (CommandRegistry& registry, doc::ShowDocument& document, MountTable& mounts,
                                  const juce::File& bundleFolder, const PresetTable* presets,

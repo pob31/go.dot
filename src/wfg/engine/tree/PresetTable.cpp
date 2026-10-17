@@ -390,6 +390,36 @@ namespace wfg::tree
         return preset;
     }
 
+    bool isPresetSlug (const std::string& slug)
+    {
+        return ! slug.empty() && slug.size() <= 64
+            && std::all_of (slug.begin(), slug.end(),
+                            [] (char c) { return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-'; });
+    }
+
+    std::string presetSlugFrom (const std::string& name)
+    {
+        std::string slug;
+
+        for (const auto c : name)
+        {
+            if (c >= 'A' && c <= 'Z')
+                slug += static_cast<char> (c - 'A' + 'a');
+            else if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9'))
+                slug += c;
+            else if (! slug.empty() && slug.back() != '-')
+                slug += '-';
+        }
+
+        if (slug.size() > 64)
+            slug.resize (64);
+
+        while (! slug.empty() && slug.back() == '-')
+            slug.pop_back();
+
+        return slug;
+    }
+
     std::optional<TextSpan> rootGodotSpan (std::string_view text)
     {
         const auto skimmed = skim (text);

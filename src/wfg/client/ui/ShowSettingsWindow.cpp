@@ -2649,6 +2649,29 @@ namespace wfg::client::ui
                 addChildComponent (presetChooser);
                 presetChooser.onChange = [this] { commitPresetChoice(); };
 
+                /*  YOUR PRESETS' FOLDER (namespace draft §76, ART): opened in
+                    the system's own file browser, made first when nothing has
+                    been saved there yet - it is a place a person puts files in,
+                    so it is shown rather than described. A fact about this
+                    machine, so it is there under the lock too. */
+                addAndMakeVisible (showPresets);
+                showPresets.setTooltip ("Open the folder of your own device presets. A file put there is offered"
+                                        " under Yours when PRESET opens; one named like a shipped preset is used"
+                                        " in its place.");
+                showPresets.onClick = [this]
+                {
+                    if (bank.folder.empty())
+                        return;
+
+                    const juce::File folder (juce::String::fromUTF8 (bank.folder.c_str()));
+
+                    if (folder.createDirectory())
+                        folder.startAsProcess();
+                };
+
+                addAndMakeVisible (presetsLabel);
+                presetsLabel.setJustificationType (juce::Justification::centredLeft);
+
                 /*  HIDDEN UNTIL A CELL IS CLICKED, and a child of the page
                     rather than of the list, so scrolling cannot leave it drawn
                     over the wrong row: it is placed from the row's live
@@ -2709,6 +2732,37 @@ namespace wfg::client::ui
                 remotesLabel.setJustificationType (juce::Justification::centredLeft);
                 remotesLabel.setTooltip ("The Android remotes connected to this machine now. Find makes one"
                                          " show itself, as WFS-DIY's remote is found from its desk.");
+            }
+
+            /*  YOUR FOLDER READ AGAIN AS THE TAB COMES UP (namespace draft §76,
+                ARZ): a file put there since is in PRESET's menu by the time
+                anybody opens it. Visible rather than showing, so that a tab
+                put up in a window not yet on the screen asks too. */
+            void visibilityChanged() override
+            {
+                if (isVisible() && send)
+                    send (gesture::rescanPresets());
+            }
+
+            /*  YOUR PRESETS' FOLDER AND WHAT THE LAST SAVE SAID (§76), beside
+                the buttons: the sentence when one failed, in the colour of a
+                failure and in words (4.8); the name and version when it
+                worked; nothing before either. */
+            void showPresetBank (model::PresetBank now)
+            {
+                if (now.folder == bank.folder && now.problem == bank.problem && now.saved == bank.saved)
+                    return;
+
+                bank = std::move (now);
+                presetsLabel.setColour (juce::Label::textColourId,
+                                        Look::colour (theme, bank.problem.empty() ? "ink-dim" : "failed"));
+                presetsLabel.setText (! bank.problem.empty() ? "Not saved: " + juce::String (bank.problem)
+                                      : ! bank.saved.empty() ? "Saved " + juce::String (bank.saved) + " to your presets."
+                                      : juce::String(),
+                                      juce::dontSendNotification);
+                showPresets.setTooltip ("Open " + juce::String (bank.folder) + ", the folder of your own device"
+                                        " presets. A file put there is offered under Yours when PRESET opens;"
+                                        " one named like a shipped preset is used in its place.");
             }
 
             void show (std::vector<model::DeviceRow> devices, bool strictNow,
@@ -2793,6 +2847,9 @@ namespace wfg::client::ui
                 auto bar = area.removeFromTop (30);
                 addDevice.setBounds (bar.removeFromLeft (128).reduced (3, 0));
                 addPreset.setBounds (bar.removeFromLeft (110).reduced (3, 0));
+                showPresets.setBounds (bar.removeFromLeft (170).reduced (3, 0));
+                bar.removeFromLeft (8);
+                presetsLabel.setBounds (bar);
 
                 auto foot = area.removeFromBottom (32);
                 filter.setBounds (foot.removeFromLeft (220).reduced (3, 2));
@@ -2849,6 +2906,13 @@ namespace wfg::client::ui
                 preset, one that cannot be used disabled with its problem. */
             void openPresetChooser()
             {
+                /*  YOUR FOLDER READ AGAIN (§76, ARZ), as the MIDI menus look
+                    for devices before they open: what this menu shows is what
+                    was read as the tab came up, and the next opening has what
+                    was put there since. */
+                if (send)
+                    send (gesture::rescanPresets());
+
                 presetChooser.clear (juce::dontSendNotification);
                 std::string vendor;
 
@@ -2857,13 +2921,17 @@ namespace wfg::client::ui
                     const auto& preset = presets[at];
                     const auto item = static_cast<int> (at) + 1;
 
-                    if (preset.vendor != vendor)
+                    /*  YOURS FIRST, under one heading of their own (§76, ASC),
+                        each named whole; then a heading per vendor. */
+                    const auto group = preset.yours() ? std::string ("Yours") : preset.vendor;
+
+                    if (group != vendor)
                     {
-                        vendor = preset.vendor;
+                        vendor = group;
                         presetChooser.addSectionHeading (juce::String (vendor));
                     }
 
-                    presetChooser.addItem (juce::String (preset.model)
+                    presetChooser.addItem (juce::String (preset.yours() ? preset.label() : preset.model)
                                              + (preset.usable() ? juce::String() : "  (" + juce::String (preset.problem) + ")"),
                                            item);
                     presetChooser.setItemEnabled (item, preset.usable());
@@ -3150,8 +3218,7 @@ namespace wfg::client::ui
                 {
                     case Cell::cross:  send (gesture::deleteObject (entry.id)); return;
                     case Cell::kind:
-                        if (! entry.presetUpdate.empty())
-                            send (gesture::refreshPreset (entry.id));
+                        kindMenu (entry);
                         return;
                     case Cell::rx:     send (gesture::setNode (base + "rx", entry.rx ? "false" : "true")); return;
                     case Cell::tx:     send (gesture::setNode (base + "tx", entry.tx ? "false" : "true")); return;
@@ -3440,6 +3507,61 @@ namespace wfg::client::ui
                 }
             }
 
+            /*  THE KIND CELL'S MENU: the newer preset when one is installed
+                (namespace draft §57, AFO), and saving the device as a preset
+                of yours when it has a description to save (§76, ARY). Nothing
+                when it has neither. */
+            void kindMenu (const model::DeviceRow& entry)
+            {
+                juce::PopupMenu menu;
+
+                if (! entry.presetUpdate.empty())
+                    menu.addItem (1, "Update to " + juce::String (entry.presetUpdate));
+
+                if (model::canBeSavedAsPreset (entry))
+                    menu.addItem (2, "Save as a preset...");
+
+                if (menu.getNumItems() == 0)
+                    return;
+
+                menu.showMenuAsync (juce::PopupMenu::Options(),
+                                    [this, id = entry.id, named = model::presetNameFor (entry),
+                                     device = entry.name.empty() ? entry.prefix : entry.name] (int chosen)
+                                    {
+                                        if (chosen == 1 && send)
+                                            send (gesture::refreshPreset (id));
+                                        else if (chosen == 2)
+                                            askPresetName (id, named, device);
+                                    });
+            }
+
+            /*  THE NAME IT IS SAVED UNDER, asked as a template's is: the
+                preset it came from, else its own name made one. A name of a
+                preset already there is saved over it, one version on. */
+            void askPresetName (const std::string& id, const std::string& named, const std::string& device)
+            {
+                auto* ask = new juce::AlertWindow ("Save as a preset",
+                                                   "Saves the description of " + juce::String (device) + " to your"
+                                                   " device presets, so a device can be made from it in any show on"
+                                                   " this machine - or on another, once the file is copied there."
+                                                   " Lower-case letters, digits and dashes.",
+                                                   juce::MessageBoxIconType::NoIcon);
+                ask->addTextEditor ("name", juce::String (named), "Name");
+                ask->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                ask->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+                ask->enterModalState (true, juce::ModalCallbackFunction::create (
+                    [this, ask, id, safe = juce::Component::SafePointer<NetworkPage> (this)] (int result)
+                    {
+                        const auto name = ask->getTextEditorContents ("name").trim().toStdString();
+
+                        if (safe == nullptr || result != 1 || name.empty() || ! send)
+                            return;
+
+                        send (gesture::savePreset (id, name));
+                    }), true);
+            }
+
             /*  A PREFIX NOTHING ELSE IS USING, so `ADD` always makes a device
                 rather than a refusal. `/device1`, `/device2`: a word a person
                 can read in an address, and one they will rename anyway. */
@@ -3469,6 +3591,9 @@ namespace wfg::client::ui
             juce::TextButton addPreset { "PRESET" };
             juce::ComboBox presetChooser;
             std::vector<model::PresetRow> presets;
+            juce::TextButton showPresets { "Show presets folder" };
+            juce::Label presetsLabel;
+            model::PresetBank bank;
             juce::TextButton filter { "OSC Filter: Accept All" };
             juce::TextButton brokerButton { "MQTT broker: Off" };
             juce::Label brokerPortBox;
@@ -9371,6 +9496,7 @@ namespace wfg::client::ui
             network->showSerials (model::readSerialPorts (snapshot));
             network->showPorts (model::readPorts (snapshot));
             network->showRemotes (model::readRemotes (model::text (snapshot, "/godot/network/remotes")));
+            network->showPresetBank (model::readPresetBank (snapshot));
             model::BrokerRow broker;
             broker.on = model::isYes (model::flag (snapshot, "/godot/network/broker"));
             broker.port = juce::String (model::text (snapshot, "/godot/network/brokerPort")).getIntValue();
