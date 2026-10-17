@@ -17,9 +17,11 @@
 #include <wfg/engine/tree/MountFetcher.h>
 
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/json/JsonValue.h>
 #include <wfg/engine/oscquery/OscQueryClient.h>
 #include <wfg/engine/pair/Hold.h>
 #include <wfg/engine/tree/Mount.h>
+#include <wfg/engine/tree/TreeCommands.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -80,15 +82,148 @@ namespace wfg::tree
             const std::lock_guard<std::mutex> lock { guard };
 
             const auto waiting = std::find_if (queued.begin(), queued.end(),
-                                               [&request] (const Request& each) { return each.mountId == request.mountId; });
+                                               [&request] (const Job& each)
+                                               { return ! each.discovering && each.request.mountId == request.mountId; });
 
             if (waiting != queued.end())
-                *waiting = std::move (request);
+                waiting->request = std::move (request);
             else
-                queued.push_back (std::move (request));
+                queued.push_back ({ std::move (request), false, {} });
         }
 
         wake.notify_one();
+    }
+
+    void MountFetcher::discover (Discover request)
+    {
+        if (request.mountId.empty() || request.host.empty() || request.queryPort <= 0)
+            return;
+
+        //  A held machine asks its devices nothing (RD.1, AGG).
+        if (pair::isHeld (hold))
+            return;
+
+        {
+            const std::lock_guard<std::mutex> lock { guard };
+
+            const auto waiting = std::find_if (queued.begin(), queued.end(),
+                                               [&request] (const Job& each)
+                                               { return each.discovering && each.discovery.mountId == request.mountId; });
+
+            if (waiting != queued.end())
+                waiting->discovery = std::move (request);
+            else
+                queued.push_back ({ {}, true, std::move (request) });
+        }
+
+        wake.notify_one();
+    }
+
+    MountFetcher::Discovered MountFetcher::discoverNow (const Discover& request, int timeoutMilliseconds)
+    {
+        Discovered outcome;
+        outcome.name = request.name;
+        const auto where = "http://" + request.host + ":" + std::to_string (request.queryPort);
+
+        const auto reply = oscquery::OscQueryClient::get (request.host, request.queryPort, "/", {}, timeoutMilliseconds);
+
+        if (! reply.ok)
+        {
+            outcome.problem = "nothing answered at " + where + ": " + reply.error;
+            return outcome;
+        }
+
+        if (reply.status != 200)
+        {
+            outcome.problem = where + " answered " + std::to_string (reply.status);
+            return outcome;
+        }
+
+        /*  WHAT IT SAYS OF ITSELF: the port it takes OSC on and how, its name,
+            whether a value can be asked of it. A server with no HOST_INFO is
+            still a description - its OSC port is then typed afterwards. */
+        if (const auto info = oscquery::OscQueryClient::get (request.host, request.queryPort, "/", "HOST_INFO",
+                                                             timeoutMilliseconds);
+            info.ok && info.status == 200)
+        {
+            if (const auto parsed = json::parse (info.body); parsed.ok() && parsed.value->isObject())
+            {
+                const auto& host = *parsed.value;
+
+                if (const auto* port = host.find ("OSC_PORT"); port != nullptr && port->isNumber()
+                      && port->asInt() > 0 && port->asInt() <= 65535)
+                    outcome.oscPort = port->asInt();
+
+                if (const auto* transport = host.find ("OSC_TRANSPORT"); transport != nullptr && transport->isString())
+                    outcome.transport = transport->asString() == "TCP" ? "tcp" : "udp";
+
+                if (const auto* named = host.find ("NAME"); outcome.name.empty() && named != nullptr && named->isString())
+                    outcome.name = named->asString();
+
+                if (const auto* extensions = host.find ("EXTENSIONS"); extensions != nullptr)
+                    if (const auto* value = extensions->find ("VALUE"); value != nullptr && value->isBool() && value->asBool())
+                        outcome.readback = "oscquery";
+            }
+        }
+
+        if (outcome.name.empty())
+            outcome.name = "OSCQuery at " + request.host;
+
+        //  THE ROOTS ARE THE DESCRIPTION'S (AFK), each one a device may have.
+        const auto roots = rootsOfNamespace (reply.body);
+
+        if (roots.empty())
+        {
+            outcome.problem = "the description at " + where + " has no root to make a device at";
+            return outcome;
+        }
+
+        for (const auto& root : roots)
+        {
+            if (root == "/godot")
+            {
+                outcome.problem = where + " is another Go.dot, not a device";
+                return outcome;
+            }
+
+            if (! isUsableRoot (root))
+            {
+                outcome.problem = "the description at " + where + " has the root " + root
+                                  + ", which no device may have";
+                return outcome;
+            }
+
+            outcome.roots += (outcome.roots.empty() ? "" : " ") + root;
+        }
+
+        MountDeclaration declaration;
+        declaration.id = request.mountId;
+        declaration.prefix = outcome.roots;
+        declaration.namespaceFile = fileFor (request.mountId);
+
+        const auto read = readNamespace (declaration, reply.body);
+
+        if (! read.ok)
+        {
+            outcome.problem = "the description at " + where + " did not read: "
+                              + (read.problems.empty() ? std::string ("it holds no node") : read.problems.front());
+            return outcome;
+        }
+
+        const auto folder = request.bundleFolder.getChildFile ("namespaces");
+        const auto target = request.bundleFolder.getChildFile (fileFor (request.mountId));
+        juce::TemporaryFile temporary (target);
+
+        if (! folder.createDirectory()
+            || ! temporary.getFile().replaceWithData (reply.body.data(), reply.body.size())
+            || ! temporary.overwriteTargetFileWithTemporary())
+        {
+            outcome.problem = "could not write " + target.getFullPathName().toStdString();
+            return outcome;
+        }
+
+        outcome.nodeCount = read.nodes.size();
+        return outcome;
     }
 
     MountFetcher::Outcome MountFetcher::fetchNow (const Request& request, int timeoutMilliseconds)
@@ -150,7 +285,7 @@ namespace wfg::tree
     {
         for (;;)
         {
-            Request request;
+            Job job;
 
             {
                 std::unique_lock<std::mutex> lock { guard };
@@ -160,9 +295,31 @@ namespace wfg::tree
                 if (stopping.load (std::memory_order_relaxed))
                     return;
 
-                request = std::move (queued.front());
+                job = std::move (queued.front());
                 queued.pop_front();
             }
+
+            /*  A DEVICE AT AN ADDRESS (§76, ARX): what was learned, on the
+                record - the file, where it takes OSC, how it is asked, its
+                name and roots - so a replay makes the same device. */
+            if (job.discovering)
+            {
+                const auto& asked = job.discovery;
+                const auto learned = discoverNow (asked, timeoutMs.load (std::memory_order_relaxed));
+
+                if (engine != nullptr)
+                    engine->submit ("mount:" + asked.mountId, "mount.discovered",
+                                    { osc::Value::string (asked.mountId), osc::Value::string (fileFor (asked.mountId)),
+                                      osc::Value::string (asked.host), osc::Value::string (learned.transport),
+                                      osc::Value::int32 (learned.oscPort), osc::Value::int32 (asked.queryPort),
+                                      osc::Value::string (learned.readback), osc::Value::string (learned.name),
+                                      osc::Value::string (learned.roots),
+                                      osc::Value::int32 (static_cast<std::int32_t> (learned.nodeCount)),
+                                      osc::Value::string (learned.problem) });
+                continue;
+            }
+
+            const auto& request = job.request;
 
             //  Outside the lock: this is the part that takes seconds.
             const auto outcome = fetchNow (request, timeoutMs.load (std::memory_order_relaxed));

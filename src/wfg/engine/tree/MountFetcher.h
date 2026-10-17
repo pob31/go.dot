@@ -106,7 +106,48 @@ namespace wfg::tree
 
         static Outcome fetchNow (const Request& request, int timeoutMilliseconds);
 
+        /*  A DEVICE AT AN ADDRESS (namespace draft §76, ARX): found on the
+            network or typed, with no root known - so its whole description
+            is asked for (`GET /`), and HOST_INFO beside it says the port it
+            takes OSC on, by which transport, its name, and whether it answers
+            a value asked of it. The roots are the description's own (AFK). The
+            answer is `mount.discovered`. */
+        struct Discover
+        {
+            std::string mountId {};
+            std::string host {};
+            int queryPort = 0;
+            std::string name {};
+            juce::File bundleFolder {};
+        };
+
+        struct Discovered
+        {
+            std::size_t nodeCount = 0;
+            std::string problem {};
+            std::string roots {};           ///< space-separated, as `mount/prefix` spells several
+            std::string name {};
+            int oscPort = 0;
+            std::string transport = "udp";
+            std::string readback = "none";
+        };
+
+        /*  Tick thread. Queues one; a request for a device already waiting
+            replaces it. */
+        void discover (Discover request);
+
+        /*  The discovery itself, blocking, without the thread: the two GETs,
+            the check, the file. Public for the tests. */
+        static Discovered discoverNow (const Discover& request, int timeoutMilliseconds);
+
     private:
+        struct Job
+        {
+            Request request {};
+            bool discovering = false;
+            Discover discovery {};
+        };
+
         void run();
 
         Engine* engine = nullptr;
@@ -114,7 +155,7 @@ namespace wfg::tree
 
         std::mutex guard;
         std::condition_variable wake;
-        std::deque<Request> queued;
+        std::deque<Job> queued;
 
         std::atomic<bool> running { false };
         std::atomic<bool> stopping { false };

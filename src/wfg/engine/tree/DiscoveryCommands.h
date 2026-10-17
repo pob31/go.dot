@@ -55,7 +55,14 @@ namespace wfg::tree
             drawn, the host, the query port, the name to give it. */
         std::function<void (const std::string& id, const std::string& host, int queryPort,
                             const std::string& name)> describe {};
+
+        /*  What became of a pick: empty when the device was made or moved,
+            else the sentence - for `network/discoveryProblem`. */
+        std::function<void (const std::string& problem)> told {};
     };
+
+    /** A literal IPv4 address, four numbers of 0 to 255: `mount/host` takes no name. */
+    bool isIpv4Address (const std::string& text);
 
     void registerDiscoveryCommands (CommandRegistry& registry, doc::ShowDocument& document, MountTable& mounts,
                                     const juce::File& bundleFolder, DiscoveryHooks hooks = {});

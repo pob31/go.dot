@@ -33,6 +33,7 @@
 #include <wfg/engine/json/JsonValue.h>
 #include <wfg/engine/tree/DiscoveryCommands.h>
 #include <wfg/engine/tree/Mount.h>
+#include <wfg/engine/tree/MountFetcher.h>
 #include <wfg/engine/tree/PresetCommands.h>
 #include <wfg/engine/tree/PresetScanner.h>
 #include <wfg/engine/tree/PresetTable.h>
@@ -42,7 +43,10 @@
 
 #include <juce_core/juce_core.h>
 
+#include <atomic>
 #include <chrono>
+#include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <thread>
@@ -526,7 +530,7 @@ TEST_CASE ("discovery: network.browse asks the hook, edits no show, and is this 
     Rig rig;
     int asked = 0;
     tree::registerDiscoveryCommands (rig.engine.commands(), rig.document, rig.mounts, freshFolder ("wfg-bundle"),
-                                     { [&asked] { ++asked; }, {} });
+                                     { [&asked] { ++asked; }, {}, {} });
 
     const auto* command = rig.engine.commands().find ("network.browse");
     REQUIRE (command != nullptr);
@@ -540,4 +544,277 @@ TEST_CASE ("discovery: network.browse asks the hook, edits no show, and is this 
     Rig replay;
     tree::registerDiscoveryCommands (replay.engine.commands(), replay.document, replay.mounts, freshFolder ("wfg-bundle"));
     CHECK (replay.apply ("window", "network.browse", {}).applied == 1u);
+}
+
+//==============================================================================
+//  A DEVICE FROM AN ADDRESS (namespace draft §76, UD.8, ARX).
+namespace
+{
+    /*  An OSCQuery server of the test's own: a listener on 127.0.0.1 that
+        answers each GET with the page named by its target, or 404. Written
+        from the HTTP it has to speak, sharing nothing with Go.dot's server. */
+    struct CannedHttp
+    {
+        explicit CannedHttp (std::map<std::string, std::string> pagesToServe) : pages (std::move (pagesToServe))
+        {
+            REQUIRE (listener.createListener (0, "127.0.0.1"));
+            thread = std::thread ([this] { run(); });
+        }
+
+        ~CannedHttp()
+        {
+            stopping.store (true);
+            listener.close();
+            thread.join();
+        }
+
+        int port() const { return listener.getBoundPort(); }
+
+        void run()
+        {
+            while (! stopping.load())
+            {
+                std::unique_ptr<juce::StreamingSocket> client (listener.waitForNextConnection());
+
+                if (client == nullptr)
+                    return;
+
+                std::string request;
+
+                while (request.find ("\r\n\r\n") == std::string::npos && client->waitUntilReady (true, 1000) == 1)
+                {
+                    char buffer[1024];
+                    const auto got = client->read (buffer, static_cast<int> (sizeof (buffer)), false);
+
+                    if (got <= 0)
+                        break;
+
+                    request.append (buffer, static_cast<std::size_t> (got));
+                }
+
+                const auto line = request.substr (0, request.find ("\r\n"));
+                const auto first = line.find (' ');
+                const auto second = line.find (' ', first + 1);
+                const auto target = first == std::string::npos || second == std::string::npos
+                                      ? std::string {} : line.substr (first + 1, second - first - 1);
+
+                const auto page = pages.find (target);
+                const auto response = page == pages.end()
+                    ? std::string ("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+                    : "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: "
+                        + std::to_string (page->second.size()) + "\r\nConnection: close\r\n\r\n" + page->second;
+
+                client->write (response.data(), static_cast<int> (response.size()));
+                client->close();
+            }
+        }
+
+        std::map<std::string, std::string> pages;
+        juce::StreamingSocket listener;
+        std::atomic<bool> stopping { false };
+        std::thread thread;
+    };
+
+    /*  A processor with two roots, as GET / answers it, and its HOST_INFO. */
+    const char* twoRoots = R"JSON({"FULL_PATH": "/", "CONTENTS": {
+        "wfs": {"FULL_PATH": "/wfs", "CONTENTS": {"gain": {"FULL_PATH": "/wfs/gain", "TYPE": "f", "ACCESS": 3}}},
+        "console": {"FULL_PATH": "/console", "CONTENTS": {"ping": {"FULL_PATH": "/console/ping", "TYPE": "N", "ACCESS": 2}}}
+    }})JSON";
+
+    const char* hostInfo = R"JSON({"NAME": "WFS-DIY", "OSC_PORT": 8000, "OSC_TRANSPORT": "UDP",
+                                   "EXTENSIONS": {"VALUE": true, "LISTEN": true}})JSON";
+
+    /*  What `mount.discovered` carries for a fetch that worked, as the
+        fetcher's thread submits it. */
+    std::vector<osc::Value> discoveredArgs (const std::string& id, const std::string& host, const std::string& roots,
+                                            const std::string& transport = "udp", const std::string& problem = {})
+    {
+        return { text (id), text (tree::MountFetcher::fileFor (id)), text (host), text (transport),
+                 osc::Value::int32 (8000), osc::Value::int32 (5005), text ("oscquery"), text ("WFS-DIY"),
+                 text (roots), osc::Value::int32 (2), text (problem) };
+    }
+}
+
+TEST_CASE ("discovery: a description at an address is fetched whole, with HOST_INFO, its roots its own")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    const auto bundle = freshFolder ("wfg-bundle-discover");
+    REQUIRE (bundle.createDirectory());
+
+    SUBCASE ("two roots, and what HOST_INFO says")
+    {
+        CannedHttp server ({ { "/", twoRoots }, { "/?HOST_INFO", hostInfo } });
+        const auto learned = tree::MountFetcher::discoverNow ({ "DSCV0001", "127.0.0.1", server.port(), "", bundle }, 3000);
+
+        INFO ("problem: " << learned.problem);
+        REQUIRE (learned.problem.empty());
+        CHECK (learned.roots == "/console /wfs");
+        CHECK (learned.name == "WFS-DIY");
+        CHECK (learned.oscPort == 8000);
+        CHECK (learned.transport == "udp");
+        CHECK (learned.readback == "oscquery");
+        CHECK (learned.nodeCount == 4u);     // the two roots and a node under each, as a declared processor counts
+        CHECK (bundle.getChildFile (tree::MountFetcher::fileFor ("DSCV0001")).existsAsFile());
+    }
+
+    SUBCASE ("no HOST_INFO: no port, a name of its address, nothing to ask - and a name given wins")
+    {
+        CannedHttp server ({ { "/", twoRoots } });
+        const auto plain = tree::MountFetcher::discoverNow ({ "DSCV0002", "127.0.0.1", server.port(), "", bundle }, 3000);
+        REQUIRE (plain.problem.empty());
+        CHECK (plain.oscPort == 0);
+        CHECK (plain.name == "OSCQuery at 127.0.0.1");
+        CHECK (plain.readback == "none");
+
+        const auto named = tree::MountFetcher::discoverNow ({ "DSCV0003", "127.0.0.1", server.port(), "Desk", bundle }, 3000);
+        CHECK (named.name == "Desk");
+    }
+
+    SUBCASE ("another Go.dot, a root no device may have, a page that is not a description, nothing listening")
+    {
+        CannedHttp goDot ({ { "/", R"JSON({"FULL_PATH": "/", "CONTENTS": {"godot": {"FULL_PATH": "/godot", "CONTENTS": {
+                                         "x": {"FULL_PATH": "/godot/x", "TYPE": "f", "ACCESS": 3}}}}})JSON" } });
+        CHECK (tree::MountFetcher::discoverNow ({ "DSCV0004", "127.0.0.1", goDot.port(), "", bundle }, 3000).problem
+                 .find ("another Go.dot") != std::string::npos);
+
+        CannedHttp media ({ { "/", R"JSON({"FULL_PATH": "/", "CONTENTS": {"media": {"FULL_PATH": "/media", "CONTENTS": {
+                                         "x": {"FULL_PATH": "/media/x", "TYPE": "f", "ACCESS": 3}}}}})JSON" } });
+        CHECK (tree::MountFetcher::discoverNow ({ "DSCV0005", "127.0.0.1", media.port(), "", bundle }, 3000).problem
+                 .find ("no device may have") != std::string::npos);
+
+        CannedHttp junk ({ { "/", "[1, 2]" } });
+        CHECK_FALSE (tree::MountFetcher::discoverNow ({ "DSCV0006", "127.0.0.1", junk.port(), "", bundle }, 3000).problem.empty());
+        CHECK_FALSE (bundle.getChildFile (tree::MountFetcher::fileFor ("DSCV0006")).exists());
+
+        CHECK (tree::MountFetcher::discoverNow ({ "DSCV0007", "127.0.0.1", 1, "", bundle }, 1000).problem
+                 .rfind ("nothing answered", 0) == 0);
+    }
+
+    bundle.deleteRecursively();
+}
+
+TEST_CASE ("discovery: mount.describeAt draws the identifier, hands the fetch on, and refuses what is not an address")
+{
+    Rig rig;
+    const auto bundle = freshFolder ("wfg-bundle-describe");
+    std::vector<std::vector<std::string>> asked;
+
+    tree::registerDiscoveryCommands (rig.engine.commands(), rig.document, rig.mounts, bundle,
+                                     { {},
+                                       [&asked] (const std::string& id, const std::string& host, int queryPort, const std::string& name)
+                                       { asked.push_back ({ id, host, std::to_string (queryPort), name }); },
+                                       {} });
+
+    REQUIRE (rig.apply ("window", "mount.describeAt", { text ("10.0.0.7"), osc::Value::int32 (5005), text ("WFS-DIY") }).applied == 1u);
+    REQUIRE (asked.size() == 1u);
+    CHECK (asked[0][0].size() == 8u);
+    CHECK (asked[0][1] == "10.0.0.7");
+    CHECK (asked[0][2] == "5005");
+    CHECK (asked[0][3] == "WFS-DIY");
+
+    //  The identifier drawn is on the record, which a replay applies asking nobody.
+    const auto record = rig.lastRecord();
+    REQUIRE (record.args.size() == 4u);
+    CHECK (record.args[3].getString() == asked[0][0]);
+
+    for (const auto* host : { "stage.local", "10.0.0", "10.0.0.256", "", "10.0.0.7.1" })
+    {
+        INFO ("host: " << host);
+        REQUIRE (rig.apply ("window", "mount.describeAt", { text (host), osc::Value::int32 (5005) }).rejected == 1u);
+        CHECK (rig.lastRecord().reason == reason::badValue);
+    }
+
+    REQUIRE (rig.apply ("window", "mount.describeAt", { text ("10.0.0.7"), osc::Value::int32 (0) }).rejected == 1u);
+
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    REQUIRE (rig.apply ("window", "mount.describeAt", { text ("10.0.0.7"), osc::Value::int32 (5005) }).rejected == 1u);
+    CHECK (rig.lastRecord().reason == reason::locked);
+    CHECK (asked.size() == 1u);
+
+    CHECK (tree::isIpv4Address ("192.168.1.20"));
+    CHECK (tree::isIpv4Address ("0.0.0.0"));
+    CHECK_FALSE (tree::isIpv4Address ("1.2.3.4 "));
+}
+
+TEST_CASE ("discovery: mount.discovered makes the device at its roots, moves the one holding them all, and refuses a split")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    const auto bundle = freshFolder ("wfg-bundle-discovered");
+    REQUIRE (bundle.getChildFile ("namespaces").createDirectory());
+    REQUIRE (bundle.getChildFile (tree::MountFetcher::fileFor ("DSCV0010")).replaceWithText (twoRoots));
+    REQUIRE (bundle.getChildFile (tree::MountFetcher::fileFor ("DSCV0011")).replaceWithText (twoRoots));
+
+    Rig rig;
+    std::vector<std::string> told;
+    tree::registerDiscoveryCommands (rig.engine.commands(), rig.document, rig.mounts, bundle,
+                                     { {}, {}, [&told] (const std::string& problem) { told.push_back (problem); } });
+
+    //  Every root free: the device is made, at its roots, rx and tx on, loaded.
+    REQUIRE (rig.apply ("mount:DSCV0010", "mount.discovered", discoveredArgs ("DSCV0010", "10.0.0.7", "/console /wfs")).applied == 1u);
+    const auto base = std::string ("/godot/mount/DSCV0010/");
+    CHECK (rig.attribute (base + "prefix") == "/console /wfs");
+    CHECK (rig.attribute (base + "namespace") == tree::MountFetcher::fileFor ("DSCV0010"));
+    CHECK (rig.attribute (base + "host") == "10.0.0.7");
+    CHECK (rig.attribute (base + "port") == "8000");
+    CHECK (rig.attribute (base + "queryPort") == "5005");
+    CHECK (rig.attribute (base + "readback") == "oscquery");
+    CHECK (rig.attribute (base + "name") == "WFS-DIY");
+    CHECK (rig.attribute (base + "rx") == "true");
+    CHECK (rig.mounts.isLoaded ("DSCV0010"));
+    REQUIRE_FALSE (told.empty());
+    CHECK (told.back().empty());
+
+    auto record = rig.lastRecord();
+    REQUIRE (record.args.size() == 12u);
+    CHECK (record.args[11].getString() == "DSCV0010");
+    const auto made = record.args;
+
+    //  Found again elsewhere: the same device moves; the name the operator gave it stays.
+    REQUIRE (rig.document.setAttribute (base + "name", "Stage left").ok);
+    REQUIRE (rig.apply ("mount:DSCV0011", "mount.discovered", discoveredArgs ("DSCV0011", "10.0.0.9", "/console /wfs")).applied == 1u);
+    CHECK (rig.attribute (base + "host") == "10.0.0.9");
+    CHECK (rig.attribute (base + "namespace") == tree::MountFetcher::fileFor ("DSCV0011"));
+    CHECK (rig.attribute (base + "name") == "Stage left");
+    CHECK_FALSE (rig.document.findById ("DSCV0011").isValid());
+    CHECK (rig.lastRecord().args[11].getString() == "DSCV0010");
+
+    //  Roots split between two devices: refused, in a sentence.
+    const auto other = rig.document.createMount ("/lisa", {}).id;
+    REQUIRE (rig.document.setAttribute ("/godot/mount/DSCV0010/prefix", "/wfs").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + other + "/prefix", "/console").ok);
+    REQUIRE (rig.apply ("mount:DSCV0012", "mount.discovered", discoveredArgs ("DSCV0012", "10.0.0.7", "/console /wfs")).rejected == 1u);
+    CHECK (rig.lastRecord().reason == reason::badValue);
+    CHECK (told.back().find ("more than one device") != std::string::npos);
+
+    //  A fetch that failed: nothing made, its sentence told.
+    REQUIRE (rig.apply ("mount:DSCV0013", "mount.discovered",
+                        discoveredArgs ("DSCV0013", "10.0.0.7", "", "udp", "nothing answered at http://10.0.0.7:5005")).applied == 1u);
+    CHECK_FALSE (rig.document.findById ("DSCV0013").isValid());
+    CHECK (told.back() == "nothing answered at http://10.0.0.7:5005");
+
+    //  Over TCP, framed as OSC 1.1 is.
+    REQUIRE (bundle.getChildFile (tree::MountFetcher::fileFor ("DSCV0014")).replaceWithText (
+        R"JSON({"FULL_PATH": "/", "CONTENTS": {"eos": {"FULL_PATH": "/eos", "CONTENTS": {"go": {"FULL_PATH": "/eos/go", "TYPE": "N", "ACCESS": 2}}}}})JSON"));
+    REQUIRE (rig.apply ("mount:DSCV0014", "mount.discovered", discoveredArgs ("DSCV0014", "10.0.0.8", "/eos", "tcp")).applied == 1u);
+    CHECK (rig.attribute ("/godot/mount/DSCV0014/transport") == "tcp");
+    CHECK (rig.attribute ("/godot/mount/DSCV0014/framing") == "slip");
+
+    //  Locked: nothing made.
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    REQUIRE (bundle.getChildFile (tree::MountFetcher::fileFor ("DSCV0015")).replaceWithText (
+        R"JSON({"FULL_PATH": "/", "CONTENTS": {"spat": {"FULL_PATH": "/spat", "CONTENTS": {"go": {"FULL_PATH": "/spat/go", "TYPE": "N", "ACCESS": 2}}}}})JSON"));
+    REQUIRE (rig.apply ("mount:DSCV0015", "mount.discovered", discoveredArgs ("DSCV0015", "10.0.0.8", "/spat")).rejected == 1u);
+    CHECK (rig.lastRecord().reason == reason::locked);
+
+    //  A REPLAY: the first record, in a fresh show over the same bundle, makes the same device with no network.
+    Rig replay;
+    tree::registerDiscoveryCommands (replay.engine.commands(), replay.document, replay.mounts, bundle);
+    REQUIRE (replay.apply ("mount:DSCV0010", "mount.discovered", made).applied == 1u);
+    CHECK (replay.attribute ("/godot/mount/DSCV0010/prefix") == "/console /wfs");
+    CHECK (replay.attribute ("/godot/mount/DSCV0010/host") == "10.0.0.7");
+    CHECK (replay.mounts.isLoaded ("DSCV0010"));
+
+    bundle.deleteRecursively();
 }

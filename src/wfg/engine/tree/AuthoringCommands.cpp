@@ -87,25 +87,7 @@ namespace wfg::tree
             return out;
         }
 
-        /*  A ROOT A PROCESSOR MAY DECLARE: absolute, one segment run with no
-            empty part, no trailing slash, no space (a declare names one root),
-            and nowhere under Go.dot's own `/godot`, `/ui` or `/media` - which
-            `createMount` does not refuse, and which would otherwise only be
-            found when the show next loaded and refused the device. */
-        bool isUsableRoot (const std::string& prefix)
-        {
-            if (prefix.size() < 2 || prefix.front() != '/' || prefix.back() == '/')
-                return false;
-
-            if (prefix.find (' ') != std::string::npos || prefix.find ("//") != std::string::npos)
-                return false;
-
-            for (const std::string reserved : { "/godot", "/ui", "/media" })
-                if (prefix == reserved || prefix.rfind (reserved + "/", 0) == 0)
-                    return false;
-
-            return true;
-        }
+        //  `isUsableRoot` and `mountWithRoot` are TreeCommands.h's since §76 (UD.8), shared with discovery.
 
         /*  WHO ASKED (namespace draft §56.6, ARQ): the devices a capture's
             answer goes to, from the sender's address and port and the device
@@ -177,18 +159,6 @@ namespace wfg::tree
             }
 
             return best;
-        }
-
-        /*  The declared device that holds `root` among its prefixes, exactly. */
-        std::string mountWithRoot (const doc::ShowDocument& document, const std::string& root)
-        {
-            for (const auto& mountId : declaredMountIds (document))
-                if (const auto declaration = mountDeclarationFor (document, mountId))
-                    for (const auto& each : prefixesOf (declaration->prefix))
-                        if (each == root)
-                            return mountId;
-
-            return {};
         }
 
         /*  The cue numbered `number`, anywhere in the show's lists, the focused

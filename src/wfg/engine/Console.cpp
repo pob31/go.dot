@@ -4221,6 +4221,11 @@ namespace
         const auto discoveryOff = args.containsOption ("--no-mdns");
         std::uint64_t discoverySeen = 0;
 
+        /*  WHAT BECAME OF THE LAST PICK (ARX): written by mount.discovered on
+            the tick, read beside the discovery's own problem on the next. */
+        std::string discoveryPick;
+        std::string discoveryPickSeen;
+
         if (args.containsOption ("--mdns-port"))
             discoveryOptions.port = args.getValueForOption ("--mdns-port").getIntValue();
 
@@ -4464,7 +4469,11 @@ namespace
                                              [&presetScanner] (wfg::tree::PresetSave job)
                                              { presetScanner.save (std::move (job)); } });
         wfg::tree::registerDiscoveryCommands (engine.commands(), document, mounts, target,
-                                              { [&discovery] { discovery.browse(); }, {} });
+                                              { [&discovery] { discovery.browse(); },
+                                                [&fetcher, &target] (const std::string& mountId, const std::string& host,
+                                                                     int queryPort, const std::string& named)
+                                                { fetcher.discover ({ mountId, host, queryPort, named, target }); },
+                                                [&discoveryPick] (const std::string& problem) { discoveryPick = problem; } });
         wfg::doc::registerBundleCommands (engine.commands(), document, session, writer);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
         wfg::audio::registerAudioSettingsCommands (engine, document, runner, runs, audioState);
@@ -8602,12 +8611,14 @@ namespace
 
                                 /*  AND WHAT THE NETWORK ANSWERED (namespace draft
                                     §76, ARW), copied only when it moved. */
-                                if (const auto heardNow = discovery.revision(); heardNow != discoverySeen)
+                                if (const auto heardNow = discovery.revision();
+                                    heardNow != discoverySeen || discoveryPick != discoveryPickSeen)
                                 {
                                     discoverySeen = heardNow;
+                                    discoveryPickSeen = discoveryPick;
                                     state.found = discovery.foundText();
                                     state.discovery = discovery.mode();
-                                    state.discoveryProblem = discovery.problem();
+                                    state.discoveryProblem = discoveryPick.empty() ? discovery.problem() : discoveryPick;
                                 }
 
                                 /*  HOW LATE THE SHOW'S TIMECODE HAS BEEN

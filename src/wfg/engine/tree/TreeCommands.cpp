@@ -74,6 +74,32 @@ namespace wfg::tree
         return ids;
     }
 
+    bool isUsableRoot (const std::string& prefix)
+    {
+        if (prefix.size() < 2 || prefix.front() != '/' || prefix.back() == '/')
+            return false;
+
+        if (prefix.find (' ') != std::string::npos || prefix.find ("//") != std::string::npos)
+            return false;
+
+        for (const std::string reserved : { "/godot", "/ui", "/media" })
+            if (prefix == reserved || prefix.rfind (reserved + "/", 0) == 0)
+                return false;
+
+        return true;
+    }
+
+    std::string mountWithRoot (const doc::ShowDocument& document, const std::string& root)
+    {
+        for (const auto& mountId : declaredMountIds (document))
+            if (const auto declaration = mountDeclarationFor (document, mountId))
+                for (const auto& each : prefixesOf (declaration->prefix))
+                    if (each == root)
+                        return mountId;
+
+        return {};
+    }
+
     std::optional<MountDeclaration> mountDeclarationFor (const doc::ShowDocument& document,
                                                          const std::string& mountId)
     {

@@ -72,6 +72,17 @@ namespace wfg::tree
     std::optional<MountDeclaration> mountDeclarationFor (const doc::ShowDocument& document,
                                                          const std::string& mountId);
 
+    /*  A ROOT A DEVICE MAY BE GIVEN BY A PROCESSOR OR BY THE NETWORK (namespace
+        draft §56, §76): absolute, one segment run with no empty part, no
+        trailing slash, no space, and nowhere under Go.dot's own `/godot`,
+        `/ui` or `/media` - which `createMount` does not refuse, and which
+        would otherwise only be found when the show next loaded and refused
+        the device. */
+    bool isUsableRoot (const std::string& prefix);
+
+    /** The declared device that holds `root` among its prefixes, exactly, or empty. */
+    std::string mountWithRoot (const doc::ShowDocument& document, const std::string& root);
+
     /*  Every network cue that asks for something its target cannot give used to
         be checked HERE, and it is now a load refusal in `ShowDocument::validate`
         - which is what question K settled and what this never was.
