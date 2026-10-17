@@ -330,6 +330,14 @@ namespace wfg::tree
             connections once a tick as the broker's rows are. */
         std::string remotes;
 
+        /*  YOUR PRESETS (namespace draft §76): `network/presetsFolder`, where
+            they are read from and saved to; `presetsProblem`, the last save's
+            or reading's sentence when it failed; `presetsSaved`, the last one
+            saved, `<slug>@<version>`. Copied from the scanner when it moved. */
+        std::string presetsFolder;
+        std::string presetsProblem;
+        std::string presetsSaved;
+
         /*  HOW LATE THE SHOW'S TIMECODE HAS BEEN (namespace draft §59.3):
             `sync/mtcLate` and `sync/mtcWorst` as the MIDI sender's MTC lane
             counts them, `sync/ltcLate` as the audio side's LTC generator does.

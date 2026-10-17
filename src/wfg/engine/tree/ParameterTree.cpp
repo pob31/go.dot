@@ -4154,6 +4154,9 @@ namespace wfg::tree
             else if (name == "brokerProblem") text = state.brokerProblem;
             else if (name == "brokerClients") text = std::to_string (state.brokerClients);
             else if (name == "remotes")       text = state.remotes;
+            else if (name == "presetsFolder") text = state.presetsFolder;
+            else if (name == "presetsProblem") text = state.presetsProblem;
+            else if (name == "presetsSaved")  text = state.presetsSaved;
             else                              text = std::string (row->defaultText);
 
             engineValue (*row, "network", text);

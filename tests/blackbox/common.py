@@ -599,7 +599,15 @@ class Server:
         # driver that scans must pass one: a scan WRITES the list. One that
         # passes none gets the driver's own (driver_engine_folder says why),
         # never the user's: ctest runs drivers side by side.
-        argv.append(f"--engine-folder={engine_folder if engine_folder is not None else driver_engine_folder()}")
+        machine_folder = engine_folder if engine_folder is not None else driver_engine_folder()
+        argv.append(f"--engine-folder={machine_folder}")
+
+        # And YOUR PRESETS somewhere of the driver's own (namespace draft 76,
+        # ASB): serve reads Documents/Go.dot/Device presets otherwise, and the
+        # developer's own presets are no driver's business. Beside the engine
+        # folder, so it goes where that goes; a driver that names its own wins.
+        if not any(arg.startswith("--user-presets=") for arg in (extra_args or [])):
+            argv.append(f"--user-presets={Path(machine_folder) / 'presets'}")
 
         # --window opens the compiled client over this same engine, in this
         # same process (namespace draft section 14.16). Off by default here as

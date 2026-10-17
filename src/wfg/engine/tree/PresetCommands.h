@@ -21,6 +21,7 @@
 
 #include <juce_core/juce_core.h>
 
+#include <functional>
 #include <string>
 
 namespace wfg::tree
@@ -42,9 +43,20 @@ namespace wfg::tree
         file that exists. Refused when nothing newer is installed.
 
         `presets` may be null: a replay and a tree dump offer none, and apply a
-        create from its own record alone. */
+        create from its own record alone.
+
+        YOUR PRESETS (namespace draft §76): `preset.rescan` reads your folder
+        again through `hooks.rescan` - serve's thread that reads it (ARZ). It
+        edits no show and acts on this machine alone; where no hook is given -
+        a replay, a tree dump - it is taken and does nothing. */
+    struct PresetHooks
+    {
+        std::function<void()> rescan {};
+    };
+
     void registerPresetCommands (CommandRegistry& registry, doc::ShowDocument& document, MountTable& mounts,
-                                 const juce::File& bundleFolder, const PresetTable* presets);
+                                 const juce::File& bundleFolder, const PresetTable* presets,
+                                 PresetHooks hooks = {});
 
     /** The bundle-relative file a preset is kept as: `namespaces/<slug>-v<version>.json`. */
     std::string presetFileFor (const std::string& slug, int version);

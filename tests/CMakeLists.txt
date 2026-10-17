@@ -90,6 +90,7 @@ add_executable(wfg_tests
     LooperTests.cpp
     MountTests.cpp
     PresetTests.cpp
+    DiscoveryTests.cpp
     NetworkCueTests.cpp
     AuthoringTests.cpp
     ProcessTests.cpp
@@ -345,7 +346,7 @@ set(WFG_UNIT_SHARDS
     "audio-3=AudioTests.cpp@28-78"
     "audio-4=AudioTests.cpp@79-"
     "devices=DeviceTests.cpp"
-    "presets=PresetTests.cpp,AnalysisTests.cpp,SeatTests.cpp,OscQueryTests.cpp,TimbreTests.cpp"
+    "presets=PresetTests.cpp,DiscoveryTests.cpp,AnalysisTests.cpp,SeatTests.cpp,OscQueryTests.cpp,TimbreTests.cpp"
     "proxy=ProxyTests.cpp,GoTests.cpp,SurfaceBridgeTests.cpp,BundleTests.cpp,SerialTests.cpp"
     "video-host=VideoHostTests.cpp,AuthoringTests.cpp,MountTests.cpp,MediaEditRenderTests.cpp,PeerLinkTests.cpp"
     "editor-helper=EditorHelperTests.cpp,ClientTests.cpp,VerifiedCueTests.cpp,TimecodeTests.cpp,MidiTests.cpp")

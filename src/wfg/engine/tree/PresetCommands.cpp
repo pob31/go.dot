@@ -85,8 +85,26 @@ namespace wfg::tree
     }
 
     void registerPresetCommands (CommandRegistry& registry, doc::ShowDocument& document, MountTable& mounts,
-                                 const juce::File& bundleFolder, const PresetTable* presets)
+                                 const juce::File& bundleFolder, const PresetTable* presets, PresetHooks hooks)
     {
+        /*  YOUR FOLDER READ AGAIN (namespace draft §76, ARZ): asked by the
+            Network tab as it is shown and as PRESET opens, and after a save.
+            The reading is the scanner thread's; the table takes it on a later
+            tick. */
+        registry.add (machineLocal ({ "preset.rescan",
+                        "Reads your device presets again (namespace draft 76): the folder of your own, beside"
+                        " the shipped presets, so a file put there or changed since is offered. Taken and"
+                        " ignored where nothing reads it.",
+                        {},
+                        false,
+                        [look = std::move (hooks.rescan)] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            if (look)
+                                look();
+
+                            return Outcome::ok (args);
+                        } }));
+
         registry.add ({ "mount.createFromPreset",
                         "Makes a device from an installed preset: the preset copied into the bundle, the device"
                         " made at the preset's roots with its port and transport, and loaded. The trailing"

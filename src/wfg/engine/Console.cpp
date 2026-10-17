@@ -107,6 +107,7 @@
 #include <wfg/engine/tree/MountProbe.h>
 #include <wfg/engine/tree/MountSender.h>
 #include <wfg/engine/tree/PresetCommands.h>
+#include <wfg/engine/tree/PresetScanner.h>
 #include <wfg/engine/tree/PresetTable.h>
 #include <wfg/engine/tree/RawSender.h>
 #include <wfg/engine/tree/OscQueryJson.h>
@@ -4196,6 +4197,12 @@ namespace
         presets.scanQuickly (presetsFolder (args, "--presets").getFullPathName().toStdString(),
                              userPresetsFolder (args).getFullPathName().toStdString());
 
+        /*  AND YOUR FOLDER READ AGAIN WHEN ASKED (namespace draft §76, ARZ), on
+            a thread of its own; the tick takes what it read. */
+        wfg::tree::PresetScanner presetScanner;
+        presetScanner.setFolder (userPresetsFolder (args).getFullPathName().toStdString());
+        std::uint64_t presetStatusSeen = 0;
+
         wfg::tree::MountSender sender;
         sender.setHold (&machineHold);
         sender.setSerialSink ([&serialPorts] (const std::string& port, const std::vector<std::uint8_t>& packet)
@@ -4425,7 +4432,8 @@ namespace
                                                { fetcher.fetch ({ mountId, host, queryPort, prefix, target }); });
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
         wfg::tree::registerDescriptionCommands (engine.commands(), document, mounts, target, answers);
-        wfg::tree::registerPresetCommands (engine.commands(), document, mounts, target, &presets);
+        wfg::tree::registerPresetCommands (engine.commands(), document, mounts, target, &presets,
+                                           { [&presetScanner] { presetScanner.rescan(); } });
         wfg::doc::registerBundleCommands (engine.commands(), document, session, writer);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
         wfg::audio::registerAudioSettingsCommands (engine, document, runner, runs, audioState);
@@ -4609,6 +4617,7 @@ namespace
         state.documentPath = target.getFullPathName().toStdString();
         state.documentName = target.getFileNameWithoutExtension().toStdString();
         state.documentDirty = wfg::doc::isDirty (document, session);
+        state.presetsFolder = presetScanner.folder();
 
         /*  In the FIRST snapshot and not only from the first tick on, because
             the first snapshot is what a client reads the moment the port
@@ -5547,6 +5556,7 @@ namespace
         parameters.setSender (&sender);
         probe.start();
         fetcher.start();
+        presetScanner.start();
         listener.start();
         spaceMouse.start();
 
@@ -8531,6 +8541,25 @@ namespace
                                     draft §68, ANT), for network/remotes. */
                                 state.remotes = server.remotesText();
 
+                                /*  YOUR PRESETS, READ AGAIN (namespace draft §76,
+                                    ARZ): taken when a reading has finished - one
+                                    relaxed load every other tick - and the rows
+                                    made again, since the table's revision alone
+                                    does not move the show's half of the tree. */
+                                if (auto yours = presetScanner.take())
+                                {
+                                    presets.adoptYours (std::move (*yours), presetScanner.folder());
+                                    parameters.markStale();
+                                }
+
+                                if (const auto stamp = presetScanner.statusRevision(); stamp != presetStatusSeen)
+                                {
+                                    presetStatusSeen = stamp;
+                                    auto said = presetScanner.status();
+                                    state.presetsProblem = std::move (said.problem);
+                                    state.presetsSaved = std::move (said.saved);
+                                }
+
                                 /*  HOW LATE THE SHOW'S TIMECODE HAS BEEN
                                     (namespace draft §59): MTC as its lane
                                     counts it, LTC as the audio side's generator
@@ -9639,6 +9668,7 @@ namespace
 
         server.stop();
         fetcher.stop();
+        presetScanner.stop();
         probe.stop();
         listener.stop();
         dialler.stop();
