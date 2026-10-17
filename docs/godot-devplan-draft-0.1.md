@@ -1967,7 +1967,11 @@ Left: the show half rebuilt on every tick that applies a command (§31.5).
   CP.0-CP.7 in Go.dot, WD in WFS-DIY (1.0.0beta55), S2 in S21_HiJack (0.3.0).
   The foot panel's messages table offers the same tree as one nested menu per
   address. Not built: a wait for the processor's own report that a recall
-  landed *(proposed)*.
+  landed *(proposed)*. **2026-10-17, at the author's direction:** a capture names
+  its sender by its root and is answered to that device alone, so two processors on
+  one computer no longer hear each other's answers; the form without it is still
+  read (namespace draft §56.6-56.7, ARQ, ARR). WFS-DIY 1.0.0beta57 and S21_HiJack
+  0.3.1 send it.
 - **Stream Deck** profile (bitmap renderable, triggering role); **SpaceMouse**
   as a rate endpoint; further surface profiles. *(2026-10-08: the SpaceMouse
   arrives first as what records an OSC cue's curves - the item before Phase 10,

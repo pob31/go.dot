@@ -24842,7 +24842,8 @@ further messages in order, all under one device; after the standby, at the end o
 named by identifier or number, or appended to by a chunk too long for one datagram. **The identifier wins**:
 a cue that already holds it is updated where it stands, so a processor that keeps the identifier beside its
 snapshot updates the same cue every time it exports. One command, one undo step, one answer
-(`/godot/captured <id> created|updated|appended|<reason> <number> <name>`).
+(`/godot/captured <id> created|updated|appended|<reason> <number> <name>`), to the processor the capture
+names as its sender since §56.7.
 
 **A processor fires Go.dot** with the verbs that exist - `go`, `cue.fire`, `standby.set`, `run.stopAll`,
 `run.killAll` - and two new ones that find a cue by its number first: `cue.fireNumber` and

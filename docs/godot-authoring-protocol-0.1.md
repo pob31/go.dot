@@ -13,8 +13,8 @@ before; recall stays fire-and-forget; both processors describe themselves and Go
 their commands as cascaded menus; Go.dot gains a fire-by-number verb; S21_HiJack drives Go.dot
 through per-cue triggers made from templates; and the menus follow QLab's shape, one drop-down
 per part of the path. **The names on this page are mine** (`mount.declare`, `cue.capture`,
-`mount.described`, `cue.fireNumber`, `standby.setNumber`, the three answer addresses), until the
-author renames them.
+`mount.described`, `cue.fireNumber`, `standby.setNumber`, the three answer addresses, a capture's
+`from`), until the author renames them.
 
 ---
 
@@ -249,7 +249,7 @@ It declares again when OSC Query starts, when a snapshot is stored or deleted, a
 seconds until Go.dot answers (Go.dot started after WFS-DIY).
 
 **What it captures** (always `where = standby`, the identifier kept in the snapshot file as
-`godotCueId` on `<InputSnapshot>`):
+`godotCueId` on `<InputSnapshot>` for the per-parameter cue, `godotLoadCueId` for the load cue):
 
 | Export | The cue's messages |
 |---|---|

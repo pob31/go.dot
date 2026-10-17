@@ -2879,7 +2879,9 @@ the decisions are the namespace draft's §56 (AEI-AEP the author's):
   identifier wins**: a cue that already holds it is updated where it stands, never
   silently elsewhere, which is this section's "update cue" from the other end.
 - **Go.dot answers each with one message** to the device, and only these verbs
-  answer. A refusal - the show locked, an address under no device - is said.
+  answer. A refusal - the show locked, an address under no device - is said. A
+  capture names the processor that sends it, so the answer reaches that processor
+  even when another shares its computer (2026-10-17, namespace draft §56.6-56.7).
 - **A processor fires by number too** (`cue.fireNumber`, `standby.setNumber`), as
   QLab's `/go "12"`.
 - **A described device's tree is a menu, one per part of the path**, under an OSC
