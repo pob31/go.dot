@@ -22,9 +22,38 @@ import { command, send } from "../plumbing/link.js";
 import { gesture } from "../gestures/table.js";
 import { wantsTheKeys } from "../gestures/keys.js";
 import { readPair, paired, seatWords, seatSentence, buttonWords, offer, banner, peerLines } from "../model/pair.js";
+import { Panic, DOUBLE_PRESS_MS } from "../model/touch.js";
 import { el } from "./common.js";
 
 el("go").addEventListener("click", () => gesture("go", []));
+
+/*  DOH! AND PANIC (namespace draft §75, ARI; the app's ANW). Doh! is `go.doh`;
+    a refusal - too late, nothing to take back - comes back as every refusal
+    does, in the banner. PANIC is one button and two levels: a press is
+    `run.stopAll`, a second within the window `run.killAll`, and the word under
+    it says which the next press is - "KILL ALL" in capitals while it would be,
+    back to "stop all" when the window has passed. Its own clock, not the
+    keyboard's: Esc and Esc Esc keep theirs. */
+const panic = new Panic();
+let panicBack = null;
+
+function sayPanicNext() {
+  const second = panic.nextIsDouble(performance.now());
+  el("panic").dataset.second = second ? "yes" : "no";
+  el("panic-next").textContent = second ? "KILL ALL" : "stop all";
+}
+
+el("panic").addEventListener("click", () => {
+  const which = panic.press(performance.now());
+
+  gesture(which === "run.killAll" ? "panic-kill" : "panic-stop", []);
+  sayPanicNext();
+
+  clearTimeout(panicBack);
+  panicBack = setTimeout(sayPanicNext, DOUBLE_PRESS_MS + 10);
+});
+
+el("doh").addEventListener("click", () => gesture("doh", []));
 
 /*  WHERE THE KEYBOARD IS, IN WORDS.
 
@@ -102,8 +131,7 @@ el("revert").addEventListener("click", () => {
   }
 });
 
-for (const button of document.querySelectorAll("#transport [data-cmd], #pair [data-cmd], #recovery [data-cmd], " +
-                                               "#pane-gogo header [data-cmd]")) {
+for (const button of document.querySelectorAll("#transport [data-cmd], #pair [data-cmd], #recovery [data-cmd]")) {
   button.addEventListener("click", () => command(button.dataset.cmd));
 }
 

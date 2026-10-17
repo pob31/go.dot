@@ -394,6 +394,17 @@ button:disabled { color: var(--ink-off); cursor: default; }
       font-weight: 700; letter-spacing: .12em; padding: 5px 26px; }
 @media (hover: hover) { #go:hover { filter: brightness(1.08); } }
 
+/*  DOH! AND PANIC (namespace draft §75, ARI): Doh! beside GO, then air, then
+    PANIC - the widest stop on the page, red, in capitals, with what its next
+    press does written under it (§4.8: the word, not the colour, says it). */
+#doh { margin-left: 6px; }
+.panic { display: inline-flex; flex-direction: column; align-items: center; margin-left: 28px; gap: 1px; }
+#panic { background: var(--failed); color: #1b0606; border-color: var(--failed);
+         font-weight: 700; letter-spacing: .12em; padding: 5px 18px; }
+#panic[data-second="yes"] { outline: 2px solid var(--ink); }
+.panic .next { font-size: var(--t-9); letter-spacing: .06em; color: var(--ink-faint); }
+#panic[data-second="yes"] + .next { color: var(--failed); font-weight: 700; }
+
 #transport .hint { color: var(--ink-faint); font-size: var(--t-10); margin-left: auto; }
 
 /*  WHAT UNDO WOULD UNMAKE, IN A WORD. The engine names every transaction

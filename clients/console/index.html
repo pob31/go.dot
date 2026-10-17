@@ -42,6 +42,16 @@
 
   <div id="transport">
     <button id="go">GO</button>
+    <!--  STOPPING, ALWAYS ON SCREEN (namespace draft §75, ARI; the app's ANW):
+          Doh! takes back a GO that came too early; then air; then PANIC - a
+          press stops every cue gracefully (Esc), a second within 0.75 s drops
+          everything (double Esc), and the word under it says which the next
+          press will do. The keyboard keeps Esc and Esc Esc. -->
+    <button id="doh" title="Doh!: take back the last GO, if it came too early">Doh!</button>
+    <span class="panic" id="panic-wrap">
+      <button id="panic" data-second="no">PANIC</button>
+      <span class="next" id="panic-next">stop all</span>
+    </span>
     <button data-cmd="standby.previous">▲ standby</button>
     <button data-cmd="standby.next">▼ standby</button>
     <button data-cmd="standby.clear">clear</button>
@@ -237,11 +247,8 @@
       <header>
         <h2>Gogo</h2>
         <span class="sub">running — present tense</span>
-        <!-- PRD §4.4's first two levels of stop, as the two commands they are
-             (2026-09-18). Esc is the first; Esc again within a second is the
-             second. Wired by the transport's data-cmd loop. -->
-        <button data-cmd="run.stopAll" title="Esc: every cue stops, footers run">stop all</button>
-        <button data-cmd="run.killAll" title="double Esc: everything dropped, no footers">kill all</button>
+        <!-- PRD §4.4's first two levels of stop are PANIC's, in the transport
+             (namespace draft §75, ARI): one button, pressed once or twice. -->
       </header>
       <div class="scroll" id="runs"></div>
     </section>

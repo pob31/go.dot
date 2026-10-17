@@ -13,6 +13,9 @@
   },
   "gestures": {
     "go":           { "command": "go",               "args": [],                     "where": "the GO button" },
+    "doh":          { "command": "go.doh",           "args": [],                     "where": "the Doh! button, left of PANIC (namespace draft 75)" },
+    "panic-stop":   { "command": "run.stopAll",      "args": [],                     "where": "PANIC pressed once (namespace draft 75)" },
+    "panic-kill":   { "command": "run.killAll",      "args": [],                     "where": "PANIC pressed again within 0.75 s (namespace draft 75)" },
     "park":         { "command": "standby.set",      "args": ["s"],                  "where": "a row's left edge, or 'standby here' in the inspector" },
     "focus-list":   { "command": "list.focus",       "args": ["s"],                  "where": "a list's tab" },
     "new-list":     { "command": "list.create",      "args": ["s"],                  "where": "the + tab" },
@@ -36,7 +39,7 @@
   },
   "buttons": ["standby.previous", "standby.next", "standby.clear", "undo", "redo",
               "document.save", "document.recover", "document.discardRecovery",
-              "run.stopAll", "run.killAll", "record.start", "record.stop",
+              "record.start", "record.stop",
               "live.keep", "live.drop",
               "pair.keep", "pair.takeOver", "pair.handOver", "pair.realign", "pair.adoptShow"]
 }
