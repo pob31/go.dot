@@ -289,6 +289,13 @@ if(WFG_BUILD_TESTS)
     add_subdirectory(tests)
 endif()
 
+# The fuzz targets compile their own std-only sources (tests/fuzz/CMakeLists.txt),
+# so this adds sanitizer-built executables beside the suite, not a dependency of it.
+if(WFG_BUILD_FUZZ)
+    enable_testing()
+    add_subdirectory(tests/fuzz)
+endif()
+
 # LAST, ALWAYS. Spikes are throwaway (devplan:19 — "they live in spikes/, never
 # migrate into src/"), they link wfg::thirdparty but never wfg::engine, and no
 # src/ or tests/ target may depend on one. Adding this directory last is the

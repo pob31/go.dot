@@ -513,7 +513,14 @@ namespace wfg::import::plist
         if (name == none)
             return {};
 
-        const auto& text = plist.objects[resolve (name)];
+        /*  A `$classname` that is itself a UID resolves to `$null` or past the
+            archive: no name, not an object to index. */
+        const auto resolved = resolve (name);
+
+        if (resolved == none)
+            return {};
+
+        const auto& text = plist.objects[resolved];
         return text.type == Object::Type::string ? text.text : std::string {};
     }
 

@@ -284,3 +284,23 @@ TEST_CASE ("keyed archive: a list that is not one is refused in words")
     CHECK_FALSE (Archive::from (std::move (*noObjects.list), error).has_value());
     CHECK (error == "not a keyed archive: no $objects or no $top");
 }
+
+TEST_CASE ("keyed archive: a $classname that is a UID names no class, and is not indexed (found by tests/fuzz)")
+{
+    //  UID nought is `$null`, and one past the end is no object at all: both
+    //  once indexed the object table with `none`.
+    for (const std::int64_t uid : { std::int64_t { 0 }, std::int64_t { 99 } })
+    {
+        writer::Keyed keyed;
+        const auto cls = keyed.add (writer::Value::dict ({ { "$classname", writer::Value::uid (uid) } }));
+        const auto root = keyed.add (writer::Value::dict ({ { "$class", writer::Value::uid (cls) } }));
+
+        std::string error;
+        auto read = parsed (keyed.archive (root));
+        REQUIRE (read.list.has_value());
+
+        const auto archive = Archive::from (std::move (*read.list), error);
+        REQUIRE (archive.has_value());
+        CHECK (archive->className (archive->top()).empty());
+    }
+}

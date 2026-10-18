@@ -257,8 +257,11 @@ the code.
   launch lands to the sample, how closely a rendered fade follows its curve, what
   a D700 refresh costs a tick, how long a Pd patch takes. They sit in the
   namespace draft beside the design they tested, and several changed a decision.
+- **The modules that read bytes Go.dot did not write are fuzzed** (the OSC decoder,
+  the binary property list under the QLab import) under ASan and UBSan, with no
+  JUCE needed to build them: [`docs/fuzzing.md`](docs/fuzzing.md).
 - **CI** builds and tests on Linux, macOS and Windows under both locales, with a
-  strict `-Werror` build, the spikes, a pin gate, and a job running Clang's
+  strict `-Werror` build, the spikes, a pin gate, a fuzz job, and a job running Clang's
   real-time sanitizer, the second net under PRD §4.2's rule that the audio
   thread never allocates, locks or calls the system.
 - **The tests run side by side**, as many at once as the machine keeps up

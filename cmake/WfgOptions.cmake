@@ -133,3 +133,10 @@ set(WFG_PIN_TE "3.5.0-develop" CACHE STRING
 # names the one Go.dot keeps.
 set(WFG_MACOS_BUNDLE_ID "com.github.pob31.godot" CACHE STRING
     "CFBundleIdentifier of the Go.dot.app the package-macos preset installs")
+
+# Fuzz targets for the byte-reading modules (Bplist, OscCodec): tests/fuzz/,
+# docs/fuzzing.md. They compile their own std-only sources, not the JUCE/TE
+# build, and need GCC or Clang for the sanitizers. OFF by default; ON in the
+# `fuzz` CI job only.
+option(WFG_BUILD_FUZZ
+    "Build the fuzz targets under tests/fuzz (GCC/Clang, ASan + UBSan)" OFF)

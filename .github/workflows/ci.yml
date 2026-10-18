@@ -557,6 +557,37 @@ jobs:
         run: cmake --build --preset spikes-debug
 
   # ---------------------------------------------------------------------------
+  # The fuzz targets (tests/fuzz, docs/fuzzing.md): the byte-reading modules
+  # (Bplist, OscCodec) under ASan + UBSan, fed valid seeds and 20000
+  # deterministic mutations each. No submodules and no JUCE - the targets
+  # compile their own std-only sources - so this job takes seconds and needs
+  # no `pins` gate. A red run left `crash-input` in the build tree; reproduce
+  # it with `fuzz_<target> crash-input` and add the case to the module's tests.
+  # ---------------------------------------------------------------------------
+  fuzz:
+    name: fuzz (Linux)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Configure
+        run: cmake -S tests/fuzz -B build/fuzz -DCMAKE_BUILD_TYPE=Debug
+
+      - name: Build
+        run: cmake --build build/fuzz -j 4
+
+      - name: Run
+        run: ctest --test-dir build/fuzz --output-on-failure
+
+      - name: Keep the input that broke it
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash-input
+          path: build/fuzz/crash-input
+          if-no-files-found: ignore
+
+  # ---------------------------------------------------------------------------
   # The second net under PRD 4.2, and the only job in this file that asserts
   # anything about real-time safety.
   #
