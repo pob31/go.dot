@@ -573,6 +573,12 @@ TEST_CASE ("M60: a flush of thirty-two NRPN faders and thirty-two RCP lines, tim
     std::size_t delivered = 0;
     sender.setLinkSink ([&delivered] (const std::string&, const std::vector<std::uint8_t>&) { ++delivered; return true; });
 
+    /*  ONE FLUSH OF ALL SIXTY-FOUR is what this measures, so the devices'
+        per-tick limit (namespace draft §88, AUT) is set aside: nought is no
+        limit, as a rig may write it. */
+    desk.perTick = 0;
+    yamaha.perTick = 0;
+
     const auto toDesk = tree::MountSender::destinationFor (desk);
     const auto toYamaha = tree::MountSender::destinationFor (yamaha);
 
