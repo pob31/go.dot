@@ -919,6 +919,32 @@ namespace wfg::tree
             }
         }
 
+        /*  A MARKER ON A SOUND OR A MOVIE (namespace draft §81), flat at
+            /godot/marker/<id> as a range is; its index counted among markers
+            alone, in the order they were made. */
+        void collectMarker (const juce::ValueTree& node, const std::string& cueId,
+                            int index, std::vector<Node>& out)
+        {
+            const auto id = node[idProperty].toString().toStdString();
+
+            if (id.empty())
+                return;
+
+            const auto base = std::string (godot) + "/marker/" + id;
+
+            for (const auto* row : doc::Schema::rowsForOwner ("marker"))
+            {
+                const doc::Attribute attribute { "Marker", row };
+                const auto name = std::string (row->name);
+
+                const auto text = name == "cue"   ? cueId
+                                : name == "index" ? std::to_string (index)
+                                                  : storedText (attribute, node);
+
+                out.push_back (makeLeaf (base + "/" + name, *row, text));
+            }
+        }
+
         /*  The identifiers of a sound's sections, in the order of its edited
             timeline (namespace draft §55): the containment read back. */
         std::string sectionsOf (const juce::ValueTree& cue)
@@ -1809,6 +1835,7 @@ namespace wfg::tree
             int childIndex = 0;
             int rangeIndex = 0;
             int sectionIndex = 0;
+            int markerIndex = 0;
             int messageIndex = 0;
 
             for (const auto& child : node)
@@ -1940,6 +1967,12 @@ namespace wfg::tree
                 if (childElement == "Section")
                 {
                     collectSection (child, id, sectionIndex++, out);
+                    continue;
+                }
+
+                if (childElement == "Marker")
+                {
+                    collectMarker (child, id, markerIndex++, out);
                     continue;
                 }
 

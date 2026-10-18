@@ -434,6 +434,14 @@ namespace wfg::doc
 
                 const auto sourceRanges = childrenOfType (source, "Range");
 
+                /*  THE PLAYLIST GOES FIRST (namespace draft §81, ATZ): an offset
+                    is refused beside ranges, and the source's may be one that
+                    plays the whole file from a second in. */
+                if (part == parts::Part::time)
+                    for (const auto& range : childrenOfType (target.cue, "Range"))
+                        if (const auto removed = remove (idText (range)); ! removed.ok)
+                            return removed;
+
                 for (const auto row : parts::rowsOf (part))
                 {
                     /*  A MOVIE PLAYS A START OFFSET OR A PLAYLIST, NEVER BOTH
@@ -538,10 +546,6 @@ namespace wfg::doc
                 //  THE PLAYLIST, replaced whole: document order is playing order.
                 if (part == parts::Part::time)
                 {
-                    for (const auto& range : childrenOfType (target.cue, "Range"))
-                        if (const auto removed = remove (idText (range)); ! removed.ok)
-                            return removed;
-
                     for (const auto& want : sourceRanges)
                     {
                         const auto made = createRange (cueId,

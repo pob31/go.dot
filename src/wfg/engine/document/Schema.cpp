@@ -206,7 +206,7 @@ namespace wfg::doc
                     and how it chases the code - which a video cue and a group
                     carry too, since a time group's members are sounds, pictures,
                     timelines and automatic sequences (AIK). Last again. */
-                { "Media",  true,  { "Route", "Send", "Feed", "Insert", "Range", "Section", "Trigger", "Fx" },
+                { "Media",  true,  { "Route", "Send", "Feed", "Insert", "Range", "Section", "Marker", "Trigger", "Fx" },
                                                           { "cue", "sound", "media", "member", "mark", "timed" } },
 
                 /*  A LIVE INPUT PLAYED AS A CUE (Phase 9b, decisions BW and CE):
@@ -228,7 +228,7 @@ namespace wfg::doc
                     Send, nothing of a voice. And a sampler member's rows, as a
                     sound's (namespace draft §49): played from a strip, its
                     fader is how solid it is. */
-                { "Video",  true,  { "Trigger", "Range", "Section" },
+                { "Video",  true,  { "Trigger", "Range", "Section", "Marker" },
                                                           { "cue", "video", "member", "mark", "timed" } },
 
                 /*  A DESTINATION IS AN OBJECT (author, 2026-09-05). PRD §3.9b
@@ -268,6 +268,15 @@ namespace wfg::doc
                     the reason a Range is; a child of Media and, since 55.5, of
                     a movie's Video, whose locked sound carries copies. */
                 { "Section", true,  {},                    { "section" } },
+
+                /*  A POINT SOMEBODY MARKED in a sound's or a movie's material
+                    (namespace draft §81): where it stands and what it is called.
+                    Identified for the reason a Range is, and a child of the cue
+                    it marks; it plays nothing and arms nothing - the waveform
+                    draws it, snaps to it, and selects between it and the next
+                    mark - and an edit of the cue's sections carries it with its
+                    material, as it carries the ranges. */
+                { "Marker", true,  {},                     { "marker" } },
 
                 /*  A TRIGGER IS AN OBJECT ON A CUE, and on ANY cue: §3.7 says a
                     cue or a group carries a list of them, so it is a child of

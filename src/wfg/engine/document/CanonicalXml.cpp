@@ -542,6 +542,15 @@ namespace wfg::doc
                     previous = child;
                 }
 
+                /*  A START OFFSET BESIDE RANGES, from a show saved before §81
+                    (ATZ): the table's + made a cue's first range and left its
+                    offset, which the ranges were already playing without -
+                    dropped here, so the show plays as it did and opens. */
+                if ((node.hasType ("Media") || node.hasType ("Video"))
+                      && node.getChildWithName ("Range").isValid()
+                      && osc::parseDouble (node["startOffset"].toString().toStdString()).value_or (0.0) > 0.0)
+                    node.removeProperty ("startOffset", nullptr);
+
                 return node;
             }
 

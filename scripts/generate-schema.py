@@ -79,6 +79,9 @@ KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
                 # rows, runtime and never stored (AGC).
                 "pair",
                 "audio", "bus", "media", "route", "range", "section", "run", "runs",
+                # A point somebody marked in a sound's or a movie's material
+                # (namespace draft §81): /godot/marker/<id>, flat as a range.
+                "marker",
                 # What a cue that sounds carries whatever its source - level,
                 # routing, the DCA, the EQ, the inserts, the sends (Phase 9b,
                 # namespace draft 18.2). A media cue and a mic cue both carry

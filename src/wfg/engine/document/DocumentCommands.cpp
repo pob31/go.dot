@@ -127,6 +127,36 @@ namespace wfg::doc
 
             return Outcome::ok (std::move (appliedArgs));
         }
+
+        /*  An optional argument, read whatever was sent: empty, or nothing, when
+            it was not. */
+        std::string stringArg (const std::vector<osc::Value>& args, std::size_t index)
+        {
+            return args.size() > index && args[index].isString() ? args[index].getString() : std::string {};
+        }
+
+        std::optional<double> numberArg (const std::vector<osc::Value>& args, std::size_t index)
+        {
+            if (args.size() > index && args[index].isNumber())
+                return args[index].asDouble();
+
+            return std::nullopt;
+        }
+
+        /*  The record keeps what the session drew or knew at `index`, so a
+            replay draws nothing and reads it there. */
+        std::vector<osc::Value> withArg (std::vector<osc::Value> args, std::size_t index, osc::Value value)
+        {
+            while (args.size() < index)
+                args.push_back (osc::Value::string ({}));
+
+            if (args.size() > index)
+                args[index] = std::move (value);
+            else
+                args.push_back (std::move (value));
+
+            return args;
+        }
     }
 
     //==============================================================================
@@ -402,17 +432,100 @@ namespace wfg::doc
                         "Cuts one of a media cue's ranges in two at a second of its file, the"
                         " second half keeping the first's place in the playlist. Refused when"
                         " that second is not strictly inside a range - on a cut, at the top of"
-                        " the file or at its end, there is nothing to divide.",
-                        { { "cue", 's', false }, { "at", 'd', false }, { "id", 's', true } },
+                        " the file or at its end, there is nothing to divide. On a cue with no"
+                        " ranges, given the length of what it plays, the whole of it from its"
+                        " start offset is made a range under `whole` and cut there: two slices"
+                        " in one step (namespace draft 81, the waveform's Add new slice).",
+                        { { "cue", 's', false }, { "at", 'd', false }, { "id", 's', true },
+                          { "length", 'd', true }, { "whole", 's', true } },
                         true,
                         [&document] (CommandContext&, const std::vector<osc::Value>& args)
                         {
-                            const auto id = args.size() > 2 ? args[2].getString() : std::string {};
+                            auto id = stringArg (args, 2);
+                            auto whole = stringArg (args, 4);
+                            const auto length = numberArg (args, 3).value_or (0.0);
 
-                            const auto edit = document.splitRange (args[0].getString(),
-                                                                   args[1].getFloat64(), id);
+                            const auto edit = document.splitWhole (args[0].getString(), args[1].getFloat64(),
+                                                                   length, id, whole);
 
-                            return fromEdit (edit, withId (args, 2, edit.id));
+                            auto applied = withId (args, 2, id);
+
+                            if (! whole.empty())
+                            {
+                                applied = withArg (std::move (applied), 3, osc::Value::float64 (length));
+                                applied = withArg (std::move (applied), 4, osc::Value::string (whole));
+                            }
+
+                            return fromEdit (edit, std::move (applied));
+                        } });
+
+        //----------------------------------------------------------------------
+        registry.add ({ "range.span",
+                        "Where a media cue starts and ends playing (namespace draft 81: the waveform's"
+                        " Set to start, Set to end, Set start and end); a negative second leaves that"
+                        " side as it is. With no ranges the start is the start offset, and an end makes"
+                        " the cue's first range from it. With ranges it cuts to the point: a range"
+                        " wholly before the start or after the end is taken out, one across it"
+                        " shortened, and the earliest in point or the furthest out point moved there"
+                        " when it stood short. Refused when nothing would be left to play.",
+                        { { "cue", 's', false }, { "start", 'd', false }, { "end", 'd', false },
+                          { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto side = [&args] (std::size_t index) -> std::optional<double>
+                            {
+                                const auto value = args[index].getFloat64();
+                                return value < 0.0 ? std::nullopt : std::optional<double> { value };
+                            };
+
+                            auto id = stringArg (args, 3);
+                            const auto edit = document.spanRanges (args[0].getString(), side (1), side (2), id);
+
+                            return fromEdit (edit, withId (args, 3, id));
+                        } });
+
+        //----------------------------------------------------------------------
+        registry.add ({ "range.slices",
+                        "A span of a media cue made `count` equal ranges (namespace draft 81: the"
+                        " waveform's Make new slices), in file order where the ranges it overlapped"
+                        " were - those inside it taken out, those across an end cut back to it. A cue"
+                        " with no ranges first gets one over the whole of what it plays, from its start"
+                        " offset to `length`, so the rest still plays. The identifiers drawn are written"
+                        " back in `ids`, space-separated.",
+                        { { "cue", 's', false }, { "from", 'd', false }, { "to", 'd', false },
+                          { "count", 'i', false }, { "length", 'd', true }, { "ids", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            auto ids = stringArg (args, 5);
+                            const auto length = numberArg (args, 4).value_or (0.0);
+
+                            const auto edit = document.sliceSpan (args[0].getString(), args[1].getFloat64(),
+                                                                  args[2].getFloat64(), args[3].getInt32(),
+                                                                  length, ids);
+
+                            auto applied = withArg (args, 4, osc::Value::float64 (length));
+                            applied = withArg (std::move (applied), 5, osc::Value::string (ids));
+                            return fromEdit (edit, std::move (applied));
+                        } });
+
+        //----------------------------------------------------------------------
+        registry.add ({ "marker.create",
+                        "Marks a point in a sound's or a movie's material (namespace draft 81): a"
+                        " named second of what the cue plays, which the waveform draws and snaps to"
+                        " and an edit of the cue carries with its material. Moved and renamed by"
+                        " node.set, taken away by object.delete.",
+                        { { "cue", 's', false }, { "at", 'd', false }, { "name", 's', true },
+                          { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto name = stringArg (args, 2);
+                            const auto edit = document.createMarker (args[0].getString(), args[1].getFloat64(),
+                                                                     name, stringArg (args, 3));
+
+                            return fromEdit (edit, withId (withArg (args, 2, osc::Value::string (name)), 3, edit.id));
                         } });
 
         //----------------------------------------------------------------------

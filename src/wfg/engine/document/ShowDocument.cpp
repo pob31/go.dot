@@ -594,6 +594,7 @@ namespace wfg::doc
         if (element == "Route")                     return "route";
         if (element == "Range")                     return "range";
         if (element == "Section")                   return "section";
+        if (element == "Marker")                    return "marker";
         if (element == "Port")                      return "port";
         if (element == "Trigger")                   return "trigger";
 
@@ -1500,6 +1501,16 @@ namespace wfg::doc
             (namespace draft 37.5, WL). */
         if (refusedOnAFollower (target.node, target.attribute->name()))
             return EditResult::failed (reason::lockedToMovie);
+
+        /*  A START OFFSET BESIDE RANGES (namespace draft §81, ATZ): the ranges
+            are what plays, and the reader refuses a show with both - refused
+            here too, so no edit can make one. Nought is the resting value and
+            always taken. */
+        if ((target.node.hasType ("Media") || target.node.hasType ("Video"))
+              && target.attribute->name() == "startOffset"
+              && target.node.getChildWithName ("Range").isValid()
+              && osc::parseDouble (std::string (text)).value_or (0.0) > 0.0)
+            return EditResult::failed (reason::badValue);
 
         /*  A LIST, which this door could not take until PR 5.16a (§14.6):
             `parseValue` read "0 -60 1 0" as one number and refused it, so the
@@ -3225,12 +3236,23 @@ namespace wfg::doc
         if (! keepingSounds && followsAMovie (cue))
             return EditResult::failed (reason::lockedToMovie);
 
+        const auto first = ! cue.getChildWithName ("Range").isValid();
+
         auto made = insertObject (cue, endOfSequence, "Range", id,
                                   { { "in", osc::formatDouble (in) },
                                     { "out", osc::formatDouble (out) } });
 
         if (made.ok)
             keepSoundsAfter (findById (made.id), "in");
+
+        /*  THE FIRST RANGE TAKES THE START OFFSET IN (namespace draft §81, ATZ):
+            a cue with ranges plays them, so an offset beside them is a second
+            answer the reader refuses - a show saved so would not open. The
+            offset goes to nought in the same step; whoever made the range from
+            it (the table's +, Set to end) began it there. */
+        if (made.ok && first && static_cast<double> (cue.getProperty ("startOffset", 0.0)) > 0.0)
+            if (const auto folded = setAttribute ("/godot/cue/" + cueId + "/startOffset", "0"); ! folded.ok)
+                return folded;
 
         return made;
     }
@@ -3304,6 +3326,459 @@ namespace wfg::doc
         }
 
         return EditResult::failed (reason::badValue);
+    }
+
+    //==============================================================================
+    namespace
+    {
+        /*  A cue's ranges as an edit of them sees them (namespace draft §81): in
+            document order - the playlist's - with the node each is. */
+        struct HeldRange
+        {
+            juce::ValueTree node;
+            std::string id;
+            double in = 0.0;
+            double out = 0.0;
+        };
+
+        std::vector<HeldRange> heldRangesOf (const juce::ValueTree& cue)
+        {
+            std::vector<HeldRange> out;
+
+            for (const auto& child : cue)
+                if (child.hasType ("Range"))
+                    out.push_back ({ child, child[idProperty].toString().toStdString(),
+                                     static_cast<double> (child.getProperty ("in", 0.0)),
+                                     static_cast<double> (child.getProperty ("out", 0.0)) });
+
+            return out;
+        }
+
+        bool playsAFile (const juce::ValueTree& cue)
+        {
+            return cue.hasType ("Media") || cue.hasType ("Video");
+        }
+
+        /*  The identifiers a record carries for the objects a verb made, space-
+            separated, in the order it made them; what a replay hands back. */
+        std::vector<std::string> idWords (const std::string& text)
+        {
+            std::vector<std::string> words;
+            std::string word;
+
+            for (const auto c : text)
+            {
+                if (c == ' ')
+                {
+                    if (! word.empty())
+                        words.push_back (std::move (word));
+
+                    word.clear();
+                    continue;
+                }
+
+                word += c;
+            }
+
+            if (! word.empty())
+                words.push_back (std::move (word));
+
+            return words;
+        }
+
+        bool differs (double now, double was) noexcept
+        {
+            return std::abs (now - was) >= 1.0e-9;
+        }
+    }
+
+    EditResult ShowDocument::splitWhole (const std::string& cueId, double at, double length,
+                                         std::string& id, std::string& wholeId)
+    {
+        const auto cue = findById (cueId);
+
+        if (! cue.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        if (! playsAFile (cue))
+            return EditResult::failed (reason::typeMismatch);
+
+        if (! keepingSounds && followsAMovie (cue))
+            return EditResult::failed (reason::lockedToMovie);
+
+        /*  WITH RANGES, the split it always was. */
+        if (! heldRangesOf (cue).empty())
+        {
+            const auto made = splitRange (cueId, at, id);
+
+            if (made.ok)
+                id = made.id;
+
+            return made;
+        }
+
+        /*  WITHOUT, the whole of what the cue plays - from its offset to the end
+            of its material - made one range and cut: two slices, the rest of the
+            cue playing on either side of the cut as it did. */
+        const auto start = std::max (0.0, static_cast<double> (cue.getProperty ("startOffset", 0.0)));
+
+        if (! (length > start + sameInstant) || ! (at > start + sameInstant) || ! (at < length - sameInstant))
+            return EditResult::failed (reason::badValue);
+
+        const auto whole = createRange (cueId, start, length, wholeId);
+
+        if (! whole.ok)
+            return whole;
+
+        wholeId = whole.id;
+
+        const auto made = splitRange (cueId, at, id);
+
+        if (made.ok)
+            id = made.id;
+
+        return made;
+    }
+
+    EditResult ShowDocument::spanRanges (const std::string& cueId, std::optional<double> start,
+                                         std::optional<double> end, std::string& id)
+    {
+        const auto cue = findById (cueId);
+
+        if (! cue.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        if (! playsAFile (cue))
+            return EditResult::failed (reason::typeMismatch);
+
+        if (! keepingSounds && followsAMovie (cue))
+            return EditResult::failed (reason::lockedToMovie);
+
+        if ((! start && ! end)
+              || (start && ! (*start >= 0.0 && std::isfinite (*start)))
+              || (end && ! (*end > 0.0 && std::isfinite (*end)))
+              || (start && end && ! (*end > *start + sameInstant)))
+            return EditResult::failed (reason::badValue);
+
+        const auto held = heldRangesOf (cue);
+
+        /*  NO RANGES: the start is the start offset, and an end makes the first
+            range - from the start given, else from the offset, which it takes
+            in (createRange folds it). */
+        if (held.empty())
+        {
+            if (! end)
+                return setAttribute ("/godot/cue/" + cueId + "/startOffset", osc::formatDouble (*start));
+
+            const auto from = start.value_or (std::max (0.0, static_cast<double> (cue.getProperty ("startOffset", 0.0))));
+
+            if (! (*end > from + sameInstant))
+                return EditResult::failed (reason::badValue);
+
+            const auto made = createRange (cueId, from, *end, id);
+
+            if (made.ok)
+                id = made.id;
+
+            return made;
+        }
+
+        /*  CUT TO THE POINT (ATT): what is kept is what plays after the start
+            and before the end; a range with nothing there is taken out. */
+        const auto kept = [&start, &end] (const HeldRange& range)
+        {
+            return (! start || range.out > *start + sameInstant) && (! end || range.in < *end - sameInstant);
+        };
+
+        std::vector<HeldRange> left;
+
+        for (const auto& range : held)
+            if (kept (range))
+                left.push_back (range);
+
+        /*  NOTHING LEFT: with both ends that is a span between the ranges, and
+            it becomes the one range; with one, there is nothing to play. */
+        if (left.empty() && ! (start && end))
+            return EditResult::failed (reason::badValue);
+
+        for (const auto& range : held)
+            if (! kept (range))
+                if (const auto taken = remove (range.id); ! taken.ok)
+                    return taken;
+
+        if (left.empty())
+        {
+            const auto made = createRange (cueId, *start, *end, id);
+
+            if (made.ok)
+                id = made.id;
+
+            return made;
+        }
+
+        auto wanted = left;
+
+        for (auto& range : wanted)
+        {
+            if (start)
+                range.in = std::max (range.in, *start);
+
+            if (end)
+                range.out = std::min (range.out, *end);
+        }
+
+        /*  AND THE POINT REACHED: the earliest in point brought back to a start
+            before it, the furthest out point on to an end after it. */
+        if (start)
+        {
+            const auto earliest = std::min_element (wanted.begin(), wanted.end(),
+                                                    [] (const HeldRange& a, const HeldRange& b) { return a.in < b.in; });
+
+            if (earliest->in > *start + sameInstant)
+                earliest->in = *start;
+        }
+
+        if (end)
+        {
+            const auto furthest = std::max_element (wanted.begin(), wanted.end(),
+                                                    [] (const HeldRange& a, const HeldRange& b) { return a.out < b.out; });
+
+            if (furthest->out < *end - sameInstant)
+                furthest->out = *end;
+        }
+
+        /*  The in point first: it only ever lands before the old out point, and
+            the out point then after the new in - a range is never for a moment
+            one that ends before it begins. */
+        for (std::size_t i = 0; i < wanted.size(); ++i)
+        {
+            const auto base = "/godot/range/" + wanted[i].id + "/";
+
+            if (differs (wanted[i].in, left[i].in))
+                if (const auto written = setAttribute (base + "in", osc::formatDouble (wanted[i].in)); ! written.ok)
+                    return written;
+
+            if (differs (wanted[i].out, left[i].out))
+                if (const auto written = setAttribute (base + "out", osc::formatDouble (wanted[i].out)); ! written.ok)
+                    return written;
+        }
+
+        return EditResult::succeeded (cueId);
+    }
+
+    EditResult ShowDocument::sliceSpan (const std::string& cueId, double from, double to, int count,
+                                        double length, std::string& ids)
+    {
+        const auto cue = findById (cueId);
+
+        if (! cue.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        if (! playsAFile (cue))
+            return EditResult::failed (reason::typeMismatch);
+
+        if (! keepingSounds && followsAMovie (cue))
+            return EditResult::failed (reason::lockedToMovie);
+
+        /*  A HUNDREDTH OF A SECOND A SLICE AT LEAST, and no more than a show's
+            launcher could ever hold: past `maxSlices` the request is a typing
+            slip, not a plan. */
+        constexpr int maxSlices = 64;
+        constexpr double smallestSlice = 0.01;
+
+        if (count < 1 || count > maxSlices || ! (from >= 0.0) || ! std::isfinite (to)
+              || ! ((to - from) / count >= smallestSlice))
+            return EditResult::failed (reason::badValue);
+
+        const auto step = (to - from) / count;
+        const auto given = idWords (ids);
+        std::size_t nextGiven = 0;
+        std::vector<std::string> drawn;
+
+        const auto takeId = [&given, &nextGiven]
+        {
+            return nextGiven < given.size() ? given[nextGiven++] : std::string {};
+        };
+
+        /*  A CUE WITH NO RANGES first has the whole of what it plays made one,
+            from its offset to the end of its material, so the rest of the file
+            still plays around the slices rather than the cue shrinking to them. */
+        if (heldRangesOf (cue).empty())
+        {
+            const auto offset = std::max (0.0, static_cast<double> (cue.getProperty ("startOffset", 0.0)));
+
+            if (! (length > offset + sameInstant))
+                return EditResult::failed (reason::badValue);
+
+            const auto whole = createRange (cueId, offset, std::max (length, to), takeId());
+
+            if (! whole.ok)
+                return whole;
+
+            drawn.push_back (whole.id);
+        }
+
+        const auto held = heldRangesOf (cue);
+
+        /*  WHAT THE SLICES PLAY LIKE: the range their first one is cut from. */
+        auto loops = 1;
+        auto pingPong = false;
+
+        for (const auto& range : held)
+            if (const auto middle = from + step * 0.5; range.in <= middle && middle < range.out)
+            {
+                loops = static_cast<int> (range.node.getProperty ("loops", 1));
+                pingPong = static_cast<bool> (range.node.getProperty ("pingPong", false));
+                break;
+            }
+
+        /*  WHERE THEY GO, decided by the first range the span touches in the
+            playlist: after one it cuts back (or cuts in two), in the place of
+            one it takes in or cuts the front off. Touching none, they go in file
+            order, before the first range that starts after them. */
+        juce::ValueTree after, before;
+        std::vector<std::string> inside;
+        std::vector<HeldRange> holders;
+
+        for (const auto& range : held)
+        {
+            if (range.out <= from + sameInstant || range.in >= to - sameInstant)
+                continue;
+
+            const auto startsInside = range.in >= from - sameInstant;
+            const auto endsInside = range.out <= to + sameInstant;
+
+            if (! after.isValid() && ! before.isValid())
+                (startsInside ? before : after) = range.node;
+
+            if (startsInside && endsInside)
+                inside.push_back (range.id);
+            else if (! startsInside && ! endsInside)
+                holders.push_back (range);
+            else if (! startsInside)
+            {
+                if (const auto cut = setAttribute ("/godot/range/" + range.id + "/out", osc::formatDouble (from)); ! cut.ok)
+                    return cut;
+            }
+            else if (const auto cut = setAttribute ("/godot/range/" + range.id + "/in", osc::formatDouble (to)); ! cut.ok)
+                return cut;
+        }
+
+        if (! after.isValid() && ! before.isValid())
+            for (const auto& range : held)
+                if (range.in >= to - sameInstant)
+                {
+                    before = range.node;
+                    break;
+                }
+
+        /*  ONE HOLDING THE WHOLE SPAN keeps its front, and its tail is made
+            after the slices with its loops - each, in a playlist that plays a
+            part of the file twice. */
+        for (const auto& holder : holders)
+            if (const auto cut = setAttribute ("/godot/range/" + holder.id + "/out", osc::formatDouble (from)); ! cut.ok)
+                return cut;
+
+        auto at = after.isValid() ? cue.indexOf (after) + 1
+                : before.isValid() ? cue.indexOf (before)
+                                   : endOfSequence;
+
+        const auto place = [this, &cue, &at] (double in, double out, const std::string& id)
+        {
+            const auto made = insertObject (cue, at, "Range", id,
+                                            { { "in", osc::formatDouble (in) }, { "out", osc::formatDouble (out) } });
+
+            if (made.ok && at != endOfSequence)
+                ++at;
+
+            return made;
+        };
+
+        std::string first;
+
+        for (int k = 0; k < count; ++k)
+        {
+            const auto in = from + step * k;
+            const auto out = k + 1 == count ? to : from + step * (k + 1);
+            const auto made = place (in, out, takeId());
+
+            if (! made.ok)
+                return made;
+
+            drawn.push_back (made.id);
+
+            if (first.empty())
+                first = made.id;
+
+            const auto base = "/godot/range/" + made.id + "/";
+
+            if (loops != 1)
+                if (const auto written = setAttribute (base + "loops", std::to_string (loops)); ! written.ok)
+                    return written;
+
+            if (pingPong)
+                if (const auto written = setAttribute (base + "pingPong", "true"); ! written.ok)
+                    return written;
+        }
+
+        for (const auto& holder : holders)
+        {
+            const auto tail = place (to, holder.out, takeId());
+
+            if (! tail.ok)
+                return tail;
+
+            drawn.push_back (tail.id);
+
+            const auto base = "/godot/range/" + tail.id + "/";
+
+            if (const auto holderLoops = static_cast<int> (holder.node.getProperty ("loops", 1)); holderLoops != 1)
+                if (const auto written = setAttribute (base + "loops", std::to_string (holderLoops)); ! written.ok)
+                    return written;
+
+            if (static_cast<bool> (holder.node.getProperty ("pingPong", false)))
+                if (const auto written = setAttribute (base + "pingPong", "true"); ! written.ok)
+                    return written;
+        }
+
+        for (const auto& id : inside)
+            if (const auto taken = remove (id); ! taken.ok)
+                return taken;
+
+        //  A movie's sounds follow its ranges (37.5, WL); an insert knocks at no door.
+        if (cue.hasType ("Video"))
+            keepSoundsAfter (cue, "startOffset");
+
+        ids.clear();
+
+        for (const auto& id : drawn)
+            ids += (ids.empty() ? "" : " ") + id;
+
+        return EditResult::succeeded (first);
+    }
+
+    EditResult ShowDocument::createMarker (const std::string& cueId, double at, const std::string& name,
+                                           const std::string& id)
+    {
+        const auto cue = findById (cueId);
+
+        if (! cue.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        /*  A SOUND'S OR A MOVIE'S, as a range is: a point in material a cue
+            that plays nothing has not got. */
+        if (! playsAFile (cue))
+            return EditResult::failed (reason::typeMismatch);
+
+        if (! (at >= 0.0) || ! std::isfinite (at))
+            return EditResult::failed (reason::badValue);
+
+        std::vector<std::pair<std::string_view, std::string>> attributes { { "at", osc::formatDouble (at) } };
+
+        if (! name.empty())
+            attributes.emplace_back ("name", name);
+
+        return insertObject (cue, endOfSequence, "Marker", id, attributes);
     }
 
 
@@ -4131,8 +4606,13 @@ namespace wfg::doc
             movie's, copied again by the writes above. */
         if (isMovieCue (cue))
             for (const auto& sound : soundsLockedTo (cue))
+            {
                 if (const auto lanes = carryLanes (sound, runs); ! lanes.ok)
                     return lanes;
+
+                if (const auto markers = carryMarkers (sound, runs); ! markers.ok)
+                    return markers;
+            }
 
         /*  AND THE FADES HELD to the material as it now stands: a section
             moved to the front of the file has nothing before it, a shortened
@@ -4252,7 +4732,27 @@ namespace wfg::doc
                 if (const auto written = setAttribute (base + "startOffset", osc::formatDouble (carriedOffset)); ! written.ok)
                     return written;
 
-        return EditResult::succeeded (cueId);
+        return carryMarkers (cue, runs);
+    }
+
+    EditResult ShowDocument::carryMarkers (const juce::ValueTree& cue, const std::vector<TimeRun>& runs)
+    {
+        /*  ITS MARKERS (namespace draft §81, AUA): with their material, or to
+            the cut where it went - a point somebody marked is kept when what it
+            marked is gone, where an undo would look for it. */
+        std::vector<std::pair<std::string, double>> markers;
+
+        for (const auto& child : cue)
+            if (child.hasType ("Marker"))
+                markers.emplace_back (child[idProperty].toString().toStdString(),
+                                      static_cast<double> (child.getProperty ("at", 0.0)));
+
+        for (const auto& [id, at] : markers)
+            if (const auto carriedAt = carryMarker (at, runs); std::abs (carriedAt - at) >= 1.0e-9)
+                if (const auto written = setAttribute ("/godot/marker/" + id + "/at", osc::formatDouble (carriedAt)); ! written.ok)
+                    return written;
+
+        return EditResult::succeeded (cue[idProperty].toString().toStdString());
     }
 
     EditResult ShowDocument::freezeEdit (const std::string& cueId, const std::string& source, const std::string& bounce,

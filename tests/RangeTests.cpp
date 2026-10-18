@@ -356,6 +356,11 @@ TEST_CASE ("validate: a start offset and a list of ranges are two answers to one
 
     rig.add (0.0, 4.0);
 
+    /*  No door makes one any more (namespace draft §81, ATZ): the first range
+        took the offset in. Put there by hand, as a file could hold it. */
+    CHECK (rig.document.getAttribute ("/godot/cue/" + rig.cueId + "/startOffset").value_or ("?") == "0");
+    rig.document.findById (rig.cueId).setProperty ("startOffset", 2.5, nullptr);
+
     const auto problems = rig.document.validate();
 
     REQUIRE (problems.size() == 1);
@@ -366,6 +371,37 @@ TEST_CASE ("validate: a start offset and a list of ranges are two answers to one
         a cue with ranges and an offset nobody set is an ordinary cue. */
     REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.cueId + "/startOffset", "0").ok);
     CHECK (rig.document.validate().empty());
+}
+
+TEST_CASE ("start offset: the first range takes it in, a write beside ranges is refused, and a show saved with both opens without it")
+{
+    /*  THE BUG §81 FOUND (ATZ): the table's + made a cue's first range from
+        nought and left the offset, and the reader refuses a show with both -
+        so a show saved after one press of + would not open again. */
+    RangeRig rig;
+    const auto offset = "/godot/cue/" + rig.cueId + "/startOffset";
+
+    REQUIRE (rig.document.setAttribute (offset, "2.5").ok);
+    const auto id = rig.add (2.5, 30.0);
+
+    CHECK (rig.document.getAttribute (offset).value_or ("?") == "0");
+    CHECK (rig.stored (id, "in") == "2.5");
+    CHECK (rig.document.validate().empty());
+
+    //  Beside ranges an offset is refused; nought is always taken.
+    CHECK_FALSE (rig.document.setAttribute (offset, "4").ok);
+    CHECK (rig.document.setAttribute (offset, "0").ok);
+
+    //  A morning's show, saved with both: it opens, playing as it did.
+    auto xml = doc::CanonicalXml::write (rig.document);
+    const auto at = xml.find ("<Media ");
+    REQUIRE (at != std::string::npos);
+    xml.insert (at + 7, "startOffset=\"7\" ");
+
+    doc::ShowDocument reopened;
+    REQUIRE (doc::CanonicalXml::read (xml, reopened).ok);
+    CHECK (reopened.getAttribute (offset).value_or ("0") == "0");
+    CHECK (reopened.getAttribute ("/godot/range/" + id + "/in").value_or ("?") == "2.5");
 }
 
 TEST_CASE ("range: it survives a save and a reload, being show state")
@@ -1273,4 +1309,280 @@ TEST_CASE ("slice move: a move the reader met late puts the clock where the read
     const auto t = secondsSinceLaunch (rig, launchedAt);
     REQUIRE (t > 1.5);
     CHECK (rig.run (id)->position == doctest::Approx (t - 1.5).epsilon (1.0e-4));
+}
+
+//==============================================================================
+/*  THE WAVEFORM'S MENUS (namespace draft §81): where a cue starts and ends, a
+    selection made slices, the first slice of a cue with none, and markers.
+    Each through its command, one transaction each as serve makes them, so an
+    undo is asked of the step the menu took. */
+namespace
+{
+    struct MenuRig : RangeRig
+    {
+        MenuRig()
+        {
+            engine.setBeforeApply ([this] (const Command& appliedCommand, const Event& submitted,
+                                           const std::vector<osc::Value>& coerced, std::int64_t tickIndex)
+                                   {
+                                       document.beginTransaction (appliedCommand.name, tickIndex,
+                                                                  submitted.origin, coerced);
+                                   });
+
+            doc::registerDocumentCommands (engine.commands(), document);
+            engine.log().openInMemory ({});
+        }
+
+        std::size_t apply (const std::string& command, std::vector<osc::Value> args)
+        {
+            REQUIRE (engine.submit (origin::cli, command, std::move (args)));
+            return engine.processTick (++tick).applied;
+        }
+
+        /** The cue's ranges in playlist order, as "in-out" words with loops when not one. */
+        std::string ranges() const
+        {
+            std::string out;
+
+            for (const auto& child : document.findById (cueId))
+                if (child.hasType ("Range"))
+                {
+                    out += (out.empty() ? "" : " ") + osc::formatDouble (static_cast<double> (child.getProperty ("in")))
+                         + "-" + osc::formatDouble (static_cast<double> (child.getProperty ("out")));
+
+                    if (const auto loops = static_cast<int> (child.getProperty ("loops", 1)); loops != 1)
+                        out += "x" + std::to_string (loops);
+                }
+
+            return out;
+        }
+
+        std::string offset() const
+        {
+            return document.getAttribute ("/godot/cue/" + cueId + "/startOffset").value_or ("0");
+        }
+
+        std::size_t span (double start, double end)
+        {
+            return apply ("range.span", { osc::Value::string (cueId), osc::Value::float64 (start), osc::Value::float64 (end) });
+        }
+
+        std::size_t slices (double from, double to, int count, double length = 0.0)
+        {
+            std::vector<osc::Value> args { osc::Value::string (cueId), osc::Value::float64 (from),
+                                           osc::Value::float64 (to), osc::Value::int32 (count) };
+
+            if (length > 0.0)
+                args.push_back (osc::Value::float64 (length));
+
+            return apply ("range.slices", std::move (args));
+        }
+
+        std::int64_t tick = 0;
+    };
+}
+
+TEST_CASE ("range.span: with no ranges the start is the offset, and an end makes the first range from it")
+{
+    MenuRig rig;
+
+    CHECK (rig.span (4.0, -1.0) == 1u);
+    CHECK (rig.offset() == "4");
+    CHECK (rig.ranges().empty());
+
+    //  Set to end: from the offset, which goes into the range.
+    CHECK (rig.span (-1.0, 20.0) == 1u);
+    CHECK (rig.ranges() == "4-20");
+    CHECK (rig.offset() == "0");
+    CHECK (rig.document.validate().empty());
+
+    REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
+    CHECK (rig.ranges().empty());
+    CHECK (rig.offset() == "4");
+
+    //  Set start and end: the range is the selection's; an end not after the start is refused.
+    CHECK (rig.span (2.0, 9.0) == 1u);
+    CHECK (rig.ranges() == "2-9");
+    CHECK (rig.span (9.0, 9.0) == 0u);
+    CHECK (rig.span (-1.0, -1.0) == 0u);
+}
+
+TEST_CASE ("range.span: with ranges it cuts to the point, and reaches it across a gap")
+{
+    MenuRig rig;
+    rig.add (0.0, 10.0);
+    rig.add (10.0, 20.0);
+    rig.add (20.0, 30.0);
+
+    //  Set to start at 15: the first slice gone, the second begins there.
+    CHECK (rig.span (15.0, -1.0) == 1u);
+    CHECK (rig.ranges() == "15-20 20-30");
+
+    //  Set to end at 25: the last slice ends there.
+    CHECK (rig.span (-1.0, 25.0) == 1u);
+    CHECK (rig.ranges() == "15-20 20-25");
+
+    //  Before every range, the start comes back to it; past the furthest out, the end goes on to it.
+    CHECK (rig.span (12.0, 28.0) == 1u);
+    CHECK (rig.ranges() == "12-20 20-28");
+
+    //  One undo for the step.
+    REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
+    CHECK (rig.ranges() == "15-20 20-25");
+
+    //  Past the last out with no end, nothing would be left: refused.
+    CHECK (rig.span (40.0, -1.0) == 0u);
+    CHECK (rig.span (-1.0, 3.0) == 0u);
+    CHECK (rig.ranges() == "15-20 20-25");
+}
+
+TEST_CASE ("range.span: a start in a gap begins the next range there; both ends between ranges make the one range")
+{
+    MenuRig rig;
+    rig.add (0.0, 5.0);
+    rig.add (12.0, 20.0);
+
+    CHECK (rig.span (8.0, -1.0) == 1u);
+    CHECK (rig.ranges() == "8-20");
+
+    REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
+    CHECK (rig.span (6.0, 10.0) == 1u);
+    CHECK (rig.ranges() == "6-10");
+}
+
+TEST_CASE ("range.slices: a cue with no ranges keeps playing the rest of its file around the slices")
+{
+    MenuRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.cueId + "/startOffset", "2").ok);
+
+    //  No length known: there is no whole to keep, refused.
+    CHECK (rig.slices (10.0, 18.0, 4) == 0u);
+
+    CHECK (rig.slices (10.0, 18.0, 4, 30.0) == 1u);
+    CHECK (rig.ranges() == "2-10 10-12 12-14 14-16 16-18 18-30");
+    CHECK (rig.offset() == "0");
+    CHECK (rig.document.validate().empty());
+
+    //  The record carries the six identifiers drawn and the length, for a replay.
+    const auto parsed = LogFile::parse (rig.engine.log().contents());
+    const auto& record = parsed.records.back();
+    REQUIRE (record.args.size() == 6u);
+    CHECK (record.args[4].asDouble() == doctest::Approx (30.0));
+
+    std::size_t words = 0;
+
+    for (std::size_t at = 0, next = 0; at < record.args[5].getString().size(); at = next + 1)
+    {
+        next = record.args[5].getString().find (' ', at);
+        ++words;
+
+        if (next == std::string::npos)
+            break;
+    }
+
+    CHECK (words == 6u);
+
+    REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
+    CHECK (rig.ranges().empty());
+    CHECK (rig.offset() == "2");
+}
+
+TEST_CASE ("range.slices: the ranges the span overlaps are cut back to it, those inside taken out, and loops carried")
+{
+    MenuRig rig;
+    rig.add (0.0, 10.0);
+    rig.add (10.0, 20.0);
+    rig.add (20.0, 30.0);
+
+    CHECK (rig.slices (5.0, 25.0, 2) == 1u);
+    CHECK (rig.ranges() == "0-5 5-15 15-25 25-30");
+
+    REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
+    CHECK (rig.ranges() == "0-10 10-20 20-30");
+
+    //  A bed going round for ever, cut into three: every piece goes round, its tail too.
+    MenuRig bed;
+    const auto id = bed.add (0.0, 30.0);
+    REQUIRE (bed.document.setAttribute ("/godot/range/" + id + "/loops", "0").ok);
+
+    CHECK (bed.slices (6.0, 15.0, 3) == 1u);
+    CHECK (bed.ranges() == "0-6x0 6-9x0 9-12x0 12-15x0 15-30x0");
+
+    //  Nought slices, or slices shorter than a hundredth of a second: refused.
+    CHECK (bed.slices (6.0, 15.0, 0) == 0u);
+    CHECK (bed.slices (6.0, 6.005, 1) == 0u);
+}
+
+TEST_CASE ("range.split: on a cue with no ranges, given the length, the whole of it from its offset is cut in two")
+{
+    MenuRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.cueId + "/startOffset", "3").ok);
+
+    //  Without the length, there is nothing to divide - as it always was.
+    CHECK (rig.apply ("range.split", { osc::Value::string (rig.cueId), osc::Value::float64 (12.0) }) == 0u);
+
+    CHECK (rig.apply ("range.split", { osc::Value::string (rig.cueId), osc::Value::float64 (12.0),
+                                       osc::Value::string ({}), osc::Value::float64 (40.0) }) == 1u);
+    CHECK (rig.ranges() == "3-12 12-40");
+    CHECK (rig.offset() == "0");
+
+    //  With ranges, the split it always was: the length is not asked.
+    CHECK (rig.apply ("range.split", { osc::Value::string (rig.cueId), osc::Value::float64 (20.0) }) == 1u);
+    CHECK (rig.ranges() == "3-12 12-20 20-40");
+}
+
+TEST_CASE ("marker: made on a sound, published flat with its cue and place, named, moved and taken away")
+{
+    MenuRig rig;
+
+    CHECK (rig.apply ("marker.create", { osc::Value::string (rig.cueId), osc::Value::float64 (4.25),
+                                         osc::Value::string ("Marker 1") }) == 1u);
+    CHECK (rig.apply ("marker.create", { osc::Value::string (rig.cueId), osc::Value::float64 (9.0) }) == 1u);
+
+    //  Not on a cue that plays no file; not before the start of it.
+    CHECK (rig.apply ("marker.create", { osc::Value::string (rig.memoId), osc::Value::float64 (1.0) }) == 0u);
+    CHECK (rig.apply ("marker.create", { osc::Value::string (rig.cueId), osc::Value::float64 (-1.0) }) == 0u);
+
+    std::vector<std::string> ids;
+
+    for (const auto& child : rig.document.findById (rig.cueId))
+        if (child.hasType ("Marker"))
+            ids.push_back (child["id"].toString().toStdString());
+
+    REQUIRE (ids.size() == 2u);
+
+    rig.parameters.markStale();
+    tree::EngineState state;
+    state.version = "test";
+    const auto snapshot = rig.parameters.publish (0, state);
+
+    const auto text = [&snapshot] (const std::string& address)
+    {
+        const auto* node = snapshot->find (address);
+
+        if (node == nullptr || ! node->soleValue().has_value())
+            return std::string ("(absent)");
+
+        return node->soleValue()->isString() ? node->soleValue()->getString()
+                                             : osc::formatDouble (node->soleValue()->asDouble());
+    };
+
+    CHECK (text ("/godot/marker/" + ids[0] + "/cue") == rig.cueId);
+    CHECK (text ("/godot/marker/" + ids[0] + "/at") == "4.25");
+    CHECK (text ("/godot/marker/" + ids[0] + "/name") == "Marker 1");
+    CHECK (text ("/godot/marker/" + ids[1] + "/index") == "1");
+
+    CHECK (rig.document.setAttribute ("/godot/marker/" + ids[1] + "/at", "11.5").ok);
+    CHECK (rig.document.setAttribute ("/godot/marker/" + ids[1] + "/name", "The slam").ok);
+    CHECK_FALSE (rig.document.setAttribute ("/godot/marker/" + ids[1] + "/at", "-2").ok);
+
+    //  It is the show's: saved, read back.
+    const auto xml = doc::CanonicalXml::write (rig.document);
+    doc::ShowDocument reopened;
+    REQUIRE (doc::CanonicalXml::read (xml, reopened).ok);
+    CHECK (reopened.getAttribute ("/godot/marker/" + ids[1] + "/name").value_or ("?") == "The slam");
+    CHECK (reopened.getAttribute ("/godot/marker/" + ids[1] + "/at").value_or ("?") == "11.5");
+
+    CHECK (rig.apply ("object.delete", { osc::Value::string (ids[0]) }) == 1u);
+    CHECK_FALSE (rig.document.findById (ids[0]).isValid());
 }

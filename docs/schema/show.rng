@@ -1068,6 +1068,7 @@
           <ref name="Insert"/>
           <ref name="Range"/>
           <ref name="Section"/>
+          <ref name="Marker"/>
           <ref name="Trigger"/>
           <ref name="Fx"/>
         </choice>
@@ -2099,6 +2100,7 @@
           <ref name="Trigger"/>
           <ref name="Range"/>
           <ref name="Section"/>
+          <ref name="Marker"/>
         </choice>
       </zeroOrMore>
     </element>
@@ -2245,6 +2247,28 @@
             <param name="minInclusive">-120</param>
             <param name="maxInclusive">12</param>
           </data>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="Marker">
+    <element name="Marker">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="at">
+          <a:documentation>Where in the cue&apos;s material the marker stands, in seconds of what the cue plays - the edited timeline while an edit is open, as a range&apos;s points are - so an edit that moves its material carries it along, and one that takes its material out leaves it at the cut (namespace draft 81). The playhead, a range&apos;s edges and a selection snap to it, and a double click between two marks selects what lies between them.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>What the waveform writes beside the marker (namespace draft 81): Marker 1, 2 and on when it is made from the playhead&apos;s menu, and whatever it is renamed to from its own. A point in the material somebody wanted to find again - the downbeat, the slam, the line the actor comes in on.</a:documentation>
+          <data type="string"/>
         </attribute>
       </optional>
     </element>

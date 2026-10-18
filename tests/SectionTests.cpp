@@ -1462,3 +1462,26 @@ TEST_CASE ("section.place: a movie's section lands on its frame grid, the rate w
     CHECK (applied[0].args[1].asDouble() == doctest::Approx (11.04));
     CHECK (applied[0].args[2].asDouble() == doctest::Approx (25.0));
 }
+
+TEST_CASE ("section.deleteSpan: a marker goes with its material, and one whose material went stays at the cut")
+{
+    /*  Namespace draft §81 (AUA): a marker is a point in what the cue plays,
+        carried by an edit as its ranges are - and kept when what it marked is
+        gone, at the cut, where an undo would look for it. */
+    EditRig rig;
+    const auto inside = rig.document.createMarker (rig.cueId, 8.0, "Inside", {});
+    const auto later = rig.document.createMarker (rig.cueId, 20.0, "Later", {});
+    REQUIRE (inside.ok);
+    REQUIRE (later.ok);
+
+    CHECK (rig.apply ("section.deleteSpan", { osc::Value::string (rig.cueId), osc::Value::float64 (5.0), osc::Value::float64 (12.0),
+                                              osc::Value::int32 (1) }) == 1u);
+
+    CHECK (rig.seconds ("/godot/marker/" + later.id + "/at") == doctest::Approx (13.0));
+    CHECK (rig.seconds ("/godot/marker/" + inside.id + "/at") == doctest::Approx (5.0));
+
+    //  One undo: the cut and the carry together.
+    REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
+    CHECK (rig.seconds ("/godot/marker/" + later.id + "/at") == doctest::Approx (20.0));
+    CHECK (rig.seconds ("/godot/marker/" + inside.id + "/at") == doctest::Approx (8.0));
+}

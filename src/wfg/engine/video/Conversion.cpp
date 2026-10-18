@@ -676,6 +676,19 @@ namespace wfg::video
                                             ! edit.ok)
                                             return Outcome::rejected (edit.reason);
                                 }
+
+                                /*  ITS MARKERS (namespace draft §81), by the same:
+                                    a point in the picture stays on its frame. */
+                                for (const auto& child : node)
+                                {
+                                    if (! child.hasType ("Marker"))
+                                        continue;
+
+                                    if (const auto edit = document.setAttribute ("/godot/marker/" + child["id"].toString().toStdString() + "/at",
+                                                                                 osc::formatDouble (std::max (0.0, secondsOf (child, "at", 0.0) - cut)));
+                                        ! edit.ok)
+                                        return Outcome::rejected (edit.reason);
+                                }
                             }
 
                             /*  ITS SOUND AS A CUE LOCKED TO IT (WJ): one after

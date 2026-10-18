@@ -224,6 +224,10 @@ namespace wfg::doc
     /** A start offset carried; nought stays nought, being the resting value. */
     double carryStartOffset (double offset, const std::vector<TimeRun>& runs) noexcept;
 
+    /*  A marker carried (namespace draft §81, AUA): with its material where
+        that is kept, else to the cut where it went. */
+    double carryMarker (double at, const std::vector<TimeRun>& runs) noexcept;
+
     //==============================================================================
     /*  THE DOOR'S JUDGEMENTS. */
 

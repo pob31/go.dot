@@ -491,6 +491,11 @@ namespace wfg::doc
         return std::max (0.0, carried (runs, offset));
     }
 
+    double carryMarker (double at, const std::vector<TimeRun>& runs) noexcept
+    {
+        return std::max (0.0, carried (runs, at));
+    }
+
     //==============================================================================
     std::vector<Section> clampFades (std::vector<Section> sections)
     {

@@ -444,6 +444,49 @@ namespace wfg::doc
         EditResult createRange (const std::string& cueId, double in, double out,
                                 const std::string& id = {});
 
+        /*  ON A CUE WITH NO RANGES, `splitRange` cuts the whole of what it plays
+            (namespace draft §81, "Add new slice"): a range from its start offset
+            to `length` is made first under `wholeId`, the offset folded into it,
+            then cut - one step. `length` is the cue's material, which the
+            document does not know; nought refuses, as a split with nothing to
+            divide does. */
+        EditResult splitWhole (const std::string& cueId, double at, double length,
+                               std::string& id, std::string& wholeId);
+
+        /*  WHERE A MEDIA CUE STARTS AND ENDS PLAYING, from the waveform's menus
+            (namespace draft §81: "Set to start", "Set to end", "Set start and
+            end"). Either side may be left as it is. With no ranges the start is
+            the start offset, and an end makes the cue's first range, the offset
+            folded into it. With ranges it CUTS TO THE POINT (the author's pick,
+            ATT): a range wholly before the new start (after the new end) is
+            taken out, one across it shortened, and the earliest in point (the
+            furthest out point) moved there when it stood short of it - so the
+            cue plays from there, to there. Refused when nothing would be left to
+            play, a start not before the end, or the cue locked to a movie.
+            `id` names the range made when there were none left, and is
+            written back. One step. */
+        EditResult spanRanges (const std::string& cueId, std::optional<double> start,
+                               std::optional<double> end, std::string& id);
+
+        /*  A SELECTION MADE SLICES (namespace draft §81, "Make new slices"): the
+            span `from`..`to` becomes `count` equal ranges, in file order, where
+            the ranges it overlapped were - those inside it taken out, those
+            across an end cut back to it, one holding the whole of it cut in two
+            around it. A cue with no ranges first gets one over the whole of
+            what it plays (its offset to `length`), so the rest of the file still
+            plays around the slices. The slices take the loops of the range
+            their first one was cut from, else play once. `ids` - the whole
+            range's, the slices', the cut-off tail's, space-separated - are
+            drawn when empty and written back. One step. */
+        EditResult sliceSpan (const std::string& cueId, double from, double to, int count,
+                              double length, std::string& ids);
+
+        /*  A MARKER (namespace draft §81): a named point in a sound's or a
+            movie's material, made at `at` seconds of what the cue plays. Moved
+            and renamed by `node.set`, taken away by `object.delete`. */
+        EditResult createMarker (const std::string& cueId, double at, const std::string& name,
+                                 const std::string& id = {});
+
         //======================================================================
         /*  A SOUND'S EDIT: ITS SECTIONS (namespace draft §55). The pieces of
             a sound cue's file in their order are the edited timeline the cue
@@ -1346,6 +1389,7 @@ namespace wfg::doc
         EditResult carrySectionEdit (juce::ValueTree cue, const std::function<EditResult()>& write);
         EditResult holdFades (const juce::ValueTree& cue);
         EditResult carryThrough (juce::ValueTree cue, const std::vector<TimeRun>& runs);
+        EditResult carryMarkers (const juce::ValueTree& cue, const std::vector<TimeRun>& runs);
         EditResult carryLanes (juce::ValueTree cue, const std::vector<TimeRun>& runs);
         std::string derivedIdFor (const std::string& joined);
         bool carryingSections = false;
