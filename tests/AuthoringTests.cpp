@@ -130,7 +130,7 @@ namespace
         {
             engine.log().openInMemory ({});
             doc::registerDocumentCommands (engine.commands(), document);
-            tree::registerAuthoringCommands (engine.commands(), document, answers);
+            tree::registerAuthoringCommands (engine.commands(), document, answers, {}, [this] { return place; });
 
             /*  One undo step per applied command, as serve cuts them. */
             engine.setBeforeApply ([this] (const Command& command, const Event& submitted,
@@ -213,6 +213,10 @@ namespace
         Socket goDot;
         std::string root = "/proc";
         tree::RawSender answers;
+
+        /*  Where the window would put a new cue (§92): its pick and the list it
+            shows, as serve's window tells the engine. Empty: no window. */
+        tree::HandsPlace place;
         Engine engine;
         doc::ShowDocument document;
         std::string listId;
@@ -361,7 +365,7 @@ TEST_CASE ("authoring: a declare is refused for a reserved root, a bad port, no 
 }
 
 //==============================================================================
-TEST_CASE ("authoring: a capture lands after the standby as one OSC cue, its messages in order, one undo step")
+TEST_CASE ("authoring: a capture lands after the cue picked in the window as one OSC cue, its messages in order, one undo step")
 {
     AuthoringRig rig;
     REQUIRE (rig.declare().applied == 1u);
@@ -369,7 +373,10 @@ TEST_CASE ("authoring: a capture lands after the standby as one OSC cue, its mes
 
     const auto first = rig.document.createCue (rig.listId, 0, "memo", "First").id;
     const auto second = rig.document.createCue (rig.listId, 1, "memo", "Second").id;
-    REQUIRE (rig.document.setAttribute ("/godot/list/" + rig.listId + "/standby", first).ok);
+
+    //  Picked in the window, where a cue made by hand would follow it (§92); the standby elsewhere.
+    rig.place = { first, rig.listId };
+    REQUIRE (rig.document.setAttribute ("/godot/list/" + rig.listId + "/standby", second).ok);
 
     const auto outcome = rig.capture ("standby", "", "", { { "/proc/a", "i:3" }, { "/proc/b", "f:0.5" },
                                                          { "/proc/c", "s:\"x y\"" } });
@@ -390,12 +397,93 @@ TEST_CASE ("authoring: a capture lands after the standby as one OSC cue, its mes
     /*  THE MESSAGES' IDENTIFIERS ON THE RECORD, in order, so a replay draws none. */
     CHECK (record.args[7].getString().size() == 17u);
 
+    /*  AND THE PLACE IT CHOSE (§92): after the picked cue - so a replay, which
+        has no window, lands it there again. */
+    CHECK (record.args[1].getString() == "after");
+    CHECK (record.args[2].getString() == first);
+
     REQUIRE (rig.processor.waitFor (2));
     CHECK (rig.processor.words (1) == std::vector<std::string> { "/godot/captured", cueId, "created", "", "Snap" });
 
     REQUIRE (rig.apply ("cli", "undo", {}).applied == 1u);
     CHECK_FALSE (rig.document.findById (cueId).isValid());
     CHECK (rig.memberIds (rig.listId) == std::vector<std::string> { first, second });
+}
+
+TEST_CASE ("authoring: with nothing picked a capture lands at the end of the list the window shows, never among a sampler's members, and the record names the place (§92)")
+{
+    /*  The author, 2026-10-19: "Creating a cue from WFS-DIY puts it after the
+        playhead cursor and not after the selected item", then, asked: "After
+        the pick like creating any other cue manually. And at the end if no
+        cue is picked." */
+    AuthoringRig rig;
+    REQUIRE (rig.declare().applied == 1u);
+
+    const auto first = rig.document.createCue (rig.listId, 0, "memo", "First").id;
+    const auto second = rig.document.createCue (rig.listId, 1, "memo", "Second").id;
+    REQUIRE (rig.document.setAttribute ("/godot/list/" + rig.listId + "/standby", first).ok);
+
+    SUBCASE ("nothing picked: the end of the list shown, not after the standby")
+    {
+        rig.place = { "", rig.listId };
+        REQUIRE (rig.capture ("standby", "", "", { { "/proc/a", "i:1" } }).applied == 1u);
+
+        const auto record = rig.lastRecord();
+        const auto cueId = record.args[3].getString();
+        CHECK (rig.memberIds (rig.listId) == std::vector<std::string> { first, second, cueId });
+        CHECK (record.args[1].getString() == "list");
+        CHECK (record.args[2].getString() == rig.listId);
+    }
+
+    SUBCASE ("another list shown: the end of that one")
+    {
+        const auto other = rig.document.createList ("Video").id;
+        rig.place = { "", other };
+        REQUIRE (rig.capture ("standby", "", "", { { "/proc/a", "i:1" } }).applied == 1u);
+
+        const auto cueId = rig.lastRecord().args[3].getString();
+        CHECK (rig.memberIds (other) == std::vector<std::string> { cueId });
+    }
+
+    SUBCASE ("a sampler's member picked: just after the sampler, as the window's own buttons put one")
+    {
+        const auto bank = rig.document.createCue (rig.listId, 1, "group", "Bank").id;
+        REQUIRE (! bank.empty());
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + bank + "/mode", "sampler").ok);
+        const auto member = rig.document.createCue (bank, 0, "media", "Hit").id;
+        REQUIRE (! member.empty());
+
+        rig.place = { member, rig.listId };
+        REQUIRE (rig.capture ("standby", "", "", { { "/proc/a", "i:1" } }).applied == 1u);
+
+        const auto record = rig.lastRecord();
+        const auto cueId = record.args[3].getString();
+        CHECK (rig.memberIds (rig.listId) == std::vector<std::string> { first, bank, cueId, second });
+        CHECK (rig.memberIds (bank) == std::vector<std::string> { member });
+        CHECK (record.args[1].getString() == "after");
+        CHECK (record.args[2].getString() == member);
+    }
+
+    SUBCASE ("a pick the show no longer has: the end of the list")
+    {
+        rig.place = { "GONE2345", rig.listId };
+        REQUIRE (rig.capture ("standby", "", "", { { "/proc/a", "i:1" } }).applied == 1u);
+
+        const auto cueId = rig.lastRecord().args[3].getString();
+        CHECK (rig.memberIds (rig.listId) == std::vector<std::string> { first, second, cueId });
+    }
+
+    SUBCASE ("as the record says it - `after` a cue - with no window, as a replay has none")
+    {
+        REQUIRE (rig.capture ("after", first, "", { { "/proc/a", "i:1" } }).applied == 1u);
+
+        const auto cueId = rig.lastRecord().args[3].getString();
+        CHECK (rig.memberIds (rig.listId) == std::vector<std::string> { first, cueId, second });
+
+        //  After a cue the show does not have: refused, nothing written.
+        CHECK (rig.capture ("after", "GONE2345", "", { { "/proc/a", "i:2" } }).rejected == 1u);
+        CHECK (rig.memberIds (rig.listId).size() == 3u);
+    }
 }
 
 TEST_CASE ("authoring: a capture under the processor's root lands on it with a device of several roots declared beside")
@@ -761,9 +849,10 @@ TEST_CASE ("authoring: a capture that names its sender is answered to that devic
         CHECK (rig.engine.processTick (rig.tick++).applied == 1u);
         rig.answers.flush();
 
+        //  The older form kept too - its `where` now the place the capture chose (§92), the end of the list.
         record = rig.lastRecord();
         REQUIRE (record.args.size() == 9u);
-        CHECK (record.args[0].getString() == "standby");
+        CHECK (record.args[0].getString() == "list");
         CHECK (record.args[2].getString().size() == 8u);
         CHECK (rig.attribute ("/godot/cue/" + record.args[2].getString() + "/name") == "Old");
     }

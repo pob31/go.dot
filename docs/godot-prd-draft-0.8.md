@@ -2886,8 +2886,10 @@ Three things are missing, and they are what the protocol has to specify:
    keeps the knowledge of *what is worth capturing* where it belongs: in the
    processor, which knows which of its parameters are a scene and which are a
    preference.
-2. **Where it lands, said explicitly.** A new cue after the standby, a new cue at
-   the end of a named list, or an update to an existing cue by ID. The last is
+2. **Where it lands, said explicitly.** A new cue where a cue made by hand would
+   land - after the cue picked in the window, or at the end of the list on screen
+   when nothing is picked (the author, 2026-10-19; namespace draft §92) - a new
+   cue at the end of a named list, or an update to an existing cue by ID. The last is
    §3.10's "capture into a cue is an explicit *update cue* action, never a silent
    write-back", seen from the other end, and the rule survives the change of
    direction: **a processor may never silently rewrite a cue somebody is
@@ -2924,7 +2926,7 @@ the decisions are the namespace draft's §56 (AEI-AEP the author's):
   datagram's address, its host and ports moved after, its name and switches the
   operator's. Go.dot fetches its OSCQuery description and keeps it in the show.
 - **A processor writes a cue** (`cue.capture`): one OSC cue holding all its
-  messages, after the standby, at the end of a list, or in place of a cue. **The
+  messages, where a cue made by hand would land, at the end of a list, or in place of a cue. **The
   identifier wins**: a cue that already holds it is updated where it stands, never
   silently elsewhere, which is this section's "update cue" from the other end.
 - **Go.dot answers each with one message** to the device, and only these verbs

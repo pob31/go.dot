@@ -82,8 +82,15 @@ namespace wfg::client::model
         drawn under its row, spaced as rows, each at its offset into the cue -
         and the aim itself is one of them, the pointer. Neither is a cue: no
         drop lands on one, no pick takes one, and the model never builds one;
-        the list inserts them (`CueListComponent::setSteps`). */
-    enum class RowKind { cue, band, step };
+        the list inserts them (`CueListComponent::setSteps`).
+
+        A LANDING ROW IS AN EMPTY LINE AT AN END OF THE LIST, while a cue is
+        dragged (namespace draft §92): first place, under the persistent band,
+        and last place, after everything - each a drop onto the list itself,
+        at its first or its last member position. The model never builds one
+        either; the list inserts them while a hand holds a cue
+        (`CueListComponent::showLandings`). */
+    enum class RowKind { cue, band, step, landing };
 
     struct Row
     {

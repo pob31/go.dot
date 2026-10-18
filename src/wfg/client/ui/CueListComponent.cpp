@@ -759,6 +759,24 @@ namespace wfg::client::ui
             return;
         }
 
+        /*  AN EMPTY LINE AT AN END OF THE LIST (§92): nothing in it, and the
+            drop's line across its middle while the hand is on it - the cue
+            would go there, first or last. */
+        if (entry.rowKind == model::RowKind::landing)
+        {
+            if (row == dropRow)
+            {
+                const auto tone = Look::colour (theme, dropTone.c_str());
+
+                g.setColour (tone.withAlpha (0.12f));
+                g.fillRect (0, 0, width, height);
+                g.setColour (tone);
+                g.fillRect (0, height / 2 - 1, width, 2);
+            }
+
+            return;
+        }
+
         if (entry.rowKind == model::RowKind::band)
         {
             paintBand (entry, row, g, width, height);
@@ -1679,18 +1697,25 @@ namespace wfg::client::ui
             if (inList >= static_cast<int> (rows.size()) * juce::jmax (1, rowHeight()))
             {
                 rowOut = static_cast<int> (rows.size()) - 1;
+
+                //  Below the last place's empty line is below the last row, as it was before that line.
+                if (rowOut > 0 && rows[static_cast<std::size_t> (rowOut)].rowKind == model::RowKind::landing)
+                    --rowOut;
+
                 pastTheEnd = true;
             }
         }
 
         const auto draggedId = draggedIdOf (details);
+        const auto onLanding = rowOut >= 0 && ! pastTheEnd
+                                 && rows[static_cast<std::size_t> (rowOut)].rowKind == model::RowKind::landing;
 
         /*  A preset line dragged: the mark moves or goes, and letting go on
             no row at all is one of the answers. */
         if (isPresetLine (details))
         {
             const auto* own = rowById (draggedId);
-            return model::presetLineDropFor (rowOut >= 0 ? &rows[static_cast<std::size_t> (rowOut)] : nullptr,
+            return model::presetLineDropFor (rowOut >= 0 && ! onLanding ? &rows[static_cast<std::size_t> (rowOut)] : nullptr,
                                              draggedId, own != nullptr ? own->preset : std::string {}, rows);
         }
 
@@ -1698,6 +1723,17 @@ namespace wfg::client::ui
 
         if (rowOut < 0 || dragged == nullptr)
             return {};
+
+        /*  AN EMPTY LINE AT AN END (§92): the list's own first or last member
+            position, whatever the keys held - a move, and nothing else. */
+        if (onLanding)
+        {
+            model::Drop drop;
+            drop.kind = model::DropKind::after;
+            drop.container = drawnList;
+            drop.index = rows[static_cast<std::size_t> (rowOut)].bandKey == landingFirstKey ? 0 : -1;
+            return drop;
+        }
 
         /*  How far down the row the pointer is, which is what tells "on"
             from "after" - asked as a dropped file asks it. */
@@ -1745,14 +1781,32 @@ namespace wfg::client::ui
     void CueListComponent::timerCallback()
     {
         const auto now = juce::ModifierKeys::getCurrentModifiers();
-
-        if (now == lastMods)
-            return;
+        auto askAgain = now != lastMods;
 
         lastMods = now;
 
-        if (lastDrag.sourceComponent != nullptr)
+        //  A list that scrolled under a still hand has another row under it.
+        if (lastDrag.sourceComponent != nullptr && scrollWhileDragging())
+            askAgain = true;
+
+        if (askAgain && lastDrag.sourceComponent != nullptr)
             itemDragMove (lastDrag);
+    }
+
+    bool CueListComponent::scrollWhileDragging()
+    {
+        auto* viewport = list.getViewport();
+
+        if (viewport == nullptr)
+            return false;
+
+        /*  WHERE THE HAND IS IN THE VIEWPORT'S OWN TERMS - above its top when
+            it is over the headings, which scrolls up as the edge itself does. */
+        const auto at = lastDrag.localPosition - list.getPosition() - viewport->getPosition();
+        const auto edge = juce::jmax (8, rowHeight());
+
+        return viewport->autoScroll (juce::jlimit (edge, juce::jmax (edge, viewport->getWidth() - edge - 1), at.x),
+                                     at.y, edge, juce::jmax (4, edge / 2));
     }
 
     void CueListComponent::itemDragMove (const SourceDetails& details)
@@ -1765,6 +1819,12 @@ namespace wfg::client::ui
 
         //  Kept so the timer can ask the same question again without the hand moving.
         lastDrag = details;
+
+        /*  THE EMPTY LINES AT THE ENDS FIRST (§92): the first one moves every
+            row below it, and the bands and the hit test have to see that. */
+        if (! isPresetLine (details))
+            showLandings (rowUnder (details.localPosition.y),
+                          details.localPosition.y < list.getY() && list.getViewport()->getViewPositionY() <= 0);
 
         /*  THE BANDS FIRST, because they change what is under the pointer:
             hovering a group's name grows its missing header and footer, and
@@ -1859,7 +1919,10 @@ namespace wfg::client::ui
                     name, which a band's own row does not carry (§30, S6). */
                 const auto& named = model::groupNamedBy (drop, rows[static_cast<std::size_t> (at)], rows);
 
-                actions.say (juce::String (model::describe (drop, named, intoTimeline)));
+                if (rows[static_cast<std::size_t> (at)].rowKind == model::RowKind::landing)
+                    actions.say (drop.index == 0 ? "first in the list" : "last in the list");
+                else
+                    actions.say (juce::String (model::describe (drop, named, intoTimeline)));
             }
         }
     }
@@ -1946,6 +2009,84 @@ namespace wfg::client::ui
         return band;
     }
 
+    model::Row CueListComponent::landing (bool first)
+    {
+        model::Row row;
+        row.rowKind = model::RowKind::landing;
+        row.section = model::Section::member;
+        row.bandKey = first ? landingFirstKey : landingLastKey;     //  which end it is
+        return row;
+    }
+
+    int CueListComponent::landingRow (bool first) const
+    {
+        const std::string key = first ? landingFirstKey : landingLastKey;
+
+        for (std::size_t n = 0; n < rows.size(); ++n)
+            if (rows[n].rowKind == model::RowKind::landing && rows[n].bandKey == key)
+                return static_cast<int> (n);
+
+        return -1;
+    }
+
+    int CueListComponent::firstLandingPlace() const
+    {
+        //  Under the persistent band, which is the list's first row (ShowModel), else the very top.
+        return ! rows.empty() && rows.front().rowKind == model::RowKind::band
+                 && rows.front().section == model::Section::persistent ? 1 : 0;
+    }
+
+    void CueListComponent::showLandings (int over, bool above)
+    {
+        auto changed = false;
+
+        //  The last place: always, after everything, which moves nothing.
+        if (landingRow (false) < 0)
+        {
+            rows.push_back (landing (false));
+            changed = true;
+        }
+
+        /*  The first place: opened by a hand on the persistent band or the
+            headings above it - never by the first cue's own row, which would
+            slide away from under the hand - and kept while the hand is over
+            the band, the line or the row the line pushed down. */
+        const auto place = firstLandingPlace();
+        const auto first = landingRow (true);
+
+        if (first < 0 && (above || (over >= 0 && over < place)))
+        {
+            rows.insert (rows.begin() + place, landing (true));
+            changed = true;
+        }
+        else if (first >= 0 && ! above && (over < 0 || over > first + 1))
+        {
+            rows.erase (rows.begin() + first);
+            changed = true;
+        }
+
+        if (changed)
+        {
+            list.updateContent();
+            list.repaint();
+        }
+    }
+
+    void CueListComponent::removeLandings()
+    {
+        const auto before = rows.size();
+
+        rows.erase (std::remove_if (rows.begin(), rows.end(),
+                                    [] (const model::Row& row) { return row.rowKind == model::RowKind::landing; }),
+                    rows.end());
+
+        if (rows.size() != before)
+        {
+            list.updateContent();
+            list.repaint();
+        }
+    }
+
     void CueListComponent::growFooters (const std::string& groupId)
     {
         /*  THE GROUP AND EVERY GROUP IT SITS IN (the author, 2026-10-18:
@@ -2024,6 +2165,7 @@ namespace wfg::client::ui
         stopTimer();
         lastDrag = SourceDetails { juce::var(), nullptr, {} };
         showEmptyBands ({}, false);
+        removeLandings();
 
         dropRow = -1;
         dropWouldLink = false;
@@ -2055,8 +2197,9 @@ namespace wfg::client::ui
         dropTone = "drop-into";
         refusalSaid.clear();
 
-        //  The bands were the hand's, and the hand has gone.
+        //  The bands were the hand's, and the hand has gone - and the empty lines at the ends with it.
         showEmptyBands ({}, false);
+        removeLandings();
 
         repaint();
 

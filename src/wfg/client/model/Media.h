@@ -424,4 +424,22 @@ namespace wfg::client::model
         once as it ends - what it removed and freed, or why it stopped. The one
         at launch is the machine's housekeeping and says nothing. */
     std::string cacheSweepNews (const CacheSweepRow& before, const CacheSweepRow& now);
+
+    /*  CUES COPIED FROM ONE SHOW, PASTED INTO ANOTHER, BRING THEIR FILES
+        (namespace draft §92; the author, 2026-10-19, chose that paste copies
+        the files this show would not find). A fragment says nothing of where
+        it came from, so the window that puts one on the system's clipboard
+        names its show on it: `from`, the show's folder, on the `<Fragment>`
+        element - which `document.paste` reads past. The window it is pasted
+        into reads it back and the names of the files its cues play, and
+        copies those its own show does not have before it pastes. */
+
+    /** `fragment` with `from="<showFolder>"` on its root; as it was when it already names one, or is no fragment. */
+    std::string fragmentFrom (const std::string& fragment, const std::string& showFolder);
+
+    /** The show folder a fragment names as its `from`, or empty. */
+    std::string fragmentSource (const std::string& fragment);
+
+    /** Every `file` a fragment's elements name, once each, in order of first appearance. */
+    std::vector<std::string> mediaNamesIn (const std::string& fragment);
 }

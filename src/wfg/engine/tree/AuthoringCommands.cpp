@@ -18,6 +18,7 @@
 
 #include <wfg/engine/command/Event.h>
 #include <wfg/engine/cue/CueList.h>
+#include <wfg/engine/cue/GroupMode.h>
 #include <wfg/engine/document/Sequence.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/tree/Mount.h>
@@ -41,7 +42,6 @@ namespace wfg::tree
         const juce::Identifier idKey { "id" };
         const juce::Identifier numberKey { "number" };
         const juce::Identifier nameKey { "name" };
-        const juce::Identifier standbyKey { "standby" };
 
         std::string textOf (const juce::ValueTree& node, const juce::Identifier& key)
         {
@@ -221,36 +221,47 @@ namespace wfg::tree
             int index = doc::endOfSequence;
         };
 
-        /*  After the standby of the focused list - in the standby's own parent,
-            one member later, since the standby may stand inside a group - or at
-            the end of that list when nothing stands by. Nothing when the show
-            has no list. */
-        std::optional<Landing> afterStandby (const doc::ShowDocument& document)
+        /*  ONE MEMBER AFTER A CUE, in the cue's own parent (namespace draft §92):
+            where a cue made by hand lands when that cue is picked. A sampler
+            holds sounds and pictures only (§39, §49), so a cue picked among its
+            members puts an OSC cue just after the sampler instead, as the
+            window's own buttons do. Nothing for a cue the show does not have. */
+        std::optional<Landing> afterCue (const doc::ShowDocument& document, const std::string& cueId)
         {
-            const auto list = cue::Focus {}.list (document);
-
-            if (! list.isValid())
+            if (cueId.empty())
                 return std::nullopt;
 
-            const auto listId = textOf (list, idKey);
-            const auto standby = document.findById (textOf (list, standbyKey));
+            auto cue = document.findById (cueId);
 
-            if (! standby.isValid())
-                return Landing { listId, doc::endOfSequence };
+            if (! cue.isValid() || cue.hasType ("List") || ! cue.getParent().isValid())
+                return std::nullopt;
 
-            const auto parent = standby.getParent();
+            auto parent = cue.getParent();
+
+            if (parent.hasType ("Group") && cue::isSampler (cue::GroupMode { textOf (parent, "mode"), {} })
+                  && parent.getParent().isValid())
+            {
+                cue = parent;
+                parent = parent.getParent();
+            }
+
+            const auto parentId = textOf (parent, idKey);
+
+            if (parentId.empty())
+                return std::nullopt;
+
             int position = 0;
 
             for (const auto& sibling : parent)
             {
-                if (sibling == standby)
+                if (sibling == cue)
                     break;
 
                 if (doc::isSequenceChild (sibling))
                     ++position;
             }
 
-            return Landing { textOf (parent, idKey), position + 1 };
+            return Landing { parentId, position + 1 };
         }
 
         /*  The end of a list named by identifier or by name; the focused list
@@ -347,7 +358,7 @@ namespace wfg::tree
 
     //==========================================================================
     void registerAuthoringCommands (CommandRegistry& registry, doc::ShowDocument& document, RawSender& answers,
-                                    DescribeRequest describe)
+                                    DescribeRequest describe, HandsPlaceRead handsPlace)
     {
         //----------------------------------------------------------------------
         /*  THE PROCESSOR BECOMES A DEVICE (namespace draft §56, AEJ).
@@ -508,14 +519,15 @@ namespace wfg::tree
             where `answeredMounts` finds the sender. Either form is recorded as
             it came, so an older log replays as it was written. */
         registry.add ({ "cue.capture",
-                        "A processor writes one OSC cue: after the standby, at the end of a list, in place of a"
-                        " cue, or appended to one; the same cue updated when its id already exists. Answers"
-                        " /godot/captured <id> <outcome> <number> <name> to the device whose root is `from`.",
+                        "A processor writes one OSC cue: where a cue made by hand would land (standby), after a"
+                        " named cue, at the end of a list, in place of a cue, or appended to one; the same cue"
+                        " updated when its id already exists. Answers /godot/captured <id> <outcome> <number>"
+                        " <name> to the device whose root is `from`.",
                         { { "from", 's', false }, { "where", 's', false }, { "target", 's', false },
                           { "id", 's', false }, { "name", 's', false }, { "number", 's', false },
                           { "notes", 's', false }, { "messageIds", 's', false }, { "pair", 's', true, true } },
                         true,
-                        [&document, &answers] (CommandContext& context, const std::vector<osc::Value>& args)
+                        [&document, &answers, handsPlace] (CommandContext& context, const std::vector<osc::Value>& args)
                         {
                             const auto first = args[0].getString();
                             const auto namesSender = first.empty() || first.front() == '/';
@@ -590,7 +602,8 @@ namespace wfg::tree
                             //--------------------------------------------------
                             // Everything checked before anything is written.
 
-                            if (where != "standby" && where != "list" && where != "cue" && where != "more")
+                            if (where != "standby" && where != "list" && where != "cue" && where != "more"
+                                  && where != "after")
                                 return refuse (reason::badValue);
 
                             if (pairs.empty() || (args.size() - firstPair) % 2 != 0)
@@ -649,11 +662,21 @@ namespace wfg::tree
                             if ((where == "more" || where == "cue") && ! existing.isValid())
                                 return refuse (reason::unknownId);
 
+                            /*  `after` names the cue a new one follows (§92) - what a
+                                `standby` capture is recorded as - and a cue the show
+                                does not have is refused before anything is written. */
+                            if (where == "after" && ! existing.isValid() && ! afterCue (document, target))
+                                return refuse (reason::unknownId);
+
                             if (existing.isValid() && ! existing.hasType ("Osc"))
                                 return refuse (reason::typeMismatch);
 
                             std::vector<std::string> madeIds;
                             std::size_t nextRecorded = 0;
+
+                            //  Where a new cue went, as the record says it (§92): `standby` resolved.
+                            auto recordedWhere = where;
+                            auto recordedTarget = target;
 
                             const auto addMessage = [&] (const std::string& address, const std::string& value)
                             {
@@ -714,8 +737,49 @@ namespace wfg::tree
                             }
                             else
                             {
-                                const auto landing = where == "list" ? endOfList (document, target)
-                                                                     : afterStandby (document);
+                                /*  WHERE A CUE MADE BY HAND WOULD LAND (the author,
+                                    2026-10-19: "after the pick like creating any other
+                                    cue manually. And at the end if no cue is picked";
+                                    namespace draft §92): after the cue picked in the
+                                    window, else at the end of the list it shows - or,
+                                    with no window, of the focused list. The word stays
+                                    `standby`, which every processor already sends.
+                                    RECORDED AS THE PLACE IT CHOSE, `after` a cue or the
+                                    end of a `list`, so a replay - which has no window -
+                                    lands it there again. */
+                                std::optional<Landing> landing;
+
+                                if (where == "list")
+                                {
+                                    landing = endOfList (document, target);
+                                }
+                                else if (where == "after")
+                                {
+                                    landing = afterCue (document, target);
+                                }
+                                else
+                                {
+                                    const auto place = handsPlace ? handsPlace() : HandsPlace {};
+
+                                    if (const auto afterPick = afterCue (document, place.picked))
+                                    {
+                                        landing = afterPick;
+                                        recordedWhere = "after";
+                                        recordedTarget = place.picked;
+                                    }
+                                    else
+                                    {
+                                        const auto shown = document.findById (place.list);
+                                        landing = endOfList (document, shown.isValid() && shown.hasType ("List")
+                                                                         ? place.list : std::string {});
+
+                                        if (landing)
+                                        {
+                                            recordedWhere = "list";
+                                            recordedTarget = landing->parent;
+                                        }
+                                    }
+                                }
 
                                 if (! landing)
                                     return refuse (reason::unknownId);
@@ -744,6 +808,8 @@ namespace wfg::tree
                             answer (outcome);
 
                             auto applied = args;
+                            applied[head] = osc::Value::string (recordedWhere);
+                            applied[head + 1] = osc::Value::string (recordedTarget);
                             applied[head + 2] = osc::Value::string (cueId);
                             applied[head + 6] = osc::Value::string (joined (madeIds));
                             return Outcome::ok (std::move (applied));

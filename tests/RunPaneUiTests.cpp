@@ -381,26 +381,29 @@ TEST_CASE ("cue list: a drag anywhere inside a group keeps its footer's band to 
                                                                                 + box->getRowHeight() / 2));
     };
 
-    //  On the title: its header's band under it, its footer's after the three.
+    /*  On the title: its header's band under it, its footer's after the
+        three - and the empty line at the end of the list, there for the whole
+        drag (§92). */
     target.itemDragEnter (over (title));
-    CHECK (drawn.getNumRows() == plain + 2);
+    CHECK (drawn.getNumRows() == plain + 3);
 
     //  Down to the last member - one row further, under the header's band - and onto the footer's: both stay.
     target.itemDragMove (over (lastMember + 1));
-    CHECK (drawn.getNumRows() == plain + 2);
+    CHECK (drawn.getNumRows() == plain + 3);
     target.itemDragMove (over (lastMember + 2));
-    CHECK (drawn.getNumRows() == plain + 2);
+    CHECK (drawn.getNumRows() == plain + 3);
 
-    //  Out of the group, onto the cue after it: they go.
+    //  Out of the group, onto the cue after it: they go, the line at the end stays.
     target.itemDragMove (over (afterRow + 2));
-    CHECK (drawn.getNumRows() == plain);
+    CHECK (drawn.getNumRows() == plain + 1);
     target.itemDragExit (over (afterRow));
+    CHECK (drawn.getNumRows() == plain);
 
     //  A group entered on a member grows its footer alone, below the hand; its title then adds the header.
     target.itemDragEnter (over (lastMember));
-    CHECK (drawn.getNumRows() == plain + 1);
-    target.itemDragMove (over (title));
     CHECK (drawn.getNumRows() == plain + 2);
+    target.itemDragMove (over (title));
+    CHECK (drawn.getNumRows() == plain + 3);
 
     target.itemDragExit (over (title));
     CHECK (drawn.getNumRows() == plain);
@@ -479,20 +482,125 @@ TEST_CASE ("cue list: a drag inside a nested group shows the footers of the grou
                                                                                 + box->getRowHeight() / 2));
     };
 
-    //  On the scene's last cue: the scene's footer and the act's, after it - two lines, below the hand.
+    //  On the scene's last cue: the scene's footer and the act's, after it - two lines, below the hand - and the end's (§92).
     target.itemDragEnter (over (lastRow));
-    CHECK (drawn.getNumRows() == plain + 2);
+    CHECK (drawn.getNumRows() == plain + 3);
 
     //  Down past the scene's footer onto the act's: both stay - the hand is still inside the act.
     target.itemDragMove (over (lastRow + 1));
-    CHECK (drawn.getNumRows() == plain + 2);
+    CHECK (drawn.getNumRows() == plain + 3);
     target.itemDragMove (over (lastRow + 2));
-    CHECK (drawn.getNumRows() == plain + 2);
+    CHECK (drawn.getNumRows() == plain + 3);
 
     //  And let go there: into the ACT's footer.
     target.itemDropped (over (lastRow + 2));
     CHECK (footerCue == after);
     CHECK (footerGroup == act);
+    CHECK (drawn.getNumRows() == plain);
+}
+
+TEST_CASE ("cue list: a drag opens an empty line at each end of the list, and a cue dropped on one goes first or last (§92)")
+{
+    /*  The author, 2026-10-19: "show an empty line at the top or bottom when
+        at the end of the list so it's easier to drag a cue in the first or
+        last position." Three cues; the last dragged to the top, the first to
+        the end. */
+    wfg::doc::ShowDocument document;
+    const auto list = document.createList ("Main");
+    REQUIRE (list.ok);
+    const auto one = document.createCue (list.id, 0, "memo", "One").id;
+    REQUIRE (document.createCue (list.id, 1, "memo", "Two").ok);
+    const auto three = document.createCue (list.id, 2, "memo", "Three").id;
+    REQUIRE (! three.empty());
+
+    wfg::Engine engine;
+    wfg::cue::RunTable runs;
+    wfg::tree::MountTable mounts;
+    wfg::tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
+    parameters.markStale();
+
+    wfg::tree::EngineState state;
+    const auto snapshot = parameters.publish (0, state);
+    REQUIRE (snapshot != nullptr);
+
+    model::ShowModel show;
+    REQUIRE (show.refresh (*snapshot, list.id));
+
+    //  The persistent band first, drawn even empty, then the three.
+    REQUIRE (show.rows().size() == 4);
+    REQUIRE (show.rows()[0].rowKind == model::RowKind::band);
+
+    std::string movedCue, movedInto;
+    int movedTo = -2;
+    ui::CueListComponent::Actions actions;
+    actions.move = [&] (const std::string& cueId, const std::string& parent, int index)
+    {
+        movedCue = cueId;
+        movedInto = parent;
+        movedTo = index;
+    };
+
+    const model::Theme theme;
+    ui::CueListComponent cues (theme, actions);
+    cues.setSize (900, 600);
+    cues.show (show, {}, {});
+
+    juce::ListBox* box = nullptr;
+
+    for (auto* child : cues.getChildren())
+        if (auto* found = dynamic_cast<juce::ListBox*> (child))
+            box = found;
+
+    REQUIRE (box != nullptr);
+
+    auto& drawn = *box->getListBoxModel();
+    auto& target = static_cast<juce::DragAndDropTarget&> (cues);
+    const auto plain = drawn.getNumRows();
+
+    const auto holding = [&] (const std::string& id, int row)
+    {
+        return juce::DragAndDropTarget::SourceDetails (juce::var (juce::String (id)), nullptr,
+                                                       juce::Point<int> (300, box->getY() + row * box->getRowHeight()
+                                                                                + box->getRowHeight() / 2));
+    };
+
+    //  Picked up over the middle: only the line at the end, which moves nothing.
+    target.itemDragEnter (holding (three, 2));
+    CHECK (drawn.getNumRows() == plain + 1);
+
+    //  Over the first cue's own row: nothing opens there - the row stays under the hand.
+    target.itemDragMove (holding (three, 1));
+    CHECK (drawn.getNumRows() == plain + 1);
+
+    //  Up onto the persistent band: the line opens under it.
+    target.itemDragMove (holding (three, 0));
+    CHECK (drawn.getNumRows() == plain + 2);
+
+    //  Down onto the line, which stays, and let go: first in the list.
+    target.itemDragMove (holding (three, 1));
+    CHECK (drawn.getNumRows() == plain + 2);
+    target.itemDropped (holding (three, 1));
+    CHECK (movedCue == three);
+    CHECK (movedInto == list.id);
+    CHECK (movedTo == 0);
+    CHECK (drawn.getNumRows() == plain);
+
+    //  The first cue held on the line at the end - the row after the last - and let go: last in the list.
+    movedTo = -2;
+    target.itemDragEnter (holding (one, 1));
+    target.itemDragMove (holding (one, plain));
+    target.itemDropped (holding (one, plain));
+    CHECK (movedCue == one);
+    CHECK (movedInto == list.id);
+    CHECK (movedTo == -1);
+    CHECK (drawn.getNumRows() == plain);
+
+    //  And the hand moving off the band and the line shuts the first one again.
+    target.itemDragEnter (holding (three, 0));
+    CHECK (drawn.getNumRows() == plain + 2);
+    target.itemDragMove (holding (three, 3));
+    CHECK (drawn.getNumRows() == plain + 1);
+    target.itemDragExit (holding (three, 3));
     CHECK (drawn.getNumRows() == plain);
 }
 

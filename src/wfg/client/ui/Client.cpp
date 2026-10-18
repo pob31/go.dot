@@ -53,6 +53,7 @@
 #include <wfg/client/model/DeviceTree.h>
 #include <wfg/client/model/Dual.h>
 #include <wfg/client/model/Flags.h>
+#include <wfg/client/model/Foot.h>
 #include <wfg/client/model/Bindings.h>
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Inspector.h>
@@ -113,6 +114,7 @@
 #include <deque>
 #include <iostream>
 #include <map>
+#include <atomic>
 #include <memory>
 #include <optional>
 #include <string>
@@ -476,14 +478,24 @@ namespace wfg::client
                     if (wanted == model::Subject::Kind::none)
                         return;
 
+                    /*  ON THE LINE THE PANEL BELONGS TO (namespace draft §92):
+                        over a movie and the sound locked to it, sends, EQ and
+                        FX open on the sound and the waveform and picture on
+                        the movie (§47, AAD) - whichever of the two the opener
+                        was handed. The inspector's Sends button beside the
+                        sound's output is handed the cue the inspector is
+                        about, which over the pair is the movie: it opened the
+                        sends of a video cue, with no faders. */
+                    const auto onCue = latest != nullptr ? model::footCueForPick (*latest, wanted, cueId) : cueId;
+
                     /*  A SECOND PRESS ON THE PANEL ALREADY OPEN SHUTS IT, which
                         is what the same button in a menu does and what a hand
                         expects of a control that has no other off switch. */
                     const auto already = shell->footSubject();
 
-                    shell->setFoot (already.kind == wanted && already.objectId == cueId
+                    shell->setFoot (already.kind == wanted && already.objectId == onCue
                                       ? model::Subject {}
-                                      : model::Subject { wanted, cueId });
+                                      : model::Subject { wanted, onCue });
 
                     menuItemsChanged();
                 };
@@ -966,6 +978,8 @@ namespace wfg::client
                     answer to goes: its part-file is removed, and what it would
                     have said is dropped (ui/MediaCopier.h). */
                 copier.stop();
+                *pasteAlive = false;
+                pasteStopping->store (true);
                #if JUCE_MAC
                 juce::MenuBarModel::setMacMainMenu (nullptr);
                #endif
@@ -1881,10 +1895,120 @@ namespace wfg::client
                     return;
                 }
 
+                /*  CUES FROM ANOTHER SHOW BRING THEIR FILES (namespace draft
+                    §92): each file they play that this show would not find is
+                    copied into its media folder first, off this thread - a
+                    movie can be thirty gigabytes - and the cues are pasted once
+                    the copies are in, so none of them arrives missing. */
+                const auto copies = filesForThePaste (text.toStdString());
+
+                if (copies.empty())
+                {
+                    pasteAt (parent, index, text.toStdString());
+                    return;
+                }
+
+                shell->transport.setNotice ("copying " + juce::String (static_cast<int> (copies.size()))
+                                              + (copies.size() == 1 ? " file" : " files") + " for the paste");
+
+                auto alive = pasteAlive;
+                auto stopping = pasteStopping;
+                const auto fragment = text.toStdString();
+
+                juce::Thread::launch ([this, alive, stopping, copies, fragment, toParent = parent, toIndex = index]
+                {
+                    std::vector<std::string> failures;
+
+                    for (const auto& [fromFile, intoFolder] : copies)
+                    {
+                        model::MediaJob job;
+                        job.copy = true;
+                        job.source = fromFile.getFullPathName().toStdString();
+
+                        const auto work = ui::doMediaJob (job, intoFolder, [stopping] { return stopping->load(); });
+
+                        if (work.found == model::Found::failed)
+                            failures.push_back (fromFile.getFileName().toStdString()
+                                                + (work.why.empty() ? std::string {} : ": " + work.why));
+
+                        if (stopping->load())
+                            return;
+                    }
+
+                    juce::MessageManager::callAsync ([this, alive, failures, fragment, toParent, toIndex]
+                    {
+                        if (! *alive)
+                            return;
+
+                        pasteAt (toParent, toIndex, fragment);
+
+                        if (! failures.empty())
+                            shell->transport.setNotice ("pasted; not copied: " + juce::String (failures.front())
+                                                          + (failures.size() > 1 ? " and "
+                                                               + juce::String (static_cast<int> (failures.size() - 1))
+                                                               + " more" : juce::String()));
+                    });
+                });
+            }
+
+            /*  THE PASTE ITSELF, at a member position kept inside what the
+                parent holds now - a copy may have taken a while. */
+            void pasteAt (const std::string& parent, int index, const std::string& fragment)
+            {
                 const auto members = static_cast<int> (model::words (orderOf (parent)).size());
                 const auto at = index < 0 ? members : juce::jlimit (0, members, index);
 
-                send (gesture::pasteCues (parent, at, text.toStdString()));
+                send (gesture::pasteCues (parent, at, fragment));
+            }
+
+            /*  WHAT A PASTE MUST COPY FIRST (§92): the files the fragment's cues
+                play, from the show the fragment names as its `from`, that this
+                show would not find - looked for where the engine looks, its
+                `media/` and the folder beside it (audio::resolveMediaPath) -
+                each with the folder in `media/` it goes to. Nothing for a
+                fragment from this show, or one that names no show. */
+            std::vector<std::pair<juce::File, juce::File>> filesForThePaste (const std::string& fragment) const
+            {
+                std::vector<std::pair<juce::File, juce::File>> out;
+                const auto from = model::fragmentSource (fragment);
+                const auto here = latest != nullptr ? model::text (*latest, "/godot/document/path") : std::string {};
+
+                if (from.empty() || here.empty())
+                    return out;
+
+                const juce::File sourceShow { juce::String (from) };
+                const juce::File thisShow { juce::String (here) };
+
+                if (sourceShow == thisShow || ! juce::File::isAbsolutePath (juce::String (from)))
+                    return out;
+
+                const auto foundIn = [] (const juce::File& showFolder, const std::string& mediaName) -> juce::File
+                {
+                    for (const auto& mediaFolder : { showFolder.getChildFile ("media"), showFolder.getSiblingFile ("media") })
+                        if (const auto inIt = mediaFolder.getChildFile (juce::String (mediaName)); inIt.existsAsFile())
+                            return inIt;
+
+                    return {};
+                };
+
+                for (const auto& name : model::mediaNamesIn (fragment))
+                {
+                    //  A name that climbs out of `media/` is no file of a show (audio::resolveMediaPath).
+                    if (name.find ("..") != std::string::npos || juce::File::isAbsolutePath (juce::String (name)))
+                        continue;
+
+                    if (foundIn (thisShow, name) != juce::File())
+                        continue;
+
+                    const auto played = foundIn (sourceShow, name);
+
+                    if (played == juce::File())
+                        continue;
+
+                    out.emplace_back (played, thisShow.getChildFile ("media").getChildFile (juce::String (name)).getParentDirectory());
+                }
+
+                return out;
             }
 
             /*  The engine's clipboard, mirrored to the system's when it moves:
@@ -1894,17 +2018,21 @@ namespace wfg::client
                 moved last is what the system's clipboard holds. */
             void mirrorClipboard (const tree::TreeSnapshot& snapshot)
             {
-                const auto mirror = [] (const std::string& fragment, std::string& seen)
+                const auto mirror = [] (const std::string& fragment, std::string& seen, const std::string& from)
                 {
                     if (fragment.empty() || fragment == seen)
                         return;
 
                     seen = fragment;
-                    juce::SystemClipboard::copyTextToClipboard (juce::String (fragment));
+                    juce::SystemClipboard::copyTextToClipboard (juce::String (from.empty() ? fragment
+                                                                                           : model::fragmentFrom (fragment, from)));
                 };
 
-                mirror (model::text (snapshot, "/godot/document/clipboard"), clipboardSeen);
-                mirror (model::text (snapshot, "/godot/document/partClipboard"), partClipboardSeen);
+                /*  CUES ARE MIRRORED NAMING THIS SHOW (§92), so a window of
+                    another show they are pasted into finds their files here. */
+                mirror (model::text (snapshot, "/godot/document/clipboard"), clipboardSeen,
+                        model::text (snapshot, "/godot/document/path"));
+                mirror (model::text (snapshot, "/godot/document/partClipboard"), partClipboardSeen, {});
             }
 
             /*  PART OF A CUE, IN WORDS: what a notice and a tooltip call it. */
@@ -3234,6 +3362,24 @@ namespace wfg::client
                     leaves the aim alone (`model::aimForPick`). Sent only to a
                     show with a surface declared - the aim is a logged command,
                     and a show with no surface has nothing to aim. */
+                /*  WHERE A NEW CUE WOULD LAND, TOLD TO THE ENGINE (namespace draft
+                    §92): the pick and the list drawn - what `destination` reads -
+                    so a cue WFS-DIY or S21_HiJack captures lands where these
+                    buttons would put one (the author, 2026-10-19). Told when
+                    either moves; never a command, since a pick is no decision
+                    about the show. */
+                if (host.handsPlace)
+                {
+                    const auto listOnScreen = listDrawn.empty() ? last.listId : listDrawn;
+
+                    if (selection.anchor() != placeToldPick || listOnScreen != placeToldList)
+                    {
+                        placeToldPick = selection.anchor();
+                        placeToldList = listOnScreen;
+                        host.handsPlace (placeToldPick, placeToldList);
+                    }
+                }
+
                 if (selection.anchor() != pickAimSeen)
                 {
                     pickAimSeen = selection.anchor();
@@ -3956,6 +4102,16 @@ namespace wfg::client
             /*  The pick the surfaces were last aimed from (§47, AAA): the aim
                 is sent when the pick moves, not every pass. */
             std::string pickAimSeen;
+
+            /*  A PASTE WAITING ON ITS FILES (§92): false once the window goes,
+                so a copy that ends afterwards pastes nothing; and asked by the
+                copy between two megabytes, so the window going stops it. */
+            std::shared_ptr<bool> pasteAlive = std::make_shared<bool> (true);
+            std::shared_ptr<std::atomic<bool>> pasteStopping = std::make_shared<std::atomic<bool>> (false);
+
+            //  The pick and the list last told the engine as where a new cue lands (§92).
+            std::string placeToldPick;
+            std::string placeToldList;
 
             void rememberOutsOf (const std::string& cueId)
             {

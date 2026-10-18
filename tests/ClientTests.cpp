@@ -16377,3 +16377,44 @@ TEST_CASE ("client: a foot panel the new cue has nothing for falls back to the p
     last["video:picture"] = Kind::waveform;
     CHECK_FALSE (model::footAfterPick (snapshot, { Kind::messages, "OSC1" }, "PIC1", last, false).isOpen());
 }
+
+TEST_CASE ("client: cues copied name their show on the clipboard, and a paste reads it back with the files they play (§92)")
+{
+    /*  The author, 2026-10-19, chose that cues pasted from another show bring
+        the files this show would not find. The window copying names its show
+        on the fragment; the window pasting reads the show and the names. */
+    const std::string fragment = "<Fragment>\n"
+                                 "  <Media id=\"AAAAAAA1\" file=\"Danse en Ch\xC5\x93ur + C10.wav\" name=\"One\">\n"
+                                 "    <Send id=\"AAAAAAA2\" bus=\"BBBBBBB1\" level=\"-2\"/>\n"
+                                 "  </Media>\n"
+                                 "  <Group id=\"AAAAAAA3\" name=\"Scene\">\n"
+                                 "    <Video id=\"AAAAAAA4\" file=\"sub/Movie &amp; more.mov\" source=\"movie\"/>\n"
+                                 "    <Media id=\"AAAAAAA5\" file=\"Danse en Ch\xC5\x93ur + C10.wav\"/>\n"
+                                 "    <Memo id=\"AAAAAAA6\" notes=\"profile=&quot;x&quot;\"/>\n"
+                                 "  </Group>\n"
+                                 "</Fragment>\n";
+
+    //  No show named yet: none read back.
+    CHECK (model::fragmentSource (fragment).empty());
+
+    const std::string folder = "D:\\Shows\\Tour \"2026\" & co";
+    const auto named = model::fragmentFrom (fragment, folder);
+
+    CHECK (named.rfind ("<Fragment from=\"", 0) == 0);
+    CHECK (model::fragmentSource (named) == folder);
+
+    //  Named once: a second naming leaves it as it was.
+    CHECK (model::fragmentFrom (named, "E:\\Other") == named);
+
+    //  The files, once each, in order, unescaped - a `file` and nothing else.
+    CHECK (model::mediaNamesIn (named) == std::vector<std::string> { "Danse en Ch\xC5\x93ur + C10.wav", "sub/Movie & more.mov" });
+
+    //  Not a fragment: left alone, and nothing read from it.
+    CHECK (model::fragmentFrom ("hello", folder) == "hello");
+    CHECK (model::fragmentSource ("<FragmentX from=\"x\">").empty());
+    CHECK (model::mediaNamesIn ("<Fragmentary file=\"x.wav\"/>").empty());
+
+    //  A numeric entity in a name reads as the character it stands for.
+    CHECK (model::mediaNamesIn ("<Fragment><Media id=\"A\" file=\"caf&#233;.wav\"/></Fragment>")
+           == std::vector<std::string> { "caf\xC3\xA9.wav" });
+}

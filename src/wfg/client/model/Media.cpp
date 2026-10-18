@@ -22,8 +22,11 @@
 #include <wfg/engine/osc/OscValue.h>
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -843,5 +846,232 @@ namespace wfg::client::model
                  + (now.removed > 0 ? " (" + removed + " elsewhere)." : std::string ("."));
 
         return {};
+    }
+
+    //==========================================================================
+    namespace
+    {
+        /*  An attribute value as canonical XML writes one (CanonicalXml's
+            escapeAttribute), and back. */
+        std::string escapedForAttribute (const std::string& text)
+        {
+            std::string out;
+            out.reserve (text.size() + 8);
+
+            for (const char c : text)
+            {
+                switch (c)
+                {
+                    case '&':  out += "&amp;";  break;
+                    case '<':  out += "&lt;";   break;
+                    case '>':  out += "&gt;";   break;
+                    case '"':  out += "&quot;"; break;
+                    case '\t': out += "&#9;";   break;
+                    case '\n': out += "&#10;";  break;
+                    case '\r': out += "&#13;";  break;
+                    default:   out.push_back (c); break;
+                }
+            }
+
+            return out;
+        }
+
+        void appendUtf8 (std::string& out, std::uint32_t code)
+        {
+            if (code < 0x80u)
+            {
+                out.push_back (static_cast<char> (code));
+            }
+            else if (code < 0x800u)
+            {
+                out.push_back (static_cast<char> (0xC0u | (code >> 6)));
+                out.push_back (static_cast<char> (0x80u | (code & 0x3Fu)));
+            }
+            else if (code < 0x10000u)
+            {
+                out.push_back (static_cast<char> (0xE0u | (code >> 12)));
+                out.push_back (static_cast<char> (0x80u | ((code >> 6) & 0x3Fu)));
+                out.push_back (static_cast<char> (0x80u | (code & 0x3Fu)));
+            }
+            else
+            {
+                out.push_back (static_cast<char> (0xF0u | (code >> 18)));
+                out.push_back (static_cast<char> (0x80u | ((code >> 12) & 0x3Fu)));
+                out.push_back (static_cast<char> (0x80u | ((code >> 6) & 0x3Fu)));
+                out.push_back (static_cast<char> (0x80u | (code & 0x3Fu)));
+            }
+        }
+
+        std::string unescapedAttribute (const std::string& text)
+        {
+            std::string out;
+            out.reserve (text.size());
+
+            for (std::size_t at = 0; at < text.size(); ++at)
+            {
+                if (text[at] != '&')
+                {
+                    out.push_back (text[at]);
+                    continue;
+                }
+
+                const auto end = text.find (';', at);
+
+                if (end == std::string::npos)
+                {
+                    out.push_back (text[at]);
+                    continue;
+                }
+
+                const auto entity = text.substr (at + 1, end - at - 1);
+
+                if (entity == "amp")        out.push_back ('&');
+                else if (entity == "lt")    out.push_back ('<');
+                else if (entity == "gt")    out.push_back ('>');
+                else if (entity == "quot")  out.push_back ('"');
+                else if (entity == "apos")  out.push_back ('\'');
+                else if (entity.size() > 1 && entity[0] == '#')
+                {
+                    const auto hex = entity[1] == 'x' || entity[1] == 'X';
+                    std::uint32_t code = 0;
+                    auto good = entity.size() > (hex ? 2u : 1u);
+
+                    for (std::size_t n = hex ? 2u : 1u; n < entity.size() && good; ++n)
+                    {
+                        const auto c = entity[n];
+                        std::uint32_t digit = 0;
+
+                        if (c >= '0' && c <= '9')                    digit = static_cast<std::uint32_t> (c - '0');
+                        else if (hex && c >= 'a' && c <= 'f')        digit = static_cast<std::uint32_t> (c - 'a' + 10);
+                        else if (hex && c >= 'A' && c <= 'F')        digit = static_cast<std::uint32_t> (c - 'A' + 10);
+                        else                                         good = false;
+
+                        code = code * (hex ? 16u : 10u) + digit;
+                        good = good && code <= 0x10FFFFu;
+                    }
+
+                    if (! good)
+                    {
+                        out.append (text, at, end - at + 1);
+                        at = end;
+                        continue;
+                    }
+
+                    appendUtf8 (out, code);
+                }
+                else
+                {
+                    out.append (text, at, end - at + 1);
+                }
+
+                at = end;
+            }
+
+            return out;
+        }
+
+        //  The root's opening tag: from `<Fragment` to its `>`, or npos.
+        std::size_t fragmentTagEnd (const std::string& fragment, std::size_t& start)
+        {
+            start = fragment.find_first_not_of (" \t\r\n");
+
+            if (start == std::string::npos || fragment.compare (start, 9, "<Fragment") != 0)
+                return std::string::npos;
+
+            const auto after = start + 9;
+
+            if (after >= fragment.size() || (fragment[after] != '>' && fragment[after] != ' '
+                                               && fragment[after] != '\t' && fragment[after] != '\n'
+                                               && fragment[after] != '\r' && fragment[after] != '/'))
+                return std::string::npos;
+
+            return fragment.find ('>', after);
+        }
+
+        //  The value of attribute `name` in `tag` (one element's opening tag), or nullopt.
+        std::optional<std::string> attributeIn (std::string_view tag, std::string_view name)
+        {
+            for (std::size_t at = 0; at < tag.size();)
+            {
+                const auto found = tag.find (name, at);
+
+                if (found == std::string_view::npos)
+                    return std::nullopt;
+
+                const auto before = found == 0 ? ' ' : tag[found - 1];
+                const auto equals = found + name.size();
+
+                if ((before == ' ' || before == '\t' || before == '\n' || before == '\r')
+                      && equals + 1 < tag.size() && tag[equals] == '=' && tag[equals + 1] == '"')
+                {
+                    const auto close = tag.find ('"', equals + 2);
+
+                    if (close == std::string_view::npos)
+                        return std::nullopt;
+
+                    return unescapedAttribute (std::string (tag.substr (equals + 2, close - equals - 2)));
+                }
+
+                at = found + 1;
+            }
+
+            return std::nullopt;
+        }
+    }
+
+    std::string fragmentFrom (const std::string& fragment, const std::string& showFolder)
+    {
+        std::size_t start = 0;
+        const auto end = fragmentTagEnd (fragment, start);
+
+        if (end == std::string::npos || showFolder.empty())
+            return fragment;
+
+        if (attributeIn (std::string_view (fragment).substr (start, end - start), "from"))
+            return fragment;
+
+        return fragment.substr (0, start + 9) + " from=\"" + escapedForAttribute (showFolder) + "\""
+             + fragment.substr (start + 9);
+    }
+
+    std::string fragmentSource (const std::string& fragment)
+    {
+        std::size_t start = 0;
+        const auto end = fragmentTagEnd (fragment, start);
+
+        if (end == std::string::npos)
+            return {};
+
+        return attributeIn (std::string_view (fragment).substr (start, end - start), "from").value_or (std::string {});
+    }
+
+    std::vector<std::string> mediaNamesIn (const std::string& fragment)
+    {
+        std::vector<std::string> names;
+        std::size_t start = 0;
+        const auto rootEnd = fragmentTagEnd (fragment, start);
+
+        if (rootEnd == std::string::npos)
+            return names;
+
+        //  Every opening tag after the root's, each asked for its `file`.
+        for (auto at = fragment.find ('<', rootEnd); at != std::string::npos; at = fragment.find ('<', at + 1))
+        {
+            if (at + 1 >= fragment.size() || fragment[at + 1] == '/' || fragment[at + 1] == '!' || fragment[at + 1] == '?')
+                continue;
+
+            const auto close = fragment.find ('>', at);
+
+            if (close == std::string::npos)
+                break;
+
+            if (const auto file = attributeIn (std::string_view (fragment).substr (at, close - at), "file");
+                file && ! file->empty() && std::find (names.begin(), names.end(), *file) == names.end())
+                names.push_back (*file);
+
+            at = close;
+        }
+
+        return names;
     }
 }

@@ -4493,10 +4493,26 @@ namespace
         wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
         wfg::cue::registerCurveCommands (engine.commands(), engine, runner, document, curveTable, &spaceMouse);
         wfg::tree::registerTreeCommands (engine.commands(), touches);
+        /*  WHERE THE WINDOW WOULD PUT A NEW CUE (namespace draft §92): written on
+            the message thread when its pick or its list changes, read by a
+            capture on the tick thread under a lock held for a copy. */
+        struct WindowPlace
+        {
+            std::mutex lock;
+            wfg::tree::HandsPlace place;
+        };
+
+        WindowPlace windowPlace;
+
         wfg::tree::registerAuthoringCommands (engine.commands(), document, answers,
                                                [&fetcher, &target] (const std::string& mountId, const std::string& host,
                                                                     int queryPort, const std::string& prefix)
-                                               { fetcher.fetch ({ mountId, host, queryPort, prefix, target }); });
+                                               { fetcher.fetch ({ mountId, host, queryPort, prefix, target }); },
+                                               [&windowPlace]
+                                               {
+                                                   const std::lock_guard<std::mutex> hold { windowPlace.lock };
+                                                   return windowPlace.place;
+                                               });
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
         wfg::tree::registerDescriptionCommands (engine.commands(), document, mounts, target, answers);
         wfg::tree::registerPresetCommands (engine.commands(), document, mounts, target, &presets,
@@ -4968,9 +4984,58 @@ namespace
         runner.setLoggedDurations (lengthsFromHeader (headerLines));
 
         //  --- the transports ------------------------------------------------
-        const auto requestedOsc = args.containsOption ("--osc-port")
-                                    ? args.getValueForOption ("--osc-port").getIntValue()
-                                    : 8010;
+        auto requestedOsc = args.containsOption ("--osc-port")
+                              ? args.getValueForOption ("--osc-port").getIntValue()
+                              : 8010;
+        auto requestedWeb = args.containsOption ("--http-port")
+                              ? args.getValueForOption ("--http-port").getIntValue()
+                              : 5010;
+
+        /*  A SECOND GO.DOT ON THIS COMPUTER OPENS A SECOND WINDOW (the author,
+            2026-10-19: "A second session will show an error message ... Allow
+            for a second window so a user can for instance copy from one to the
+            other"; namespace draft §92). A show double-clicked, or Go.dot
+            started again, while another Go.dot already listens on the usual
+            ports took the same ports and stopped with "could not open the
+            show". With a window and no port named, a port held by another
+            listener now means another Go.dot: this one takes free ports, as a
+            show opened from the File menu always has (`launchAnother`), and
+            carries on beside it. Remotes and processors keep reaching the
+            first, on the usual ports. Asked of the web port - an OSC bind
+            shares a port it should not, on Windows and Linux - and only with
+            no port named, so a port somebody chose is never moved. HELD is
+            asked two ways: a bind of our own refused, or a connection on this
+            machine answered - the server listens on IPv6 where a plain probe
+            binds IPv4, and on Windows the two do not refuse each other. */
+        if (wantWindow && ! args.containsOption ("--osc-port") && ! args.containsOption ("--http-port"))
+        {
+            const auto heldElsewhere = [port = requestedWeb]
+            {
+                juce::StreamingSocket usualPort;
+
+                if (! usualPort.createListener (port))
+                    return true;
+
+                usualPort.close();
+
+                juce::StreamingSocket knock;
+                return knock.connect ("localhost", port, 300);
+            };
+
+            if (heldElsewhere())
+            {
+                juce::StreamingSocket freeTcp;
+                juce::DatagramSocket freeUdp;
+
+                if (freeTcp.createListener (0) && freeUdp.bindToPort (0))
+                {
+                    std::cerr << "wfg serve: another Go.dot holds port " << requestedWeb << "; this window takes ports "
+                              << freeTcp.getBoundPort() << " (web) and " << freeUdp.getBoundPort() << " (OSC)" << std::endl;
+                    requestedWeb = freeTcp.getBoundPort();
+                    requestedOsc = freeUdp.getBoundPort();
+                }
+            }
+        }
 
         /*  Constructed, then wired, then started, in that order. The namespace
             is built between the endpoint's construction and its start, which is
@@ -5746,9 +5811,7 @@ namespace
             return 2;
         }
 
-        const auto requestedHttp = args.containsOption ("--http-port")
-                                     ? args.getValueForOption ("--http-port").getIntValue()
-                                     : 5010;
+        const auto requestedHttp = requestedWeb;
 
         /*  THE REDUNDANCY LINK (namespace draft §58, RD.5-RD.7): this machine's
             stream - every record it writes that a follower will apply, kept
@@ -9563,6 +9626,13 @@ namespace
                     tileWish.cue = cueId;
                     tileWish.seconds = seconds;
                     ++tileWish.serial;
+                };
+
+                //  And where a new cue would land (§92): what a capture asking for `standby` reads.
+                clientHost.handsPlace = [&windowPlace] (const std::string& picked, const std::string& list)
+                {
+                    const std::lock_guard<std::mutex> hold { windowPlace.lock };
+                    windowPlace.place = wfg::tree::HandsPlace { picked, list };
                 };
 
                 clientHost.cueTile = [&videoHost]

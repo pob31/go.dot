@@ -273,7 +273,8 @@ knows who to answer (§6.6).
 
 | `where` | `target` | A new cue lands |
 |---|---|---|
-| `standby` | ignored, send `""` | Right after the standby cue of the list the operator is in - inside the same group when the standby is in one - or at the end of that list when nothing stands by. |
+| `standby` | ignored, send `""` | Where a cue made by hand in Go.dot would land: right after the cue the operator has picked in Go.dot's window - inside the same group - or at the end of the list on screen when nothing is picked. The word is older than the rule; it no longer means the standby. |
+| `after` | a cue's identifier | Right after that cue, inside the same group. |
 | `list` | a list's identifier or name; `""` for the list the operator is in | At the end of that list. |
 | `cue` | a cue's identifier, or its number | Nowhere new: that existing cue's content is replaced. It must be an OSC cue. |
 | `more` | the identifier of the cue being sent in chunks | Nowhere new: the pairs are added to that cue (§6.5). |

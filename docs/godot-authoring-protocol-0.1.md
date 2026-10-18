@@ -124,16 +124,17 @@ root being empty or beginning with `/` and `where` never.
 
 | `where` | `target` | Lands |
 |---|---|---|
-| `standby` | ignored | After the standby cue of the focused list. No standby: at the end of that list. No focused list: the first list. No list at all: `unknown-id`. |
+| `standby` | ignored | Where a cue made by hand in Go.dot's window would land (namespace draft §92): after the cue picked there, in that cue's own group - after a sampler group rather than among its members - or, with nothing picked, at the end of the list the window shows. With no window: at the end of the focused list. No list at all: `unknown-id`. Go.dot records it as the `after` or `list` it chose. |
+| `after` | a cue id | After that cue, in its own group (after a sampler group rather than among its members). A cue Go.dot does not have: `unknown-id`. |
 | `list` | a list id or name; empty = the focused list | At the end of that list. |
 | `cue` | a cue id, or a cue number | Replaces that cue's content. It must be an OSC cue (`type-mismatch` otherwise). |
 | `more` | the id of the cue a previous chunk made | Appends the pairs to it (§4.4). `name`, `number` and `notes` are ignored. |
 
 **The identifier wins over `where`** (decision C). If a cue with `id` already exists, it is
 updated in place, wherever it now sits, and `where` only matters when it does not. A processor
-therefore always sends `standby` with the id it kept: the first export lands after the
-standby, every later one updates that cue, and a cue deleted in Go.dot meanwhile is made again
-after the standby.
+therefore always sends `standby` with the id it kept: the first export lands where the operator
+is working, every later one updates that cue, and a cue deleted in Go.dot meanwhile is made again
+where the operator is working then.
 
 ### 4.2 The rest of the head
 

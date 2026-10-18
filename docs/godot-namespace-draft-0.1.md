@@ -32353,3 +32353,81 @@ machine, 4 of those 36 GOs never showed the start at all - on both roads - which
 
 Owed: the author's bench - the movie at the top of the list, GO, Esc and double Esc, the standby straight
 back on it, GO - on the release he asked for.
+
+The author's bench, 2026-10-19, on a local build of the same commit: *"Video issue is fixed!"*
+
+## 92. Four things for 0.1.5: a drag to the ends, the sends button over a movie, where a captured cue lands, a second Go.dot
+
+Asked by the author on 2026-10-19, for 0.1.5, in one list:
+
+1. *"We need to make it easier for the user to drag an item at the top or the end of the list. Right now
+   this can be tricky. Let the drag scroll the list at the top and bottom and show an empty line at the top
+   or bottom when at the end of the list so it's easier to drag a cue in the first or last position."*
+2. *"Selecting a video file and pressing the sends button of the inspector (in the list, not the one with
+   the icon at the top) doesn't lead to the proper panel - it says video at the top and there are no faders
+   in the footer. the one at the top with the icon sends it to the audio sub-cue as expected and shows the
+   levels."*
+3. *"Creating a cue from WFS-DIY puts it after the playhead cursor and not after the selected item
+   (visible in the inspector."* Asked whether the window should tell the engine its pick, he chose (offered
+   as "After the pick"): *"After the pick like creating any other cue manually. And at the end if no cue is
+   picked."*
+4. *"A second session will show and error message. Only one session at a time on the computer. Allow for a
+   second window so a user can for instance copy from on to the other."* He chose a second launch opening a
+   second window as Open show does (offered as "Second window"), and that cues pasted from another show
+   bring the files this show would not find (offered as "Copy missing files").
+
+What was found: a drag had no scrolling at all, and no drop gave a list's first member position - every
+drop between rows is "after" a row, and the list's first row is the persistent band. The inspector's Sends
+button beside a sound's output opened its panel on the cue the inspector is about, which over a movie and
+its locked sound is the movie (§47, AAD); the icon at the top carries the sound's own identifier. The
+engine never knew the window's pick (§14.1), so a capture could only land after the standby. And a second
+Go.dot started by a double-click or by the launcher took the usual web port the first held, and stopped
+with "could not open the show"; a show opened from the File menu has always started on free ports.
+Copying between two windows already worked through the system's clipboard, the files left behind.
+
+Decisions AVM to AVT, the author's where said, the rest mine (proposed):
+
+- **AVM** (the author's) **A drag scrolls the list at its top and bottom edges**, within a row of them,
+  faster nearer the edge, while the hand holds still there too.
+- **AVN** (the author's ask, the details mine) **An empty line at each end of the list while a cue is
+  dragged.** The last place's line, after everything, is there for the whole drag - it moves nothing. The
+  first place's opens under the persistent band only while the hand is on the band or the headings above
+  it, never on the first cue's own row, which would slide away from under the hand; once open it stays
+  while the hand is on the band, the line or the row it pushed down. Dropped on either, the cue moves to
+  the list's first or last member position, whatever keys are held. The status line says "first in the
+  list" or "last in the list" - my words, owed his.
+- **AVO** **A panel opens on the line it belongs to** over a movie and its sound, whichever opener asked:
+  sends, EQ and FX on the sound, the waveform and the picture on the movie - the rule the icon at the top
+  already followed, now in the one door every opener goes through.
+- **AVP** (the author's) **A captured cue lands where a cue made by hand would**: after the cue picked in
+  the window, in that cue's own group - just after a sampler group rather than among its members, as the
+  window's buttons put one - or at the end of the list the window shows when nothing is picked. With no
+  window, the end of the focused list. The word stays `standby`, which every processor sends; the protocol
+  gains `after <cue>`.
+- **AVQ** **The window tells the engine its pick and the list it shows**, when either changes - not a
+  command and not in the show: what somebody has picked is still no decision about the show (§14.1).
+  **The capture's record names the place it chose**, `after` a cue or the end of a `list`, so a replay,
+  which has no window, lands it there again.
+- **AVR** (the author's) **A second Go.dot opens a second window.** With a window and no port named, a
+  usual web port held by another listener means another Go.dot: this one takes free ports, as a show
+  opened from the File menu does, and carries on beside it. Remotes and processors keep reaching the
+  first. An audio interface the first holds alone is said in the second's window, as any interface that
+  will not open is.
+- **AVS** (the author's) **Cues pasted from another show bring their files.** The window that copies names
+  its show on the clipboard (`from` on the `<Fragment>`, which paste reads past); the window that pastes
+  copies each file the cues play that its own show would not find - looked for where the engine looks, its
+  `media/` and the folder beside it - from the other show into its `media/`, off the window's thread, and
+  pastes once the copies are in. A file that fails is said once the cues are in. Only what a cue plays,
+  its `file`; nothing for cues from the same show.
+- **AVT** The status words of a paste waiting on its files, "copying N files for the paste" and "pasted;
+  not copied: ...", are mine, owed his.
+
+Tests: `RunPaneUiTests` - a drag opens an empty line at each end of the list, and a cue dropped on one goes
+first or last; the two drag cases of §84 count the last place's line. `AuthoringTests` - a capture lands
+after the cue picked in the window and is recorded `after` it; with nothing picked, at the end of the list
+shown, recorded as that list; another list shown, its end; a sampler's member picked, just after the
+sampler; a pick the show no longer has, the end; `after` with no window, and refused for a cue the show does
+not have. `ClientTests` - cues copied name their show, and a paste reads back the show and the files.
+
+Owed: the author's try of all four in the window; the drag's feel (the edge, the speed); a second launch on
+his machine with the MADIface held by the first; a paste of cues with a movie between two shows.

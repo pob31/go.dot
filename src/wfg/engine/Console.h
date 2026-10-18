@@ -244,6 +244,15 @@ namespace wfg
 
         std::function<void (const std::string& cueId, double seconds)> previewCue {};
         std::function<CueTile()> cueTile {};
+
+        /*  WHERE A CUE MADE BY HAND WOULD LAND (namespace draft §92): the cue
+            picked in the window, empty for none, and the list it shows - told
+            when either changes, so a cue a processor captures with `standby`
+            lands where the window's own buttons would put one (the author,
+            2026-10-19). What somebody has picked is still not a decision about
+            the show: no command, no record - the capture's own record names the
+            place it chose. Message thread. */
+        std::function<void (const std::string& picked, const std::string& list)> handsPlace {};
     };
 
     /** Builds the client, or returns nullptr having said why on stderr. */

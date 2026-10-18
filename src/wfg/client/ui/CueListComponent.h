@@ -389,6 +389,31 @@ namespace wfg::client::ui
         bool hasBand (const std::string& groupOf, model::Section which) const;
         static model::Row emptyBand (const std::string& groupOf, int depth, model::Section which, const char* word);
 
+        /*  THE EMPTY LINES AT THE TWO ENDS OF THE LIST, while a cue is dragged
+            (the author, 2026-10-19: "show an empty line at the top or bottom
+            when at the end of the list so it's easier to drag a cue in the
+            first or last position"; namespace draft §92). The last one is
+            there for the whole drag: it goes after everything, so nothing
+            moves. The first one opens under the persistent band only while the
+            hand is at the top - over the band or the headings - since it pushes
+            every row below it down by one; once open it stays while the hand
+            is over the band, the line or the row it pushed down.
+            `over` is the drawn row under the pointer, -1 for none, and `above`
+            whether the pointer is over the headings, above every row. */
+        static constexpr const char* landingFirstKey = "landing/first";
+        static constexpr const char* landingLastKey = "landing/last";
+        void showLandings (int over, bool above);
+        void removeLandings();
+        int landingRow (bool first) const;
+        int firstLandingPlace() const;
+        static model::Row landing (bool first);
+
+        /*  THE LIST SCROLLS WHILE A HAND HOLDS A CUE AT ITS TOP OR ITS BOTTOM
+            EDGE (§92), within a row of it, faster the nearer the edge - asked
+            by the drag's timer, so a hand held still at the edge keeps it
+            going. Whether it moved. */
+        bool scrollWhileDragging();
+
         /*  WHAT A DRAG IS DOING, re-asked while the hand holds still.
 
             A drag carries no modifiers of its own, so `dropAt` reads the
@@ -398,7 +423,8 @@ namespace wfg::client::ui
             all (author, 2026-09-22: "the drag operation didn't work at first
             (alt and shift+alt modifiers)"). So while a drag is over this list
             the answer is re-asked on a timer from the last position the
-            pointer was at, and a changed modifier lands without a twitch. */
+            pointer was at, and a changed modifier lands without a twitch.
+            The same timer scrolls the list at its edges (`scrollWhileDragging`). */
         void timerCallback() override;
 
         SourceDetails lastDrag { juce::var(), nullptr, {} };

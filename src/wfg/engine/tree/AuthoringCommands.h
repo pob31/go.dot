@@ -69,9 +69,23 @@ namespace wfg::tree
     using DescribeRequest = std::function<void (const std::string& mountId, const std::string& host,
                                                 int queryPort, const std::string& prefix)>;
 
+    /*  WHERE A CUE MADE BY HAND WOULD LAND, as the window last said (namespace
+        draft §92): the cue picked in it, and the list it shows. A capture that
+        asks for `standby` lands there - after the picked cue, else at the end
+        of that list - as a cue made with the window's own buttons does. Read
+        on the tick thread when a capture asks; empty with no window (a
+        headless serve, a replay, which reads the place the record names). */
+    struct HandsPlace
+    {
+        std::string picked;
+        std::string list;
+    };
+
+    using HandsPlaceRead = std::function<HandsPlace()>;
+
     /** Adds mount.declare, cue.capture, cue.fireNumber and standby.setNumber, answering through `answers`. */
     void registerAuthoringCommands (CommandRegistry& registry, doc::ShowDocument& document, RawSender& answers,
-                                    DescribeRequest describe = {});
+                                    DescribeRequest describe = {}, HandsPlaceRead handsPlace = {});
 
     /*  Adds mount.described: a fetched description adopted - the device's
         `namespace` row pointed at the file, the file loaded into `mounts` from
