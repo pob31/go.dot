@@ -32200,6 +32200,10 @@ processor declares with `bundles`, captures 7,500 pairs in 203 chunks back to ba
 fired: every message, in order, bundled, spread at twenty datagrams a tick, the cue `done` once the last
 had left.
 
+**On the bench** (the author, 2026-10-18, Go.dot 0.1.2 with WFS-DIY 1.0.0beta58): a cue recalling the
+full configuration of 64 inputs - every parameter, not only positions - *"survived... and sent it all
+in a matter of seconds."*
+
 ### 88.4 Not built
 
 - Doh! still puts back only the first 256 writes of a GO (§24.13).
