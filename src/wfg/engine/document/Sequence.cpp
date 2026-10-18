@@ -43,6 +43,14 @@ namespace wfg::doc
     int rawIndexForPosition (const juce::ValueTree& parent, int position)
     {
         const auto numChildren = parent.getNumChildren();
+
+        /*  AN APPEND ASKS NOTHING OF THE CHILDREN (namespace draft §88): the
+            walk below can only end at the last child for it, and walking there
+            for each of a capture's 5,300 messages was fourteen million looks at
+            an element's name. */
+        if (position == endOfSequence)
+            return numChildren;
+
         auto remaining = position;
 
         for (int raw = 0; raw < numChildren; ++raw)

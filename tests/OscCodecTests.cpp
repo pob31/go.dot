@@ -730,6 +730,25 @@ TEST_CASE ("udp: start and stop are safe to repeat, and a bad handler is refused
     endpoint.stop();
 }
 
+TEST_CASE ("udp: the bound socket asks its system for room for a burst (§88)")
+{
+    /*  A processor's capture of seventy inputs is 228 KB back to back, past the
+        64 KB the system gives a socket. What the system grants is its own call
+        (Linux caps it at rmem_max), so this holds the ask to having been made
+        and answered, and to never less than the 64 KB JUCE sets. */
+    UdpEndpoint endpoint;
+    CHECK (endpoint.receiveBuffer() == 0);
+
+    REQUIRE (endpoint.start (0, [] (Datagram) {}));
+    CHECK (endpoint.receiveBuffer() >= 65536);
+
+   #if defined (_WIN32)
+    CHECK (endpoint.receiveBuffer() >= UdpEndpoint::receiveBufferWanted);
+   #endif
+
+    endpoint.stop();
+}
+
 TEST_CASE ("osc codec: a datagram the codec refuses becomes an X record naming its sender")
 {
     /*  The plan's requirement for this PR, end to end and with no server in it:

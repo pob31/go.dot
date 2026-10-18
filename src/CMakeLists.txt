@@ -459,6 +459,8 @@ add_library(wfg_engine STATIC
     wfg/engine/osc/OscValue.cpp
     wfg/engine/osc/OscValue.h
     wfg/engine/osc/SenderGate.h
+    wfg/engine/osc/SocketBuffers.cpp
+    wfg/engine/osc/SocketBuffers.h
     wfg/engine/osc/UdpEndpoint.cpp
     wfg/engine/monitor/TrafficTap.h
     wfg/engine/monitor/TrafficTap.cpp

@@ -129,6 +129,14 @@ namespace wfg::osc
         /** The largest datagram a single read will take. */
         static constexpr int maxDatagramSize = 65536;
 
+        /*  WHAT THE BOUND SOCKET ASKS ITS SYSTEM FOR (namespace draft §88, AVA),
+            and what the receive side was given, in bytes - nought before `start`.
+            The system may give less; a test reads it to know the ask was made. */
+        static constexpr int receiveBufferWanted = 4 * 1024 * 1024;
+        static constexpr int sendBufferWanted = 1024 * 1024;
+
+        int receiveBuffer() const noexcept { return receiveBytes.load (std::memory_order_relaxed); }
+
         /*  THE NETWORK MONITOR'S TAP, which every datagram in and every send
             out is shown to while a monitor listens (monitor/TrafficTap.h). Set
             once, before `start`; null records nothing. */
@@ -146,6 +154,7 @@ namespace wfg::osc
         std::atomic<int> port { 0 };
         std::atomic<std::int64_t> received { 0 };
         std::atomic<std::int64_t> errors { 0 };
+        std::atomic<int> receiveBytes { 0 };
         std::atomic<monitor::TrafficTap*> tap { nullptr };
     };
 }

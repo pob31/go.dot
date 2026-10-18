@@ -48,6 +48,7 @@
 
 #include <juce_core/juce_core.h>
 
+#include <algorithm>
 #include <chrono>
 #include <mutex>
 #include <string>
@@ -252,6 +253,38 @@ TEST_CASE ("authoring: a processor declares itself and becomes a device, answere
 
     REQUIRE (rig.processor.waitFor (1));
     CHECK (rig.processor.words (0) == std::vector<std::string> { "/godot/declared", deviceId, "created" });
+}
+
+TEST_CASE ("authoring: a processor that says it reads bundles is made with Bundles on, and a later declare overrules nobody (§88)")
+{
+    AuthoringRig rig;
+
+    REQUIRE (rig.apply (rig.fromProcessor(), "mount.declare",
+                        { text ("/proc"), number (rig.processor.port()), number (0), text ("Processor"),
+                          text (""), text (""), number (1) }).applied == 1u);
+
+    const auto deviceId = onlyMount (rig.document);
+    REQUIRE (tree::mountDeclarationFor (rig.document, deviceId));
+    CHECK (tree::mountDeclarationFor (rig.document, deviceId)->bundles);
+    CHECK (tree::mountDeclarationFor (rig.document, deviceId)->perTick == 20);
+
+    //  On the record, so a replay makes the same device.
+    const auto record = rig.lastRecord();
+    REQUIRE (record.args.size() == 7u);
+    CHECK (record.args[6].getInt32() == 1);
+
+    //  The operator switches it off; the processor's next declare leaves it so.
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + deviceId + "/bundles", "false").ok);
+    REQUIRE (rig.apply (rig.fromProcessor(), "mount.declare",
+                        { text ("/proc"), number (rig.processor.port()), number (0), text ("Processor"),
+                          text (""), text (""), number (1) }).applied == 1u);
+    CHECK_FALSE (tree::mountDeclarationFor (rig.document, deviceId)->bundles);
+
+    //  And one that says nothing is made as it always was.
+    REQUIRE (rig.declare ("/other").applied == 1u);
+    for (const auto& id : tree::declaredMountIds (rig.document))
+        if (id != deviceId)
+            CHECK_FALSE (tree::mountDeclarationFor (rig.document, id)->bundles);
 }
 
 TEST_CASE ("authoring: declaring again moves where the device is and keeps what the operator decided")
@@ -469,6 +502,67 @@ TEST_CASE ("authoring: a cue named by number is replaced; a chunk appends; the w
     const auto memo = rig.document.createCue (rig.listId, 0, "memo", "Words").id;
     CHECK (rig.capture ("standby", "", memo, { { "/proc/a", "i:1" } }).rejected == 1u);
     CHECK (rig.capture ("cue", "99", "", { { "/proc/a", "i:1" } }).rejected == 1u);
+}
+
+TEST_CASE ("authoring: a capture of 7,500 pairs in chunks, all in one tick, lands whole and walks nothing (§88)")
+{
+    /*  THE AUTHOR'S EXPORT, LARGER (namespace draft §88): WFS-DIY sent 190 chunks
+        back to back and they were applied in one tick, which took fourteen
+        seconds - every pair read every device's rows by address, each read a
+        walk of the show. Now the devices are read once and the show is never
+        walked; this counts the walks rather than timing the tick, which a
+        runner's speed would decide. */
+    AuthoringRig rig;
+    REQUIRE (rig.declare().applied == 1u);
+
+    static constexpr int pairsInAll = 7500;
+    static constexpr int pairsPerChunk = 28;
+    const std::string cueId = "BGCQ0001";
+
+    const auto submitAll = [&rig, &cueId] (const std::string& value)
+    {
+        for (int first = 0; first < pairsInAll; first += pairsPerChunk)
+        {
+            std::vector<osc::Value> args { text (rig.root), text (first == 0 ? "standby" : "more"),
+                                           text (first == 0 ? "" : cueId), text (cueId),
+                                           text (first == 0 ? "Seventy inputs" : ""), text (""), text (""),
+                                           text ("") };
+
+            for (int n = first; n < std::min (first + pairsPerChunk, pairsInAll); ++n)
+            {
+                args.push_back (text ("/proc/input/" + std::to_string (n / 100 + 1) + "/p" + std::to_string (n % 100)));
+                args.push_back (text (value));
+            }
+
+            REQUIRE (rig.engine.submit (rig.fromProcessor(), "cue.capture", std::move (args)));
+        }
+
+        const auto result = rig.engine.processTick (rig.tick++);
+        rig.answers.flush();
+        return result;
+    };
+
+    const auto chunks = static_cast<std::size_t> ((pairsInAll + pairsPerChunk - 1) / pairsPerChunk);
+
+    SUBCASE ("made, then made again in place")
+    {
+        REQUIRE (submitAll ("f:0.5").applied == chunks);
+
+        auto messages = rig.messagesOf (cueId);
+        REQUIRE (messages.size() == static_cast<std::size_t> (pairsInAll - 1));
+        CHECK (rig.attribute ("/godot/cue/" + cueId + "/address") == "/proc/input/1/p0");
+        CHECK (messages.front() == std::pair<std::string, std::string> { "/proc/input/1/p1", "f:0.5" });
+        CHECK (messages.back() == std::pair<std::string, std::string> { "/proc/input/75/p99", "f:0.5" });
+
+        REQUIRE (submitAll ("f:0.25").applied == chunks);
+
+        messages = rig.messagesOf (cueId);
+        REQUIRE (messages.size() == static_cast<std::size_t> (pairsInAll - 1));
+        CHECK (messages[1234].second == "f:0.25");
+        CHECK (rig.memberIds (rig.listId) == std::vector<std::string> { cueId });
+
+        CHECK (rig.document.idWalksTaken() == 0);
+    }
 }
 
 TEST_CASE ("authoring: a capture is checked whole before anything is written")

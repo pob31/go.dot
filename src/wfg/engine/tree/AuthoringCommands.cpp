@@ -137,28 +137,40 @@ namespace wfg::tree
             return atHost;
         }
 
-        /*  The declared device whose prefix covers `address` the furthest, or
-            empty. Read off the document: see the header. */
-        std::string mountCovering (const doc::ShowDocument& document, const std::string& address)
+        /*  Every declared device and its prefix, read off the document: see
+            the header. */
+        std::vector<std::pair<std::string, std::string>> declaredRoots (const doc::ShowDocument& document)
+        {
+            std::vector<std::pair<std::string, std::string>> roots;
+
+            for (const auto& mountId : declaredMountIds (document))
+                if (const auto declaration = mountDeclarationFor (document, mountId))
+                    roots.emplace_back (mountId, declaration->prefix);
+
+            return roots;
+        }
+
+        /*  The device among `roots` whose prefix covers `address` the furthest,
+            or empty. */
+        std::string coveringIn (const std::vector<std::pair<std::string, std::string>>& roots,
+                                const std::string& address)
         {
             std::string best;
             std::size_t bestLength = 0;
 
-            for (const auto& mountId : declaredMountIds (document))
-            {
-                const auto declaration = mountDeclarationFor (document, mountId);
-
-                if (! declaration)
-                    continue;
-
-                if (const auto length = prefixMatchLength (address, declaration->prefix); length > bestLength)
+            for (const auto& [mountId, prefix] : roots)
+                if (const auto length = prefixMatchLength (address, prefix); length > bestLength)
                 {
                     best = mountId;
                     bestLength = length;
                 }
-            }
 
             return best;
+        }
+
+        std::string mountCovering (const doc::ShowDocument& document, const std::string& address)
+        {
+            return coveringIn (declaredRoots (document), address);
         }
 
         /*  The cue numbered `number`, anywhere in the show's lists, the focused
@@ -357,7 +369,8 @@ namespace wfg::tree
                         "A processor declares itself as a device: made at its root the first time, its host and"
                         " ports moved after. Answers /godot/declared <id> <outcome> at host:port.",
                         { { "prefix", 's', false }, { "port", 'i', false }, { "queryPort", 'i', false },
-                          { "name", 's', false }, { "id", 's', true }, { "host", 's', true } },
+                          { "name", 's', false }, { "id", 's', true }, { "host", 's', true },
+                          { "bundles", 'i', true } },
                         true,
                         [&document, &answers, describe] (CommandContext& context, const std::vector<osc::Value>& args)
                         {
@@ -367,6 +380,13 @@ namespace wfg::tree
                             const auto deviceName = args[3].getString();
                             const auto wantedId = args.size() > 4 ? args[4].getString() : std::string {};
                             auto host = args.size() > 5 ? args[5].getString() : std::string {};
+
+                            /*  WHETHER IT READS BUNDLES, when it says (namespace draft
+                                §88, AUW): applied when the device is made, as its
+                                name, rx and tx are (AUZ) - an operator who switched
+                                Bundles off is not overruled by the next declare. */
+                            const auto saysBundles = args.size() > 6;
+                            const auto takesBundles = saysBundles && args[6].getInt32() != 0;
 
                             if (host.empty() && context.origin != nullptr)
                                 host = originHost (*context.origin);
@@ -400,6 +420,9 @@ namespace wfg::tree
                                 writes.push_back ({ "name", deviceName });
                                 writes.push_back ({ "rx", "true" });
                                 writes.push_back ({ "tx", "true" });
+
+                                if (takesBundles)
+                                    writes.push_back ({ "bundles", "true" });
                             }
                             else
                             {
@@ -447,7 +470,7 @@ namespace wfg::tree
                                 describe (deviceId, host, queryPort, prefix);
 
                             auto applied = args;
-                            applied.resize (6, osc::Value::string ({}));
+                            applied.resize (saysBundles ? 7 : 6, osc::Value::string ({}));
                             applied[4] = osc::Value::string (deviceId);
                             applied[5] = osc::Value::string (host);
                             return Outcome::ok (std::move (applied));
@@ -571,14 +594,22 @@ namespace wfg::tree
                                 if (address.empty() || address.front() != '/' || ! osc::valuesFromAtoms (value))
                                     return refuse (reason::badValue);
 
-                            const auto device = mountCovering (document, pairs.front().first);
+                            /*  THE DEVICES READ ONCE, every pair matched against
+                                them in memory (namespace draft §88). Read for each
+                                pair, as they were, a capture of 5,300 pairs read
+                                every device's two dozen rows 5,300 times - each
+                                a walk of a show growing by the pair, before
+                                `findById` had its index - and one export cost the
+                                tick fourteen seconds. */
+                            const auto roots = declaredRoots (document);
+                            const auto device = coveringIn (roots, pairs.front().first);
 
                             if (device.empty())
                                 return refuse (reason::unknownId);
 
                             for (const auto& [address, value] : pairs)
                             {
-                                const auto other = mountCovering (document, address);
+                                const auto other = coveringIn (roots, address);
 
                                 if (other.empty())
                                     return refuse (reason::unknownId);

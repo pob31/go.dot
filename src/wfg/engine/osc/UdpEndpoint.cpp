@@ -17,6 +17,7 @@
 #include <wfg/engine/osc/UdpEndpoint.h>
 
 #include <wfg/engine/monitor/TrafficTap.h>
+#include <wfg/engine/osc/SocketBuffers.h>
 
 #include <juce_core/juce_core.h>
 
@@ -60,6 +61,13 @@ namespace wfg::osc
 
         socket = std::move (bound);
         port.store (socket->getBoundPort(), std::memory_order_relaxed);
+
+        /*  ROOM FOR A BURST (namespace draft §88, AVA): a processor's capture of
+            seventy inputs arrives as 190 datagrams back to back, past the 64 KB
+            the system gives, and a cue paced at the device's limit still leaves
+            a thousand a second from this same socket. */
+        const auto buffers = askForBuffers (socket->getRawSocketHandle(), receiveBufferWanted, sendBufferWanted);
+        receiveBytes.store (buffers.receive, std::memory_order_relaxed);
 
         /*  Written before the thread exists, and never written again while it
             runs. That is the whole of the synchronisation story for the
@@ -155,12 +163,21 @@ namespace wfg::osc
 
         /*  A sender of its own when this endpoint is not receiving, so a caller
             can send without binding anything - which is what a test driving
-            another endpoint needs, and what an outbound-only client is. */
-        juce::DatagramSocket sender;
-        auto* target = socket != nullptr ? socket.get() : &sender;
+            another endpoint needs, and what an outbound-only client is. Made
+            only then (namespace draft §88): made for every datagram, as it was,
+            a socket was opened, set up and closed beside each of a big cue's
+            five thousand sends from the bound one. */
+        int written = 0;
 
-        const auto written = target->write (juce::String (host), destinationPort,
-                                            data, static_cast<int> (size));
+        if (socket != nullptr)
+        {
+            written = socket->write (juce::String (host), destinationPort, data, static_cast<int> (size));
+        }
+        else
+        {
+            juce::DatagramSocket sender;
+            written = sender.write (juce::String (host), destinationPort, data, static_cast<int> (size));
+        }
 
         //  What left, shown to the monitor: a send the socket refused did not cross the wire.
         if (written == static_cast<int> (size))
