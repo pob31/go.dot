@@ -54,6 +54,8 @@
 
 namespace wfg::tree
 {
+    struct TreeDiff;
+
     class TreeSnapshot
     {
     public:
@@ -68,11 +70,18 @@ namespace wfg::tree
             namespace every time a cue was renamed. Measured at 3.1 ms of every
             applied mutation with WFS-DIY's own capture, against 0.1 ms for
             everything else. */
+        /*  AND FOUR SINCE §88 (2026-10-18, AUV): an OSC cue's further messages
+            and every curve are a half of their own, `messageNodes`, kept message
+            by message and made again only where an edit touched them. A spatial
+            processor's snapshot of seventy inputs is 5,300 messages, six rows
+            each - thirty thousand rows the show's half was made again with on
+            every GO, every stop and every run that ended. */
         TreeSnapshot (std::int64_t tickIndex,
                       std::shared_ptr<const std::vector<Node>> documentNodes,
                       std::shared_ptr<const std::vector<Node>> mountedNodes,
                       std::vector<Node> runtimeNodes,
-                      std::shared_ptr<const std::vector<Node>> mountedWritten = {});
+                      std::shared_ptr<const std::vector<Node>> mountedWritten = {},
+                      std::shared_ptr<const std::vector<Node>> messageNodes = {});
 
         /** The tick this was published at. */
         std::int64_t tick() const noexcept { return tickAt; }
@@ -90,6 +99,13 @@ namespace wfg::tree
         /** The immediate children of a container, in address order. */
         std::vector<const Node*> childrenOf (std::string_view address) const;
 
+        /*  THE SHOW'S MESSAGES AND CURVES AS ONE OBJECT (namespace draft §88):
+            a reader that makes something of a cue's messages may keep what it
+            made while this is the same object, since a published snapshot never
+            changes and the half is shared from one to the next until an edit
+            makes it again. Null for a snapshot made without it. */
+        const std::shared_ptr<const std::vector<Node>>& messagesHalf() const noexcept { return messages; }
+
     private:
         std::int64_t tickAt = 0;
         std::shared_ptr<const std::vector<Node>> document;
@@ -102,6 +118,12 @@ namespace wfg::tree
             and this is what spares the half its rebuild. Empty for most of a
             show's life. */
         std::shared_ptr<const std::vector<Node>> written;
+
+        /*  THE SHOW'S MESSAGES AND CURVES (namespace draft §88, AUV), shared by
+            pointer from one snapshot to the next while no edit touches them. */
+        std::shared_ptr<const std::vector<Node>> messages;
+
+        friend TreeDiff diff (const TreeSnapshot& before, const TreeSnapshot& after);
     };
 
     //==============================================================================

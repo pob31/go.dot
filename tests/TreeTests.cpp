@@ -37,6 +37,7 @@
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/audio/Timbre.h>
 #include <wfg/engine/document/Bundle.h>
+#include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/pair/PairSettings.h>
@@ -2167,4 +2168,258 @@ TEST_CASE ("same sample: pair/mapped, drift, clockResidual, outputLatency, peerO
     CHECK (valueAt (snapshot, "/godot/pair/outputLatency", "f") == osc::Value::float32 (static_cast<float> (0.0015)));
     CHECK (valueAt (snapshot, "/godot/pair/peerOutputLatency", "f") == osc::Value::float32 (static_cast<float> (0.010)));
     CHECK (valueAt (snapshot, "/godot/engine/sampleZeroAt", "h") == osc::Value::int64 (1'234'567'890'123'456));
+}
+
+
+//==============================================================================
+/*  THE SHOW'S OSC MESSAGES AND CURVES, A HALF OF THEIR OWN (namespace draft §88,
+    AUV): kept message by message and made again only where an edit touched
+    them. Held to two things: what it publishes is what a tree made from nothing
+    publishes of the same show, edit after edit - an undo, a paste and a cue
+    taken away included - and a GO's tick, with no edit, makes none of it. */
+namespace
+{
+    struct MessagesRig
+    {
+        MessagesRig()
+        {
+            listId = document.createList ("Main").id;
+        }
+
+        std::shared_ptr<const TreeSnapshot> publish (ParameterTree& tree)
+        {
+            EngineState state;
+            state.version = "test";
+            state.tick = ++tick;
+            state.documentRevision = document.showRevision();
+            tree.markStale();
+            return tree.publish (tick, state);
+        }
+
+        /*  The rows of cues, messages and curves, address to value, with their
+            types: what the published tree says of them. */
+        static std::map<std::string, std::pair<std::string, std::vector<osc::Value>>> rowsOf (const TreeSnapshot& snapshot)
+        {
+            std::map<std::string, std::pair<std::string, std::vector<osc::Value>>> out;
+
+            for (const auto* node : snapshot.all())
+                for (const auto* prefix : { "/godot/cue", "/godot/message", "/godot/curve" })
+                    if (node->address.rfind (prefix, 0) == 0)
+                        out[node->address] = { node->typeTags, node->values };
+
+            return out;
+        }
+
+        /*  What the kept tree says now, against a tree made from nothing on the
+            same show. */
+        void agrees()
+        {
+            const auto kept = publish (parameters);
+
+            ParameterTree fresh { document, engine.commands(), mounts, runs };
+            const auto made = publish (fresh);
+
+            CHECK (rowsOf (*kept) == rowsOf (*made));
+            CHECK (kept->size() == made->size());
+        }
+
+        std::string oscCue (const std::string& name, int messages)
+        {
+            const auto made = document.createCue (listId, index++, "osc", name, {},
+                                                  { { "address", "/wfs/input/1/x" }, { "value", "f:0.5" } });
+            REQUIRE (made.ok);
+
+            for (int n = 0; n < messages; ++n)
+                REQUIRE (document.createMessage (made.id, "/wfs/input/" + std::to_string (n + 2) + "/x", "f:0.25").ok);
+
+            return made.id;
+        }
+
+        std::vector<std::string> messagesOf (const std::string& cueId) const
+        {
+            std::vector<std::string> ids;
+
+            for (const auto& child : document.findById (cueId))
+                if (child.hasType ("Message"))
+                    ids.push_back (child["id"].toString().toStdString());
+
+            return ids;
+        }
+
+        void step (const char* name)
+        {
+            tick += 100;
+            document.beginTransaction (name, tick, "test", {});
+        }
+
+        Engine engine;
+        doc::ShowDocument document;
+        MountTable mounts;
+        cue::RunTable runs;
+        ParameterTree parameters { document, engine.commands(), mounts, runs };
+        std::string listId;
+        int index = 0;
+        std::int64_t tick = 0;
+    };
+}
+
+TEST_CASE ("tree: an OSC cue's messages and curves are a half of their own, the same rows a tree made from nothing has (§88)")
+{
+    MessagesRig rig;
+
+    rig.step ("cue.create");
+    const auto first = rig.oscCue ("First", 40);
+    rig.step ("cue.create");
+    const auto second = rig.oscCue ("Second", 3);
+    rig.agrees();
+
+    const auto messages = rig.messagesOf (first);
+
+    //  A value edited, a curve on a message and one on the cue's own.
+    rig.step ("node.set");
+    REQUIRE (rig.document.setAttribute ("/godot/message/" + messages[5] + "/value", "f:0.75").ok);
+    rig.agrees();
+
+    rig.step ("curve.create");
+    REQUIRE (rig.document.createCurve (messages[7], 0).ok);
+    rig.step ("curve.create");
+    REQUIRE (rig.document.createCurve (first, 0).ok);
+    rig.agrees();
+
+    //  One taken away from the middle: every place after it moves.
+    rig.step ("object.delete");
+    REQUIRE (rig.document.remove (messages[10]).ok);
+    rig.agrees();
+
+    //  Put back by an undo, taken again by a redo.
+    REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
+    rig.agrees();
+    REQUIRE (rig.document.redo (doc::UndoDomain::document).has_value());
+    rig.agrees();
+
+    //  A cue pasted, with all its messages under new names.
+    rig.step ("document.paste");
+    REQUIRE (rig.document.paste (rig.listId, 2, rig.document.fragmentOf ({ first }), {}).ok);
+    rig.agrees();
+
+    //  A whole cue taken away, and given back.
+    rig.step ("object.delete");
+    REQUIRE (rig.document.remove (second).ok);
+    rig.agrees();
+    REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
+    rig.agrees();
+
+    //  And a show taken over.
+    doc::ShowDocument reopened;
+    REQUIRE (doc::CanonicalXml::read (doc::CanonicalXml::write (rig.document), reopened).ok);
+    rig.document.adopt (reopened.root().createCopy(), doc::IdRegistry::withSystemEntropy());
+    rig.agrees();
+}
+
+TEST_CASE ("tree: a tick with no edit makes no message's rows, and an edit makes only what it touched (§88)")
+{
+    MessagesRig rig;
+    const auto cueId = rig.oscCue ("Seventy inputs", 2000);
+
+    rig.publish (rig.parameters);
+    const auto rows = rig.parameters.messageRowsMade();
+    const auto halves = rig.parameters.messageHalvesBuilt();
+    CHECK (rows >= 2000u);
+
+    //  A GO, a stop, a run ending: the show's half rebuilt, the messages not.
+    const auto before = rig.publish (rig.parameters);
+    const auto after = rig.publish (rig.parameters);
+    CHECK (rig.parameters.messageRowsMade() == rows);
+    CHECK (rig.parameters.messageHalvesBuilt() == halves);
+
+    //  And the difference between two such ticks holds no message: the half is the same object.
+    const auto quiet = diff (*before, *after);
+    CHECK (quiet.added.empty());
+    CHECK (quiet.removed.empty());
+
+    for (const auto& address : quiet.valueChanged)
+        CHECK (address.rfind ("/godot/message", 0) != 0);
+
+    //  One value edited: that message's rows, and the half put together once.
+    const auto messages = rig.messagesOf (cueId);
+    REQUIRE (rig.document.setAttribute ("/godot/message/" + messages[1234] + "/value", "f:0.875").ok);
+    const auto edited = rig.publish (rig.parameters);
+    CHECK (rig.parameters.messageRowsMade() == rows + 1);
+    CHECK (rig.parameters.messageHalvesBuilt() == halves + 1);
+
+    const auto changes = diff (*after, *edited);
+    CHECK (std::find (changes.valueChanged.begin(), changes.valueChanged.end(),
+                      "/godot/message/" + messages[1234] + "/value") != changes.valueChanged.end());
+
+    //  Twenty-eight appended, as one chunk of a capture: those twenty-eight.
+    for (int n = 0; n < 28; ++n)
+        REQUIRE (rig.document.createMessage (cueId, "/wfs/input/1/y" + std::to_string (n), "f:0.5").ok);
+
+    rig.publish (rig.parameters);
+    CHECK (rig.parameters.messageRowsMade() == rows + 1 + 28);
+}
+
+TEST_CASE ("tree: the difference between two snapshots, half by half, is the whole tree's (§88)")
+{
+    /*  The rule the half-by-half diff rests on: halves never share an address,
+        so their differences together are the tree's - held against the walk of
+        the whole of each snapshot it replaced, through edits of every half. */
+    MessagesRig rig;
+    const auto cueId = rig.oscCue ("Snapshot", 30);
+
+    const auto whole = [] (const TreeSnapshot& before, const TreeSnapshot& after)
+    {
+        TreeDiff out;
+        const auto a = before.all();
+        const auto b = after.all();
+        auto i = a.begin();
+        auto j = b.begin();
+
+        while (i != a.end() && j != b.end())
+        {
+            if ((*i)->address < (*j)->address)      out.removed.push_back ((*i++)->address);
+            else if ((*j)->address < (*i)->address) out.added.push_back ((*j++)->address);
+            else
+            {
+                if ((*i)->values != (*j)->values)
+                    out.valueChanged.push_back ((*j)->address);
+
+                ++i;
+                ++j;
+            }
+        }
+
+        for (; i != a.end(); ++i) out.removed.push_back ((*i)->address);
+        for (; j != b.end(); ++j) out.added.push_back ((*j)->address);
+        return out;
+    };
+
+    const auto same = [] (const TreeDiff& x, const TreeDiff& y)
+    {
+        return x.added == y.added && x.removed == y.removed && x.valueChanged == y.valueChanged;
+    };
+
+    auto last = rig.publish (rig.parameters);
+
+    const auto check = [&] ()
+    {
+        const auto now = rig.publish (rig.parameters);
+        CHECK (same (diff (*last, *now), whole (*last, *now)));
+        last = now;
+    };
+
+    REQUIRE (rig.document.setAttribute ("/godot/message/" + rig.messagesOf (cueId)[3] + "/value", "f:1").ok);
+    check();
+
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + cueId + "/name", "Renamed").ok);
+    check();
+
+    REQUIRE (rig.document.remove (rig.messagesOf (cueId)[0]).ok);
+    check();
+
+    rig.oscCue ("Another", 5);
+    check();
+
+    REQUIRE (rig.document.remove (cueId).ok);
+    check();
 }

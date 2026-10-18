@@ -57,12 +57,14 @@ namespace wfg::tree
                                 std::shared_ptr<const std::vector<Node>> documentNodes,
                                 std::shared_ptr<const std::vector<Node>> mountedNodes,
                                 std::vector<Node> runtimeNodes,
-                                std::shared_ptr<const std::vector<Node>> mountedWritten)
+                                std::shared_ptr<const std::vector<Node>> mountedWritten,
+                                std::shared_ptr<const std::vector<Node>> messageNodes)
         : tickAt (tickIndex),
           document (std::move (documentNodes)),
           mounted (std::move (mountedNodes)),
           runtime (std::move (runtimeNodes)),
-          written (std::move (mountedWritten))
+          written (std::move (mountedWritten)),
+          messages (std::move (messageNodes))
     {
     }
 
@@ -77,6 +79,11 @@ namespace wfg::tree
 
         if (document != nullptr)
             if (const auto* node = findIn (*document, address))
+                return node;
+
+        //  The show's messages and curves (§88), beside the show's own nodes.
+        if (messages != nullptr)
+            if (const auto* node = findIn (*messages, address))
                 return node;
 
         /*  The mounted half LAST, and it is the biggest: a lookup that found
@@ -94,6 +101,7 @@ namespace wfg::tree
     {
         return runtime.size()
                  + (document != nullptr ? document->size() : 0)
+                 + (messages != nullptr ? messages->size() : 0)
                  + (mounted != nullptr ? mounted->size() : 0);
     }
 
@@ -104,16 +112,18 @@ namespace wfg::tree
 
         const std::vector<Node> empty;
         const auto& docNodes = document != nullptr ? *document : empty;
+        const auto& messageNodes = messages != nullptr ? *messages : empty;
         const auto& mountNodes = mounted != nullptr ? *mounted : empty;
 
-        /*  A THREE-WAY MERGE rather than a concatenate-and-sort: all three are
+        /*  A FOUR-WAY MERGE rather than a concatenate-and-sort: all four are
             already in address order, so this is linear and the result is too.
             Written as "take the smallest head of whichever still has one",
             which is the same rule the two-way version had and reads the same at
-            three as it did at two. */
+            four as it did at two. */
         auto a = docNodes.begin();
         auto b = runtime.begin();
         auto c = mountNodes.begin();
+        auto d = messageNodes.begin();
 
         /*  AND THE WRITTEN MOUNTED NODES, each in the place of its copy in the
             mounted half (ZC): both in address order, so one walks beside the
@@ -133,6 +143,9 @@ namespace wfg::tree
             if (c != mountNodes.end() && (least == nullptr
                                           || c->address < least->address))
                                                                     { least = &*c; from = 2; }
+            if (d != messageNodes.end() && (least == nullptr
+                                             || d->address < least->address))
+                                                                    { least = &*d; from = 3; }
 
             if (from < 0)
                 break;
@@ -150,7 +163,8 @@ namespace wfg::tree
 
             if (from == 0)      ++a;
             else if (from == 1) ++b;
-            else                ++c;
+            else if (from == 2) ++c;
+            else                ++d;
         }
 
         return result;
@@ -168,46 +182,110 @@ namespace wfg::tree
     }
 
     //==============================================================================
+    namespace
+    {
+        /*  Two runs of nodes in address order, compared in one walk. */
+        void diffSorted (const std::vector<const Node*>& oldNodes, const std::vector<const Node*>& newNodes,
+                         TreeDiff& result)
+        {
+            auto a = oldNodes.begin();
+            auto b = newNodes.begin();
+
+            while (a != oldNodes.end() && b != newNodes.end())
+            {
+                if ((*a)->address < (*b)->address)
+                {
+                    result.removed.push_back ((*a)->address);
+                    ++a;
+                }
+                else if ((*b)->address < (*a)->address)
+                {
+                    result.added.push_back ((*b)->address);
+                    ++b;
+                }
+                else
+                {
+                    if ((*a)->values != (*b)->values)
+                        result.valueChanged.push_back ((*b)->address);
+
+                    ++a;
+                    ++b;
+                }
+            }
+
+            for (; a != oldNodes.end(); ++a)
+                result.removed.push_back ((*a)->address);
+
+            for (; b != newNodes.end(); ++b)
+                result.added.push_back ((*b)->address);
+        }
+
+        std::vector<const Node*> pointersTo (const std::vector<Node>* nodes)
+        {
+            std::vector<const Node*> out;
+
+            if (nodes == nullptr)
+                return out;
+
+            out.reserve (nodes->size());
+
+            for (const auto& node : *nodes)
+                out.push_back (&node);
+
+            return out;
+        }
+
+        /*  The mounted half as a reader sees it: each written node in the
+            place of its copy (ZC). */
+        std::vector<const Node*> mountedView (const std::vector<Node>* mounted, const std::vector<Node>* written)
+        {
+            auto out = pointersTo (mounted);
+
+            if (written == nullptr || written->empty())
+                return out;
+
+            auto w = written->begin();
+
+            for (auto& node : out)
+            {
+                while (w != written->end() && w->address < node->address)
+                    ++w;
+
+                if (w != written->end() && w->address == node->address)
+                    node = &*w;
+            }
+
+            return out;
+        }
+    }
+
     TreeDiff diff (const TreeSnapshot& before, const TreeSnapshot& after)
     {
         TreeDiff result;
 
-        const auto oldNodes = before.all();
-        const auto newNodes = after.all();
+        /*  HALF BY HALF (namespace draft §88, AUV), and a half both snapshots
+            share by pointer is skipped unread: a snapshot never changes once
+            published, so the same half is the same nodes. The four never share
+            an address, so their differences together are the tree's. A GO of a
+            cue of 5,300 messages used to compare every one of their thirty
+            thousand rows with itself, every tick that published. */
+        if (before.document != after.document)
+            diffSorted (pointersTo (before.document.get()), pointersTo (after.document.get()), result);
 
-        /*  Both sides are in address order, so this walks them once rather than
-            looking each address up in the other. A show with several thousand
-            nodes gets diffed on every tick that changed something. */
-        auto a = oldNodes.begin();
-        auto b = newNodes.begin();
+        if (before.messages != after.messages)
+            diffSorted (pointersTo (before.messages.get()), pointersTo (after.messages.get()), result);
 
-        while (a != oldNodes.end() && b != newNodes.end())
-        {
-            if ((*a)->address < (*b)->address)
-            {
-                result.removed.push_back ((*a)->address);
-                ++a;
-            }
-            else if ((*b)->address < (*a)->address)
-            {
-                result.added.push_back ((*b)->address);
-                ++b;
-            }
-            else
-            {
-                if ((*a)->values != (*b)->values)
-                    result.valueChanged.push_back ((*b)->address);
+        diffSorted (pointersTo (&before.runtime), pointersTo (&after.runtime), result);
 
-                ++a;
-                ++b;
-            }
-        }
+        if (before.mounted != after.mounted || before.written != after.written)
+            diffSorted (mountedView (before.mounted.get(), before.written.get()),
+                        mountedView (after.mounted.get(), after.written.get()), result);
 
-        for (; a != oldNodes.end(); ++a)
-            result.removed.push_back ((*a)->address);
-
-        for (; b != newNodes.end(); ++b)
-            result.added.push_back ((*b)->address);
+        /*  In address order, as the whole-tree walk this replaced gave them: a
+            client hears a container added before what it holds. */
+        std::sort (result.added.begin(), result.added.end());
+        std::sort (result.removed.begin(), result.removed.end());
+        std::sort (result.valueChanged.begin(), result.valueChanged.end());
 
         return result;
     }

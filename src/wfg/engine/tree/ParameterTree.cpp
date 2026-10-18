@@ -688,6 +688,26 @@ namespace wfg::tree
             return held;
         }
 
+        /*  WHERE AN OSC CUE'S MESSAGES AND CURVES ARE (namespace draft §88, AUV):
+            the half of their own `MessageRows` keeps, set around a rebuild of
+            the show's half as the plugins are. Set, the walk leaves a cue's
+            Message and Curve children to it and reads the cue's `messages` and
+            `curves` rows from it; unset, it makes them itself, as it did. */
+        struct WalkBulk
+        {
+            const MessageRows* rows = nullptr;
+        };
+
+        WalkBulk& walkBulk()
+        {
+            static thread_local WalkBulk held;
+            return held;
+        }
+
+        const juce::Identifier messageType { "Message" };
+        const juce::Identifier curveType { "Curve" };
+        const juce::Identifier oscType { "Osc" };
+
         /*  The set entry a cue's Fx names, and where it sits in the chain: read
             off the document root, which every node can reach. */
         struct SetEntry
@@ -1777,12 +1797,20 @@ namespace wfg::tree
                     /*  AN OSC CUE'S FURTHER MESSAGES, in their order (namespace
                         draft 45): the containment read back, as `zones` is. */
                     case CueRow::messages:
+                        if (const auto* bulk = walkBulk().rows)
+                        {
+                            text = bulk->messagesOf (id);
+                            break;
+                        }
+
                         for (const auto& child : node)
                             if (child.hasType ("Message") && child.hasProperty (idProperty))
                                 text += (text.empty() ? "" : " ") + child[idProperty].toString().toStdString();
                         break;
 
-                    case CueRow::curves: text = curvesOf (node); break;
+                    case CueRow::curves:
+                        text = walkBulk().rows != nullptr ? walkBulk().rows->curvesOf (id) : curvesOf (node);
+                        break;
 
                     /*  The EQ as a locked show is riding it, where it rides one;
                         and what a DCA mark carries, held live, on every kind that
@@ -1840,6 +1868,12 @@ namespace wfg::tree
 
             for (const auto& child : node)
             {
+                /*  AN OSC CUE'S MESSAGES AND CURVES ARE THEIR OWN HALF'S
+                    (namespace draft §88, AUV), and five thousand of them are
+                    passed over here at the cost of two comparisons each. */
+                if (walkBulk().rows != nullptr && (child.hasType (messageType) || child.hasType (curveType)))
+                    continue;
+
                 if (! child.hasProperty (idProperty))
                     continue;
 
@@ -2050,6 +2084,281 @@ namespace wfg::tree
     }
 
     //==============================================================================
+    MessageRows::MessageRows (const doc::ShowDocument& documentToWatch)
+        : document (documentToWatch)
+    {
+    }
+
+    MessageRows::~MessageRows()
+    {
+        watched.removeListener (this);
+    }
+
+    const std::string& MessageRows::messagesOf (const std::string& cueId) const
+    {
+        static const std::string none;
+        const auto found = cues.find (cueId);
+        return found == cues.end() ? none : found->second.messagesText;
+    }
+
+    const std::string& MessageRows::curvesOf (const std::string& cueId) const
+    {
+        static const std::string none;
+        const auto found = cues.find (cueId);
+        return found == cues.end() ? none : found->second.curvesText;
+    }
+
+    void MessageRows::touchCuesUnder (const juce::ValueTree& node)
+    {
+        if (node.hasType (oscType))
+        {
+            if (const auto id = node[idProperty].toString().toStdString(); ! id.empty())
+                touchedCues.insert (id);
+
+            return;
+        }
+
+        //  A message or a curve holds no cue: its five thousand siblings are not walked.
+        if (node.hasType (messageType) || node.hasType (curveType))
+            return;
+
+        for (const auto& child : node)
+            touchCuesUnder (child);
+    }
+
+    void MessageRows::touchChild (const juce::ValueTree& parent, const juce::ValueTree& child)
+    {
+        /*  A MESSAGE OR A CURVE ADDED TO A CUE, OR TAKEN FROM IT: the cue is made
+            again, since its messages' places may have moved. A curve on a
+            further message: that message. Anything else: every OSC cue it
+            carries - a cue pasted, a group put back by an undo. */
+        if (parent.hasType (oscType) && (child.hasType (messageType) || child.hasType (curveType)))
+            touchedCues.insert (parent[idProperty].toString().toStdString());
+        else if (parent.hasType (messageType) && child.hasType (curveType))
+            touchedRows.insert (parent[idProperty].toString().toStdString());
+        else
+            touchCuesUnder (child);
+    }
+
+    void MessageRows::valueTreePropertyChanged (juce::ValueTree& node, const juce::Identifier&)
+    {
+        /*  A VALUE: the message it is a value of, or the curve on a cue's own
+            message. An OSC cue's own rows are the rest of the show's half. */
+        if (node.hasType (messageType))
+        {
+            touchedRows.insert (node[idProperty].toString().toStdString());
+        }
+        else if (node.hasType (curveType))
+        {
+            const auto parent = node.getParent();
+
+            if (parent.hasType (messageType))
+                touchedRows.insert (parent[idProperty].toString().toStdString());
+            else
+                touchedRows.insert (node[idProperty].toString().toStdString());
+        }
+    }
+
+    void MessageRows::valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child)
+    {
+        touchChild (parent, child);
+    }
+
+    void MessageRows::valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int)
+    {
+        touchChild (parent, child);
+    }
+
+    void MessageRows::valueTreeChildOrderChanged (juce::ValueTree& parent, int, int)
+    {
+        if (parent.hasType (oscType))
+            touchedCues.insert (parent[idProperty].toString().toStdString());
+    }
+
+    bool MessageRows::refresh()
+    {
+        //  A show taken over is a new root: listened to from now, and all of it made again.
+        if (watched != document.root())
+        {
+            watched.removeListener (this);
+            watched = document.root();
+            watched.addListener (this);
+            everything = true;
+        }
+
+        auto changed = built == nullptr;
+
+        if (everything)
+        {
+            everything = false;
+            changed = true;
+
+            cues.clear();
+            rows.clear();
+            touchedCues.clear();
+            touchedRows.clear();
+
+            //  Where the walk publishes a cue: the lists, and all they hold.
+            touchCuesUnder (watched.getChildWithName ("Lists"));
+        }
+
+        //  The cues first: a message they make again needs nothing more.
+        for (const auto& cueId : std::exchange (touchedCues, {}))
+        {
+            remakeCue (cueId);
+            changed = true;
+        }
+
+        for (const auto& rowId : std::exchange (touchedRows, {}))
+            changed = remakeRows (rowId) || changed;
+
+        if (changed)
+            assemble();
+
+        return changed;
+    }
+
+    void MessageRows::remakeCue (const std::string& cueId)
+    {
+        const auto cue = document.findById (cueId);
+        const auto before = cues.find (cueId);
+
+        CueEntry now;
+
+        /*  ONE IT NO LONGER PUBLISHES - taken away, or never under a list, which
+            is where the walk finds a cue - leaves nothing behind. */
+        const auto underLists = [] (juce::ValueTree node)
+        {
+            for (node = node.getParent(); node.isValid(); node = node.getParent())
+                if (node.hasType ("Lists"))
+                    return true;
+
+            return false;
+        };
+
+        const auto published = cue.isValid() && cue.hasType (oscType) && underLists (cue);
+
+        if (published)
+        {
+            int index = 0;
+
+            for (const auto& child : cue)
+            {
+                if (! child.hasProperty (idProperty))
+                    continue;
+
+                const auto isMessage = child.hasType (messageType);
+
+                if (! isMessage && ! child.hasType (curveType))
+                    continue;
+
+                const auto childId = child[idProperty].toString().toStdString();
+                const auto place = isMessage ? index++ : -1;
+                auto& kept = rows[childId];
+
+                (isMessage ? now.messages : now.curves).push_back (childId);
+
+                /*  MADE AGAIN ONLY WHAT MOVED: a message new to the cue, one
+                    whose place changed, or one whose value an edit touched. */
+                if (kept.cue == cueId && kept.index == place && ! kept.nodes.empty()
+                      && touchedRows.erase (childId) == 0)
+                    continue;
+
+                kept.cue = cueId;
+                kept.index = place;
+                kept.nodes.clear();
+
+                if (isMessage)
+                    collectMessage (child, cueId, place, kept.nodes);
+                else
+                    collectCurve (child, cueId, {}, kept.nodes);
+
+                ++made;
+            }
+        }
+
+        /*  WHAT IT HELD AND HOLDS NO LONGER, let go - unless another cue has
+            taken it since, which made it again as its own. */
+        if (before != cues.end())
+        {
+            std::set<std::string> holds (now.messages.begin(), now.messages.end());
+            holds.insert (now.curves.begin(), now.curves.end());
+
+            for (const auto* list : { &before->second.messages, &before->second.curves })
+                for (const auto& gone : *list)
+                    if (! holds.contains (gone))
+                        if (const auto found = rows.find (gone); found != rows.end() && found->second.cue == cueId)
+                            rows.erase (found);
+        }
+
+        if (! published)
+        {
+            cues.erase (cueId);
+            return;
+        }
+
+        const auto join = [] (const std::vector<std::string>& ids)
+        {
+            std::string text;
+
+            for (const auto& id : ids)
+                text += (text.empty() ? "" : " ") + id;
+
+            return text;
+        };
+
+        now.messagesText = join (now.messages);
+        now.curvesText = join (now.curves);
+        cues[cueId] = std::move (now);
+    }
+
+    bool MessageRows::remakeRows (const std::string& rowId)
+    {
+        /*  A VALUE EDITED where the cue around it did not move: that message's
+            rows alone, at the place its cue last gave it. One not held - taken
+            away since, or under a cue the walk does not publish - is nothing. */
+        const auto found = rows.find (rowId);
+        const auto node = document.findById (rowId);
+
+        if (found == rows.end() || ! node.isValid())
+            return false;
+
+        auto& kept = found->second;
+        kept.nodes.clear();
+
+        if (node.hasType (messageType))
+            collectMessage (node, kept.cue, kept.index, kept.nodes);
+        else if (node.hasType (curveType))
+            collectCurve (node, kept.cue, {}, kept.nodes);
+
+        ++made;
+        return true;
+    }
+
+    void MessageRows::assemble()
+    {
+        std::size_t count = 0;
+
+        for (const auto& entry : rows)
+            count += entry.second.nodes.size();
+
+        std::vector<Node> nodes;
+        nodes.reserve (count);
+
+        for (const auto& entry : rows)
+            nodes.insert (nodes.end(), entry.second.nodes.begin(), entry.second.nodes.end());
+
+        /*  `/godot/message`, `/godot/curve` and each one's container are this
+            half's; the root and `/godot` the show's half's. The same messages
+            in the same order - an edit of a value - sort as they did last time
+            without a sort (§31.5). */
+        sortWithContainers (nodes, { std::string (rootAddress), std::string (godot) }, false, &sort);
+
+        built = std::make_shared<const std::vector<Node>> (std::move (nodes));
+        ++builds;
+    }
+
+    //==============================================================================
     ParameterTree::ParameterTree (const doc::ShowDocument& documentToProject,
                                   const CommandRegistry& commandsToDescribe,
                                   const MountTable& mountsToPublish,
@@ -2086,6 +2395,17 @@ namespace wfg::tree
 
         walkPlugins() = { pluginTable,
                           std::max (1, static_cast<int> (showNode.getChildWithName ("Audio").getProperty ("channelsPerTrack", 2))) };
+
+        /*  THE MESSAGES ARE THEIR OWN HALF'S (namespace draft §88, AUV), for the
+            length of this walk and no longer. */
+        struct BulkScope
+        {
+            explicit BulkScope (const MessageRows& rows) { walkBulk().rows = &rows; }
+            ~BulkScope() { walkBulk().rows = nullptr; }
+
+            BulkScope (const BulkScope&) = delete;
+            BulkScope& operator= (const BulkScope&) = delete;
+        } bulkScope { messageRows };
 
         //----------------------------------------------------------------------
         // /godot/document — the rows that persist, read off the root: the
@@ -3803,6 +4123,15 @@ namespace wfg::tree
         analysis.ensureBuilt (document, durations);
         samplerLayout.ensureBuilt (document);
 
+        /*  THE MESSAGES FIRST (namespace draft §88, AUV): made again only where an
+            edit touched them, and before the show's half is walked, which reads a
+            cue's `messages` and `curves` rows from them. When they moved, so has
+            the shape of a cue around them. */
+        if (messageRows.refresh())
+            stale = true;
+
+        messagePart = messageRows.half();
+
         /*  AND THE PLUGIN TABLE ASKED THE SAME WAY (Phase 9a): the sandbox
             writes it from the message thread, and its `state` rows are on
             this cached half. */
@@ -5370,7 +5699,7 @@ namespace wfg::tree
         runtimeNodesSeen = runtime.size();
 
         auto result = std::make_shared<const TreeSnapshot> (tick, documentPart, mountPart,
-                                                            std::move (runtime), mountWritten);
+                                                            std::move (runtime), mountWritten, messagePart);
 
         {
             const std::lock_guard<std::mutex> lock { publishMutex };

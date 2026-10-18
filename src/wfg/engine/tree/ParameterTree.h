@@ -73,6 +73,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -385,6 +386,106 @@ namespace wfg::tree
         std::vector<std::string> containers;
     };
 
+    /*  THE ROWS OF THE SHOW'S OSC MESSAGES AND CURVES (namespace draft §88, AUV),
+        kept apart from the rest of the show's half and made again only where an
+        edit touched them.
+
+        The author's question, asked of the show's half being rebuilt on every
+        tick that applied a command: "Is it possible to rebuild partly? Skip
+        large ones for stopped rebuilds? And only allow small items to rebuild
+        instantly the part where it sits?" What makes a show large is an OSC
+        cue's further messages - a spatial processor's snapshot of seventy
+        inputs is 5,300 of them, six rows each - and a message's rows depend on
+        nothing but its own node, its cue's identifier and its place among the
+        cue's messages. So they are kept here, message by message: an edit of a
+        message's value makes that message's rows again, a message added or taken
+        away makes again the cue it sits in (its places may move), and a GO, a
+        stop or a run ending makes nothing. The half is put together again only
+        when one of them moved, and a snapshot shares it by pointer otherwise.
+
+        WHAT MOVED IS HEARD, NOT ASKED: this listens to the show's root as the
+        document does, and keeps the cues and the messages a change touched until
+        the next `refresh`. A show taken over (`adopt`) is a new root, noticed at
+        the next refresh, and everything is made again from it. Tick thread, as
+        every edit of the document is. */
+    class MessageRows final : private juce::ValueTree::Listener
+    {
+    public:
+        explicit MessageRows (const doc::ShowDocument& documentToWatch);
+        ~MessageRows() override;
+
+        MessageRows (const MessageRows&) = delete;
+        MessageRows& operator= (const MessageRows&) = delete;
+
+        /*  Brought up to date with the show, before the show's half is walked.
+            True when anything in the half moved. */
+        bool refresh();
+
+        /** The rows, sorted with their containers, as `refresh` last made them. */
+        std::shared_ptr<const std::vector<Node>> half() const noexcept { return built; }
+
+        /*  A cue's `messages` and `curves` rows as the cue's own walk would have
+            made them: its further messages' identifiers in their order, and the
+            curves on its own message. Empty for a cue that holds none. */
+        const std::string& messagesOf (const std::string& cueId) const;
+        const std::string& curvesOf (const std::string& cueId) const;
+
+        /*  Counts, for the tests that hold this to making only what moved: how
+            many messages' (or a cue's own curve's) rows have been made, and how
+            many times the half has been put together. */
+        std::size_t rowsMade() const noexcept { return made; }
+        std::size_t halvesBuilt() const noexcept { return builds; }
+
+    private:
+        void valueTreePropertyChanged (juce::ValueTree& node, const juce::Identifier& property) override;
+        void valueTreeChildAdded (juce::ValueTree& parent, juce::ValueTree& child) override;
+        void valueTreeChildRemoved (juce::ValueTree& parent, juce::ValueTree& child, int) override;
+        void valueTreeChildOrderChanged (juce::ValueTree& parent, int, int) override;
+        void valueTreeRedirected (juce::ValueTree&) override { everything = true; }
+
+        /*  Every OSC cue at or under `node`, touched; and the cue or the message
+            a change at `node` belongs to. */
+        void touchCuesUnder (const juce::ValueTree& node);
+        void touchChild (const juce::ValueTree& parent, const juce::ValueTree& child);
+
+        void remakeCue (const std::string& cueId);
+        bool remakeRows (const std::string& rowId);
+        void assemble();
+
+        struct CueEntry
+        {
+            std::vector<std::string> messages;
+            std::vector<std::string> curves;
+            std::string messagesText;
+            std::string curvesText;
+        };
+
+        /*  A message's rows and its curves', or a curve on a cue's own message:
+            the cue it sits in, its place among the cue's messages (-1 for a
+            curve), and the rows. */
+        struct Rows
+        {
+            std::string cue;
+            int index = -1;
+            std::vector<Node> nodes;
+        };
+
+        const doc::ShowDocument& document;
+        juce::ValueTree watched;
+        bool everything = true;
+
+        std::set<std::string> touchedCues;
+        std::set<std::string> touchedRows;
+
+        std::map<std::string, CueEntry> cues;
+        std::map<std::string, Rows> rows;
+        std::shared_ptr<const std::vector<Node>> built;
+        TreeSortMemo sort;
+
+        std::size_t made = 0;
+        std::size_t builds = 0;
+    };
+
     class ParameterTree
     {
     public:
@@ -617,6 +718,11 @@ namespace wfg::tree
         /** How many times the mounted half has been rebuilt. See the member. */
         std::size_t mountRebuilds() const noexcept { return mountRebuildCount; }
 
+        /*  The messages half's counts (namespace draft §88, AUV): rows made,
+            and halves put together. See `MessageRows`. */
+        std::size_t messageRowsMade() const noexcept { return messageRows.rowsMade(); }
+        std::size_t messageHalvesBuilt() const noexcept { return messageRows.halvesBuilt(); }
+
         /*  How many times the edit-time liveness analysis has been rebuilt.
             The same shape and the same argument as the count above: what the
             cache guarantees is countable and exact - a hundred publishes with
@@ -638,6 +744,11 @@ namespace wfg::tree
         const CommandRegistry& commands;
         const MountTable& mounts;
         const MountSender* sender = nullptr;
+
+        /*  The show's OSC messages and curves, a half of their own (namespace
+            draft §88, AUV). */
+        MessageRows messageRows { document };
+        std::shared_ptr<const std::vector<Node>> messagePart;
         const midi::PortTable* ports = nullptr;
         const surface::SurfaceTable* surfaces = nullptr;
         const cue::DcaTable* dcas = nullptr;
