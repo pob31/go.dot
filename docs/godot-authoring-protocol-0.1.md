@@ -239,7 +239,10 @@ the path to choose from, then the next depending on the previous selection and s
 
 **Network tab.** A new protocol, "Go.dot", beside QLab: IP and port of Go.dot (8010), Rx and Tx
 on, no patch number. Connecting the row declares `/wfs` with WFS-DIY's UDP receive port and its
-OSCQuery port (5005 by default, 0 when OSCQuery is off).
+OSCQuery port (5005 by default, 0 when OSCQuery is off), and since 1.0.0beta58 `bundles` 1: WFS-DIY
+reads bundles. A Go.dot that does not know the seventh argument answers nothing, and WFS-DIY says the
+declare without it next time (namespace draft §88). It spaces a capture's chunks 5 ms apart, and its
+receive queue takes a cue of thousands of messages at Go.dot's pace.
 
 **What it describes**, beyond today's `/wfs/input`, `/wfs/output`, `/wfs/reverb` and `/wfs/config`:
 

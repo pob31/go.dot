@@ -130,7 +130,8 @@ has stood in front of the thing.
   preview while FFmpeg (downloaded the first time it is needed) converts it to
   HAP.
 - **OSC.** Network devices with an address, ports and receive and send switches;
-  OSC cues carrying several messages, sent as one bundle per device; curves
+  OSC cues carrying several messages, sent as one bundle per device and at
+  the pace each device takes (its datagrams per tick); curves
   played on the cue's clock and recorded from what a device reports or from a
   SpaceMouse; a monitor of every message in and out. Devices made from presets
   for sound and lighting consoles and spatial processors, each speaking its own
