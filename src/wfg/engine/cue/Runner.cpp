@@ -92,6 +92,15 @@ namespace wfg::cue
             dependency that would let a Tracktion header in. */
         constexpr double silenceDb = -120.0;
 
+        /*  A LIVE RUN OF THE STANDBY'S OWN CUE that its arm waits for, rather
+            than counts as the arm: one Doh! is fading (§24), or one playing
+            (§89). Only an arm made in case - prepared, not asked for - is the
+            arm itself. */
+        bool waitsForItsVoice (const Run& live) noexcept
+        {
+            return live.takenBack || ! live.onlyPrepared();
+        }
+
         /*  HOW FAR INSIDE ITS LAST RANGE A SEEK PAST THE END LANDS (namespace
             draft §30.4, RH): a millisecond before the out-point - the end, and
             the same floor a seek to the top of a file keeps - so a hand that
@@ -18635,7 +18644,7 @@ namespace wfg::cue
                         {
                             if (const auto* live = runs.liveRunOf (id))
                             {
-                                if (live->takenBack)
+                                if (waitsForItsVoice (*live))
                                     waitingForVoice = live->id;
 
                                 continue;
@@ -18782,10 +18791,17 @@ namespace wfg::cue
 
                 OR ON ITS WAY OUT UNDER A DOH (2026-10-01, §24): remembered, and
                 armed once its voice is free - an arm now would take a second
-                voice, the corrected GO's while the old one fades. */
+                voice, the corrected GO's while the old one fades.
+
+                OR STILL PLAYING (2026-10-18, namespace draft §89): the pointer
+                put back on a cue that sounds - a movie's locked sound, most of
+                all - is remembered the same way, and armed once that run has
+                ended, by Esc or by its own end. Left at "already running", the
+                standby stayed unarmed after the Esc, and the next GO armed it
+                cold, late. */
             if (const auto* live = runs.liveRunOf (id))
             {
-                if (live->takenBack)
+                if (waitsForItsVoice (*live))
                     waitingForVoice = live->id;
 
                 continue;

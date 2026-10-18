@@ -3570,3 +3570,79 @@ TEST_CASE ("video: a text cue of a family the show carries is drawn from its fil
     CHECK (rig.sink.restated.back().text.fontFile.empty());
     CHECK_FALSE (rig.sink.restated.back().text.slant);
 }
+
+TEST_CASE ("video: the standby put back on a movie that plays arms its sound once that run ends, by Esc or its own end (namespace draft §89)")
+{
+    /*  The author, 2026-10-18: a movie "in the cuelist will read the first
+        time around, but moving the pointer back on it will not get it to read
+        reliably on cue". His log: the standby set on the movie while it
+        played, Esc, GO - and the locked sound armed only at that GO, late. */
+    const std::map<std::string, double> lengths { { "clip.mov", 600.0 }, { "clip (sound).wav", 600.0 } };
+    LaunchingPlayer audio;
+    VideoRig rig;
+    rig.runner.setPlayer (&audio);
+    rig.runner.setMediaDurations (&lengths);
+    makeLockedMovie (rig, "none", "0");
+
+    rig.submitAndTick ("list.focus", { osc::Value::string ("VD000001") });
+    rig.submitAndTick ("standby.set", { osc::Value::string ("VD000060") });
+    rig.ticks (2);
+    REQUIRE (audio.arms.size() == 1);
+    audio.completeArms (rig.engine);
+
+    rig.submitAndTick ("go");
+    rig.ticks (50);
+    audio.now += 48000;
+
+    //  Back on it while it plays: nothing armed yet - a second voice for a sound that sounds.
+    rig.submitAndTick ("standby.set", { osc::Value::string ("VD000060") });
+    rig.ticks (3);
+    CHECK (audio.arms.empty());
+
+    //  Esc: once the run has gone, its sound is armed again, ahead of the GO.
+    rig.submitAndTick ("run.stopAll");
+    rig.ticks (120);
+    REQUIRE (audio.arms.size() == 1);
+    const auto armedRun = audio.arms.front().runId;
+    audio.completeArms (rig.engine);
+    rig.ticks (2);
+
+    //  And the GO takes that arm, as a first GO does.
+    rig.submitAndTick ("go");
+    rig.ticks (2);
+    const auto* sound = rig.runOf ("VD000061");
+    REQUIRE (sound != nullptr);
+    CHECK (sound->id == armedRun);
+    CHECK (audio.arms.empty());
+}
+
+TEST_CASE ("video: a sound at the standby while it plays is armed again when it ends by itself (namespace draft §89)")
+{
+    const std::map<std::string, double> lengths { { "tone.wav", 2.0 } };
+    LaunchingPlayer audio;
+    audio.soundLength = 48000;
+    VideoRig rig;
+    rig.runner.setPlayer (&audio);
+    rig.runner.setMediaDurations (&lengths);
+
+    REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000001"), osc::Value::int32 (0),
+                                                osc::Value::string ("media"), osc::Value::string ("Tone"),
+                                                osc::Value::string ("VD000062"),
+                                                osc::Value::string ("file"), osc::Value::string ("tone.wav") }).applied >= 1);
+
+    rig.submitAndTick ("list.focus", { osc::Value::string ("VD000001") });
+    rig.submitAndTick ("standby.set", { osc::Value::string ("VD000062") });
+    rig.ticks (2);
+    audio.completeArms (rig.engine);
+    rig.submitAndTick ("go");
+    rig.ticks (5);
+
+    rig.submitAndTick ("standby.set", { osc::Value::string ("VD000062") });
+    rig.ticks (3);
+    CHECK (audio.arms.empty());
+
+    //  Past its end: armed again, once.
+    audio.now += 2 * 48000;
+    rig.ticks (10);
+    CHECK (audio.arms.size() == 1);
+}

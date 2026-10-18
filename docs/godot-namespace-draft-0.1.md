@@ -32221,3 +32221,41 @@ whole (`DeviceRow`'s own `==`; ShowSettingsUiTests counts the redraws asked for)
 - Doh! still puts back only the first 256 writes of a GO (§24.13).
 - The page's poll of the whole tree and the tablet's PATH_ADDED per node both grow with a big cue.
 - A capture of 190 chunks is 190 undo steps.
+
+## 89. The standby put back on a cue that plays, armed once it has stopped
+
+Asked by the author on 2026-10-18, first as *"Could we do it per chunks so that the video is ready to play
+as soon as possible and not wait for long videos to load from start to finish?"*, then, asked what he saw:
+*"What actually works reliably is when it's part of a group with the video in the preload, Then it will
+start immediately. Where as if it sits in the cuelist it will read the first time around, but moving the
+pointer back on it will not get it to read reliably on cue."* and *"I only see the sound "armed"
+message"*.
+
+Nothing loads a movie whole: it is opened by its index alone, and read a few frames ahead of where GO
+starts it (§48). His session's log (a 30 GB HAP movie at the top of the list, its sound locked to it) told
+the rest. Each time the standby was put back on the movie **while it still played**, its sound was not
+armed - the cue had a live run, which the standby counted as its arm - and **nothing armed it once Esc
+had stopped that run**: the only arm waited for after a run was a voice Doh! fades out (§24). The next GO
+then armed the sound cold, and it started late (`run.late`, 7 to 15 blocks). Every time the standby was
+put on the movie after the stop, the sound armed at once and the GO was on time. A group at the standby
+is prepared by its own road, which is why one never showed it. Decisions from AVF, mine (proposed):
+
+- **AVF** **A live run the standby's cue still plays is waited for, as Doh!'s fading voice is**: once it has
+  ended - by Esc, a stop, or its own end - the standby's sounds are armed, ahead of the GO. Only a run
+  made ready in case (prepared, not asked for) counts as the arm itself. For any sound at the standby,
+  not only a movie's.
+- **AVG** (found, **not built**) The renderer keeps one wanted frame per **file**, not per layer: two layers
+  of one movie - a GO in the second Esc takes to fade the run before it - are read from one
+  playhead, and the other shows the nearest frame it has until the first has gone. A second at most, by
+  Esc's fade; worth a fix of its own if it is ever seen.
+
+Tests: `VideoTests` - the standby put back on a movie that plays arms nothing while it plays and arms its
+sound once Esc has ended it, and the next GO takes that arm; a sound at the standby while it plays is
+armed again when it ends by itself. `VideoHostTests` - a renderer with no window: a movie played six
+seconds in, stopped, named again from its start, shows its start at the next GO at once, with the
+stopped layer gone and with it still up.
+
+Owed: the author's bench of the same gestures - the movie at the top of the list, GO, the standby back on
+it while it plays, Esc, GO - and whether the movie's line of the row shows its own mark ("Ready: read
+ahead") beside its sound's. Not built: reading a movie "in chunks" - it already is read only where it is
+played.

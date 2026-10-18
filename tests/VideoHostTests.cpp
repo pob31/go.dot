@@ -3703,3 +3703,98 @@ TEST_CASE ("video host: a movie's edit rendered is played by a renderer with no 
 
     folder.deleteRecursively();
 }
+
+TEST_CASE ("video host: a movie played, stopped and named again from its start shows its start at the next GO (namespace draft §89)")
+{
+    using namespace wfg::testing::hapmovie;
+
+    juce::TemporaryFile work;
+    const auto folder = work.getFile().getSiblingFile ("godot-video-again-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+    folder.createDirectory();
+
+    std::vector<Bytes> frames;
+    frames.push_back (section (0xAB, solidDxt1 (16, 8, 0xFF0000)));
+
+    for (int n = 1; n < 250; ++n)
+        frames.push_back (section (0xAB, solidDxt1 (16, 8, 0x0000FF)));
+
+    const auto movie = writeMovie (folder, "long.mov", hapMovie (16, 8, frames, 25));
+    const auto path = movie.getFullPathName().toStdString();
+
+    video::HostSpec spec;
+    spec.workFolder = folder.getFullPathName().toStdString();
+    spec.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName().toStdString();
+    spec.leadingArgs = { "video-render" };
+    spec.headless = true;
+
+    doc::ShowDocument document;
+    REQUIRE (doc::Bundle::open (videoBundle(), document).ok);
+
+    TestClock clock;
+
+    /*  The author, 2026-10-18 (namespace draft §89): stopped by Esc and
+        named again from its start - with the stopped run's layer gone, and
+        still up as Esc fades it - the next GO's layer shows its start at
+        once, the frames there read again beside the old playhead. */
+    for (const bool oldStillUp : { false, true })
+    {
+        CAPTURE (oldStillUp);
+        video::VideoHost host { spec };
+        host.configure (document);
+        REQUIRE (tickUntil (host, clock, [&host] { return host.readouts().renderer == "running"; }));
+
+        auto& r = *host.regionForTests();
+
+        const auto readyAt = [&host]
+        {
+            const auto readouts = host.readouts();
+            return readouts.heldCurrent && ! readouts.held.empty()
+                     && readouts.held[0].state == video::region::HeldState::ready;
+        };
+
+        host.sink().prepare ({ { path, true, 0.0, 1 } });
+        REQUIRE (tickUntil (host, clock, readyAt));
+
+        video::LayerSpec layer;
+        layer.id = "RUN00001";
+        layer.canvas = "VD000011";
+        layer.order = 1;
+        layer.source = "movie";
+        layer.file = path;
+
+        auto shownAt = clock.now() + 960;
+        host.sink().show (layer);
+        host.sink().opacity ("RUN00001", { shownAt, 1.0 });
+        host.sink().move ("RUN00001", video::Property::time, { shownAt, 0.0 });
+        auto lag = lagToFirstSight (host, clock, r, shownAt, 0xFF0000);
+        REQUIRE (lag >= 0);
+
+        //  GO moved the standby on: the list no longer names it. It plays on, six seconds in.
+        host.sink().prepare ({});
+        host.sink().move ("RUN00001", video::Property::time, { clock.now(), 6.0 });
+        std::int64_t seen = -1;
+        REQUIRE (tickUntil (host, clock, [&] { return probeOf (r, 0, seen) == 0x0000FFu; }));
+
+        //  Esc, then the standby back on it: named again from its start.
+        if (! oldStillUp)
+            host.sink().remove ("RUN00001", clock.now());
+
+        host.sink().prepare ({ { path, true, 0.0, 1 } });
+        const auto readied = tickUntil (host, clock, readyAt);
+        CHECK (readied);
+
+        //  GO again: a new layer from the start shows red at once.
+        layer.id = "RUN00002";
+        layer.order = 2;
+        shownAt = clock.now() + 960;
+        host.sink().show (layer);
+        host.sink().opacity ("RUN00002", { shownAt, 1.0 });
+        host.sink().move ("RUN00002", video::Property::time, { shownAt, 0.0 });
+        host.sink().prepare ({});
+        lag = lagToFirstSight (host, clock, r, shownAt, 0xFF0000);
+        CHECK (lag >= 0);
+        CHECK (lag < seenSoonEnough);
+    }
+
+    folder.deleteRecursively();
+}
