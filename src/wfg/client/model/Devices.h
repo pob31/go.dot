@@ -165,6 +165,12 @@ namespace wfg::client::model
             is none. A device is never a blank row - somebody has to be able to
             point at it before they have finished naming it. */
         std::string label() const;
+
+        /*  WHOLE, so the Network tab redraws when anything it shows moves.
+            Its comparison was a list of fields, and Bundles and Per tick were
+            not on it: a click went to the engine while the box went on
+            showing the old state, and the second click turned it back off. */
+        bool operator== (const DeviceRow&) const = default;
     };
 
 /*  WHAT PUTS A DEVICE ON A SERIAL PORT, or back on the network (PC.11), as

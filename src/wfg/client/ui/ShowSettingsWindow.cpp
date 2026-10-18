@@ -2806,24 +2806,10 @@ namespace wfg::client::ui
             {
                 presets = std::move (presetsNow);
                 broker = brokerNow;
-                const auto sameRows = devices.size() == rows.size()
-                                        && std::equal (devices.begin(), devices.end(), rows.begin(),
-                                                       [] (const model::DeviceRow& a,
-                                                           const model::DeviceRow& b)
-                                                       {
-                                                           return a.id == b.id && a.name == b.name
-                                                               && a.prefix == b.prefix
-                                                               && a.host == b.host && a.port == b.port
-                                                               && a.transport == b.transport
-                                                               && a.serial == b.serial
-                                                               && a.rx == b.rx && a.tx == b.tx
-                                                               && a.doh == b.doh
-                                                               && a.dohRollback == b.dohRollback
-                                                               && a.sent == b.sent
-                                                               && a.heard == b.heard
-                                                               && a.listen == b.listen
-                                                               && a.problem == b.problem;
-                                                       });
+                /*  EVERY FIELD, NOT A LIST OF THEM (namespace draft §88): a
+                    list left Bundles and Per tick out, and a click on either
+                    changed the show without changing the box. */
+                const auto sameRows = devices == rows;
 
                 const auto sameLock = locked == ! editable;
 

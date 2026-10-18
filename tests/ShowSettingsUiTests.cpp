@@ -1890,6 +1890,60 @@ TEST_CASE ("show settings UI: a network device's Per tick cell is typed in place
     CHECK (theOneSet (rig.sent) == std::pair<std::string, std::string> { "/godot/mount/QX7DESK0/perTick", "5" });
 }
 
+/*  THE BOX SHOWS WHAT THE CLICK DID (namespace draft §88). The author ticked
+    Bundles on WFS-DIY's device three times, 2026-10-18, and each time the
+    second click a second later turned it off again: the tab redrew only when
+    a field on its list moved, and Bundles and Per tick were not on it, so the
+    show changed and the box did not.
+
+    A REDRAW ASKED FOR, SEEN WITHOUT A SCREEN: a test has no window to paint
+    into, so the list is given a cached image that counts what it is asked to
+    make again - which is where a repaint lands before it reaches a window. */
+TEST_CASE ("show settings UI: the Network tab redraws when only a device's Bundles or Per tick changes (§88)")
+{
+    struct RedrawsAsked final : juce::CachedComponentImage
+    {
+        int asked = 0;
+        void paint (juce::Graphics&) override {}
+        bool invalidateAll() override { ++asked; return true; }
+        bool invalidate (const juce::Rectangle<int>&) override { ++asked; return true; }
+        void releaseResources() override {}
+    };
+
+    Rig rig;
+    REQUIRE (rig.document.createMount ("/wfs", "", "QX7DESK0").ok);
+
+    const auto first = rig.publish();
+    client::ui::ShowSettingsWindow panel (rig.theme, *first, [] (Event) {});
+    panel.setSize (1400, 800);
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+    tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("Network"));
+
+    auto* list = listOn (*tabs->getCurrentContentComponent());
+    REQUIRE (list != nullptr);
+
+    auto* redraws = new RedrawsAsked();
+    list->setCachedComponentImage (redraws);        // the list owns it from here
+
+    //  The tab's first refresh since it came up settles it; after that,
+    //  nothing moved is nothing redrawn, so the count means something.
+    panel.refresh (*first);
+    redraws->asked = 0;
+    panel.refresh (*first);
+    CHECK (redraws->asked == 0);
+
+    REQUIRE (rig.document.setAttribute ("/godot/mount/QX7DESK0/bundles", "true").ok);
+    panel.refresh (*rig.publish());
+    CHECK (redraws->asked > 0);
+
+    redraws->asked = 0;
+    REQUIRE (rig.document.setAttribute ("/godot/mount/QX7DESK0/perTick", "60").ok);
+    panel.refresh (*rig.publish());
+    CHECK (redraws->asked > 0);
+}
+
 TEST_CASE ("show settings UI: a MIDI port says whether it plays sound and what Doh! does with it")
 {
     Rig rig;
