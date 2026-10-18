@@ -73,6 +73,7 @@
 #include <wfg/client/model/InputList.h>
 #include <wfg/client/model/Foot.h>
 #include <wfg/client/model/Panic.h>
+#include <wfg/client/model/Markers.h>
 #include <wfg/client/model/Ranges.h>
 #include <wfg/client/model/Readiness.h>
 #include <wfg/client/model/Flags.h>
@@ -748,6 +749,14 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::processSend ("R4NID001", "/hit", {}),
         gesture::processSend ("R4NID001", "/say", { process::Atom::of (std::string ("on")), process::Atom::of (0.5) }),
         gesture::splitRange ("B3N8R5TW", 6.0),
+
+        /*  THE WAVEFORM'S MENUS (namespace draft §81). */
+        gesture::splitWhole ("B3N8R5TW", 6.0, 30.0),
+        gesture::spanRanges ("B3N8R5TW", 2.0, -1.0),
+        gesture::spanRanges ("B3N8R5TW", 2.0, 20.0),
+        gesture::sliceSpan ("B3N8R5TW", 4.0, 12.0, 4, 30.0),
+        gesture::createMarker ("B3N8R5TW", 4.25, "Marker 1"),
+
         gesture::createSend ("B3N8R5TW", "J3MT5XYA"),
         gesture::createSend ("B3N8R5TW", "J3MT5XYA", -18.5),
         gesture::eqReset ("B3N8R5TW"),
@@ -7211,6 +7220,100 @@ TEST_CASE ("client: every range in the show is gathered in one pass, owned by it
 
     //  A cue with no ranges has none, rather than somebody else's.
     CHECK (model::readRanges (*snapshot, "NOSUCHID").empty());
+}
+
+TEST_CASE ("client: a cue's markers are read in time order, owned by their cue, and a new one is numbered past the highest")
+{
+    /*  Namespace draft §81 (AUA): a marker is the show's, published flat at
+        /godot/marker/<id> as a range is; the waveform draws them by time. */
+    Rig rig ("ambience");
+    const auto ranged = model::rangesByCue (*rig.publish (0));
+    const auto bed = std::find_if (ranged.begin(), ranged.end(), [] (const auto& pair) { return pair.second.size() == 3; });
+    REQUIRE (bed != ranged.end());
+    const auto cueId = bed->first;
+
+    REQUIRE (rig.document.createMarker (cueId, 9.5, "Marker 4", {}).ok);
+    REQUIRE (rig.document.createMarker (cueId, 2.25, "The slam", {}).ok);
+    rig.parameters.markStale();
+
+    const auto markers = model::readMarkers (*rig.publish (1), cueId);
+    REQUIRE (markers.size() == 2u);
+    CHECK (markers[0].name == "The slam");
+    CHECK (markers[0].at == doctest::Approx (2.25));
+    CHECK (markers[1].at == doctest::Approx (9.5));
+    CHECK (model::readMarkers (*rig.publish (2), "NOSUCHID").empty());
+
+    //  Past the highest "Marker N", whatever else is called what.
+    CHECK (model::nextMarkerName (markers) == "Marker 5");
+    CHECK (model::nextMarkerName ({}) == "Marker 1");
+    CHECK (model::nextMarkerName ({ { "M1", "Marker", 1.0 }, { "M2", "Marker x2", 2.0 } }) == "Marker 1");
+}
+
+TEST_CASE ("client: a double click selects between two marks, and Shift takes in the next interval")
+{
+    /*  The author, 2026-10-18 (namespace draft §81, AUB): "Double clicking
+        between markers (scene or additional manual markers, start, end, slice)
+        then select the range. Once a range is selected, shift clicking on
+        intervals adds to the selection in a continuous range". */
+    const std::vector<model::MarkerRow> markers { { "M1", "Marker 1", 7.0 } };
+    const std::vector<model::RangeRow> ranges { { "R1", "", 2.0, 10.0, 1, false, 0 }, { "R2", "", 10.0, 20.0, 1, false, 1 } };
+    const std::vector<double> cuts { 15.0 };
+
+    const auto marks = model::marksOf (markers, ranges, {}, cuts, 0.0, 30.0);
+    CHECK (marks == std::vector<double> { 0.0, 2.0, 7.0, 10.0, 15.0, 20.0, 30.0 });
+
+    const auto first = model::intervalAround (marks, 8.0);
+    REQUIRE (first.has_value());
+    CHECK (first->first == doctest::Approx (7.0));
+    CHECK (first->second == doctest::Approx (10.0));
+
+    //  On a mark is the interval that begins there; outside the marks, nothing.
+    CHECK (model::intervalAround (marks, 10.0)->first == doctest::Approx (10.0));
+    CHECK_FALSE (model::intervalAround (marks, 31.0).has_value());
+    CHECK_FALSE (model::intervalAround ({ 3.0 }, 4.0).has_value());
+
+    //  Shift on an interval two further on: everything between taken in.
+    const auto later = model::intervalAround (marks, 17.0);
+    REQUIRE (later.has_value());
+    const auto grown = model::spanOver (*first, *later);
+    CHECK (grown.first == doctest::Approx (7.0));
+    CHECK (grown.second == doctest::Approx (20.0));
+
+    //  A cue with no ranges starts at its offset, a mark; an edit's cuts are marks; one instant is one mark.
+    std::vector<model::SectionRow> sections (2);
+    sections[0].in = 0.0;
+    sections[0].out = 4.0;
+    sections[1].in = 10.0;
+    sections[1].out = 16.0;
+    sections[1].gap = 1.0;
+    CHECK (model::marksOf ({}, {}, sections, {}, 3.0, 11.0) == std::vector<double> { 0.0, 3.0, 4.0, 5.0, 11.0 });
+    CHECK (model::marksOf ({ { "M", "", 5.0004 } }, {}, {}, {}, 0.0, 10.0) == std::vector<double> { 0.0, 5.0004, 10.0 });
+}
+
+TEST_CASE ("client: Set to start and Set to end say why before the engine would refuse")
+{
+    //  No ranges: a start anywhere; an end after where the cue starts.
+    CHECK (model::spanRefusal ({}, 4.0, 6.0, std::nullopt).empty());
+    CHECK (model::spanRefusal ({}, 4.0, std::nullopt, 9.0).empty());
+    CHECK_FALSE (model::spanRefusal ({}, 4.0, std::nullopt, 3.0).empty());
+
+    //  Ranges: something must be left; both ends between them make the one range.
+    const std::vector<model::RangeRow> ranges { { "R1", "", 0.0, 10.0, 1, false, 0 }, { "R2", "", 20.0, 30.0, 1, false, 1 } };
+    CHECK (model::spanRefusal (ranges, 0.0, 25.0, std::nullopt).empty());
+    CHECK_FALSE (model::spanRefusal (ranges, 0.0, 31.0, std::nullopt).empty());
+    CHECK_FALSE (model::spanRefusal (ranges, 0.0, std::nullopt, 0.0).empty());
+    CHECK (model::spanRefusal (ranges, 0.0, 12.0, 18.0).empty());
+    CHECK_FALSE (model::spanRefusal (ranges, 0.0, 12.0, 12.0).empty());
+
+    //  How many ranges a cue would hold after Make new slices, as the engine makes them.
+    CHECK (model::rangesAfterSlicing ({}, 10.0, 18.0, 4) == 6);
+    CHECK (model::rangesAfterSlicing ({ { "R1", "", 0.0, 10.0, 1, false, 0 }, { "R2", "", 10.0, 20.0, 1, false, 1 },
+                                        { "R3", "", 20.0, 30.0, 1, false, 2 } }, 5.0, 25.0, 2) == 4);
+
+    //  The table's + on a cue with no ranges begins at its offset (ATZ).
+    const auto first = model::addAt ({}, 12.0, 30.0, 0.05, 4.5);
+    CHECK (first.kind == model::RangeAdd::Kind::create);
+    CHECK (first.in == doctest::Approx (4.5));
 }
 
 TEST_CASE ("client: a media cue's time is its file's at its own speed - in the list's column and on a timeline")

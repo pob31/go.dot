@@ -426,6 +426,11 @@ namespace wfg::client::ui
                 editing.createRange = actions.createRange;
                 editing.removeRange = actions.removeObject;
                 editing.splitRange = actions.splitRange;
+                editing.splitWhole = actions.splitWhole;
+                editing.spanRanges = actions.spanRanges;
+                editing.sliceSpan = actions.sliceSpan;
+                editing.createMarker = actions.createMarker;
+                editing.removeMarker = actions.removeObject;
                 editing.splitSection = actions.splitSection;
                 editing.joinSection = actions.joinSection;
                 editing.moveSection = actions.moveSection;

@@ -8107,6 +8107,7 @@ namespace
                                     thread, and go into the same snapshot. */
                                 state.audioDevice = audioState.device;
                                 state.audioOutputs = audioState.outputs;
+                                state.audioSlots = runner.player() != nullptr ? runner.player()->slotCount() : 0;
                                 state.audioStatus = audioState.status;
                                 state.audioSettingsStatus = audioState.settingsStatus;
                                 state.clock = deviceDriver != nullptr ? "device" : "dummy";

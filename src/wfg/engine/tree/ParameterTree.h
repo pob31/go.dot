@@ -188,6 +188,7 @@ namespace wfg::tree
             truthful answer rather than a placeholder. */
         std::string audioDevice;
         int audioOutputs = 0;
+        int audioSlots = 0;     ///< ranges one cue can play, fixed when the graph was built (namespace draft 81)
         std::string audioStatus = "stopped";
         std::string audioSettingsStatus = "ready", audioSettingsError;
         std::string audioAvailableBufferSizes;

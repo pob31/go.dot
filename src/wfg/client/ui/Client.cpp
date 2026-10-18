@@ -637,6 +637,17 @@ namespace wfg::client
                 footActions.splitRange = [this] (const std::string& cueId, double at)
                                          { send (gesture::splitRange (cueId, at)); };
 
+                /*  THE WAVEFORM'S MENUS (namespace draft §81): each line a named
+                    command, one undo step each. */
+                footActions.splitWhole = [this] (const std::string& cueId, double at, double length)
+                                         { send (gesture::splitWhole (cueId, at, length)); };
+                footActions.spanRanges = [this] (const std::string& cueId, double start, double end)
+                                         { send (gesture::spanRanges (cueId, start, end)); };
+                footActions.sliceSpan = [this] (const std::string& cueId, double from, double to, int count, double length)
+                                        { send (gesture::sliceSpan (cueId, from, to, count, length)); };
+                footActions.createMarker = [this] (const std::string& cueId, double at, const std::string& name)
+                                           { send (gesture::createMarker (cueId, at, name)); };
+
                 /*  A SOUND'S EDIT (namespace draft §55): every gesture of the
                     sections row is a named command. */
                 footActions.splitSection = [this] (const std::string& cueId, double at)

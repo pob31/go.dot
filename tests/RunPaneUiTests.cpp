@@ -7626,6 +7626,209 @@ TEST_CASE ("waveform: the top half selects time and the lower half a section; x 
     CHECK (said.contains ("locked"));
 }
 
+TEST_CASE ("waveform: the right-click menus - the playhead's, a selection's, a marker's; a double click selects between marks and Shift takes in more (namespace draft §81)")
+{
+    /*  The author, 2026-10-18: on the playhead "Set to start; Set to end; Add
+        marker; Add new slice; Split", on a range "Set start and end; Make new
+        slices; Trim; Remove", and a double click between markers selecting.
+        A menu cannot be clicked here, so what a right click offers is asked of
+        `menuFor` and a line done by `choose`, as `pickLaneAt` stands in for the
+        lane's menu. */
+    std::string spanCue, sliceCue, markerCue, markerName, removedMarker, setAddress, setValue, cutCue, deleteCue;
+    double spanStart = 99.0, spanEnd = 99.0, sliceFrom = -1.0, sliceTo = -1.0, sliceLength = -1.0;
+    double markerAt = -1.0, splitAt = -1.0, sectionAt = -1.0, wholeAt = -1.0, wholeLength = -1.0;
+    double cutFrom = -1.0, cutTo = -1.0, deleteFrom = -1.0, deleteTo = -1.0;
+    int sliceCount = 0, spans = 0;
+    bool ripple = false;
+    juce::String said;
+
+    ui::WaveformEditorComponent::Actions actions;
+    actions.say = [&] (const juce::String& sentence) { if (sentence.isNotEmpty()) said = sentence; };
+    actions.set = [&] (const std::string& address, const std::string& value) { setAddress = address; setValue = value; };
+    actions.spanRanges = [&] (const std::string& cue, double start, double end) { spanCue = cue; spanStart = start; spanEnd = end; ++spans; };
+    actions.sliceSpan = [&] (const std::string& cue, double from, double to, int count, double length)
+    { sliceCue = cue; sliceFrom = from; sliceTo = to; sliceCount = count; sliceLength = length; };
+    actions.createMarker = [&] (const std::string& cue, double at, const std::string& name) { markerCue = cue; markerAt = at; markerName = name; };
+    actions.removeMarker = [&] (const std::string& id) { removedMarker = id; };
+    actions.splitRange = [&] (const std::string&, double at) { splitAt = at; };
+    actions.splitWhole = [&] (const std::string&, double at, double length) { wholeAt = at; wholeLength = length; };
+    actions.splitSection = [&] (const std::string&, double at) { sectionAt = at; };
+    actions.splitSpan = [&] (const std::string& cue, double from, double to) { cutCue = cue; cutFrom = from; cutTo = to; };
+    actions.deleteSpan = [&] (const std::string& cue, double from, double to, bool closeUp)
+    { deleteCue = cue; deleteFrom = from; deleteTo = to; ripple = closeUp; };
+
+    ui::WaveformEditorComponent editor (model::Theme {}, actions);
+    editor.setRightColumn (360, 12);
+    editor.setSize (1000, 260);
+
+    //  Two slices, ten seconds each, and a marker at fifteen.
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::waveform, "CUE00001" };
+    reading.cueName = "The bed";
+    reading.cueKind = "media";
+    reading.file = "bed.wav";
+    reading.fileLength = 30.0;
+    reading.editable = true;
+    reading.launcherSlots = 8;
+    reading.ranges = { { "RNG00001", "", 0.0, 10.0, 1, false, 0 }, { "RNG00002", "", 10.0, 20.0, 1, false, 1 } };
+    reading.markers = { { "MRK00001", "Marker 1", 15.0 } };
+    editor.show (reading, nullptr);
+
+    const auto source = juce::Desktop::getInstance().getMainMouseSource();
+    const auto mouse = [&] (juce::Point<float> at, bool dragged, juce::ModifierKeys mods, int clicks)
+    {
+        const auto now = juce::Time::getCurrentTime();
+        return juce::MouseEvent (source, at, mods, juce::MouseInputSource::defaultPressure,
+                                 0.0f, 0.0f, 0.0f, 0.0f, &editor, &editor, now, at, now, clicks, dragged);
+    };
+    const juce::ModifierKeys left { juce::ModifierKeys::leftButtonModifier };
+    const juce::ModifierKeys shifted { juce::ModifierKeys::leftButtonModifier | juce::ModifierKeys::shiftModifier };
+    const auto xOf = [&] (double seconds) { return editor.pointPosition ({ seconds, 0.0 }).x; };
+    const auto bar = editor.barBounds();
+
+    //  In the top half, well away from the lane's unity line, where a double click would add a point.
+    const auto unityY = editor.pointPosition ({ 0.0, 0.0 }).y;
+    const auto highY = static_cast<float> (bar.getY()) + static_cast<float> (bar.getHeight()) * 0.22f;
+    const auto lowerTopY = static_cast<float> (bar.getY()) + static_cast<float> (bar.getHeight()) * 0.42f;
+    const auto topY = std::abs (highY - unityY) > std::abs (lowerTopY - unityY) ? highY : lowerTopY;
+
+    using Line = ui::WaveformEditorComponent::MenuLine;
+    using Lines = std::vector<Line>;
+    const auto at = [&] (double seconds) { return juce::Point<int> (juce::roundToInt (xOf (seconds)), juce::roundToInt (topY)); };
+
+    //  THE PLAYHEAD'S MENU, the playhead brought to the click first (ATV).
+    CHECK (editor.menuFor (at (5.0)) == Lines { Line::setToStart, Line::setToEnd, Line::addMarker, Line::addSlice, Line::split });
+    CHECK (editor.playhead() == doctest::Approx (5.0).epsilon (0.01));
+    CHECK (ui::WaveformEditorComponent::wordsFor (Line::addSlice) == "Add new slice");
+
+    editor.choose (Line::setToStart);
+    CHECK (spanCue == "CUE00001");
+    CHECK (spanStart == doctest::Approx (5.0).epsilon (0.01));
+    CHECK (spanEnd < 0.0);
+
+    editor.choose (Line::setToEnd);
+    CHECK (spanStart < 0.0);
+    CHECK (spanEnd == doctest::Approx (5.0).epsilon (0.01));
+
+    editor.choose (Line::addMarker);
+    CHECK (markerCue == "CUE00001");
+    CHECK (markerAt == doctest::Approx (5.0).epsilon (0.01));
+    CHECK (markerName == "Marker 2");
+
+    editor.choose (Line::addSlice);
+    CHECK (splitAt == doctest::Approx (5.0).epsilon (0.01));
+
+    editor.choose (Line::split);
+    CHECK (sectionAt == doctest::Approx (5.0).epsilon (0.01));
+
+    //  Past the last slice, Set to start would leave nothing: said, and not sent.
+    spans = 0;
+    editor.menuFor (at (25.0));
+    editor.choose (Line::setToStart);
+    CHECK (spans == 0);
+    CHECK (said.contains ("nothing would be left"));
+
+    //  A DOUBLE CLICK in the top half selects between the marks either side: the join at ten, the marker at fifteen.
+    editor.mouseDown (mouse (at (12.0).toFloat(), false, left, 1));
+    editor.mouseUp (mouse (at (12.0).toFloat(), false, left, 1));
+    editor.mouseDown (mouse (at (12.0).toFloat(), false, left, 2));
+    editor.mouseDoubleClick (mouse (at (12.0).toFloat(), false, left, 2));
+    editor.mouseUp (mouse (at (12.0).toFloat(), false, left, 2));
+    REQUIRE (editor.selectionShown().has_value());
+    CHECK (editor.selectionShown()->first == doctest::Approx (10.0));
+    CHECK (editor.selectionShown()->second == doctest::Approx (15.0));
+
+    //  Shift+click on an interval further on takes in everything to it.
+    editor.mouseDown (mouse (at (25.0).toFloat(), false, shifted, 1));
+    editor.mouseUp (mouse (at (25.0).toFloat(), false, shifted, 1));
+    REQUIRE (editor.selectionShown().has_value());
+    CHECK (editor.selectionShown()->first == doctest::Approx (10.0));
+    CHECK (editor.selectionShown()->second == doctest::Approx (30.0));
+
+    //  THE SELECTION'S MENU, inside it.
+    CHECK (editor.menuFor (at (12.0)) == Lines { Line::setStartAndEnd, Line::makeSlices, Line::trim, Line::remove });
+
+    editor.choose (Line::setStartAndEnd);
+    CHECK (spanStart == doctest::Approx (10.0));
+    CHECK (spanEnd == doctest::Approx (30.0));
+
+    editor.makeSlices (4);
+    CHECK (sliceCue == "CUE00001");
+    CHECK (sliceFrom == doctest::Approx (10.0));
+    CHECK (sliceTo == doctest::Approx (30.0));
+    CHECK (sliceCount == 4);
+    CHECK (sliceLength == doctest::Approx (30.0));
+    CHECK (said.contains ("4 slices"));
+
+    //  More than the show was opened with room for: made, and said.
+    editor.makeSlices (12);
+    CHECK (sliceCount == 12);
+    CHECK (said.contains ("reopen the show"));
+
+    //  Nought, or slices under a hundredth of a second: said, not sent.
+    sliceCount = 0;
+    editor.makeSlices (0);
+    CHECK (sliceCount == 0);
+
+    editor.choose (Line::trim);
+    CHECK (cutCue == "CUE00001");
+    CHECK (cutFrom == doctest::Approx (10.0));
+    CHECK (cutTo == doctest::Approx (30.0));
+
+    //  Remove closes the gap (the author's pick, ATU), and lets the selection go.
+    editor.choose (Line::remove);
+    CHECK (deleteCue == "CUE00001");
+    CHECK (deleteFrom == doctest::Approx (10.0));
+    CHECK (deleteTo == doctest::Approx (30.0));
+    CHECK (ripple);
+    CHECK_FALSE (editor.selectionShown().has_value());
+
+    //  A MARKER'S MENU, on its diamond: renamed, taken away.
+    const auto flag = editor.markerFlag ("MRK00001");
+    REQUIRE (flag.has_value());
+    CHECK (editor.menuFor (*flag) == Lines { Line::renameMarker, Line::removeMarker });
+    editor.renameMarker ("The slam");
+    CHECK (setAddress == "/godot/marker/MRK00001/name");
+    CHECK (setValue == "The slam");
+    editor.choose (Line::removeMarker);
+    CHECK (removedMarker == "MRK00001");
+
+    //  Dragged by its diamond, written once, on release.
+    setAddress.clear();
+    editor.mouseDown (mouse (flag->toFloat(), false, left, 1));
+    editor.mouseDrag (mouse ({ xOf (17.0), static_cast<float> (flag->y) }, true, left, 1));
+    CHECK (setAddress.empty());
+    editor.mouseUp (mouse ({ xOf (17.0), static_cast<float> (flag->y) }, true, left, 1));
+    CHECK (setAddress == "/godot/marker/MRK00001/at");
+    CHECK (wfg::osc::parseDouble (setValue).value_or (-1.0) == doctest::Approx (17.0).epsilon (0.01));
+
+    //  A CUE WITH NO RANGES: Add new slice cuts the whole of it in two; an end before its start is refused.
+    reading.ranges.clear();
+    reading.markers.clear();
+    reading.startOffset = 2.0;
+    editor.show (reading, nullptr);
+    editor.menuFor (at (8.0));
+    editor.choose (Line::addSlice);
+    CHECK (wholeAt == doctest::Approx (8.0).epsilon (0.01));
+    CHECK (wholeLength == doctest::Approx (30.0));
+
+    spans = 0;
+    editor.menuFor (at (1.0));
+    editor.choose (Line::setToEnd);
+    CHECK (spans == 0);
+    CHECK (said.contains ("before where the cue starts"));
+
+    //  Under the lock, nothing is sent and the words say why.
+    reading.locked = true;
+    reading.editable = false;
+    editor.show (reading, nullptr);
+    markerCue.clear();
+    editor.menuFor (at (6.0));
+    editor.choose (Line::addMarker);
+    CHECK (markerCue.empty());
+    CHECK (said.contains ("locked"));
+}
+
 TEST_CASE ("waveform: a movie's strip and its cuts follow the edit - each slot the file's picture where its section is, each cut where the material went (§55.5)")
 {
     /*  A thirty-second movie of three shots - red, green, blue, ten seconds

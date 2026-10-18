@@ -255,6 +255,32 @@ namespace wfg::client::gesture
                  { osc::Value::string (cueId), osc::Value::float64 (at) } };
     }
 
+    Event splitWhole (const std::string& cueId, double at, double length)
+    {
+        return { origin::window, "range.split",
+                 { osc::Value::string (cueId), osc::Value::float64 (at), osc::Value::string ({}),
+                   osc::Value::float64 (length) } };
+    }
+
+    Event spanRanges (const std::string& cueId, double start, double end)
+    {
+        return { origin::window, "range.span",
+                 { osc::Value::string (cueId), osc::Value::float64 (start), osc::Value::float64 (end) } };
+    }
+
+    Event sliceSpan (const std::string& cueId, double from, double to, int count, double length)
+    {
+        return { origin::window, "range.slices",
+                 { osc::Value::string (cueId), osc::Value::float64 (from), osc::Value::float64 (to),
+                   osc::Value::int32 (count), osc::Value::float64 (length) } };
+    }
+
+    Event createMarker (const std::string& cueId, double at, const std::string& name)
+    {
+        return { origin::window, "marker.create",
+                 { osc::Value::string (cueId), osc::Value::float64 (at), osc::Value::string (name) } };
+    }
+
     Event sectionSplit (const std::string& cueId, double at)
     {
         return { origin::window, "section.split",

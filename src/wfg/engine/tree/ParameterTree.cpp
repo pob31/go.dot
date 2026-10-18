@@ -4082,6 +4082,7 @@ namespace wfg::tree
 
             if (name == "device")        text = state.audioDevice;
             else if (name == "outputs")  text = std::to_string (state.audioOutputs);
+            else if (name == "slots")    text = std::to_string (state.audioSlots);
             else if (name == "status")   text = state.audioStatus;
             else if (name == "settingsStatus") text = state.audioSettingsStatus;
             else if (name == "settingsRevision") text = std::to_string (state.audioSettingsRevision);

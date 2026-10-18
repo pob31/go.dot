@@ -295,7 +295,7 @@ and says afterwards what was built against what was drawn.
 | The remote | An Android app live in the background: GO, Doh! and PANIC, cues, running cues, a surface, the mapping and its grid, find-my-tablet; Choufleur's script page and its wrist buzzer | §68 |
 | Timecode out | MTC and LTC cues, the Timecode tab | §59 |
 | Timecode in | Time groups on LTC, MTC and the wall clock; chase by jump, varispeed and timestretch | §60 |
-| Media edit | A sound and a movie cut into sections, crossfaded and frozen; handles on the waveform | §54, §55 |
+| Media edit | A sound and a movie cut into sections, crossfaded and frozen; handles on the waveform; right-click menus and markers on it | §54, §55, §81 |
 | Group joins | Let play, Gapless or Crossfade between a sequence's members, automatic and manual, pictures dissolving; a looping range's wraps crossfaded | §69 |
 | Sound or picture delay | A cue holds back its sound or its picture by a number of milliseconds, to line up with a projector or a long audio chain | §70 |
 | Video cards and cameras | Pictures out on a DeckLink or AJA card at its format and on its clock, the show's buses embedded, fill and key; a card's input or a camera as a live picture; `wfg video-probe` for testers | §71, §72 |

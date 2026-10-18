@@ -721,6 +721,41 @@ namespace wfg::client::ui
             gripHeld = gripHover = {};
             slidSection = noSection;
             slidePreview.clear();
+            pickWhenCut.reset();
+            markerHeld.clear();
+            markerHover.clear();
+            markerSent.clear();
+            menuMarker.clear();
+        }
+
+        /*  THE PIECE TRIM CUT OUT (namespace draft §81, ATX), picked once its
+            cut has come back - so its trim box is the one shown. Within half a
+            frame of where the selection began, which is where a movie's cut
+            lands; given up after a second of passes, as a refusal never comes. */
+        if (pickWhenCut.has_value())
+        {
+            const auto starts = model::sectionStarts (reading.sections);
+            const auto slack = std::max (0.002, reading.frameRate > 0.0 ? 0.51 / reading.frameRate : 0.0);
+
+            for (std::size_t k = 0; k < starts.size(); ++k)
+                if (std::abs (starts[k] - *pickWhenCut) < slack)
+                {
+                    pickedSection = k;
+                    pickWhenCut.reset();
+                    break;
+                }
+
+            if (pickWhenCut.has_value() && ++pickWaited > 25)
+                pickWhenCut.reset();
+        }
+
+        if (! markerSent.empty())
+        {
+            const auto found = std::find_if (reading.markers.begin(), reading.markers.end(),
+                                             [this] (const model::MarkerRow& marker) { return marker.id == markerSent; });
+
+            if (found == reading.markers.end() || std::abs (found->at - markerSentAt) < 1.0e-6 || ++markerSentPasses > 25)
+                markerSent.clear();
         }
 
         if (pickedSection >= reading.sections.size())
@@ -1007,15 +1042,19 @@ namespace wfg::client::ui
         auto seconds = secondsAt (x);
 
         /*  ONTO A MOVIE'S CUT when it is near one (§47.10), so the head sits
-            on a shot's first frame - the monitor shows it - as an edge does. */
-        if (snap && cutsSnap())
+            on a shot's first frame - the monitor shows it - as an edge does;
+            and onto a marker (namespace draft §81), which is a point somebody
+            wanted to come back to. */
+        if (snap)
         {
-            std::vector<double> cuts;
+            auto targets = markerSeconds();
 
-            for (const auto& cut : cutsShown())
-                cuts.push_back (cut.seconds);
+            if (cutsSnap())
+                for (const auto& cut : cutsShown())
+                    targets.push_back (cut.seconds);
 
-            seconds = model::snapTo (seconds, cuts, toleranceSeconds());
+            if (! targets.empty())
+                seconds = model::snapTo (seconds, targets, toleranceSeconds());
         }
 
         point = std::min (std::max (seconds, 0.0),
@@ -1507,6 +1546,8 @@ namespace wfg::client::ui
             }
         }
 
+        paintMarkers (g, bar);
+
         /*  AND THE PLAYHEAD. Where the sound IS when something is sounding
             this cue, and where it WOULD START otherwise - two different claims,
             so two different marks: solid ink for the one that is real, and a
@@ -1730,8 +1771,9 @@ namespace wfg::client::ui
         /*  THE RENDER OF AN OPEN EDIT says where it is, ahead of the row's
             instructions (namespace draft §55). */
         const auto render = editShown() ? juce::String (model::renderWords (reading.render)) : juce::String();
-        const auto instructions = (reading.running ? "playing - drag the ruler to move the playhead"
-                                                   : "drag the ruler to place the playhead") + lanes;
+        //  And the menus (namespace draft §81), said where the hand looks first.
+        const auto instructions = (reading.running ? "playing - drag the ruler to move the playhead, right-click for more"
+                                                   : "drag the ruler to place the playhead, right-click for more") + lanes;
 
         g.drawText (render.isNotEmpty() ? render + "  " + juce::String::fromUTF8 ("\xc2\xb7") + "  " + instructions
                                         : instructions,
@@ -2457,6 +2499,522 @@ namespace wfg::client::ui
         repaint();
     }
 
+    //==============================================================================
+    /*  THE MARKERS (namespace draft §81, AUA): a diamond at the top of the bar,
+        a dashed line down it and the name beside - a shape and a word, never a
+        colour alone (§4.8). Held by the diamond, which a drag moves (one write
+        on release) and a right click gives its menu; the line is for the eye. */
+    juce::Rectangle<int> WaveformEditorComponent::flagBand() const
+    {
+        const auto bar = barArea();
+        return bar.withHeight (juce::jmin (12, bar.getHeight()));
+    }
+
+    std::vector<double> WaveformEditorComponent::markerSeconds() const
+    {
+        std::vector<double> out;
+
+        for (const auto& marker : reading.markers)
+            out.push_back (marker.id == markerHeld ? markerValue
+                           : marker.id == markerSent ? markerSentAt
+                                                     : marker.at);
+
+        return out;
+    }
+
+    std::string WaveformEditorComponent::markerUnder (juce::Point<int> at) const
+    {
+        if (! flagBand().expanded (0, 2).contains (at) || ! (view.span() > 0.0))
+            return {};
+
+        const auto bar = barArea();
+        const auto seconds = markerSeconds();
+        std::string nearest;
+        auto best = grabRadius + 1;
+
+        for (std::size_t k = 0; k < reading.markers.size() && k < seconds.size(); ++k)
+        {
+            const auto x = bar.getX() + juce::roundToInt (view.xForSeconds (seconds[k], bar.getWidth()));
+
+            if (const auto off = std::abs (x - at.x); off < best)
+            {
+                best = off;
+                nearest = reading.markers[k].id;
+            }
+        }
+
+        return nearest;
+    }
+
+    std::optional<juce::Point<int>> WaveformEditorComponent::markerFlag (const std::string& markerId) const
+    {
+        const auto bar = barArea();
+        const auto seconds = markerSeconds();
+
+        for (std::size_t k = 0; k < reading.markers.size() && k < seconds.size(); ++k)
+            if (reading.markers[k].id == markerId && seconds[k] >= view.from && seconds[k] <= view.to)
+                return juce::Point<int> (bar.getX() + juce::roundToInt (view.xForSeconds (seconds[k], bar.getWidth())),
+                                         flagBand().getCentreY());
+
+        return std::nullopt;
+    }
+
+    void WaveformEditorComponent::paintMarkers (juce::Graphics& g, juce::Rectangle<int> bar)
+    {
+        if (reading.markers.empty() || ! (view.span() > 0.0))
+            return;
+
+        const auto seconds = markerSeconds();
+        std::vector<std::pair<double, const model::MarkerRow*>> shown;
+
+        for (std::size_t k = 0; k < reading.markers.size() && k < seconds.size(); ++k)
+            shown.emplace_back (seconds[k], &reading.markers[k]);
+
+        std::sort (shown.begin(), shown.end(),
+                   [] (const auto& a, const auto& b) { return a.first < b.first; });
+
+        g.setFont (Look::font (theme, 11.0f));
+        const auto top = static_cast<float> (bar.getY());
+        const auto bottom = static_cast<float> (bar.getBottom());
+
+        for (std::size_t k = 0; k < shown.size(); ++k)
+        {
+            const auto second = shown[k].first;
+            const auto* marker = shown[k].second;
+
+            if (second < view.from || second > view.to)
+                continue;
+
+            const auto x = static_cast<float> (bar.getX()) + static_cast<float> (view.xForSeconds (second, bar.getWidth()));
+            const auto hot = marker->id == markerHeld || marker->id == markerHover;
+            const float dashes[] { 3.0f, 3.0f };
+
+            g.setColour (juce::Colours::black.withAlpha (0.6f));
+            g.drawLine (x + 1.0f, top, x + 1.0f, bottom, 1.0f);
+            g.setColour (Look::colour (theme, hot ? "ink" : "ink-dim"));
+            g.drawDashedLine (juce::Line<float> (x, top, x, bottom), dashes, 2, hot ? 1.5f : 1.0f);
+
+            juce::Path diamond;
+            const auto middle = top + 5.0f;
+            diamond.addQuadrilateral (x, middle - 5.0f, x + 5.0f, middle, x, middle + 5.0f, x - 5.0f, middle);
+            g.setColour (juce::Colours::black);
+            g.strokePath (diamond, juce::PathStrokeType (2.0f));
+            g.setColour (Look::colour (theme, "ink"));
+            g.fillPath (diamond);
+
+            /*  ITS NAME, on the line under a range's own, as far as the next
+                marker or the end of the bar leaves room for. */
+            const auto next = k + 1 < shown.size()
+                                ? bar.getX() + juce::roundToInt (view.xForSeconds (shown[k + 1].first, bar.getWidth()))
+                                : bar.getRight();
+            const auto room = next - juce::roundToInt (x) - 10;
+
+            if (room > 24 && ! marker->name.empty())
+            {
+                g.setColour (Look::colour (theme, hot ? "ink" : "ink-dim"));
+                g.drawText (juce::String::fromUTF8 (marker->name.c_str()),
+                            juce::Rectangle<int> (juce::roundToInt (x) + 7, bar.getY() + 12, room, 13),
+                            juce::Justification::centredLeft, true);
+            }
+        }
+    }
+
+    /*  THE MARKS A DOUBLE CLICK SELECTS BETWEEN (namespace draft §81, AUB):
+        markers, scene changes while they are shown, every range's edges, the
+        edit's cuts, where a cue with no ranges starts, and the material's ends. */
+    std::vector<double> WaveformEditorComponent::marksNow() const
+    {
+        std::vector<double> cuts;
+
+        if (strip != nullptr && showCuts.getToggleState())
+            for (const auto& cut : cutsShown())
+                cuts.push_back (cut.seconds);
+
+        auto markers = reading.markers;
+        const auto seconds = markerSeconds();
+
+        for (std::size_t k = 0; k < markers.size() && k < seconds.size(); ++k)
+            markers[k].at = seconds[k];
+
+        return model::marksOf (markers, reading.ranges,
+                               editShown() ? reading.sections : std::vector<model::SectionRow> {},
+                               cuts, reading.startOffset, reading.fileLength);
+    }
+
+    bool WaveformEditorComponent::selectIntervalAt (int x, bool extend)
+    {
+        const auto interval = model::intervalAround (marksNow(), secondsAt (x));
+
+        if (! interval.has_value())
+        {
+            tell ("there is no mark on either side of here to select between");
+            return false;
+        }
+
+        selection = extend && selection.has_value() ? model::spanOver (*selection, *interval) : *interval;
+        tell ("selection " + clockText (selection->first) + juce::String::fromUTF8 (" \xe2\x80\x93 ")
+                + clockText (selection->second) + " - right-click it for its menu, Shift+click to take in the next");
+        repaint();
+        return true;
+    }
+
+    //==============================================================================
+    /*  THE RIGHT-CLICK MENUS (the author, 2026-10-18; namespace draft §81). The
+        words of the playhead's and the selection's lines are the author's; a
+        marker's two are mine. */
+    juce::String WaveformEditorComponent::wordsFor (MenuLine line)
+    {
+        switch (line)
+        {
+            case MenuLine::setToStart:     return "Set to start";
+            case MenuLine::setToEnd:       return "Set to end";
+            case MenuLine::addMarker:      return "Add marker";
+            case MenuLine::addSlice:       return "Add new slice";
+            case MenuLine::split:          return "Split";
+            case MenuLine::setStartAndEnd: return "Set start and end";
+            case MenuLine::makeSlices:     return juce::String::fromUTF8 ("Make new slices\xe2\x80\xa6");
+            case MenuLine::trim:           return "Trim";
+            case MenuLine::remove:         return "Remove";
+            case MenuLine::renameMarker:   return juce::String::fromUTF8 ("Rename marker\xe2\x80\xa6");
+            case MenuLine::removeMarker:   return "Remove marker";
+        }
+
+        return {};
+    }
+
+    std::vector<WaveformEditorComponent::MenuLine> WaveformEditorComponent::menuFor (juce::Point<int> at)
+    {
+        if (! reading.notice.empty() || reading.subject.objectId.empty())
+            return {};
+
+        menuMarker = markerUnder (at);
+
+        if (! menuMarker.empty())
+            return { MenuLine::renameMarker, MenuLine::removeMarker };
+
+        const auto seconds = secondsAt (at.x);
+
+        if (selection.has_value() && seconds >= selection->first && seconds <= selection->second)
+            return { MenuLine::setStartAndEnd, MenuLine::makeSlices, MenuLine::trim, MenuLine::remove };
+
+        /*  THE PLAYHEAD COMES TO THE CLICK (ATV), as a left click there would
+            bring it - and lets a selection it is outside go, as that click
+            does - unless it is already under the pointer. */
+        const auto bar = barArea();
+        const auto headX = bar.getX() + juce::roundToInt (view.xForSeconds (headSeconds(), bar.getWidth()));
+
+        if (std::abs (headX - at.x) > grabRadius)
+        {
+            selection.reset();
+            sentSeek = -1.0;
+            moveHeadTo (at.x, true, true);
+        }
+
+        return { MenuLine::setToStart, MenuLine::setToEnd, MenuLine::addMarker, MenuLine::addSlice, MenuLine::split };
+    }
+
+    void WaveformEditorComponent::openMenuAt (juce::Point<int> at)
+    {
+        const auto lines = menuFor (at);
+
+        if (lines.empty())
+            return;
+
+        juce::PopupMenu menu;
+
+        for (const auto line : lines)
+            menu.addItem (static_cast<int> (line) + 1, wordsFor (line));
+
+        menu.showMenuAsync (juce::PopupMenu::Options().withMousePosition(),
+                            [safe = juce::Component::SafePointer<WaveformEditorComponent> (this)] (int chosen)
+                            {
+                                if (safe != nullptr && chosen > 0)
+                                    safe->choose (static_cast<MenuLine> (chosen - 1));
+                            });
+    }
+
+    bool WaveformEditorComponent::rangesRefused()
+    {
+        if (! reading.locked)
+            return false;
+
+        tell ("The show is locked.");
+        return true;
+    }
+
+    void WaveformEditorComponent::choose (MenuLine line)
+    {
+        const auto cueId = reading.subject.objectId;
+
+        if (cueId.empty())
+            return;
+
+        const auto head = headSeconds();
+        const auto noSelection = [this] { tell ("drag a selection in the top half, or double-click between two marks, first"); };
+
+        switch (line)
+        {
+            /*  WHERE THE CUE STARTS AND ENDS (ATW): cut to the point with ranges
+                (ATT), the offset and the first range without. */
+            case MenuLine::setToStart:
+            case MenuLine::setToEnd:
+            case MenuLine::setStartAndEnd:
+            {
+                if (rangesRefused())
+                    return;
+
+                std::optional<double> start, end;
+
+                if (line == MenuLine::setStartAndEnd)
+                {
+                    if (! selection.has_value())
+                        return noSelection();
+
+                    start = selection->first;
+                    end = selection->second;
+                }
+                else if (line == MenuLine::setToStart)
+                    start = head;
+                else
+                    end = head;
+
+                if (const auto why = model::spanRefusal (reading.ranges, reading.startOffset, start, end); ! why.empty())
+                    return tell (said (why.c_str()));
+
+                if (actions.spanRanges != nullptr)
+                    actions.spanRanges (cueId, start.value_or (-1.0), end.value_or (-1.0));
+
+                tell (start && end ? "the cue plays from " + clockText (*start) + " to " + clockText (*end)
+                      : start ? "the cue starts at " + clockText (*start)
+                              : "the cue ends at " + clockText (*end));
+                return;
+            }
+
+            case MenuLine::addMarker:
+                if (rangesRefused())
+                    return;
+
+                if (actions.createMarker != nullptr)
+                    actions.createMarker (cueId, head, model::nextMarkerName (reading.markers));
+
+                tell ("a marker at " + clockText (head) + " - drag its diamond to move it, right-click it to rename it");
+                return;
+
+            case MenuLine::addSlice:
+                addSliceHere();
+                return;
+
+            case MenuLine::split:
+                splitHere();
+                return;
+
+            case MenuLine::makeSlices:
+                if (! selection.has_value())
+                    return noSelection();
+
+                if (rangesRefused())
+                    return;
+
+                askSliceCount();
+                return;
+
+            /*  TRIM: the edit cut at both ends of the selection, and the piece
+                between picked once the cut comes back, its trim box ready. */
+            case MenuLine::trim:
+                if (! selection.has_value())
+                    return noSelection();
+
+                if (! reading.editable || actions.splitSpan == nullptr)
+                    return refuseEdit();
+
+                pickWhenCut = selection->first;
+                pickWaited = 0;
+                actions.splitSpan (cueId, selection->first, selection->second);
+                return;
+
+            /*  REMOVE CLOSES THE GAP (the author's pick, ATU): what follows
+                moves earlier, as Shift+Backspace does. */
+            case MenuLine::remove:
+                if (! selection.has_value())
+                    return noSelection();
+
+                if (! reading.editable || actions.deleteSpan == nullptr)
+                    return refuseEdit();
+
+                actions.deleteSpan (cueId, selection->first, selection->second, true);
+                selection.reset();
+                repaint();
+                return;
+
+            case MenuLine::renameMarker:
+                if (rangesRefused())
+                    return;
+
+                askMarkerName();
+                return;
+
+            case MenuLine::removeMarker:
+                if (rangesRefused())
+                    return;
+
+                if (! menuMarker.empty() && actions.removeMarker != nullptr)
+                    actions.removeMarker (menuMarker);
+
+                menuMarker.clear();
+                return;
+        }
+    }
+
+    /*  ADD NEW SLICE: the table's +, at the playhead (ATX) - and on a cue with
+        no ranges, the whole of it cut there into two slices rather than one
+        range over the file. */
+    void WaveformEditorComponent::addSliceHere()
+    {
+        if (rangesRefused())
+            return;
+
+        const auto at = headSeconds();
+        const auto& cueId = reading.subject.objectId;
+
+        if (reading.ranges.empty())
+        {
+            if (! (reading.fileLength > 0.0))
+                return tell ("the length of this file is not known yet");
+
+            if (! (at > reading.startOffset + 0.001) || ! (at < reading.fileLength - 0.001))
+                return tell ("the playhead is where the cue starts or ends - move it into the sound to cut there");
+
+            if (actions.splitWhole != nullptr)
+                actions.splitWhole (cueId, at, reading.fileLength);
+
+            return tell ("two slices, cut at " + clockText (at));
+        }
+
+        const auto wanted = model::addAt (reading.ranges, at, reading.fileLength);
+
+        switch (wanted.kind)
+        {
+            case model::RangeAdd::Kind::split:
+                if (actions.splitRange != nullptr)
+                    actions.splitRange (cueId, wanted.at);
+
+                tell ("a new slice from " + clockText (wanted.at));
+                break;
+
+            case model::RangeAdd::Kind::create:
+                if (actions.createRange != nullptr)
+                    actions.createRange (cueId, wanted.in, wanted.out);
+
+                tell ("a new slice from " + clockText (wanted.in) + " to " + clockText (wanted.out));
+                break;
+
+            case model::RangeAdd::Kind::nothing:
+                tell (said (wanted.why.c_str()));
+                break;
+        }
+    }
+
+    /*  MAKE NEW SLICES asks how many (ATY), saying how many ranges this show
+        has room for on one cue before it must be reopened. */
+    void WaveformEditorComponent::askSliceCount()
+    {
+        if (! selection.has_value())
+            return;
+
+        const auto span = *selection;
+        auto words = "Cut " + clockText (span.first) + juce::String::fromUTF8 (" \xe2\x80\x93 ")
+                       + clockText (span.second) + " into equal slices.";
+
+        if (reading.launcherSlots > 0)
+            words << "\n\nThis show was opened with room for " << reading.launcherSlots
+                  << " slices on one cue; this one has " << static_cast<int> (reading.ranges.size())
+                  << ". More will play once the show is reopened.";
+
+        auto* ask = new juce::AlertWindow ("Make new slices", words, juce::MessageBoxIconType::NoIcon, this);
+        ask->addTextEditor ("count", "2", "How many");
+        ask->addButton ("Make", 1, juce::KeyPress (juce::KeyPress::returnKey));
+        ask->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+        ask->enterModalState (true, juce::ModalCallbackFunction::create (
+            [safe = juce::Component::SafePointer<WaveformEditorComponent> (this), ask, span] (int result)
+            {
+                if (safe == nullptr || result != 1)
+                    return;
+
+                const auto typed = ask->getTextEditorContents ("count").trim();
+                safe->selection = span;
+                safe->makeSlices (typed.isNotEmpty() && typed.containsOnly ("0123456789") && typed.length() < 4
+                                    ? typed.getIntValue() : 0);
+            }), true);
+    }
+
+    void WaveformEditorComponent::makeSlices (int count)
+    {
+        if (! selection.has_value())
+            return tell ("drag a selection in the top half, or double-click between two marks, first");
+
+        if (rangesRefused())
+            return;
+
+        const auto from = selection->first;
+        const auto to = selection->second;
+
+        if (count < 1 || count > 64)
+            return tell ("type a number of slices from 1 to 64");
+
+        if ((to - from) / count < 0.01)
+            return tell ("slices that many would each be under a hundredth of a second");
+
+        if (reading.ranges.empty() && ! (reading.fileLength > 0.0))
+            return tell ("the length of this file is not known yet");
+
+        if (actions.sliceSpan != nullptr)
+            actions.sliceSpan (reading.subject.objectId, from, to, count, reading.fileLength);
+
+        const auto after = model::rangesAfterSlicing (reading.ranges, from, to, count);
+
+        if (reading.launcherSlots > 0 && after > reading.launcherSlots)
+            return tell (juce::String (after) + " slices on this cue, more than the " + juce::String (reading.launcherSlots)
+                           + " this show was opened with room for - reopen the show to play them all");
+
+        tell (juce::String (count) + (count == 1 ? " slice" : " slices") + " from " + clockText (from) + " to "
+                + clockText (to));
+    }
+
+    void WaveformEditorComponent::askMarkerName()
+    {
+        const auto markerId = menuMarker;
+        const auto found = std::find_if (reading.markers.begin(), reading.markers.end(),
+                                         [&markerId] (const model::MarkerRow& marker) { return marker.id == markerId; });
+
+        if (found == reading.markers.end())
+            return;
+
+        auto* ask = new juce::AlertWindow ("Rename the marker", {}, juce::MessageBoxIconType::NoIcon, this);
+        ask->addTextEditor ("name", juce::String::fromUTF8 (found->name.c_str()), "Name");
+        ask->addButton ("Rename", 1, juce::KeyPress (juce::KeyPress::returnKey));
+        ask->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+        ask->enterModalState (true, juce::ModalCallbackFunction::create (
+            [safe = juce::Component::SafePointer<WaveformEditorComponent> (this), ask, markerId] (int result)
+            {
+                if (safe == nullptr || result != 1)
+                    return;
+
+                safe->menuMarker = markerId;
+                safe->renameMarker (ask->getTextEditorContents ("name").trim().toStdString());
+            }), true);
+    }
+
+    void WaveformEditorComponent::renameMarker (const std::string& name)
+    {
+        if (menuMarker.empty() || name.empty() || rangesRefused())
+            return;
+
+        if (actions.set != nullptr)
+            actions.set ("/godot/marker/" + menuMarker + "/name", name);
+    }
+
     void WaveformEditorComponent::mouseMove (const juce::MouseEvent& event)
     {
         if (rulerArea().contains (event.getPosition()))
@@ -2469,6 +3027,20 @@ namespace wfg::client::ui
                 repaint();
             }
 
+            return;
+        }
+
+        /*  A MARKER'S DIAMOND (namespace draft §81), at the very top of the bar:
+            dragged sideways, right-clicked for its menu. */
+        if (const auto underFlag = markerUnder (event.getPosition()); underFlag != markerHover)
+        {
+            markerHover = underFlag;
+            repaint();
+        }
+
+        if (! markerHover.empty())
+        {
+            setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
             return;
         }
 
@@ -2544,6 +3116,26 @@ namespace wfg::client::ui
         grabbed = {};
         panning = false;
         onRuler = false;
+        rightPress = false;
+        pressTookSelection = false;
+
+        /*  A RIGHT PRESS (namespace draft §81, AUC): on the bar it pans while it
+            drags, as it always did; let go where it was pressed, it opens the
+            menu of what is under it - over the ruler and the row above too. */
+        if (event.mods.isPopupMenu())
+        {
+            const auto where = event.getPosition();
+
+            if (rulerArea().contains (where) || barArea().contains (where) || sectionsArea().contains (where))
+            {
+                rightPress = true;
+                rightPressX = event.x;
+                panning = barArea().contains (where);
+                panFrom = event.x;
+            }
+
+            return;
+        }
 
         /*  THE RULER IS THE PLAYHEAD'S STRIP (author, 2026-09-21: *"the
             playhead can be controlled in the time ruler"*). A press there puts
@@ -2577,6 +3169,13 @@ namespace wfg::client::ui
                 sayEdit();
             }
 
+            /*  SHIFT TAKES IN ANOTHER INTERVAL (namespace draft §81, AUB). */
+            if (event.mods.isShiftDown() && event.getNumberOfClicks() == 1)
+            {
+                pressTookSelection = selectIntervalAt (event.x, true);
+                return;
+            }
+
             selecting = true;
             selectingFromRow = true;
             selectPressX = event.x;
@@ -2589,6 +3188,9 @@ namespace wfg::client::ui
                 for (const auto start : model::sectionStarts (reading.sections))
                     targets.push_back (start);
 
+                for (const auto marked : markerSeconds())
+                    targets.push_back (marked);
+
                 selectFrom = model::snapTo (selectFrom, targets, toleranceSeconds());
             }
 
@@ -2599,10 +3201,28 @@ namespace wfg::client::ui
         if (! barArea().contains (event.getPosition()))
             return;
 
-        if (event.mods.isPopupMenu() || event.mods.isMiddleButtonDown())
+        if (event.mods.isMiddleButtonDown())
         {
             panning = true;
             panFrom = event.x;
+            return;
+        }
+
+        /*  A MARKER, held by its diamond (namespace draft §81). */
+        if (const auto underFlag = markerUnder (event.getPosition()); ! underFlag.empty())
+        {
+            if (rangesRefused())
+                return;
+
+            const auto seconds = markerSeconds();
+
+            for (std::size_t k = 0; k < reading.markers.size() && k < seconds.size(); ++k)
+                if (reading.markers[k].id == underFlag)
+                    markerValue = seconds[k];
+
+            markerHeld = underFlag;
+            markerMoved = false;
+            repaint();
             return;
         }
 
@@ -2662,6 +3282,12 @@ namespace wfg::client::ui
 
             if (event.y < bar.getCentreY())
             {
+                if (event.mods.isShiftDown() && event.getNumberOfClicks() == 1)
+                {
+                    pressTookSelection = selectIntervalAt (event.x, true);
+                    return;
+                }
+
                 selecting = true;
                 selectingFromRow = false;
                 selectPressX = event.x;
@@ -2673,6 +3299,9 @@ namespace wfg::client::ui
 
                     for (const auto start : model::sectionStarts (reading.sections))
                         targets.push_back (start);
+
+                    for (const auto marked : markerSeconds())
+                        targets.push_back (marked);
 
                     selectFrom = model::snapTo (selectFrom, targets, toleranceSeconds());
                 }
@@ -2717,6 +3346,40 @@ namespace wfg::client::ui
 
     void WaveformEditorComponent::mouseDrag (const juce::MouseEvent& event)
     {
+        /*  A MARKER CARRIED (namespace draft §81): snapped, unless Alt, to the
+            other marks and the playhead; written once, on release. */
+        if (! markerHeld.empty())
+        {
+            const auto end = reading.fileLength > 0.0 ? reading.fileLength : secondsAt (barArea().getRight());
+            auto seconds = std::clamp (secondsAt (event.x), 0.0, std::max (0.0, end));
+
+            if (! event.mods.isAltDown())
+            {
+                auto others = reading.markers;
+                others.erase (std::remove_if (others.begin(), others.end(),
+                                              [this] (const model::MarkerRow& marker) { return marker.id == markerHeld; }),
+                              others.end());
+
+                std::vector<double> cuts;
+
+                if (cutsSnap())
+                    for (const auto& cut : cutsShown())
+                        cuts.push_back (cut.seconds);
+
+                auto targets = model::marksOf (others, reading.ranges,
+                                               editShown() ? reading.sections : std::vector<model::SectionRow> {},
+                                               cuts, reading.startOffset, reading.fileLength);
+                targets.push_back (headSeconds());
+                seconds = model::snapTo (seconds, targets, toleranceSeconds());
+            }
+
+            markerValue = seconds;
+            markerMoved = true;
+            tell ("marker at " + clockText (seconds) + " - Alt lets it go of the marks");
+            repaint();
+            return;
+        }
+
         /*  A HANDLE HELD (namespace draft §55.9): the edit as the drag would
             leave it, drawn, and said; Shift moves a fade alone (AED). */
         if (gripHeld.grip != model::Grip::none && gripHeld.index < reading.sections.size())
@@ -2804,6 +3467,9 @@ namespace wfg::client::ui
                     for (const auto& cut : cutsShown())
                         targets.push_back (cut.seconds);
 
+                for (const auto marked : markerSeconds())
+                    targets.push_back (marked);
+
                 const auto byStart = model::snapTo (start, targets, toleranceSeconds());
                 const auto byEnd = model::snapTo (start + length, targets, toleranceSeconds()) - length;
 
@@ -2859,6 +3525,9 @@ namespace wfg::client::ui
                 if (cutsSnap())
                     for (const auto& cut : cutsShown())
                         targets.push_back (cut.seconds);
+
+                for (const auto marked : markerSeconds())
+                    targets.push_back (marked);
 
                 now = model::snapTo (now, targets, toleranceSeconds());
             }
@@ -2953,6 +3622,10 @@ namespace wfg::client::ui
                 for (const auto& cut : cutsShown())
                     targets.push_back (cut.seconds);
 
+            //  And a marker (namespace draft §81): a slice cut where somebody marked.
+            for (const auto marked : markerSeconds())
+                targets.push_back (marked);
+
             seconds = model::snapTo (seconds, targets, toleranceSeconds());
         }
 
@@ -2974,18 +3647,25 @@ namespace wfg::client::ui
 
     void WaveformEditorComponent::mouseDoubleClick (const juce::MouseEvent& event)
     {
-        /*  ON A BLOCK, the view frames its section (namespace draft §55). */
+        /*  ON A MARKER'S DIAMOND, its name (namespace draft §81). */
+        if (const auto underFlag = markerUnder (event.getPosition()); ! underFlag.empty())
+        {
+            markerHeld.clear();
+            menuMarker = underFlag;
+
+            if (! rangesRefused())
+                askMarkerName();
+
+            return;
+        }
+
+        /*  ON THE ROW ABOVE, WHAT LIES BETWEEN TWO MARKS IS SELECTED (the
+            author, 2026-10-18; namespace draft §81, AUB) - the row is for time
+            now (ATF), and framing a section is a wheel's work. */
         if (const auto row = sectionsArea(); ! row.isEmpty() && row.contains (event.getPosition()))
         {
-            const auto hit = model::hitSection (sectionLayout(), static_cast<double> (event.x - barArea().getX()), 0.0);
-
-            if (hit.hit == model::SectionHit::block && hit.index < reading.sections.size())
-            {
-                const auto start = joinSecondsOf (hit.index);
-                view.frame (start, start + reading.sections[hit.index].length());
-                repaint();
-            }
-
+            selecting = false;
+            selectIntervalAt (event.x, event.mods.isShiftDown());
             return;
         }
 
@@ -3022,6 +3702,17 @@ namespace wfg::client::ui
             }
         }
 
+        /*  AND IN THE TOP HALF, the same (AUB): the lower half and the ruler
+            keep the way back to the whole file. */
+        if (editShown() && barArea().contains (event.getPosition()) && event.y < barArea().getCentreY())
+        {
+            selecting = false;
+            grabbed = {};
+            panning = false;
+            selectIntervalAt (event.x, event.mods.isShiftDown());
+            return;
+        }
+
         /*  BACK TO THE WHOLE FILE, which is the way out of a zoom that has got
             away from somebody. Deliberately NOT Escape: that key is PANIC in
             this window (PRD 4.4), and a panel that quietly took it for its own
@@ -3035,6 +3726,44 @@ namespace wfg::client::ui
 
     void WaveformEditorComponent::mouseUp (const juce::MouseEvent& event)
     {
+        /*  A RIGHT CLICK THAT DID NOT DRAG opens its menu (namespace draft §81). */
+        if (rightPress)
+        {
+            rightPress = false;
+            panning = false;
+
+            if (std::abs (event.x - rightPressX) <= 3)
+                openMenuAt (event.getPosition());
+
+            return;
+        }
+
+        if (pressTookSelection)
+        {
+            pressTookSelection = false;
+            return;
+        }
+
+        //  A MARKER'S ONE WRITE (namespace draft §81), and only if it moved.
+        if (! markerHeld.empty())
+        {
+            const auto id = markerHeld;
+            markerHeld.clear();
+
+            if (markerMoved && actions.set != nullptr)
+            {
+                markerSent = id;
+                markerSentAt = markerValue;
+                markerSentPasses = 0;
+                actions.set ("/godot/marker/" + id + "/at", osc::formatDouble (markerValue));
+            }
+
+            markerMoved = false;
+            tell ({});
+            repaint();
+            return;
+        }
+
         /*  A HANDLE'S ONE WRITE (namespace draft §55.9). */
         if (gripHeld.grip != model::Grip::none)
         {
@@ -3120,7 +3849,8 @@ namespace wfg::client::ui
             selecting = false;
 
             //  On the row above, a click picked its block and leaves the playhead be.
-            if (std::abs (event.x - selectPressX) <= 3)
+            //  A double click's release keeps the interval it selected (§81).
+            if (std::abs (event.x - selectPressX) <= 3 && event.getNumberOfClicks() < 2)
             {
                 selection.reset();
 
@@ -3189,10 +3919,11 @@ namespace wfg::client::ui
 
     void WaveformEditorComponent::mouseExit (const juce::MouseEvent&)
     {
-        if (hover.handle != model::Handle::none || hoverPoint != noPoint)
+        if (hover.handle != model::Handle::none || hoverPoint != noPoint || ! markerHover.empty())
         {
             hover = {};
             hoverPoint = noPoint;
+            markerHover.clear();
             repaint();
         }
     }

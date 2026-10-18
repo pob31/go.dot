@@ -93,6 +93,16 @@ namespace wfg::client::ui
             std::function<void (const std::string& cueId, double from, double to, bool ripple)> deleteSpan;
             std::function<void (const std::string& cueId)> unfreezeEdit;
 
+            /*  THE RIGHT-CLICK MENUS (namespace draft §81): the whole of a cue
+                with no ranges cut into two slices, where it starts and ends
+                (a negative second leaving that side), a selection made slices,
+                and a marker made and taken away. */
+            std::function<void (const std::string& cueId, double at, double length)> splitWhole;
+            std::function<void (const std::string& cueId, double start, double end)> spanRanges;
+            std::function<void (const std::string& cueId, double from, double to, int count, double length)> sliceSpan;
+            std::function<void (const std::string& cueId, double at, const std::string& name)> createMarker;
+            std::function<void (const std::string& markerId)> removeMarker;
+
             /*  THE THREE THE TRANSPORT NEEDS. `play` fires this cue - the real
                 one, through its own routing - `stop` kills the run it made,
                 and `seek` moves that run to a second of its file. All three
@@ -184,6 +194,33 @@ namespace wfg::client::ui
         /*  THE WHEEL'S ONE WRITE NOW, rather than once it has been still a
             moment - what the timer does, for a test that has no message loop. */
         void settleWheel() { flushCurve(); }
+
+        /*  THE RIGHT-CLICK MENUS (the author, 2026-10-18, namespace draft §81):
+            on the playhead "Set to start; Set to end; Add marker; Add new
+            slice; Split", on a selection "Set start and end; Make new slices;
+            Trim; Remove", and on a marker its own two. */
+        enum class MenuLine { setToStart, setToEnd, addMarker, addSlice, split,
+                              setStartAndEnd, makeSlices, trim, remove,
+                              renameMarker, removeMarker };
+
+        /*  WHAT A RIGHT CLICK THERE OFFERS, having first done what the click
+            does: on a marker, that marker's; inside the selection, the
+            selection's; anywhere else the playhead's, the playhead brought
+            there first as a left click would (ATV). Public, as `pickLaneAt`,
+            so a test can ask without a menu it cannot click - and `choose`
+            then does what the line says. */
+        std::vector<MenuLine> menuFor (juce::Point<int>);
+        void choose (MenuLine);
+        static juce::String wordsFor (MenuLine);
+
+        /*  THE TWO LINES THAT ASK FIRST, with the answer typed: how many slices
+            the selection makes, and what the marker is called now. */
+        void makeSlices (int count);
+        void renameMarker (const std::string& name);
+
+        /*  WHERE A MARKER'S FLAG IS DRAWN, for a test to aim at, as
+            `pointPosition`; nothing when it is out of the view. */
+        std::optional<juce::Point<int>> markerFlag (const std::string& markerId) const;
 
     private:
         /*  WHAT IS LEFT FOR THE PICTURE once the table has its column. The bar
@@ -442,6 +479,40 @@ namespace wfg::client::ui
         void paintGrips (juce::Graphics&, juce::Rectangle<int> bar);
         void splitHere();
         double sourceLength() const;
+
+        /*  THE MENUS AND THE MARKERS (namespace draft §81): a right press, which
+            pans when it drags and opens a menu when it does not; the marker a
+            menu is about; the section Trim cut out, picked once its cut comes
+            back; a marker held by its flag, where the hand has it, written
+            once on release; a press that took the selection (Shift) and leaves
+            its release nothing to do. */
+        bool rightPress = false;
+        int rightPressX = 0;
+        std::string menuMarker;
+        std::optional<double> pickWhenCut;
+        int pickWaited = 0;
+        std::string markerHeld, markerHover;
+        double markerValue = 0.0;
+        bool markerMoved = false;
+        bool pressTookSelection = false;
+
+        /*  A MARKER MOVED, drawn where it was put until the reading says the
+            same, or a second of passes says the write was refused. */
+        std::string markerSent;
+        double markerSentAt = 0.0;
+        int markerSentPasses = 0;
+
+        juce::Rectangle<int> flagBand() const;
+        std::string markerUnder (juce::Point<int>) const;
+        std::vector<double> markerSeconds() const;
+        std::vector<double> marksNow() const;
+        bool selectIntervalAt (int x, bool extend);
+        void paintMarkers (juce::Graphics&, juce::Rectangle<int> bar);
+        void openMenuAt (juce::Point<int>);
+        void askSliceCount();
+        void askMarkerName();
+        void addSliceHere();
+        bool rangesRefused();
 
         std::size_t grabbedPoint = noPoint;
         std::size_t hoverPoint = noPoint;

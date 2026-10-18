@@ -263,7 +263,7 @@ namespace wfg::client::model
     }
 
     RangeAdd addAt (const std::vector<RangeRow>& rows, double seconds, double fileLength,
-                    double smallest)
+                    double smallest, double startOffset)
     {
         RangeAdd out;
 
@@ -281,7 +281,7 @@ namespace wfg::client::model
         if (rows.empty())
         {
             out.kind = RangeAdd::Kind::create;
-            out.in = 0.0;
+            out.in = startOffset > 0.0 && startOffset < fileLength - smallest ? startOffset : 0.0;
             out.out = fileLength;
             return out;
         }

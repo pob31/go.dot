@@ -55,6 +55,7 @@
 #include <wfg/client/model/OscCurves.h>
 #include <wfg/client/model/OscMessages.h>
 #include <wfg/client/model/Patch.h>
+#include <wfg/client/model/Markers.h>
 #include <wfg/client/model/Ranges.h>
 #include <wfg/client/model/Sections.h>
 #include <wfg/client/model/Sends.h>
@@ -198,6 +199,12 @@ namespace wfg::client::model
         std::string rateMode;
 
         std::vector<RangeRow> ranges;
+
+        /*  THE CUE'S MARKERS, in time order, and how many ranges one cue can
+            play before the show must be reopened (namespace draft §81): what
+            "Make new slices" says before it makes more than that. */
+        std::vector<MarkerRow> markers;
+        int launcherSlots = 0;
 
         /*  THE CUE'S LEVEL LANE, drawn over the waveform (namespace draft
             §20.5), and whether the show is locked - which is when nothing on

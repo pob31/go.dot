@@ -2167,6 +2167,18 @@ stage.
 **Done when:** each of the nine does what §80.2 says, the tests of §80.3 pass in C and fr_FR, the strict
 build is green, and CI is green; the projector, the grid and the D700's row are the author's to see.
 
+### Right-click menus and markers on the waveform, for 0.1.2 (2026-10-18)
+
+The author, "For v0.1.2": right-click menus on the waveform and the movie strip - on the playhead, on a
+selection - a double click selecting between marks, Shift+click taking in more, and markers. Namespace
+draft §81; ATS-ATV his (three picked from my options), ATW-AUC mine. Two stages: WM.1 the engine (the
+marker element, `range.span`, `range.slices`, `range.split` on a cue with no ranges, and the start
+offset folded into a first range - a bug that left a show unopenable), WM.2 the window. No release cut:
+the author tags.
+
+**Done when:** every line of the three menus does what §81.1 says, the tests of §81.5 pass in C and
+fr_FR, the strict build is green, and CI is green; the menus and the markers are the author's to see.
+
 ---
 
 ## Cross-cutting, every phase

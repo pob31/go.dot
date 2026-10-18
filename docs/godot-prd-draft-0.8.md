@@ -2450,6 +2450,15 @@ name. Playback walks the list.
   loops, sends, EQ or effects - onto every picked cue that takes it, the part
   **replaced whole**, one step of undo. The same parts kept in the show under a name
   are **cue templates**, a new cue born from one and never linked to it (§4.12).
+- **Markers, and the waveform's menus.** *Added in 0.8, at the author's direction
+  (2026-10-18)* (`docs/godot-namespace-draft-0.1.md` §81): a media cue may carry
+  **markers** - named points in its material, kept in the show, carried by an edit with
+  what they mark. A right click on the waveform's playhead sets where the cue starts or
+  ends there, or adds a marker, a slice or an edit cut; on a selection it sets both
+  ends, cuts the selection into a number of equal slices, or cuts or removes it from the
+  edit; a double click selects what lies between two marks. With ranges, a start or an
+  end set so **cuts the ranges to it**. A cue with ranges has no start offset: its first
+  range takes it in.
 
 #### Advancing
 

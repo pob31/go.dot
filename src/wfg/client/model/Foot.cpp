@@ -394,6 +394,8 @@ namespace wfg::client::model
             out.rate = osc::parseDouble (at (cue + "rate")).value_or (1.0);
             out.rateMode = at (cue + "rateMode");
             out.ranges = readRanges (snapshot, out.subject.objectId);
+            out.markers = readMarkers (snapshot, out.subject.objectId);
+            out.launcherSlots = static_cast<int> (osc::parseDouble (at ("/godot/audio/slots")).value_or (0.0));
             out.lane = readLane (snapshot, out.subject.objectId);
             out.locked = isYes (flag (snapshot, "/godot/document/locked"));
 

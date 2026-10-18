@@ -1441,10 +1441,10 @@ TEST_CASE ("video: a movie's Ranges play as a sound's - each for its passes, the
     REQUIRE (rig.document.setAttribute ("/godot/range/" + first.id + "/loops", "2").ok);
     REQUIRE (rig.document.createRange ("VD000060", 1.5, 1.9).ok);
 
-    /*  A START OFFSET BESIDE THEM is refused when the show is checked, as a
-        sound's is. */
-    REQUIRE (rig.document.setAttribute ("/godot/cue/VD000060/startOffset", "0.3").ok);
-    CHECK_FALSE (rig.document.validate().empty());
+    /*  A START OFFSET BESIDE THEM is refused, as a sound's is - at the door
+        since namespace draft §81 (ATZ), so the show never holds one. */
+    CHECK_FALSE (rig.document.setAttribute ("/godot/cue/VD000060/startOffset", "0.3").ok);
+    CHECK (rig.document.validate().empty());
     REQUIRE (rig.document.setAttribute ("/godot/cue/VD000060/startOffset", "0").ok);
 
     rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000060") });
@@ -2105,7 +2105,7 @@ TEST_CASE ("video: a sound locked to its movie takes its start, speed and Ranges
     /*  DETACHED, the sound is its own: its rows take an edit, and the movie's
         no longer reach it. */
     REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000040/lockedTo"), text ("") }));
-    REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000040/startOffset"), text ("0.75") }));
+    REQUIRE (rig.applied ("node.set", { text ("/godot/range/" + soundRanges()[0] + "/in"), text ("0.5") }));
     REQUIRE (rig.applied ("node.set", { text ("/godot/cue/VD000002/rate"), text ("2") }));
     CHECK (rig.at ("/godot/cue/VD000040/rate") == "1.25");
 

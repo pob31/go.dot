@@ -202,8 +202,10 @@ namespace wfg::client::model
         std::string why;              ///< for `nothing`, in words
     };
 
+    /*  `startOffset` is where a cue with no ranges begins: its first range is
+        made from there (namespace draft §81, ATZ), as the cue already played. */
     RangeAdd addAt (const std::vector<RangeRow>&, double seconds, double fileLength,
-                    double smallest = 0.05);
+                    double smallest = 0.05, double startOffset = 0.0);
 
     /*  THE INSTANTS WORTH SNAPPING TO while a range edge is dragged: every
         other edge, the ends of the file, and the playhead if one is running.

@@ -115,7 +115,7 @@ namespace wfg::client::ui
         add.setTooltip ("Adds a range after the last one, to the end of the file");
         add.onClick = [this]
         {
-            const auto wanted = model::addAt (reading.ranges, playhead, reading.fileLength);
+            const auto wanted = model::addAt (reading.ranges, playhead, reading.fileLength, 0.05, reading.startOffset);
 
             switch (wanted.kind)
             {
@@ -223,7 +223,7 @@ namespace wfg::client::ui
         only agrees with it. */
     void RangeTableComponent::sayWhatThePlusWouldDo()
     {
-        const auto wanted = model::addAt (reading.ranges, playhead, reading.fileLength);
+        const auto wanted = model::addAt (reading.ranges, playhead, reading.fileLength, 0.05, reading.startOffset);
 
         add.setEnabled (wanted.kind != model::RangeAdd::Kind::nothing);
 
@@ -316,7 +316,9 @@ namespace wfg::client::ui
         auto ranges = reading.ranges;
 
         if (standing())
-            ranges.push_back ({ {}, {}, 0.0, reading.fileLength, 1, 0 });
+            ranges.push_back ({ {}, {}, reading.startOffset > 0.0 && reading.startOffset < reading.fileLength
+                                          ? reading.startOffset : 0.0,
+                                reading.fileLength, 1, 0 });
 
         for (std::size_t at = 0; at < ranges.size(); ++at)
         {

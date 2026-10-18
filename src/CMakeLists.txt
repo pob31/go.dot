@@ -748,6 +748,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/InputList.cpp
     wfg/client/model/Ranges.h
     wfg/client/model/Ranges.cpp
+    wfg/client/model/Markers.h
+    wfg/client/model/Markers.cpp
     wfg/client/model/Curve.h
     wfg/client/model/Curve.cpp
     wfg/client/model/DirectOuts.h

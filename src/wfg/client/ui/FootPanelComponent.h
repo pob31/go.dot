@@ -87,6 +87,14 @@ namespace wfg::client::ui
             /** `range.split` at the playhead. */
             std::function<void (const std::string& cueId, double at)> splitRange;
 
+            /*  THE WAVEFORM'S MENUS (namespace draft §81): a cue with no ranges cut
+                into two slices, where a cue starts and ends, a selection made
+                slices, a marker made. A marker is taken away by `removeObject`. */
+            std::function<void (const std::string& cueId, double at, double length)> splitWhole;
+            std::function<void (const std::string& cueId, double start, double end)> spanRanges;
+            std::function<void (const std::string& cueId, double from, double to, int count, double length)> sliceSpan;
+            std::function<void (const std::string& cueId, double at, const std::string& name)> createMarker;
+
             /*  A SOUND'S EDIT (namespace draft §55): the waveform's sections row. */
             std::function<void (const std::string& cueId, double at)> splitSection;
             std::function<void (const std::string& sectionId)> joinSection;

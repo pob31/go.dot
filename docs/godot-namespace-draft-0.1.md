@@ -31735,3 +31735,133 @@ test opens a projector, and the fake one that would is not written.
 
 On the author's screen: Hide and Show with the monitor open, the projector lit again; the grid against a
 real snapshot; the D700's DCA row with a movie, a sound, and both. The words of ATK-ATR.
+
+## 81. Right-click menus and markers on the waveform, for 0.1.2
+
+Asked by the author on 2026-10-18, "For v0.1.2": *"In the audio waveform and video strip foot panel,
+I'd like to add some contextual actions when right clicking: 1. on the playhead > Set to start; Set to
+end; Add marker; Add new slice; Split 2. on a range > Set start and end; Make new slices (the user has a
+number to type in to make the corresponding number of news slices out of the range); Trim (splits in
+edit mode at both ends of the range); Remove (splits in edit mode and removes the selected range) 3.
+Double clicking between markers (scene or additional manual markers, start, end, slice) then select the
+range. Once a range is selected, shift clicking on intervals adds to the selection in a continuous
+range"*. His "range" there is the panel's selection (ADZ's word); a "range" in this document is still a
+cue's Range, a slice two of them meeting. Decisions from ATS. Engine b423bd80 (WM.1), window WM.2.
+
+### 81.1 What it does
+
+- **On the playhead** - or anywhere outside a selection, the playhead coming there first as a left click
+  would bring it - a right click offers *Set to start*, *Set to end*, *Add marker*, *Add new slice* and
+  *Split*. A cue with no ranges starts at its start offset, and *Set to end* makes its first range, from
+  there to the playhead. With ranges the start is the earliest in point and the end the furthest out
+  point, and setting either cuts the ranges to it. *Add new slice* is the range table's +: a cut inside
+  a range, a new range in a gap; on a cue with no ranges, the whole of what it plays cut into two
+  slices. *Split* cuts the edit, as **x** does.
+- **On a selection**, *Set start and end* makes the cue play from its start to its end; *Make new
+  slices...* asks how many and cuts it into that many equal ranges; *Trim* cuts the edit at both ends
+  and picks the piece between, its trim box the one shown; *Remove* takes it out of the edit and closes
+  the gap.
+- **A double click** in the top half of the bar or on the strip above selects what lies between the
+  marks either side - markers, a movie's scene changes while they are shown, every range's in and out
+  (a slice is two at one instant), the edit's cuts, where a cue with no ranges starts, and the
+  material's ends. **Shift+click** on another interval takes it in, and everything between.
+- **A marker** is a named point in a sound's or a movie's material, kept in the show: a diamond at the
+  top of the bar, a dashed line down it and its name, made *Marker 1*, *Marker 2* and on from the
+  playhead's menu. Its diamond is dragged to move it (one write, on release) and right-clicked or
+  double-clicked to rename or remove it. The playhead, a selection, a range's edges, a slid section and
+  other markers snap to it, Alt letting go. An edit of the sections carries it with its material, as it
+  carries the ranges, and leaves one whose material went at the cut; a conversion that trims a movie's
+  head moves it back with them.
+- **The bug this found** (ATZ): the range table's + on a cue with a start offset made its first range
+  from nought and left the offset, and the reader refuses a show with both - so the show, saved, would
+  not open again. The first range now takes the offset in, an offset is refused beside ranges, and a
+  show saved before opens with the offset dropped, playing as it did.
+
+### 81.2 Decisions
+
+- **ATS** (the author's) The menus, their lines and their words as above; a double click selects
+  between marks and Shift+click takes in more, continuous. *Make new slices* asks for a number.
+- **ATT** (the author chose, offered as "Cut to the playhead") With ranges, a start or an end set from
+  the menus cuts to the point: a range wholly before the start, or after the end, is taken out, one
+  across it shortened; one undo brings them back. Mine within it: a start in a gap or before every range
+  brings the earliest in point back to it, and an end past the furthest out point takes it on there, so
+  the cue plays from there to there; both ends between ranges make the one range; refused, in words,
+  when nothing would be left to play.
+- **ATU** (the author chose "Close the gap", over my recommendation of two lines, silence and close up)
+  *Remove* closes the gap: what follows moves earlier, as Shift+Backspace. Backspace still leaves
+  silence.
+- **ATV** (the author chose, offered as "Playhead comes there, then menu") A right click away from the
+  playhead and outside a selection brings the playhead there, as a left click would - seeking a playing
+  run as that does, and letting the selection go - then opens the playhead's menu.
+- **ATW** (mine) What a start and an end are: the start offset and the cue's first range without ranges,
+  the earliest in point and the furthest out point with them (ADH's reading of an end marker).
+- **ATX** (mine) *Add new slice* is the table's + at the playhead (`model::addAt`); on a cue with no
+  ranges, two slices rather than one range over the file - `range.split` given the material's length.
+  *Split* is `section.split`. *Trim* is `section.splitSpan`, as written, the piece between then picked;
+  that it might mean keeping only the selection is the other reading, not built.
+- **ATY** (mine) *Make new slices*: a count from 1 to 64, equal, covering the selection exactly, in
+  file order where the ranges it overlapped were - those inside taken out, those across an end cut back,
+  one holding all of it cut in two around the slices, which take its loops. A cue with no ranges is made
+  whole first, so the rest of the file still plays around them. The box says how many ranges the show
+  was opened with room for on one cue; past that they are made and the words say to reopen the show -
+  §12.9's rule (at least eight, or four more than the busiest cue at load) is unchanged, now published as
+  `/godot/audio/slots`.
+- **ATZ** (mine) A cue with ranges has no start offset: the first range takes it in (to nought in the
+  same step), a non-zero offset written beside ranges is refused, a time-part paste takes the old ranges
+  away before it writes the offset, the table's + and its whole-file row begin at the offset, and the
+  reader drops an offset it finds beside ranges.
+- **AUA** (mine) Markers as in 81.1: an element of their own on Media and Video, named past the highest
+  *Marker N* so a removed one's number is not handed on; carried by an edit to the cut when their
+  material goes (a lane point goes with it; a marker is somebody's decision and stays where an undo would
+  look); a movie's locked sound's markers carried too, though the panel shows the movie's. A shape and a
+  word, never a colour alone (§4.8).
+- **AUB** (mine) The marks are those of 81.1, a movie's scene changes only while they are shown. The
+  double click selects in the top half and on the strip above; the ruler and the lower half keep *back to
+  the whole file*; on the strip it no longer frames a section; on the level lane's line it still adds a
+  point, which is drawn where it would land. Shift+click with no selection selects that interval.
+- **AUC** (mine) A right press still pans while it drags; let go within three pixels of where it went
+  down, it opens the menu of what is under it - over the bar, the ruler and the strip above. A line that
+  cannot act says why when it is chosen, before any command is sent, rather than being greyed with no
+  reason; the marker's two lines' words are mine.
+
+### 81.3 Rows
+
+| Node | Type | Meaning |
+|---|---|---|
+| `/godot/marker/<id>/cue`, `index` | `s`, `i`, ro | derived, as a range's |
+| `/godot/marker/<id>/name` | `s` | what the waveform writes beside it |
+| `/godot/marker/<id>/at` | `d`, seconds | where it stands in what the cue plays |
+| `/godot/audio/slots` | `i`, ro | ranges one cue can play before the show must be reopened; nought with no graph |
+
+### 81.4 Commands
+
+- `marker.create cue at [name] [id]` - one marker; node.set moves and renames, object.delete removes.
+- `range.span cue start end [id]` - where a cue starts and ends; a negative second leaves that side.
+- `range.slices cue from to count [length] [ids]` - a span made count ranges; `ids` written back.
+- `range.split cue at [id] [length] [whole]` - on a cue with no ranges, given the length, the whole cut
+  in two.
+
+Each is one record and one undo step; every identifier drawn is written back for a replay.
+
+### 81.5 Tests
+
+`RangeTests`: span with and without ranges, across gaps, refusals, one undo; slices over no ranges, over
+several, loops carried, the record's ids and length; the whole split in two; markers published, saved,
+moved, refused and deleted; the offset folded, refused and dropped on read. `SectionTests`: a marker
+carried by a closed-up deletion, at the cut when its material went, back with one undo. `ClientTests`:
+markers read in time order and named past the highest; the marks, the interval around a second, Shift's
+span; the refusals said before sending; the ranges after slicing; the + from the offset; the four new
+gestures against the registry. `wfg_audio_ui_tests`: the three menus where they open, each line's send,
+the playhead brought to the click, the double click and Shift+click, Make new slices with the room said,
+Remove closing up, a marker renamed, removed and dragged, a cue with no ranges, the lock.
+
+### 81.6 Owed
+
+The author's look at all of it, on a sound and on a movie; the words of ATW-AUC, the marker's two lines
+and the sentences under the bar; whether *Trim* is meant as written.
+
+### 81.7 Not built
+
+Markers in a cue's copied parts and in templates; markers on the running pane's strip, the remote and
+the web page; a marker as something a cue waits for or a GO goes to; a key for *Add marker*; the
+launcher's slots grown without reopening the show.

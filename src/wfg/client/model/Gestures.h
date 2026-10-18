@@ -267,6 +267,16 @@ namespace wfg::client::gesture
         undo step and one record - see `ShowDocument::splitRange`. */
     Event splitRange (const std::string& cueId, double at);
 
+    /*  THE WAVEFORM'S MENUS (namespace draft §81). `range.split` given the
+        length of what the cue plays, so a cue with no ranges is cut into two
+        slices ("Add new slice"); `range.span` for "Set to start", "Set to end"
+        and "Set start and end", a negative second leaving that side;
+        `range.slices` for "Make new slices"; `marker.create` for "Add marker". */
+    Event splitWhole (const std::string& cueId, double at, double length);
+    Event spanRanges (const std::string& cueId, double start, double end);
+    Event sliceSpan (const std::string& cueId, double from, double to, int count, double length);
+    Event createMarker (const std::string& cueId, double at, const std::string& name);
+
     /*  A SOUND'S EDIT (namespace draft §55.3, 55.11): the sections cut, joined,
         trimmed, moved, removed and cleared, and the edit frozen and unfrozen;
         the handles' edge, fade and curve; a selection split or deleted. A
