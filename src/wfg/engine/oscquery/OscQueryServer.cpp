@@ -893,6 +893,14 @@ namespace wfg::oscquery
 
         for (const auto& address : diff.valueChanged)
         {
+            /*  WHO LISTENS FIRST (namespace draft §88): a GO of a cue of 5,300
+                messages changes 5,300 values, and each was looked up and
+                encoded before anybody was asked whether they listened. */
+            const auto listeners = impl->subscriptions.listenersOf (address);
+
+            if (listeners.empty())
+                continue;
+
             const auto* node = current.find (address);
 
             if (node == nullptr || node->values.empty())
@@ -910,7 +918,7 @@ namespace wfg::oscquery
             if (! encoded.has_value())
                 continue;       // a value the wire cannot carry; nothing to send
 
-            for (const auto& connection : impl->subscriptions.listenersOf (address))
+            for (const auto& connection : listeners)
             {
                 if (! impl->target->shouldPush (connection, address, causedBy))
                     continue;

@@ -1286,6 +1286,18 @@ set_tests_properties(blackbox.authoring.C blackbox.authoring.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 120)
 
 # -----------------------------------------------------------------------------
+# A SPATIAL PROCESSOR'S SNAPSHOT OF SEVENTY INPUTS (namespace draft §88): 7,500
+# pairs captured in chunks sent back to back, landed whole with the tick kept
+# up, and fired - every message heard, in order, bundled and spread at the
+# device's twenty datagrams a tick, the cue playing until the last has left.
+add_test(NAME blackbox.big-cue.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/big_cue.py" --wfg-locale=C)
+add_test(NAME blackbox.big-cue.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/big_cue.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.big-cue.C blackbox.big-cue.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
+# -----------------------------------------------------------------------------
 # A DEVICE FOUND ON THE NETWORK, SAVED AS A PRESET (namespace draft §76, UD.10):
 # the shipped binary against mock_target.py describing itself and answering
 # multicast DNS put to it directly - found, made, saved into a folder of the

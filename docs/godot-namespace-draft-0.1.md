@@ -32148,7 +32148,57 @@ Mine, proposed:
 
 ### 88.3 Built
 
-(Kept current as the stages land.)
+- **BC.1, AVB.** `ShowDocument::findById` answers from an index its own listener keeps: a node added is
+  indexed with everything under it, one taken away forgotten, a redirect, an adopt and a move indexed
+  again from the root. A miss is believed, a hit checked (still the show's, still carrying the
+  identifier); an identifier two nodes carry goes to the walk (`findByIdWalk`), first in document
+  order. `idWalksTaken()` counts the walks for the tests.
+- **BC.2, AVA.** A capture reads the declared devices once and matches every pair against them in
+  memory; an append (`endOfSequence`) asks nothing of the children. Go.dot's bound socket asks for a
+  4 MB receive and a 1 MB send buffer (`osc/SocketBuffers`); `UdpEndpoint::send` opens no socket beside
+  the bound one.
+- **BC.3-BC.5, AUT, AUU, AUX, AUY, AVC, AVD.** `MountSender::flush` gives each device at most
+  `mount/perTick` datagrams (a bundle is one, a question is one) and keeps the rest in their place for
+  the flushes after. What became of a run's messages is a `Tally` per owner - waiting, sent, failed,
+  dropped, and `behind`: held back by the limit in the last flush. A cue with messages behind is
+  playing until they have gone, whatever its wait; a single Esc lets it finish, a double Esc drops the
+  rest. A value a rate cap holds keeps nobody playing that did not wait for it before - a `none` cue, a
+  stopped run - so a stream re-firing a capped cue is not held up (mine, found by GoTests' "double Esc:
+  nothing Go.dot started keeps writing"). A `sent` or `verified` cue waits for every queued message, and
+  a `verified` one asks nothing of an address whose value has not left. A cue's patience starts again
+  on every tick that saw a message go. Row `mount,perTick` (I, 1..1000, 20, show) and the Network
+  tab's Per tick column after Bundles, typed in place.
+- **BC.6, AUV.** `MessageRows` keeps the rows of every OSC cue's further messages and of every curve,
+  message by message, as a fourth half of `TreeSnapshot`; `tree::diff` compares half by half and skips
+  a half both snapshots share.
+- **BC.7.** `sharedOscMessages` reads a cue's messages by address and keeps the reading while the
+  messages half and the cue's own rows are what they were; the Messages panel has components for the
+  rows in view; the inspector's target line makes its writes when a target is chosen
+  (`model::alongsideOf`); the grid paints what its clip holds.
+- **BC.8, AUW, AUZ.** `mount.declare`'s seventh argument `bundles`, applied when the device is made.
+- **And, found while measuring:** `OscQueryServer::publishChanges` asks who listens to a changed value
+  before it encodes it; a further message's rows are read off its node at GO (the schema's `Reader`),
+  not through its address.
+
+**M82** (`blackbox.big-cue`, this laptop, three Release runs): the GO of the 7,500-message cue leaves no
+lateness note at all - under a tick; its 203 bundles leave over 178-181 ms, the ten ticks twenty a tick
+makes; the capture of 203 chunks in one tick costs the tick after it 80-89 ms, once, while the new cue's
+37,500 rows are made and published. The author's session, on 0.1.1: the capture 14.3 s, the GO 2.2 s.
+MSVC Debug on the same laptop: 2.8-3.1 s at worst, where every tick already costs its budget.
+
+**Tests**, in C and fr_FR. DocumentTests - the index against the walk through every kind of edit; an
+identifier held twice. AuthoringTests - 7,500 pairs in 268 chunks in one tick, made and made again in
+place, no walk taken; `bundles` at creation only. OscCodecTests - the socket's receive buffer.
+NetworkCueTests - 1,000 messages at 20 a flush in order; bundled, never more than the limit's datagrams;
+a waiting address re-written keeps its place; a double Esc drops the rest; a 5,000-message cue (`none`,
+`sent`) over 250 ticks, playing until the last; Esc lets it finish, a double Esc ends it. TreeTests - the
+kept messages half equals a tree made from nothing through edits, undo, redo, a paste and a reopen; a tick
+with no edit makes no message's rows; the half-by-half diff equals the whole-tree walk's. ClientTests,
+RunPaneUiTests, ShowSettingsUiTests - the target's writes at the choice; 7,500 messages with under 80
+rows of components, followed through a scroll; the Per tick cell. `blackbox.big-cue` - a WFS-DIY-shaped
+processor declares with `bundles`, captures 7,500 pairs in 203 chunks back to back, and hears its cue
+fired: every message, in order, bundled, spread at twenty datagrams a tick, the cue `done` once the last
+had left.
 
 ### 88.4 Not built
 

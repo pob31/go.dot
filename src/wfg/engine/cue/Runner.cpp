@@ -13818,11 +13818,20 @@ namespace wfg::cue
             further one's at /godot/message - with the curves under it, each
             judged as the door judges it so a curve the show could not have
             saved is no curve here either. */
+        /*  A FURTHER MESSAGE READ OFF ITS OWN NODE (namespace draft §88): the
+            schema's defaults with no address to parse - five thousand of them
+            are read at a big cue's GO. The cue's own through its address. */
+        static const Reader schema;
+
         const auto add = [this, &targets] (const juce::ValueTree& message, const std::string& base)
         {
+            const auto further = message.hasType ("Message");
+
             CurveTarget target;
-            target.address = document.getAttribute (base + "address").value_or (std::string {});
-            target.base = osc::valuesFromAtoms (document.getAttribute (base + "value").value_or (std::string {}))
+            target.address = further ? schema.text (message, "message", "address")
+                                     : document.getAttribute (base + "address").value_or (std::string {});
+            target.base = osc::valuesFromAtoms (further ? schema.text (message, "message", "value")
+                                                       : document.getAttribute (base + "value").value_or (std::string {}))
                             .value_or (osc::Values {});
 
             for (const auto& child : message)
@@ -13986,15 +13995,16 @@ namespace wfg::cue
             if (! child.hasType ("Message"))
                 continue;
 
-            /*  READ AT ITS OWN ADDRESS, /godot/message/<id> - `textOf` reads a
-                cue's, and a message is not one. */
-            const auto base = "/godot/message/" + child[idProperty].toString().toStdString() + "/";
+            /*  READ OFF ITS OWN NODE, with the schema's defaults (namespace
+                draft §88): `textOf` reads a cue's, and a message is not one; and
+                through its address, as it was read until a cue of 5,300 messages
+                parsed 10,600 of them at its GO. */
+            static const Reader messageRows;
 
             OscJob::Further next;
-            next.address = document.getAttribute (base + "address").value_or (std::string {});
+            next.address = messageRows.text (child, "message", "address");
 
-            const auto values = osc::valuesFromAtoms (document.getAttribute (base + "value")
-                                                        .value_or (std::string {}));
+            const auto values = osc::valuesFromAtoms (messageRows.text (child, "message", "value"));
 
             if (! values.has_value())
             {
