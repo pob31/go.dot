@@ -79,6 +79,7 @@
 #include <juce_data_structures/juce_data_structures.h>
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
@@ -86,6 +87,8 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -1095,6 +1098,18 @@ namespace wfg::doc
         juce::ValueTree findById (std::string_view id) const;
         juce::ValueTree root() const noexcept { return showNode; }
 
+        /*  THE WALK `findById` WAS until 2026-10-18 (namespace draft §88, AVB):
+            depth-first from the root, the first node in document order that
+            carries the identifier. Kept for the test that holds the index to
+            it, and for the two cases the index hands back to it - an
+            identifier the show holds twice, and an entry an in-place change of
+            `id` has left behind. */
+        juce::ValueTree findByIdWalk (std::string_view id) const;
+
+        /*  How many times `findById` has had to walk since the document was
+            made: a test's count, nought on every path a show plays through. */
+        std::uint64_t idWalksTaken() const noexcept { return idWalks.load (std::memory_order_relaxed); }
+
         /*  Whether climbing from the DCA `start` through each one's `dca` -
             the DCA it sits inside - reaches `self`. The cycle test, asked by
             the write door before a DCA is put inside another and by
@@ -1449,11 +1464,31 @@ namespace wfg::doc
             touched, so it lives in the .cpp beside the schema lookup. */
         void valueTreePropertyChanged (juce::ValueTree& node, const juce::Identifier& property) override;
 
-        void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override    { bumpStructure(); }
-        void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { bumpStructure(); }
+        /*  AND OF THE IDENTIFIER INDEX (namespace draft §88, AVB): a node
+            added is indexed with everything under it, a node taken away is
+            forgotten with everything under it, and a redirect - the whole tree
+            replaced - is indexed again from the root. An undo, a redo, a paste
+            and a revert all arrive here as one of these. */
+        void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree& child) override
+        {
+            indexSubtree (child);
+            bumpStructure();
+        }
+
+        void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree& child, int) override
+        {
+            unindexSubtree (child);
+            bumpStructure();
+        }
+
         void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override     { bumpStructure(); }
         void valueTreeParentChanged (juce::ValueTree&) override                   { bumpStructure(); }
-        void valueTreeRedirected (juce::ValueTree&) override                      { bumpStructure(); }
+
+        void valueTreeRedirected (juce::ValueTree&) override
+        {
+            rebuildIdIndex();
+            bumpStructure();
+        }
 
         void bumpStructure() noexcept
         {
@@ -1463,6 +1498,28 @@ namespace wfg::doc
 
         juce::ValueTree showNode;
         IdRegistry registry;
+
+        /*  EVERY IDENTIFIER IN THE SHOW AND THE NODE CARRYING IT (namespace
+            draft §88, AVB) - the "cache invalidated in one place" `findById`'s
+            comment asked for once the walk showed up in a profile, which it did:
+            a GO of a cue of 5,300 messages read each message by its address,
+            four walks a message, each past every message before it.
+
+            Kept by the listener above and nowhere else, so no door has a second
+            map to keep right. A miss is believed - the index holds every node
+            the tree holds - and a hit is checked against the node before it is
+            given out: still in this show, still carrying that identifier. An
+            identifier two nodes carry (a hand-edited file) is answered by the
+            walk, which picks the first in document order as it always did. */
+        std::unordered_map<std::string, juce::ValueTree> byId;
+        std::unordered_set<std::string> heldTwice;
+        mutable std::atomic<std::uint64_t> idWalks { 0 };
+
+        void indexNode (const juce::ValueTree& node);
+        void indexSubtree (const juce::ValueTree& node);
+        void unindexSubtree (const juce::ValueTree& node);
+        void rebuildIdIndex();
+        bool isInShow (const juce::ValueTree& node) const;
 
         /** The last fragment `copyToClipboard` made; engine state, never saved. */
         std::string clipboard;

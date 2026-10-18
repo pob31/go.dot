@@ -772,6 +772,155 @@ TEST_CASE ("document: an identifier supplied twice is refused")
 }
 
 //==============================================================================
+/*  THE INDEX BEHIND findById (namespace draft §88, AVB) answers what the walk it
+    replaced answers, for every identifier in the show and for one that is not,
+    after every kind of edit that adds, takes away or moves a node - an undo, a
+    redo, a paste and a whole show taken over included - and never walks to do it. */
+namespace
+{
+    void everyIdentifierIn (const juce::ValueTree& node, std::vector<std::string>& out)
+    {
+        if (node.hasProperty ("id"))
+            out.push_back (node["id"].toString().toStdString());
+
+        for (const auto& child : node)
+            everyIdentifierIn (child, out);
+    }
+
+    void indexAgreesWithTheWalk (const ShowDocument& document)
+    {
+        std::vector<std::string> ids;
+        everyIdentifierIn (document.root(), ids);
+        REQUIRE (! ids.empty());
+
+        for (const auto& id : ids)
+        {
+            INFO (id);
+            CHECK (document.findById (id).isValid());
+            CHECK (document.findById (id) == document.findByIdWalk (id));
+        }
+
+        CHECK_FALSE (document.findById ("ZZZZZZZZ").isValid());
+    }
+}
+
+TEST_CASE ("document: findById answers from its index what the walk answers, through every edit (§88)")
+{
+    ShowDocument document;
+    std::int64_t tick = 0;
+
+    const auto step = [&document, &tick] (const char* name)
+    {
+        tick += 100;
+        document.beginTransaction (name, tick, "test", {});
+    };
+
+    step ("list.create");
+    const auto list = document.createList ("Main");
+    REQUIRE (list.ok);
+
+    step ("cue.create");
+    const auto group = document.createCue (list.id, 0, "group", "Act one");
+    REQUIRE (group.ok);
+
+    step ("cue.create");
+    const auto osc = document.createCue (group.id, 0, "osc", "Snapshot", {},
+                                         { { "address", "/wfs/input/1/positionY" }, { "value", "f:0.25" } });
+    REQUIRE (osc.ok);
+
+    std::vector<std::string> messages;
+
+    for (int n = 0; n < 200; ++n)
+    {
+        step ("message.create");
+        const auto made = document.createMessage (osc.id, "/wfs/input/" + std::to_string (n + 1) + "/positionX",
+                                                  "f:0.5");
+        REQUIRE (made.ok);
+        messages.push_back (made.id);
+    }
+
+    step ("curve.create");
+    REQUIRE (document.createCurve (messages[7], 0).ok);
+
+    step ("cue.create");
+    const auto memo = document.createCue (list.id, 1, "memo", "Walk-in");
+    REQUIRE (memo.ok);
+
+    indexAgreesWithTheWalk (document);
+
+    //  Moved out of the group and back; one message taken away.
+    step ("object.move");
+    REQUIRE (document.move (osc.id, list.id, 0).ok);
+    indexAgreesWithTheWalk (document);
+
+    step ("object.delete");
+    REQUIRE (document.remove (messages[3]).ok);
+    CHECK_FALSE (document.findById (messages[3]).isValid());
+    indexAgreesWithTheWalk (document);
+
+    //  The group and all it holds taken away, then given back by an undo and taken again by a redo.
+    step ("object.delete");
+    REQUIRE (document.remove (group.id).ok);
+    CHECK_FALSE (document.findById (group.id).isValid());
+
+    REQUIRE (document.undo (UndoDomain::document).has_value());
+    CHECK (document.findById (group.id).isValid());
+    indexAgreesWithTheWalk (document);
+
+    REQUIRE (document.redo (UndoDomain::document).has_value());
+    CHECK_FALSE (document.findById (group.id).isValid());
+
+    //  The message taken away earlier comes back with two undos.
+    REQUIRE (document.undo (UndoDomain::document).has_value());
+    REQUIRE (document.undo (UndoDomain::document).has_value());
+    CHECK (document.findById (messages[3]).isValid());
+    indexAgreesWithTheWalk (document);
+
+    //  A paste brings the cue and its messages in again under new identifiers.
+    step ("document.paste");
+    const auto pasted = document.paste (list.id, 2, document.fragmentOf ({ osc.id }), {});
+    REQUIRE (pasted.ok);
+    indexAgreesWithTheWalk (document);
+
+    //  And a whole show taken over, as a load and a revert do.
+    ShowDocument reopened;
+    REQUIRE (CanonicalXml::read (CanonicalXml::write (document), reopened).ok);
+    indexAgreesWithTheWalk (reopened);
+
+    CHECK (document.idWalksTaken() == 0);
+    CHECK (reopened.idWalksTaken() == 0);
+}
+
+TEST_CASE ("document: an identifier held twice is answered by the walk, first in document order (§88)")
+{
+    /*  A hand-edited file can carry one identifier on two nodes; the walk always
+        answered with the first in document order, and so does the index, by
+        handing that identifier back to it. */
+    ShowDocument document;
+
+    const auto list = document.createList ("Main");
+    const auto first = document.createCue (list.id, 0, "memo", "First");
+    REQUIRE (first.ok);
+
+    auto root = document.root().createCopy();
+    auto copy = root.getChildWithName ("Lists").getChild (0).getChild (0).createCopy();
+    copy.setProperty ("name", "Second", nullptr);
+    root.getChildWithName ("Lists").getChild (0).appendChild (copy, nullptr);
+
+    document.adopt (root, IdRegistry::withSystemEntropy());
+
+    const auto found = document.findById (first.id);
+    REQUIRE (found.isValid());
+    CHECK (found["name"].toString() == "First");
+    CHECK (found == document.findByIdWalk (first.id));
+    CHECK (document.idWalksTaken() > 0);
+
+    //  The first taken away, the second is the one left.
+    document.root().getChildWithName ("Lists").getChild (0).removeChild (found, nullptr);
+    CHECK (document.findById (first.id)["name"].toString() == "Second");
+}
+
+//==============================================================================
 /*  AN INDEX IS A MEMBER POSITION, NOT A CHILD POSITION.
 
     `object.move <id> <parent> <index>` and `cue.create <parent> <index> <kind>

@@ -768,6 +768,7 @@ namespace wfg::doc
             three changes to a document nobody has opened yet. A fresh document
             is at revision 1 and stays there until somebody writes something. */
         showNode.addListener (this);
+        rebuildIdIndex();
     }
 
     EditResult ShowDocument::configureAudio (const audio::AudioSettings& settings)
@@ -818,7 +819,13 @@ namespace wfg::doc
         engineStepPending = false;
         keeping = nullptr;
 
+        //  The index is about the tree, which has just changed hands (§88, AVB).
+        other.byId.clear();
+        other.heldTwice.clear();
+        idWalks.store (other.idWalks.load (std::memory_order_relaxed), std::memory_order_relaxed);
+
         showNode.addListener (this);
+        rebuildIdIndex();
         return *this;
     }
 
@@ -899,6 +906,9 @@ namespace wfg::doc
 
         showNode.addListener (this);
 
+        //  Every identifier of the show just taken over (namespace draft §88, AVB).
+        rebuildIdIndex();
+
         /*  A load is the largest change there is - to the show half as much as
             to the whole, which is why a verb that has just opened a bundle
             stamps its session AFTER the load rather than before it. */
@@ -943,13 +953,117 @@ namespace wfg::doc
         if (id.empty())
             return {};
 
+        /*  FROM THE INDEX (namespace draft §88, AVB). The walk below was linear
+            "and deliberately so: a show holds thousands of objects, not
+            millions", with the fix named for when it showed up in a profile -
+            "a cache invalidated in one place, not a second map maintained in
+            five". It showed up: a show holds thousands of objects, and an OSC
+            cue's messages are read one by one by address, so a cue of 5,300
+            messages walked the show 21,000 times at its GO. The one place is
+            the document's own listener. */
+        const std::string key { id };
+
+        if (heldTwice.contains (key))
+        {
+            idWalks.fetch_add (1, std::memory_order_relaxed);
+            return findByIdWalk (id);
+        }
+
+        const auto found = byId.find (key);
+
+        if (found == byId.end())
+            return {};
+
+        if (found->second[idProperty].toString().toStdString() == key && isInShow (found->second))
+            return found->second;
+
+        /*  An entry an in-place change of `id` left behind: the walk says what
+            holds it now. Nothing in the show changes an identifier where it
+            stands, so this is the safety and not the path. */
+        idWalks.fetch_add (1, std::memory_order_relaxed);
+        return findByIdWalk (id);
+    }
+
+    bool ShowDocument::isInShow (const juce::ValueTree& node) const
+    {
+        auto top = node;
+
+        while (top.getParent().isValid())
+            top = top.getParent();
+
+        return top == showNode;
+    }
+
+    void ShowDocument::indexNode (const juce::ValueTree& node)
+    {
+        if (! node.hasProperty (idProperty))
+            return;
+
+        const auto key = node[idProperty].toString().toStdString();
+
+        if (key.empty())
+            return;
+
+        const auto [entry, made] = byId.try_emplace (key, node);
+
+        if (made || entry->second == node)
+            return;
+
+        /*  TWO NODES, ONE IDENTIFIER: the one already held is still the show's
+            and still carries it, so the walk decides between them from now
+            on. Otherwise the held one is a leftover and this node takes its
+            place. */
+        if (entry->second[idProperty].toString().toStdString() == key && isInShow (entry->second))
+            heldTwice.insert (key);
+        else
+            entry->second = node;
+    }
+
+    void ShowDocument::indexSubtree (const juce::ValueTree& node)
+    {
+        indexNode (node);
+
+        for (const auto& child : node)
+            indexSubtree (child);
+    }
+
+    void ShowDocument::unindexSubtree (const juce::ValueTree& node)
+    {
+        if (node.hasProperty (idProperty))
+        {
+            const auto key = node[idProperty].toString().toStdString();
+
+            if (const auto found = byId.find (key); found != byId.end() && found->second == node)
+            {
+                byId.erase (found);
+
+                /*  The other node that carried it, if the show had two, is the
+                    one the index holds from now on. */
+                if (heldTwice.contains (key))
+                    if (const auto other = findByIdWalk (key); other.isValid())
+                        byId.emplace (key, other);
+            }
+        }
+
+        for (const auto& child : node)
+            unindexSubtree (child);
+    }
+
+    void ShowDocument::rebuildIdIndex()
+    {
+        byId.clear();
+        heldTwice.clear();
+        indexSubtree (showNode);
+    }
+
+    juce::ValueTree ShowDocument::findByIdWalk (std::string_view id) const
+    {
+        if (id.empty())
+            return {};
+
         const juce::String wanted { juce::String (std::string (id)) };
 
-        /*  Depth-first over the whole tree. Linear, and deliberately so: a show
-            holds thousands of objects, not millions, and an index would be a
-            second source of truth to keep correct across every structural edit.
-            If this ever shows up in a profile, the fix is a cache invalidated in
-            one place, not a second map maintained in five. */
+        /*  Depth-first over the whole tree, the first in document order. */
         struct Search
         {
             static juce::ValueTree find (const juce::ValueTree& node, const juce::String& target)
