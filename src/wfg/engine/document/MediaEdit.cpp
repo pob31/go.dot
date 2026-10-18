@@ -54,6 +54,7 @@ namespace wfg::doc
         section.fadeInCurve = static_cast<double> (node.getProperty ("fadeInCurve", 0.0));
         section.fadeOutCurve = static_cast<double> (node.getProperty ("fadeOutCurve", 0.0));
         section.gap = static_cast<double> (node.getProperty ("gap", 0.0));
+        section.under = static_cast<double> (node.getProperty ("under", 0.0));
         return section;
     }
 

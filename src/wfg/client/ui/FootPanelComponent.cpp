@@ -437,6 +437,7 @@ namespace wfg::client::ui
                 editing.removeSection = actions.removeSection;
                 editing.edgeSection = actions.edgeSection;
                 editing.placeSection = actions.placeSection;
+                editing.slideSection = actions.slideSection;
                 editing.fadeSection = actions.fadeSection;
                 editing.curveSection = actions.curveSection;
                 editing.splitSpan = actions.splitSpan;

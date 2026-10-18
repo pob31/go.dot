@@ -2179,6 +2179,19 @@ the author tags.
 **Done when:** every line of the three menus does what §81.1 says, the tests of §81.5 pass in C and
 fr_FR, the strict build is green, and CI is green; the menus and the markers are the author's to see.
 
+### A section slid beneath the one before; the monitor beside the outputs (2026-10-18)
+
+The author, on the waveform's sections: a drag left slides a section beneath the one before, shortening
+the cue, and a drag right pushes the sections after it on - namespace draft §82, AUD-AUE his (both my
+recommended options), AUF mine: a new row `section/under` and a new verb `section.slide`. And "When the
+video monitor is on, it steals the picture from the canvas output" - §83, AUG-AUH mine: the monitor's
+pictures drawn on a thread of their own, a preview movie never black for a late playhead. And §84,
+AUI mine: a drag inside a nested group shows the footers of the groups around it too. One stage each;
+for 0.1.2, no tag.
+
+**Done when:** a slide does what §82.1 says and replays; the renderer's ticks keep coming while the
+monitor draws (§83.3); the tests pass in C and fr_FR, the strict build is green, and CI is green.
+
 ---
 
 ## Cross-cutting, every phase

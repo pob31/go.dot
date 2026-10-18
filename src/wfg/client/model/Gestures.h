@@ -288,6 +288,9 @@ namespace wfg::client::gesture
     Event sectionRemove (const std::string& sectionId, bool leaveGap = false);
     Event sectionEdge (const std::string& sectionId, bool inSide, double seconds);
     Event sectionPlace (const std::string& sectionId, double seconds);
+
+    /** `section.slide`: a section moved by seconds, everything after it with it, beneath the one before (§82). */
+    Event sectionSlide (const std::string& sectionId, double seconds);
     Event sectionFade (const std::string& sectionId, bool inSide, double seconds, bool alone);
     Event sectionCurve (const std::string& sectionId, bool inSide, double curve, bool alone);
     Event sectionSplitSpan (const std::string& cueId, double from, double to);

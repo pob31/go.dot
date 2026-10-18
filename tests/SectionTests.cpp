@@ -45,6 +45,7 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <limits>
 
 using namespace wfg;
 
@@ -1437,6 +1438,65 @@ TEST_CASE ("section.place: a section slid along the timeline, its material and i
 
     //  One undo puts it back.
     REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
+}
+
+TEST_CASE ("section.slide: to the right silence opens and what follows is pushed on; to the left it goes beneath the one before, kept, and comes out again (§82)")
+{
+    /*  The author, 2026-10-18: "When moving an object left ... it should slide
+        beneath the previous one, shortening the whole clip ... it refuses to
+        move if there's another segment to its right. In this case the left
+        segment pushes back the right following segments." */
+    EditRig rig;
+    rig.split (10.0);
+    rig.split (20.0);
+    const auto ids = rig.ids();     // the intro 0-10, the verse 10-20, the chorus 20-30
+    const auto length = [&rig] { return doc::editedLength (rig.document.sectionsOf (rig.document.findById (rig.cueId))); };
+    const auto at = [&rig, &ids] (std::size_t k, const char* row) { return rig.seconds ("/godot/section/" + ids[k] + "/" + row); };
+
+    //  A point on the chorus's material.
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.cueId + "/levelLane", "25 0 28 -10").ok);
+
+    //  THE VERSE TWO SECONDS LATER: silence opens before it, the chorus and its points are pushed on.
+    CHECK (rig.apply ("section.slide", { osc::Value::string (ids[1]), osc::Value::float64 (2.0) }) == 1u);
+    CHECK (at (1, "gap") == doctest::Approx (2.0));
+    CHECK (at (2, "gap") == doctest::Approx (0.0));
+    CHECK (length() == doctest::Approx (32.0));
+    CHECK (rig.lane() == "27 0 30 -10");
+
+    //  FIVE BACK: the silence closes, then three seconds go BENEATH the intro - kept, not heard, the cue shorter.
+    REQUIRE (rig.document.slideSection (ids[1], -5.0).ok);
+    CHECK (at (1, "gap") == doctest::Approx (0.0));
+    CHECK (at (1, "under") == doctest::Approx (3.0));
+    CHECK (at (1, "in") == doctest::Approx (13.0));
+    CHECK (at (1, "out") == doctest::Approx (20.0));
+    CHECK (length() == doctest::Approx (27.0));
+    CHECK (rig.lane() == "22 0 25 -10");
+    CHECK (doc::isJoin (rig.document.sectionsOf (rig.document.findById (rig.cueId)), 1));
+
+    //  BACK THREE: the covered part comes out first, and no silence opens.
+    REQUIRE (rig.document.slideSection (ids[1], 3.0).ok);
+    CHECK (at (1, "under") == doctest::Approx (0.0));
+    CHECK (at (1, "in") == doctest::Approx (10.0));
+    CHECK (at (1, "gap") == doctest::Approx (0.0));
+    CHECK (length() == doctest::Approx (30.0));
+    CHECK (rig.lane() == "25 0 28 -10");
+
+    //  As far left as it goes, a hundredth of it is still heard.
+    REQUIRE (rig.document.slideSection (ids[1], -50.0).ok);
+    CHECK (at (1, "under") == doctest::Approx (9.99));
+    CHECK (at (1, "in") == doctest::Approx (19.99));
+    CHECK (length() == doctest::Approx (20.01));
+
+    //  The first slides beneath the cue's start the same way; nothing is refused but a number that is none.
+    REQUIRE (rig.document.slideSection (ids[0], -4.0).ok);
+    CHECK (at (0, "under") == doctest::Approx (4.0));
+    CHECK (at (0, "in") == doctest::Approx (4.0));
+    CHECK (rig.document.slideSection (ids[0], std::numeric_limits<double>::quiet_NaN()).reason == "bad-value");
+
+    //  One undo takes one slide back.
+    REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
+    CHECK (std::max (0.0, at (0, "under")) == doctest::Approx (0.0));    // gone, or nought
+    CHECK (at (0, "in") == doctest::Approx (0.0));
 }
 
 TEST_CASE ("section.place: a movie's section lands on its frame grid, the rate written back, and its sound's copy slides with it")

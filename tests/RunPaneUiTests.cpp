@@ -406,6 +406,96 @@ TEST_CASE ("cue list: a drag anywhere inside a group keeps its footer's band to 
     CHECK (drawn.getNumRows() == plain);
 }
 
+TEST_CASE ("cue list: a drag inside a nested group shows the footers of the groups around it too, and one dropped on an outer footer goes there (§84)")
+{
+    /*  The author, 2026-10-18: "Moving a cue over a nested group should show
+        the outer groups' footers too. Sometimes it is hard to reach the footer
+        of an outer group when the last item is itself a group." An act whose
+        last member is a scene, and a cue after both. */
+    wfg::doc::ShowDocument document;
+    const auto list = document.createList ("Main");
+    REQUIRE (list.ok);
+    const auto act = document.createCue (list.id, 0, "group", "Act").id;
+    REQUIRE (document.createCue (act, 0, "memo", "One").ok);
+    const auto scene = document.createCue (act, 1, "group", "Scene").id;
+    REQUIRE (document.createCue (scene, 0, "memo", "Two").ok);
+    const auto last = document.createCue (scene, 1, "memo", "Three").id;
+    const auto after = document.createCue (list.id, 1, "memo", "After").id;
+    REQUIRE (! after.empty());
+
+    wfg::Engine engine;
+    wfg::cue::RunTable runs;
+    wfg::tree::MountTable mounts;
+    wfg::tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
+    parameters.markStale();
+
+    wfg::tree::EngineState state;
+    const auto snapshot = parameters.publish (0, state);
+    REQUIRE (snapshot != nullptr);
+
+    model::ShowModel show;
+    REQUIRE (show.refresh (*snapshot, list.id));
+
+    const auto indexOf = [&show] (const std::string& id)
+    {
+        for (std::size_t at = 0; at < show.rows().size(); ++at)
+            if (show.rows()[at].id == id)
+                return static_cast<int> (at);
+
+        return -1;
+    };
+
+    const auto lastRow = indexOf (last);
+    const auto afterRow = indexOf (after);
+    REQUIRE (lastRow > 0);
+    REQUIRE (afterRow == lastRow + 1);
+
+    std::string footerCue, footerGroup;
+    ui::CueListComponent::Actions actions;
+    actions.moveToFooter = [&] (const std::string& cueId, const std::string& group) { footerCue = cueId; footerGroup = group; };
+
+    const model::Theme theme;
+    ui::CueListComponent cues (theme, actions);
+    cues.setSize (900, 600);
+    cues.show (show, {}, {});
+
+    juce::ListBox* box = nullptr;
+
+    for (auto* child : cues.getChildren())
+        if (auto* found = dynamic_cast<juce::ListBox*> (child))
+            box = found;
+
+    REQUIRE (box != nullptr);
+    REQUIRE (box->getListBoxModel() != nullptr);
+
+    auto& drawn = *box->getListBoxModel();
+    auto& target = static_cast<juce::DragAndDropTarget&> (cues);
+    const auto plain = drawn.getNumRows();
+
+    const auto over = [&] (int row)
+    {
+        return juce::DragAndDropTarget::SourceDetails (juce::var (juce::String (after)), nullptr,
+                                                       juce::Point<int> (300, box->getY() + row * box->getRowHeight()
+                                                                                + box->getRowHeight() / 2));
+    };
+
+    //  On the scene's last cue: the scene's footer and the act's, after it - two lines, below the hand.
+    target.itemDragEnter (over (lastRow));
+    CHECK (drawn.getNumRows() == plain + 2);
+
+    //  Down past the scene's footer onto the act's: both stay - the hand is still inside the act.
+    target.itemDragMove (over (lastRow + 1));
+    CHECK (drawn.getNumRows() == plain + 2);
+    target.itemDragMove (over (lastRow + 2));
+    CHECK (drawn.getNumRows() == plain + 2);
+
+    //  And let go there: into the ACT's footer.
+    target.itemDropped (over (lastRow + 2));
+    CHECK (footerCue == after);
+    CHECK (footerGroup == act);
+    CHECK (drawn.getNumRows() == plain);
+}
+
 TEST_CASE ("cue list: a cue that needs something missing wears the warning in the readiness cell, and its word after the name (§64)")
 {
     /*  The author, 2026-10-15: "when a cue is missing something ... mark the
@@ -7195,14 +7285,15 @@ TEST_CASE ("waveform: a sound's sections row - the blocks, a pick, a drag into a
     CHECK (splitCue.empty());
     CHECK (said.contains ("already a cut"));
 
-    /*  The chorus carried before the intro from the LOWER HALF of the bar: one
-        move, on release (the author, 2026-10-17: "The lower half of the
-        waveform should drag"). Away from its middle, where its volume is held. */
+    /*  The chorus carried before the intro from the LOWER HALF of the bar with
+        Ctrl/Cmd: one move, on release (§82, AUE - a plain drag slides). Away
+        from its middle, where its volume is held. */
     const auto lowerY = static_cast<float> (editor.barBounds().getBottom() - editor.barBounds().getHeight() / 4);
-    editor.mouseDown (mouse ({ xOf (22.0), lowerY }, 1, false, left));
-    editor.mouseDrag (mouse ({ xOf (12.0), lowerY }, 1, true, left));
-    editor.mouseDrag (mouse ({ xOf (1.0), lowerY }, 1, true, left));
-    editor.mouseUp (mouse ({ xOf (1.0), lowerY }, 1, true, left));
+    const juce::ModifierKeys leftCommand { juce::ModifierKeys::leftButtonModifier | juce::ModifierKeys::commandModifier };
+    editor.mouseDown (mouse ({ xOf (22.0), lowerY }, 1, false, leftCommand));
+    editor.mouseDrag (mouse ({ xOf (12.0), lowerY }, 1, true, leftCommand));
+    editor.mouseDrag (mouse ({ xOf (1.0), lowerY }, 1, true, leftCommand));
+    editor.mouseUp (mouse ({ xOf (1.0), lowerY }, 1, true, leftCommand));
     CHECK (moved == "SEC00003");
     CHECK (movedTo == 0);
 
@@ -7471,6 +7562,10 @@ TEST_CASE ("waveform: the top half selects time and the lower half a section; x 
     int movedTo = -1;
     actions.moveSection = [&] (const std::string& id, int index) { movedId = id; movedTo = index; };
 
+    std::string slidId;
+    double slidBy = 0.0;
+    actions.slideSection = [&] (const std::string& id, double seconds) { slidId = id; slidBy = seconds; };
+
     ui::WaveformEditorComponent editor (model::Theme {}, actions);
     editor.setRightColumn (360, 12);
     editor.setSize (1000, 260);
@@ -7539,31 +7634,43 @@ TEST_CASE ("waveform: the top half selects time and the lower half a section; x 
     CHECK (editor.keyPressed (juce::KeyPress ('x')));
     CHECK (splitAt == doctest::Approx (23.0).epsilon (0.01));
 
-    /*  A DRAG IN THE LOWER HALF SLIDES (§55.13): the last section four
-        seconds later, one section.place on release; the first, with no
-        silence beside it, stays where it is and nothing is sent. */
+    /*  A DRAG IN THE LOWER HALF SLIDES, WHAT FOLLOWS WITH IT (the author,
+        2026-10-18; §82, AUD): the last section four seconds later, one
+        section.slide on release; the first three seconds later, the two after
+        it pushed on; the middle one three seconds earlier, beneath the first. */
     editor.mouseDown (mouse ({ xOf (27.0), lowY }, false, left));
     editor.mouseDrag (mouse ({ xOf (29.0), lowY }, true, left));
     editor.mouseDrag (mouse ({ xOf (31.0), lowY }, true, left));
-    CHECK (said.contains ("carried past a neighbour"));
+    CHECK (said.contains ("what follows with it"));
     editor.mouseUp (mouse ({ xOf (31.0), lowY }, true, left));
-    CHECK (placedId == "SEC00002");
-    CHECK (placedAt == doctest::Approx (24.0).epsilon (0.01));
+    CHECK (placedId.empty());
+    CHECK (slidId == "SEC00002");
+    CHECK (slidBy == doctest::Approx (4.0).epsilon (0.01));
 
-    placedId.clear();
     editor.mouseDown (mouse ({ xOf (3.0), lowY }, false, left));
     editor.mouseDrag (mouse ({ xOf (6.0), lowY }, true, left));
     editor.mouseUp (mouse ({ xOf (6.0), lowY }, true, left));
-    CHECK (placedId.empty());
+    CHECK (slidId == "SEC00001");
+    CHECK (slidBy == doctest::Approx (3.0).epsilon (0.01));
 
-    /*  AND CARRIED PAST ITS NEIGHBOUR'S MIDDLE IT TAKES THAT PLACE (2026-10-17):
-        the first, with no room beside it, carried to the end is one move. */
-    editor.mouseDown (mouse ({ xOf (3.0), lowY }, false, left));
-    editor.mouseDrag (mouse ({ xOf (20.0), lowY }, true, left));
-    editor.mouseDrag (mouse ({ xOf (29.0), lowY }, true, left));
+    editor.mouseDown (mouse ({ xOf (16.0), lowY }, false, left));
+    editor.mouseDrag (mouse ({ xOf (14.0), lowY }, true, left));
+    editor.mouseDrag (mouse ({ xOf (13.0), lowY }, true, left));
+    CHECK (said.contains ("beneath section 1"));
+    editor.mouseUp (mouse ({ xOf (13.0), lowY }, true, left));
+    CHECK (slidId == "SEC00003");
+    CHECK (slidBy == doctest::Approx (-3.0).epsilon (0.01));
+
+    /*  AND WITH CTRL/CMD, CARRIED PAST ITS NEIGHBOUR'S MIDDLE IT TAKES THAT
+        PLACE (§82, AUE): the first carried to the end is one move. */
+    const juce::ModifierKeys leftCommand { juce::ModifierKeys::leftButtonModifier | juce::ModifierKeys::commandModifier };
+    slidId.clear();
+    editor.mouseDown (mouse ({ xOf (3.0), lowY }, false, leftCommand));
+    editor.mouseDrag (mouse ({ xOf (20.0), lowY }, true, leftCommand));
+    editor.mouseDrag (mouse ({ xOf (29.0), lowY }, true, leftCommand));
     CHECK (said.contains ("to place 3 of 3"));
-    editor.mouseUp (mouse ({ xOf (29.0), lowY }, true, left));
-    CHECK (placedId.empty());
+    editor.mouseUp (mouse ({ xOf (29.0), lowY }, true, leftCommand));
+    CHECK (slidId.empty());
     CHECK (movedId == "SEC00001");
     CHECK (movedTo == 2);
 

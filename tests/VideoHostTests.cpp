@@ -1684,6 +1684,113 @@ TEST_CASE ("video host: a HAP movie read by a renderer with no window, its frame
     folder.deleteRecursively();
 }
 
+TEST_CASE ("video host: the monitor's pictures, drawn while a movie plays and its tile is asked for every pass, hold up nothing else the renderer does (§83)")
+{
+    /*  The author, 2026-10-18: "When the video monitor is on, it steals the
+        picture from the canvas output." The monitor's previews and the picked
+        cue's tile were drawn a pixel at a time on the renderer's own thread -
+        tens of milliseconds a tenth of a second, the tile asked for again on
+        every pass while its cue plays - and held up the ticks that tell the
+        stores where each playhead is. Drawn on a thread of their own, the
+        probe, written on every one of those ticks, keeps coming. */
+    using namespace wfg::testing::hapmovie;
+
+    juce::TemporaryFile work;
+    const auto folder = work.getFile().getSiblingFile ("godot-video-monitor-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+    folder.createDirectory();
+
+    std::vector<Bytes> frames;
+    frames.push_back (section (0xAB, solidDxt1 (16, 8, 0xFF0000)));
+    frames.push_back (section (0xAB, solidDxt1 (16, 8, 0x0000FF)));
+    frames.push_back (section (0xAB, solidDxt1 (16, 8, 0x00FF00)));
+    const auto movie = writeMovie (folder, "three.mov", hapMovie (16, 8, frames, 1));
+
+    video::HostSpec spec;
+    spec.workFolder = folder.getFullPathName().toStdString();
+    spec.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName().toStdString();
+    spec.leadingArgs = { "video-render" };
+    spec.headless = true;
+
+    doc::ShowDocument document;
+    REQUIRE (doc::Bundle::open (videoBundle(), document).ok);
+
+    TestClock clock;
+
+    {
+        video::VideoHost host { spec };
+        host.configure (document);
+        REQUIRE (tickUntil (host, clock, [&host] { return host.readouts().renderer == "running"; }));
+
+        auto& r = *host.regionForTests();
+
+        video::LayerSpec layer;
+        layer.id = "RUN00001";
+        layer.canvas = "VD000011";
+        layer.order = 1;
+        layer.source = "movie";
+        layer.file = movie.getFullPathName().toStdString();
+
+        host.sink().show (layer);
+        host.sink().opacity ("RUN00001", { clock.now(), 1.0 });
+        host.sink().move ("RUN00001", video::Property::time, { clock.now(), 0.2 });
+
+        std::int64_t seen = -1;
+        REQUIRE (tickUntil (host, clock, [&] { return probeOf (r, 0, seen) == 0xFF0000u; }));
+
+        //  The monitor open, the cue's tile asked for on every pass, as the window asks while it plays.
+        host.setMonitoring (true);
+
+        const auto began = std::chrono::steady_clock::now();
+        auto lastChange = began;
+        auto lastTick = began - std::chrono::milliseconds (20);
+        std::int64_t lastSample = -1;
+        double worstGapMs = 0.0;
+        auto tiles = 0;
+
+        while (std::chrono::steady_clock::now() - began < std::chrono::seconds (3))
+        {
+            const auto now = std::chrono::steady_clock::now();
+
+            if (now - lastTick >= std::chrono::milliseconds (20))
+            {
+                lastTick = now;
+                host.showTile (layer, 0.2, 1.0);
+                host.tick (clock.now(), 48000);
+                ++tiles;
+            }
+
+            std::int64_t sample = -1;
+            probeOf (r, 0, sample);
+
+            if (sample != lastSample)
+            {
+                //  After the first second, once the monitor's drawing is under way.
+                if (lastSample >= 0 && now - began > std::chrono::seconds (1))
+                    worstGapMs = std::max (worstGapMs, std::chrono::duration<double, std::milli> (now - lastChange).count());
+
+                lastSample = sample;
+                lastChange = now;
+            }
+
+            std::this_thread::sleep_for (std::chrono::milliseconds (2));
+        }
+
+        //  The monitor did draw: its tile is there.
+        CHECK (host.cueTile().width > 0);
+        MESSAGE ("the probe's worst gap with the monitor drawing: " << worstGapMs << " ms over " << tiles << " tile requests");
+
+        /*  The renderer's ticks are 10 ms apart; a monitor drawn on them stalled
+            them for a tile's and the previews' time - well over a tenth of a
+            second in a debug build. */
+        CHECK (worstGapMs < 100.0);
+        CHECK (probeOf (r, 0, seen) == 0xFF0000u);
+
+        host.setMonitoring (false);
+    }
+
+    folder.deleteRecursively();
+}
+
 TEST_CASE ("video host: a HAP movie named to read ahead is opened and read from the second GO starts it at, beside one a layer plays")
 {
     using namespace wfg::testing::hapmovie;

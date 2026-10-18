@@ -86,6 +86,7 @@ namespace wfg::client::model
             else if (name == "fadeInCurve")  row.fadeInCurve = number (reading, 0.0);
             else if (name == "fadeOutCurve") row.fadeOutCurve = number (reading, 0.0);
             else if (name == "gap")          row.gap = number (reading, 0.0);
+            else if (name == "under")        row.under = number (reading, 0.0);
         }
 
         std::vector<SectionRow> out;
@@ -542,6 +543,37 @@ namespace wfg::client::model
         for (std::size_t at = 0; at < sections.size(); ++at)
             sections[at].index = static_cast<int> (at);
 
+        return sections;
+    }
+
+    std::vector<SectionRow> withSlide (std::vector<SectionRow> sections, std::size_t index, double seconds)
+    {
+        if (index >= sections.size() || ! std::isfinite (seconds))
+            return sections;
+
+        const auto starts = sectionStarts (sections);
+        const auto before = index == 0 ? 0.0 : starts[index - 1] + sections[index - 1].length();
+        auto& slid = sections[index];
+
+        //  The whole piece, its covered head and all - as the engine reads it.
+        const auto covered = std::clamp (std::isfinite (slid.under) ? slid.under : 0.0, 0.0, std::max (0.0, slid.in));
+        const auto wholeIn = slid.in - covered;
+        const auto wholeLength = slid.out - wholeIn;
+        const auto wholeStart = starts[index] - covered + seconds;
+
+        constexpr double leastHeard = 0.01;
+        auto under = std::clamp (before - wholeStart, 0.0, std::max (0.0, wholeLength - leastHeard));
+        auto gap = under > 0.0 ? 0.0 : wholeStart - before;
+
+        if (under < joinInstant)
+            under = 0.0;
+
+        if (gap < joinInstant)
+            gap = 0.0;
+
+        slid.in = wholeIn + under;
+        slid.under = under;
+        slid.gap = gap;
         return sections;
     }
 

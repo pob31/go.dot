@@ -3317,7 +3317,8 @@ namespace wfg::client::ui
             {
                 pickedSection = *under;
                 slidSection = *under;
-                slideFrom = slideValue = model::sectionStarts (reading.sections)[*under];
+                slideFrom = model::sectionStarts (reading.sections)[*under];
+                slideValue = 0.0;   // the seconds slid (§82), nought until it moves
                 slidePress = secondsAt (event.x);
                 slideMoved = false;
                 slideSlot = -1;
@@ -3448,6 +3449,36 @@ namespace wfg::client::ui
                 return;
 
             slideMoved = true;
+            const auto name = juce::String (static_cast<int> (slidSection) + 1);
+
+            /*  WITH CTRL/⌘, ANOTHER PLACE IN THE ORDER (the author, 2026-10-18;
+                namespace draft §82, AUE): past a neighbour's middle it takes that
+                place, as a plain drag did the evening before. */
+            if (event.mods.isCommandDown())
+            {
+                const auto bar = barArea();
+                slideSlot = model::dropSlotFor (reading.sections, view, bar.getWidth(), slidSection,
+                                                static_cast<double> (event.x - bar.getX()));
+                slideValue = 0.0;
+                slidePreview = slideSlot >= 0 ? model::withOrder (reading.sections, slidSection, slideSlot)
+                                              : reading.sections;
+                tell (slideSlot >= 0 ? "section " + name + " to place " + juce::String (slideSlot + 1) + " of "
+                                         + juce::String (static_cast<int> (reading.sections.size()))
+                                     : "section " + name + " - past a neighbour's middle it takes that place");
+                repaint();
+                return;
+            }
+
+            /*  A PLAIN DRAG SLIDES IT, EVERYTHING AFTER IT WITH IT (the author,
+                2026-10-18: "When moving an object left ... it should slide beneath
+                the previous one, shortening the whole clip ... the left segment
+                pushes back the right following segments"; namespace draft §82,
+                AUD): to the right silence opens before it; to the left the silence
+                closes, then it goes beneath the one before, which stays on top.
+                Snapped by its start or its end to what stays where it is - the
+                sections before it, the playhead, a movie's cuts, the markers -
+                unless Alt. */
+            slideSlot = -1;
             const auto length = reading.sections[slidSection].length();
             auto start = slideFrom + (secondsAt (event.x) - slidePress);
 
@@ -3456,12 +3487,11 @@ namespace wfg::client::ui
                 std::vector<double> targets { headSeconds() };
                 const auto starts = model::sectionStarts (reading.sections);
 
-                for (std::size_t k = 0; k < starts.size(); ++k)
-                    if (k != slidSection)
-                    {
-                        targets.push_back (starts[k]);
-                        targets.push_back (starts[k] + reading.sections[k].length());
-                    }
+                for (std::size_t k = 0; k < slidSection && k < starts.size(); ++k)
+                {
+                    targets.push_back (starts[k]);
+                    targets.push_back (starts[k] + reading.sections[k].length());
+                }
 
                 if (cutsSnap())
                     for (const auto& cut : cutsShown())
@@ -3479,29 +3509,15 @@ namespace wfg::client::ui
                     start = byEnd;
             }
 
-            /*  PAST A NEIGHBOUR'S MIDDLE IT TAKES THAT PLACE (the author,
-                2026-10-17: "The lower half of the waveform should drag (this is
-                the missing bit)"): a split leaves no room either side, and a
-                slide that stops at the neighbours moved nothing at all. */
-            const auto bar = barArea();
-            slideSlot = model::dropSlotFor (reading.sections, view, bar.getWidth(), slidSection,
-                                            static_cast<double> (event.x - bar.getX()));
+            slideValue = start - slideFrom;
+            slidePreview = model::withSlide (reading.sections, slidSection, slideValue);
 
-            if (slideSlot >= 0)
-            {
-                slidePreview = model::withOrder (reading.sections, slidSection, slideSlot);
-                tell ("section " + juce::String (static_cast<int> (slidSection) + 1) + " to place "
-                        + juce::String (slideSlot + 1) + " of " + juce::String (static_cast<int> (reading.sections.size())));
-                repaint();
-                return;
-            }
-
-            const auto limits = model::placeLimits (reading.sections, slidSection);
-            start = std::clamp (start, limits.first, limits.second);
-            slidePreview = model::withPlace (reading.sections, slidSection, start);
-            slideValue = model::sectionStarts (slidePreview)[slidSection];
-            tell ("section " + juce::String (static_cast<int> (slidSection) + 1) + " from " + clockText (slideValue)
-                    + " - carried past a neighbour, it takes that place");
+            const auto& shown = slidePreview[slidSection];
+            tell (shown.under > 0.0
+                    ? "section " + name + ": " + clockText (shown.under) + " of it beneath section "
+                        + juce::String (static_cast<int> (slidSection)) + ", the cue that much shorter"
+                    : "section " + name + " from " + clockText (model::sectionStarts (slidePreview)[slidSection])
+                        + ", what follows with it - Ctrl/Cmd to reorder");
             repaint();
             return;
         }
@@ -3829,8 +3845,8 @@ namespace wfg::client::ui
                     if (actions.moveSection != nullptr)
                         actions.moveSection (reading.sections[index].id, slideSlot);
                 }
-                else if (std::abs (slideValue - slideFrom) >= 0.0005 && actions.placeSection != nullptr)
-                    actions.placeSection (reading.sections[index].id, slideValue);
+                else if (std::abs (slideValue) >= 0.0005 && actions.slideSection != nullptr)
+                    actions.slideSection (reading.sections[index].id, slideValue);   // §82: by seconds, what follows with it
             }
 
             slideMoved = false;

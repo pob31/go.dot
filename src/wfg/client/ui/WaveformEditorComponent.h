@@ -87,6 +87,10 @@ namespace wfg::client::ui
 
             /** A section slid along the timeline from the lower half (§55.13). */
             std::function<void (const std::string& sectionId, double seconds)> placeSection;
+
+            /*  A SECTION SLID BY SECONDS, everything after it with it, beneath the
+                one before on the way left (namespace draft §82, AUD). */
+            std::function<void (const std::string& sectionId, double seconds)> slideSection;
             std::function<void (const std::string& sectionId, bool inSide, double seconds, bool alone)> fadeSection;
             std::function<void (const std::string& sectionId, bool inSide, double curve, bool alone)> curveSection;
             std::function<void (const std::string& cueId, double from, double to)> splitSpan;
@@ -459,11 +463,11 @@ namespace wfg::client::ui
         int selectPressX = 0;
         bool lowerPress = false;
 
-        /*  A SECTION SLID FROM THE LOWER HALF (§55.13): which, where it began,
-            the second the hand pressed at, where it would now begin, and the
-            edit so - drawn, waveform and all, until the one write on release.
-            Carried past a neighbour (2026-10-17), `slideSlot` is the place in
-            the order it would take, and -1 while it only slides. */
+        /*  A SECTION SLID FROM THE LOWER HALF (§55.13, §82): which, where it
+            began, the second the hand pressed at, the seconds it is slid by -
+            everything after it with it - and the edit so, drawn, waveform and
+            all, until the one write on release. With Ctrl/⌘ (§82, AUE),
+            `slideSlot` is the place in the order it would take, else -1. */
         std::size_t slidSection = static_cast<std::size_t> (-1);
         double slideFrom = 0.0, slidePress = 0.0, slideValue = 0.0;
         bool slideMoved = false;

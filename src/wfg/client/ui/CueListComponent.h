@@ -371,12 +371,23 @@ namespace wfg::client::ui
         std::string bandsFor;
         bool bandsWithHeader = false;
 
+        /*  `bandsFor` and every group it sits in, innermost first: each shows its
+            empty footer (namespace draft §84), and the bands stay while the hand
+            is anywhere inside the outermost. */
+        std::vector<std::string> bandsChain;
+
         /*  Grows `rows` the empty bands of `groupId` - its footer, and its
             header when `withHeader` - or takes them away again. */
         void showEmptyBands (const std::string& groupId, bool withHeader);
 
-        /** Whether drawn row `row` lies inside `bandsFor`: its title, what it holds, its bands. */
+        /** Whether drawn row `row` lies inside the outermost group of `bandsChain`: its title, what it holds, its bands. */
         bool insideBandsGroup (int row) const;
+
+        /*  The empty footers of `groupId` and every group it sits in, added to
+            what shows and to `bandsChain` (§84); a band's existence, and one made. */
+        void growFooters (const std::string& groupId);
+        bool hasBand (const std::string& groupOf, model::Section which) const;
+        static model::Row emptyBand (const std::string& groupOf, int depth, model::Section which, const char* word);
 
         /*  WHAT A DRAG IS DOING, re-asked while the hand holds still.
 

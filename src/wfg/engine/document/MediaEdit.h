@@ -63,6 +63,11 @@ namespace wfg::doc
         double fadeOutCurve = 0.0;
         double gap = 0.0;           // seconds of silence before it on the edited timeline
 
+        /*  Seconds of its head beneath the section before it (namespace draft
+            §82, AUD): not heard - `in` is where it is heard from - and kept so a
+            slide back brings it out. Nothing reads it but section.slide. */
+        double under = 0.0;
+
         double length() const noexcept { return out - in; }
     };
 

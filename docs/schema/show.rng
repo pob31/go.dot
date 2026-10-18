@@ -2249,6 +2249,14 @@
           </data>
         </attribute>
       </optional>
+      <optional>
+        <attribute name="under">
+          <a:documentation>How much of this section&apos;s head lies beneath the section before it, in seconds of the file (namespace draft 82, AUD). Slid left past where the one before ends, a section goes under it - the one before stays on top, the part covered is not heard, and its in is where it is heard from - and the whole cue is that much shorter. Kept so that a slide back to the right brings the covered part out again before any silence opens. Written by section.slide; nought for a section nothing covers.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
     </element>
   </define>
 

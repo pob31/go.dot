@@ -4357,6 +4357,61 @@ namespace wfg::doc
         });
     }
 
+    EditResult ShowDocument::slideSection (const std::string& sectionId, double seconds)
+    {
+        const auto [section, cue] = sectionAndCue (*this, sectionId);
+
+        if (auto refusal = refuseSectionEdit (cue))
+            return *refusal;
+
+        if (! std::isfinite (seconds))
+            return EditResult::failed (reason::badValue);
+
+        const auto sections = sectionsOf (cue);
+        const auto k = indexOfSection (sections, sectionId);
+
+        if (k >= sections.size())
+            return EditResult::failed (reason::unknownId);
+
+        const auto& slid = sections[k];
+        const auto starts = sectionStarts (sections);
+        const auto before = k == 0 ? 0.0 : starts[k - 1] + sections[k - 1].length();
+
+        /*  THE WHOLE PIECE, covered head and all: where it begins in the file
+            and on the timeline, and how long it is. Never more covered than
+            there is file before its in - an edge moved since may have left less. */
+        const auto covered = std::clamp (std::isfinite (slid.under) ? slid.under : 0.0, 0.0, std::max (0.0, slid.in));
+        const auto wholeIn = slid.in - covered;
+        const auto wholeLength = slid.out - wholeIn;
+        const auto wholeStart = starts[k] - covered + seconds;
+
+        //  Beneath the one before as far as it went - a hundredth of it, at least, still heard.
+        constexpr double leastHeard = 0.01;
+        auto under = std::clamp (before - wholeStart, 0.0, std::max (0.0, wholeLength - leastHeard));
+        auto gap = under > 0.0 ? 0.0 : wholeStart - before;
+
+        /*  UNDER A MILLISECOND IS NONE, either way: the section meets the one
+            before, and the two make a join. */
+        if (under < sameInstant)
+            under = 0.0;
+
+        if (gap < sameInstant)
+            gap = 0.0;
+
+        const auto base = "/godot/section/" + sectionId + "/";
+        const std::vector<std::pair<std::string, double>> writes {
+            { base + "in", wholeIn + under }, { base + "under", under }, { base + "gap", gap } };
+
+        return carrySectionEdit (cue, [this, writes, sectionId]
+        {
+            for (const auto& [address, value] : writes)
+                if (const auto written = setAttribute (address, osc::formatDouble (value)); ! written.ok)
+                    return written;
+
+            return EditResult::succeeded (sectionId);
+        });
+    }
+
     EditResult ShowDocument::setSectionGap (const std::string& sectionId, double gap)
     {
         const auto [section, cue] = sectionAndCue (*this, sectionId);

@@ -13828,6 +13828,36 @@ TEST_CASE ("client: a trim's words, the render's words, and every section gestur
     CHECK (gesture::sectionMove ("S1", 2).args[1].getInt32() == 2);
     CHECK (gesture::sectionRemove ("S1").command == "section.remove");
     CHECK (gesture::sectionClear ("C1").command == "section.clear");
+
+    //  A slide by seconds, what follows with it (§82); and its preview, the engine's own arithmetic.
+    CHECK (gesture::sectionSlide ("S1", -2.5).command == "section.slide");
+    CHECK (gesture::sectionSlide ("S1", -2.5).args[1].asDouble() == doctest::Approx (-2.5));
+    {
+        std::vector<model::SectionRow> sections (2);
+        sections[0].id = "A";
+        sections[0].in = 0.0;
+        sections[0].out = 10.0;
+        sections[1].id = "B";
+        sections[1].index = 1;
+        sections[1].in = 10.0;
+        sections[1].out = 20.0;
+
+        const auto pushed = model::withSlide (sections, 1, 2.0);
+        CHECK (pushed[1].gap == doctest::Approx (2.0));
+        CHECK (pushed[1].under == doctest::Approx (0.0));
+
+        const auto beneath = model::withSlide (sections, 1, -3.0);
+        CHECK (beneath[1].gap == doctest::Approx (0.0));
+        CHECK (beneath[1].under == doctest::Approx (3.0));
+        CHECK (beneath[1].in == doctest::Approx (13.0));
+        CHECK (model::editedLength (beneath) == doctest::Approx (17.0));
+
+        const auto back = model::withSlide (beneath, 1, 5.0);
+        CHECK (back[1].under == doctest::Approx (0.0));
+        CHECK (back[1].in == doctest::Approx (10.0));
+        CHECK (back[1].gap == doctest::Approx (2.0));
+    }
+
     CHECK (gesture::freezeEdit ("C1").command == "media.freeze");
     CHECK (gesture::unfreezeEdit ("C1").command == "media.unfreeze");
 }

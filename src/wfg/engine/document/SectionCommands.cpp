@@ -374,6 +374,36 @@ namespace wfg::doc
                         } });
 
         //----------------------------------------------------------------------
+        registry.add ({ "section.slide",
+                        "Slides a section by a number of seconds, everything after it with it (namespace draft"
+                        " §82, AUD): to the right silence opens before it and the sections after it are pushed"
+                        " on; to the left the silence before it closes, then it goes beneath the section"
+                        " before, which stays on top - the part covered is not heard, is kept, and comes out"
+                        " again when it slides back - and the cue is that much shorter. The lane points go with"
+                        " it. On a movie the seconds land on its frame grid, written back with the rate.",
+                        { { "section", 's', false }, { "seconds", 'd', false }, { "frameRate", 'd', true } },
+                        true,
+                        [&document, refusedMovieOf] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto sectionId = stringAt (args, 0);
+                            auto seconds = numberAt (args, 1);
+                            const auto movie = refusedMovieOf (sectionId, numberAt (args, 2));
+
+                            if (! movie.refusal.empty())
+                                return refusedMovie (movie);
+
+                            if (movie.movie)
+                                seconds = snappedToFrames (seconds, movie.fps);
+
+                            auto applied = withValue (args, 1, osc::Value::float64 (seconds));
+
+                            if (movie.movie)
+                                applied = withValue (std::move (applied), 2, osc::Value::float64 (movie.fps));
+
+                            return fromEdit (document.slideSection (sectionId, seconds), std::move (applied));
+                        } });
+
+        //----------------------------------------------------------------------
         registry.add ({ "section.fade",
                         "Sets how long a section fades in or out, in seconds (namespace draft 55.9, AED): its"
                         " partner across a join - the fade out of the section before, the fade in of the one"

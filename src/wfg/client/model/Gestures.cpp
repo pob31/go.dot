@@ -324,6 +324,11 @@ namespace wfg::client::gesture
         return { origin::window, "section.place", { osc::Value::string (sectionId), osc::Value::float64 (seconds) } };
     }
 
+    Event sectionSlide (const std::string& sectionId, double seconds)
+    {
+        return { origin::window, "section.slide", { osc::Value::string (sectionId), osc::Value::float64 (seconds) } };
+    }
+
     Event sectionFade (const std::string& sectionId, bool inSide, double seconds, bool alone)
     {
         return { origin::window, "section.fade",

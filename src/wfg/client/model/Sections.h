@@ -62,6 +62,7 @@ namespace wfg::client::model
         double fadeInCurve = 0.0; ///< -1..1
         double fadeOutCurve = 0.0;
         double gap = 0.0;         ///< seconds of silence before it
+        double under = 0.0;       ///< seconds of its head beneath the one before (§82), not heard
 
         double length() const noexcept { return out - in; }
     };
@@ -196,6 +197,14 @@ namespace wfg::client::model
         with section `index` at place `slot` among them, each keeping its gap,
         as the engine moves it. Out of range, the edit as it was. */
     std::vector<SectionRow> withOrder (std::vector<SectionRow>, std::size_t index, int slot);
+
+    /*  A SECTION SLID BY `seconds`, EVERYTHING AFTER IT WITH IT (the author,
+        2026-10-18; namespace draft §82, AUD), section.slide restated: silence
+        opening before it to the right; to the left its silence closing, then the
+        section going beneath the one before - its covered head in `under`, its
+        `in` where it is heard from - the covered part coming out first on the
+        way back; a hundredth of a second of it heard at least. */
+    std::vector<SectionRow> withSlide (std::vector<SectionRow>, std::size_t index, double seconds);
 
     /*  THE FADE UNDER THE POINTER, for the wheel (55.9): the section and side
         whose fade spans `seconds`, with `slack` seconds of grace either side

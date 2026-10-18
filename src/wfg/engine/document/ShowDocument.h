@@ -561,6 +561,15 @@ namespace wfg::doc
             taking. It stops at its neighbours: refused where it would cover one. */
         EditResult placeSection (const std::string& sectionId, double seconds);
 
+        /*  A SECTION SLID BY `seconds`, AND EVERYTHING AFTER IT WITH IT (the
+            author, 2026-10-18; namespace draft §82, AUD): to the right, silence
+            opens before it and the sections after it are pushed on; to the left,
+            the silence before it closes and then it goes BENEATH the one before,
+            which stays on top - the part covered not heard and kept (`under`), the
+            cue that much shorter. Back to the right, the covered part comes out
+            first. At least a hundredth of a second of it is heard. */
+        EditResult slideSection (const std::string& sectionId, double seconds);
+
         /*  A SELECTION OF TIME (55.9): the sections cut at both its ends, one
             step - an end on a cut or in silence passed over, none to cut
             refused; `ids` in are the identifiers to make them under (empty to

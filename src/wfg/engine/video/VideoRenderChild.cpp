@@ -49,9 +49,11 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <thread>
@@ -624,8 +626,17 @@ namespace wfg::video
                     auto& entry = held[path];
                     entry.frames[frame->index] = frame;
 
+                    /*  NEVER THE NEWEST FRAME AT OR BEFORE THE PLAYHEAD (2026-10-18;
+                        namespace draft §83): a playhead told late jumped past
+                        everything read, every frame went, and `frame` - a frame late
+                        rather than a black one - had none to give: the projector
+                        went black until the decoder caught up. */
+                    auto keep = entry.frames.upper_bound (current);
+                    keep = keep != entry.frames.begin() ? std::prev (keep) : entry.frames.end();
+
                     for (auto at = entry.frames.begin(); at != entry.frames.end();)
-                        at = at->first < current - 1 || at->first > current + 8 ? entry.frames.erase (at) : std::next (at);
+                        at = at != keep && (at->first < current - 1 || at->first > current + 8) ? entry.frames.erase (at)
+                                                                                                 : std::next (at);
                 }
 
                 return worked;
@@ -3652,6 +3663,40 @@ namespace wfg::video
         };
 
         //==============================================================================
+        /*  A THREAD THAT DOES ONE THING EACH TIME IT IS WOKEN, at a low priority:
+            the monitor's pictures (namespace draft §83), drawn off the thread that
+            tells the stores where every playhead is. */
+        class WakeThread final : public juce::Thread
+        {
+        public:
+            WakeThread (const juce::String& name, std::function<void()> jobToRun)
+                : juce::Thread (name), job (std::move (jobToRun))
+            {
+            }
+
+            ~WakeThread() override
+            {
+                signalThreadShouldExit();
+                notify();
+                stopThread (4000);
+            }
+
+        private:
+            void run() override
+            {
+                while (! threadShouldExit())
+                {
+                    wait (250);
+
+                    if (! threadShouldExit())
+                        job();
+                }
+            }
+
+            std::function<void()> job;
+        };
+
+        //==============================================================================
         /*  THE RENDERER'S MESSAGE THREAD, a hundred times a second: alive, the
             parent still there, the displays and the configuration followed,
             and - with no window - the probes. */
@@ -3682,6 +3727,9 @@ namespace wfg::video
             ~Session() override
             {
                 stopTimer();
+
+                //  The monitor's thread stopped before anything it draws from goes.
+                monitorThread.reset();
 
                 if (loop != nullptr)
                     loop->setOutputs ({});
@@ -3868,8 +3916,7 @@ namespace wfg::video
                     writeTints (config, layers);
 
                     //  And each canvas small, while a monitor wants them (namespace draft 40).
-                    if (r.previewWanted.load (std::memory_order_acquire) != 0)
-                        writePreviews (config, layers);
+                    const auto previews = r.previewWanted.load (std::memory_order_acquire) != 0;
 
                     /*  AND THE PICKED CUE'S TILE (§47, AAH): for three seconds after
                         each new request - long enough for its picture or its
@@ -3884,10 +3931,61 @@ namespace wfg::video
 
                     /*  ...and for as long as a blur cue is picked, whose tile is the
                         canvas beneath it as it is now (61). */
-                    if (tileUp && (ticks <= tileFreshUntil || tileLayer.source == region::Source::capture
-                                     || tileLayer.source == region::Source::blur))
-                        writeTile (config, tileLayer, serial, layers);
+                    const auto tileNow = tileUp && (ticks <= tileFreshUntil || tileLayer.source == region::Source::capture
+                                                      || tileLayer.source == region::Source::blur);
+
+                    /*  BOTH DRAWN ON THE MONITOR'S OWN THREAD (the author, 2026-10-18:
+                        "When the video monitor is on, it steals the picture from the
+                        canvas output"; namespace draft §83). Drawn here, a pixel at a
+                        time - tens of milliseconds a tenth of a second, a tile asked
+                        for again on every pass while its cue plays - they held up the
+                        ticks that tell the stores where each movie's playhead is, the
+                        movie on the output fell behind and went black, and putting
+                        the projectors away and back waited behind them too. */
+                    if (previews || tileNow)
+                        handToMonitor (config, layers, previews,
+                                       tileNow ? std::optional<region::LayerReading> (tileLayer) : std::nullopt, serial);
                 }
+            }
+
+            /*  WHAT THE MONITOR IS TO DRAW NEXT, handed to its thread (§83): the
+                configuration and the layers as this pass read them, copied, and the
+                newest only - a monitor drawing behind skips to what is now. */
+            void handToMonitor (const region::ConfigReading& config, const std::vector<region::LayerReading>& layers,
+                                bool previews, std::optional<region::LayerReading> tile, std::uint32_t serial)
+            {
+                {
+                    const std::lock_guard<std::mutex> hold (monitorLock);
+                    monitorJob = MonitorJob { config, layers, previews, std::move (tile), serial };
+                }
+
+                if (monitorThread == nullptr)
+                {
+                    monitorThread = std::make_unique<WakeThread> ("video monitor", [this] { drawMonitor(); });
+                    monitorThread->startThread (juce::Thread::Priority::low);
+                }
+
+                monitorThread->notify();
+            }
+
+            //  On the monitor's thread: the previews and the tile it was last handed.
+            void drawMonitor()
+            {
+                std::optional<MonitorJob> job;
+
+                {
+                    const std::lock_guard<std::mutex> hold (monitorLock);
+                    job.swap (monitorJob);
+                }
+
+                if (! job.has_value())
+                    return;
+
+                if (job->previews)
+                    writePreviews (job->config, job->layers);
+
+                if (job->tile.has_value())
+                    writeTile (job->config, *job->tile, job->serial, job->layers);
             }
 
             /*  THE MONITOR'S PICTURES (namespace draft 40, the author's "video
@@ -3898,7 +3996,7 @@ namespace wfg::video
                 second apart, and only while a window asks. */
             void writePreviews (const region::ConfigReading& config, const std::vector<region::LayerReading>& layers)
             {
-                const auto now = clock.sampleAt (r, steadyNanos());
+                const auto now = monitorClock.sampleAt (r, steadyNanos());
 
                 if (now < 0)
                     return;
@@ -3938,16 +4036,16 @@ namespace wfg::video
                     const auto whole = blurs (stack);
 
                     if (whole)
-                        compositeInto (stack, now, canvasWidth, canvasHeight, width, height, &sampler, wholeScratch);
+                        compositeInto (stack, now, canvasWidth, canvasHeight, width, height, &monitorSampler, monitorWhole);
 
                     for (int row = 0; row < height; ++row)
                         for (int column = 0; column < width; ++column)
                         {
                             const auto x = ((column + 0.5) / width - 0.5) * canvasWidth;
                             const auto y = (0.5 - (row + 0.5) / height) * canvasHeight;
-                            const auto rgb = whole ? colourIn (wholeScratch, column, row, width, level)
+                            const auto rgb = whole ? colourIn (monitorWhole, column, row, width, level)
                                            : stack.empty() ? 0u
-                                                           : scaledColour (colourAt (stack, now, canvasWidth, canvasHeight, x, y, &sampler), level);
+                                                           : scaledColour (colourAt (stack, now, canvasWidth, canvasHeight, x, y, &monitorSampler), level);
                             auto* pixel = previewScratch.data() + 3 * (row * width + column);
                             pixel[0] = static_cast<std::uint8_t> ((rgb >> 16) & 0xffu);
                             pixel[1] = static_cast<std::uint8_t> ((rgb >> 8) & 0xffu);
@@ -3996,7 +4094,7 @@ namespace wfg::video
 
                 if (blurTile)
                 {
-                    const auto now = clock.sampleAt (r, steadyNanos());
+                    const auto now = monitorClock.sampleAt (r, steadyNanos());
                     std::vector<const region::LayerReading*> beneath;
 
                     for (const auto* under : stackOf (layers, layer.canvas))
@@ -4005,7 +4103,7 @@ namespace wfg::video
 
                     beneath.push_back (&layer);
                     compositeInto (beneath, std::max<std::int64_t> (now, 0), canvasWidth, canvasHeight, width, height,
-                                   &tileSampler, wholeScratch);
+                                   &monitorTileSampler, monitorWhole);
                 }
 
                 for (int row = 0; row < height; ++row)
@@ -4013,8 +4111,8 @@ namespace wfg::video
                     {
                         const auto x = ((column + 0.5) / width - 0.5) * canvasWidth;
                         const auto y = (0.5 - (row + 0.5) / height) * canvasHeight;
-                        const auto rgb = blurTile ? colourIn (wholeScratch, column, row, width, 1.0)
-                                                  : colourAt (alone, 0, canvasWidth, canvasHeight, x, y, &tileSampler);
+                        const auto rgb = blurTile ? colourIn (monitorWhole, column, row, width, 1.0)
+                                                  : colourAt (alone, 0, canvasWidth, canvasHeight, x, y, &monitorTileSampler);
                         auto* pixel = tileScratch.data() + 3 * (row * width + column);
                         pixel[0] = static_cast<std::uint8_t> ((rgb >> 16) & 0xffu);
                         pixel[1] = static_cast<std::uint8_t> ((rgb >> 8) & 0xffu);
@@ -4366,12 +4464,33 @@ namespace wfg::video
 
             //  The picked cue's movie, read apart from what plays (§47, AAH), and its words (61).
             MovieStore tileMovies;
-            StoreSampler tileSampler { pictures, tileMovies, texts, "tile" };
             std::vector<std::string> lastWanted;
             std::vector<std::unique_ptr<OutputWindow>> windows;
             std::unique_ptr<RenderLoop> loop;
             std::vector<std::unique_ptr<ProjectorWindow>> projectors;
             ClockReader clock;
+
+            /*  THE MONITOR'S OWN (§83): its clock, its samplers and its scratch,
+                used on its thread alone - the probe and the tints keep theirs. */
+            ClockReader monitorClock;
+            StoreSampler monitorSampler { pictures, movies, texts };
+            StoreSampler monitorTileSampler { pictures, tileMovies, texts, "tile" };
+            std::vector<double> monitorWhole;
+
+            struct MonitorJob
+            {
+                region::ConfigReading config;
+                std::vector<region::LayerReading> layers;
+                bool previews = false;
+                std::optional<region::LayerReading> tile;
+                std::uint32_t serial = 0;
+            };
+
+            std::mutex monitorLock;
+            std::optional<MonitorJob> monitorJob;
+
+            //  Last, so that it goes first: its thread stopped before what it draws from.
+            std::unique_ptr<WakeThread> monitorThread;
         };
     }
 

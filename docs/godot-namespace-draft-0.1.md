@@ -31865,3 +31865,112 @@ and the sentences under the bar; whether *Trim* is meant as written.
 Markers in a cue's copied parts and in templates; markers on the running pane's strip, the remote and
 the web page; a marker as something a cue waits for or a GO goes to; a key for *Add marker*; the
 launcher's slots grown without reopening the show.
+
+## 82. A section slid: beneath the one before, or pushing on what follows
+
+Asked by the author on 2026-10-18, on the waveform's sections: *"When moving an object left in the
+waveform chopping board it should slide beneath the previous one, shortening the whole clip. The
+crossfade doesn't move then. Moving right is okay if it's the last item on the bench. But it refuses to
+move if there's another segment to its right. In this case the left segment pushes back the right
+following segments."* The lower half's drag of §80 (ATN) slid a section only into the room beside it
+and, carried past a neighbour's middle, swapped it into that place. Decisions from AUD.
+
+### 82.1 What it does
+
+A plain drag in the lower half moves the section and everything after it by the same seconds. To the
+right, silence opens before it and the sections after it are pushed on; the cue grows. To the left, the
+silence before it closes and then the section goes beneath the one before, which stays on top: the part
+covered is not heard, the join - and the crossfade centred on it - stays where the one before ends, and
+the cue is that much shorter. Slid back to the right, the covered part comes out first, and only then
+does silence open. With Ctrl (⌘ on a Mac) the drag moves the section to another place in the order,
+past a neighbour's middle, as §80's did.
+
+### 82.2 Decisions
+
+The author's (2026-10-18; the options' words mine):
+
+- **AUD** **A plain drag slides the section, everything after it with it**: right opens silence and
+  pushes the rest; left closes the silence, then goes beneath the one before - and the part covered is
+  **kept**: a slide back brings it out again.
+- **AUE** **Ctrl/⌘ + drag reorders**: past a neighbour's middle it takes that place (ATN's gesture,
+  now with the key).
+
+Mine (proposed):
+
+- **AUF** What is heard stays in the rows every reader already knows: a covered section's `in` is where
+  it is heard from and its `gap` is nought. One new row, `section/under`, says how much of its head is
+  covered, and only `section.slide` reads it - so the render, the timing, the lanes and every other
+  section verb are as they were. `section.slide <section> <seconds> [frameRate]` takes the seconds slid,
+  so a record replays the same edit; on a movie they land on its frame grid. At least a hundredth of a
+  second of a section is heard. The first section slides under the cue's start the same way. A covered
+  part comes back no further than the file's start - an edge moved since may leave less. The drag snaps
+  to what stays where it is: the sections before it, the playhead, a movie's cuts, the markers.
+  `section.place` (§55.13) stays for the records that hold it; the window no longer sends it.
+
+### 82.3 Tests
+
+`SectionTests`: right opens silence and pushes the chorus with its lane points; left closes the
+silence, then three seconds beneath the intro, kept, the cue three seconds shorter, a join; back right
+the covered part first; as far left as it goes a hundredth heard; the first under the cue's start; one
+undo. `ClientTests`: the gesture, and the window's preview of a slide against the engine's arithmetic.
+`wfg_audio_ui_tests`: a plain drag sends one `section.slide` - right, the first pushing the rest, left
+beneath its neighbour - and a Ctrl/⌘ drag one `section.move`.
+
+### 82.4 Not built
+
+The covered head is not drawn beneath the section before: the bar shows what is heard.
+
+## 83. The video monitor and the outputs, both showing
+
+Asked by the author on 2026-10-18: *"When the video monitor is on, it steals the picture from the canvas
+output. Could both show unless the outputs are voluntarily deactivated?"* Nothing put an output away
+for the monitor; the monitor took its time from the outputs. Decisions from AUG.
+
+### 83.1 What was wrong
+
+The monitor's pictures - every canvas at 256 by 144 and the picked cue at 512 by 288, 3 to 9 ms and 12 to
+23 ms each in a release build (M66), ten times a second, the cue's asked for again on every pass while it
+plays - were drawn a pixel at a time on the renderer's own thread, the one that tells the movie stores
+where each playhead is a hundred times a second. Measured in a debug build, that thread stood still for
+up to 328 ms at a time while the monitor drew. A movie an output played was told where its playhead was
+late; a preview movie (not HAP) then threw away every frame it had read, the playhead having jumped past
+them, and the output went black until the decoder caught up; a HAP movie froze. Putting the projectors
+away and back (§80) waited behind the same drawing, which is likely the cause of that report too; §80's
+ATO stays as a guard.
+
+### 83.2 Decisions
+
+Mine (proposed):
+
+- **AUG** **The monitor draws on a thread of its own**, at a low priority, from a copy of what each pass
+  read, only the newest kept: the monitor may fall behind, the outputs never do. Both show; an output is
+  dark only when it is switched off or put away.
+- **AUH** **A preview movie keeps the newest frame it has at or before its playhead**: a playhead told
+  late shows a frame late, never black.
+
+### 83.3 Tests
+
+`VideoHostTests`: the monitor's pictures, drawn while a movie plays and its tile is asked for every pass,
+hold up nothing else - the renderer's probe, written on each of its ticks, never more than 100 ms apart:
+14.5 ms at worst with the monitor on its own thread, 328 ms with it on the renderer's (debug build, this
+machine).
+
+### 83.4 Owed
+
+On the author's screen: the monitor open beside an output playing a movie, HAP and a preview movie; Hide
+and Show with the monitor open.
+
+## 84. The footers of the groups around a nested one, while dragging
+
+Asked by the author on 2026-10-18: *"Moving a cue over a nested group should show the outer groups'
+footers too. Sometimes it is hard to reach the footer of an outer group when the last item is itself a
+group."* §80 (ATM) grew the empty footer of the group under the hand only. Decision AUI, mine
+(proposed):
+
+- **AUI** A drag inside a group grows the empty footer of that group **and of every group it sits in**,
+  each after everything its group holds - the inner's first, the outer's after it - all below the hand,
+  so nothing under the hand moves. They stay while the hand is anywhere inside the outermost of them, and
+  a nested group the hand goes down into grows its own too. The header still wants its group's title.
+
+Tests: `wfg_audio_ui_tests` - an act whose last member is a scene: on the scene's last cue both footers
+show, they stay down to the act's, and a cue dropped there goes into the act's footer.

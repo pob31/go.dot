@@ -1785,7 +1785,14 @@ namespace wfg::client::ui
                 of the group"): its members, its sections, its bands. They went
                 the moment the hand left the title, on its way to the footer. */
             else if (! bandsFor.empty() && insideBandsGroup (over))
-                ;
+            {
+                /*  ...and a group inside it not shown yet - the hand gone from one
+                    nested group down into the next - grows its footers too, all of
+                    them below the hand (§84). */
+                if (! row->parent.empty()
+                      && std::find (bandsChain.begin(), bandsChain.end(), row->parent) == bandsChain.end())
+                    growFooters (row->parent);
+            }
 
             /*  AND A GROUP ENTERED BELOW ITS TITLE grows its footer alone: the
                 footer comes after everything the group holds, below the hand,
@@ -1882,6 +1889,7 @@ namespace wfg::client::ui
 
         bandsFor = groupId;
         bandsWithHeader = withHeader;
+        bandsChain.clear();
 
         /*  Whatever was spliced in last time goes with the group it was for -
             and only that. The persistent band has no section behind it and
@@ -1895,87 +1903,107 @@ namespace wfg::client::ui
                                               && row.section != model::Section::persistent; }),
                     rows.end());
 
-        if (! bandsFor.empty())
+        growFooters (bandsFor);
+
+        if (bandsChain.empty())
         {
-            const auto* group = rowById (bandsFor);
-
-            if (group == nullptr || ! group->isGroup)
-            {
-                bandsFor.clear();
-                bandsWithHeader = false;
-            }
-            else
-            {
-                /*  ONLY THE SECTIONS THAT ARE NOT THERE. One that already has
-                    cues in it has a band of its own, drawn by the model, and a
-                    second would be two answers to one question. */
-                const auto has = [this] (model::Section which)
-                {
-                    for (const auto& row : rows)
-                        if (row.rowKind == model::RowKind::band && row.parent == bandsFor
-                              && row.section == which)
-                            return true;
-
-                    return false;
-                };
-
-                /*  The depth by value: an insert below may move `rows`, and
-                    `group` points into it. */
-                const auto bandDepth = group->depth + 1;
-
-                const auto make = [this, bandDepth] (model::Section which, const char* word)
-                {
-                    model::Row band;
-                    band.rowKind = model::RowKind::band;
-                    band.section = which;
-                    band.depth = bandDepth;
-                    band.parent = bandsFor;
-                    band.name = word;
-                    band.count = 0;         //  what marks it as one of ours
-                    band.bandKey = bandsFor + "/" + word;
-                    return band;
-                };
-
-                auto at = std::find_if (rows.begin(), rows.end(),
-                                        [this] (const model::Row& row) { return row.id == bandsFor; });
-
-                if (at != rows.end())
-                {
-                    const auto depth = at->depth;
-                    auto after = at + 1;
-
-                    //  The footer goes past everything the group contains.
-                    while (after != rows.end() && after->depth > depth)
-                        ++after;
-
-                    if (! has (model::Section::footer))
-                        after = rows.insert (after, make (model::Section::footer, "Footer"));
-
-                    if (withHeader && ! has (model::Section::header))
-                    {
-                        at = std::find_if (rows.begin(), rows.end(),
-                                           [this] (const model::Row& row) { return row.id == bandsFor; });
-                        rows.insert (at + 1, make (model::Section::header, "Header"));
-                    }
-                }
-            }
+            bandsFor.clear();
+            bandsWithHeader = false;
         }
+
+        //  And the header of the group whose title is under the hand, just under it.
+        if (withHeader && ! bandsChain.empty() && ! hasBand (bandsFor, model::Section::header))
+            if (const auto at = std::find_if (rows.begin(), rows.end(), [this] (const model::Row& row) { return row.id == bandsFor; });
+                at != rows.end())
+            {
+                const auto depth = at->depth;
+                rows.insert (at + 1, emptyBand (bandsFor, depth + 1, model::Section::header, "Header"));
+            }
 
         list.updateContent();
         list.repaint();
     }
 
+    bool CueListComponent::hasBand (const std::string& groupOf, model::Section which) const
+    {
+        /*  ONLY THE SECTIONS THAT ARE NOT THERE. One that already has cues in it
+            has a band of its own, drawn by the model, and a second would be two
+            answers to one question. */
+        return std::any_of (rows.begin(), rows.end(), [&groupOf, which] (const model::Row& row)
+                            { return row.rowKind == model::RowKind::band && row.parent == groupOf && row.section == which; });
+    }
+
+    model::Row CueListComponent::emptyBand (const std::string& groupOf, int depth, model::Section which, const char* word)
+    {
+        model::Row band;
+        band.rowKind = model::RowKind::band;
+        band.section = which;
+        band.depth = depth;
+        band.parent = groupOf;
+        band.name = word;
+        band.count = 0;         //  what marks it as one of ours
+        band.bandKey = groupOf + "/" + word;
+        return band;
+    }
+
+    void CueListComponent::growFooters (const std::string& groupId)
+    {
+        /*  THE GROUP AND EVERY GROUP IT SITS IN (the author, 2026-10-18:
+            "Moving a cue over a nested group should show the outer groups'
+            footers too. Sometimes it is hard to reach the footer of an outer
+            group when the last item is itself a group"; namespace draft §84):
+            innermost first, each footer past everything its group contains -
+            the inner's first, so an outer one's lands after it, and all of them
+            below a hand inside the innermost: nothing under the hand moves. */
+        auto grew = false;
+
+        for (auto id = groupId; ! id.empty();)
+        {
+            const auto title = std::find_if (rows.begin(), rows.end(), [&id] (const model::Row& row) { return row.id == id; });
+
+            if (title == rows.end() || ! title->isGroup)
+                break;
+
+            const auto outer = title->parent;
+            const auto depth = title->depth;
+
+            if (std::find (bandsChain.begin(), bandsChain.end(), id) == bandsChain.end())
+                bandsChain.push_back (id);
+
+            if (! hasBand (id, model::Section::footer))
+            {
+                auto after = title + 1;
+
+                while (after != rows.end() && after->depth > depth)
+                    ++after;
+
+                rows.insert (after, emptyBand (id, depth + 1, model::Section::footer, "Footer"));
+                grew = true;
+            }
+
+            id = outer;
+        }
+
+        if (grew)
+        {
+            list.updateContent();
+            list.repaint();
+        }
+    }
+
     bool CueListComponent::insideBandsGroup (int row) const
     {
-        if (bandsFor.empty() || row < 0 || static_cast<std::size_t> (row) >= rows.size())
+        if (bandsChain.empty() || row < 0 || static_cast<std::size_t> (row) >= rows.size())
             return false;
 
-        /*  THE GROUP'S ROWS ARE ITS TITLE AND EVERY ROW AFTER IT DRAWN DEEPER,
-            its bands among them: the list draws a group's contents, sections
-            and bands one level in from its title, and nothing else between. */
+        /*  THE OUTERMOST GROUP'S ROWS - its title and every row after it drawn
+            deeper, the bands among them - so the hand can go down past an inner
+            group's footer to an outer one's without the bands moving under it. */
+        const auto& outermost = bandsChain.back();
+
         for (std::size_t title = 0; title < rows.size(); ++title)
         {
-            if (rows[title].id != bandsFor || ! rows[title].isGroup)
+            if (rows[title].id != outermost || ! rows[title].isGroup)
                 continue;
 
             auto end = title + 1;
