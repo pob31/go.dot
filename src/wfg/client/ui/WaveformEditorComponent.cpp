@@ -2915,7 +2915,7 @@ namespace wfg::client::ui
     }
 
     /*  MAKE NEW SLICES asks how many (ATY), saying how many ranges this show
-        has room for on one cue before it must be reopened. */
+        has room for on one cue before its audio must be built again. */
     void WaveformEditorComponent::askSliceCount()
     {
         if (! selection.has_value())
@@ -2926,9 +2926,9 @@ namespace wfg::client::ui
                        + clockText (span.second) + " into equal slices.";
 
         if (reading.launcherSlots > 0)
-            words << "\n\nThis show was opened with room for " << reading.launcherSlots
+            words << "\n\nThe audio was built with room for " << reading.launcherSlots
                   << " slices on one cue; this one has " << static_cast<int> (reading.ranges.size())
-                  << ". More will play once the show is reopened.";
+                  << ". More will play after Apply while stopped, in Show settings > Audio interface.";
 
         auto* ask = new juce::AlertWindow ("Make new slices", words, juce::MessageBoxIconType::NoIcon, this);
         ask->addTextEditor ("count", "2", "How many");
@@ -2975,7 +2975,8 @@ namespace wfg::client::ui
 
         if (reading.launcherSlots > 0 && after > reading.launcherSlots)
             return tell (juce::String (after) + " slices on this cue, more than the " + juce::String (reading.launcherSlots)
-                           + " this show was opened with room for - reopen the show to play them all");
+                           + " the audio was built with room for - Apply while stopped, in Show settings > Audio"
+                             " interface, to play them all");
 
         tell (juce::String (count) + (count == 1 ? " slice" : " slices") + " from " + clockText (from) + " to "
                 + clockText (to));

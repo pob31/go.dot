@@ -21,6 +21,7 @@
 #include <wfg/client/model/MidiPorts.h>
 #include <wfg/client/model/OutputList.h>
 #include <wfg/client/model/Rack.h>
+#include <wfg/client/model/Ranges.h>
 #include <wfg/client/model/SerialPorts.h>
 #include <wfg/client/model/SettingsPages.h>
 #include <wfg/client/model/Surfaces.h>
@@ -109,6 +110,7 @@ namespace wfg::client::model
             if (kind == "media")
             {
                 addOnce (keys, "audio");
+                addOnce (keys, "slices:" + id);
                 inserts();
                 file();
             }
@@ -257,6 +259,34 @@ namespace wfg::client::model
 
         out.outputChannels = outputChannelCount (readOutputs (snapshot));
 
+        /*  THE CUES THAT CAN HAVE OUTGROWN THE GRAPH'S SLOTS: the audio is
+            never built with fewer than eight (Console.cpp's `slotFloor`), so
+            only a cue past that is kept, and the whole tree is walked once a
+            show change, as the rest of the index is. */
+        constexpr int fewestSlots = 8;
+
+        for (const auto& [cue, ranges] : rangesByCue (snapshot))
+        {
+            if (static_cast<int> (ranges.size()) <= fewestSlots)
+                continue;
+
+            const auto base = "/godot/cue/" + cue + "/";
+
+            if (text (snapshot, base + "kind") != "media")
+                continue;
+
+            auto label = text (snapshot, base + "number");
+            auto name = text (snapshot, base + "name");
+
+            if (name.empty())
+                name = text (snapshot, base + "autoName");
+
+            if (! name.empty())
+                label += (label.empty() ? "" : " ") + name;
+
+            out.sliced.push_back ({ cue, label.empty() ? cue : label, static_cast<int> (ranges.size()) });
+        }
+
         /*  WHETHER ANYTHING IN THE SHOW WANTS SOUND: an interface that is not
             running is a problem for a show with sounds or mics, and not for a
             show that has none and never switched one on. */
@@ -326,7 +356,26 @@ namespace wfg::client::model
                            + std::to_string (hardware) + ": it is not heard");
                     break;
                 }
+
+            /*  AND PAST WHAT THE AUDIO WAS BUILT WITH, which an output added
+                since has outgrown (PRD §3.25): the interface has the channels,
+                the graph does not reach them yet. */
+            if (const auto built = integer (snapshot, "/godot/audio/outputs");
+                  built > 0 && index.outputChannels > built && index.outputChannels <= hardware)
+                add (out, pageName::audioInterface, "outputs", "outputs",
+                     "The show's outputs take " + std::to_string (index.outputChannels) + " channels and the audio was"
+                       " built with " + std::to_string (built) + ": the last are not heard until Apply while stopped");
         }
+
+        /*  A SOUND CUE WITH MORE SLICES THAN THE AUDIO WAS BUILT WITH ROOM FOR
+            on one cue: GO refuses it whole (`no-slot`) until it is built again. */
+        if (const auto slots = integer (snapshot, "/godot/audio/slots"); slots > 0)
+            for (const auto& cue : index.sliced)
+                if (cue.slices > slots)
+                    add (out, pageName::audioInterface, "slices:" + cue.id, "too many slices",
+                         "Cue " + cue.label + " has " + std::to_string (cue.slices) + " slices and the audio was built"
+                           " with room for " + std::to_string (slots) + " on one cue: GO plays nothing of it until"
+                           " Apply while stopped");
 
         for (const auto& input : index.inputs)
             if (const auto why = text (snapshot, "/godot/input/" + input.id + "/problem"); ! why.empty())

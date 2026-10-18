@@ -258,7 +258,8 @@ namespace wfg::doc
                     fixes how many launcher slots every track is built with,
                     once, when the graph is built (§3.25). A range added past
                     that during a show has nowhere to be armed and is refused
-                    with `no-slot` until the show is reloaded. */
+                    with `no-slot` until the graph is built again (Apply while
+                    stopped, or Load now). */
                 { "Range",  true,  {},                     { "range" } },
 
                 /*  A PIECE OF THE FILE IN AN EDIT (namespace draft §55): a

@@ -311,3 +311,54 @@ TEST_CASE ("problems: a file looked for and not there marks its cue, and a probl
     CHECK (cells.at ("SND1").icon == model::Icon::warning);
     CHECK (cells.at ("SND2").icon == model::Icon::ready);
 }
+
+TEST_CASE ("problems: a cue or an output past what the audio was built with is said, and where Apply puts it right")
+{
+    /*  PRD §3.25: the graph's slots and output width are fixed when it is
+        built - the show opened, Apply while stopped, Load now. An edit since
+        that goes past them is refused or silent at GO, so it is said before. */
+    std::map<std::string, Value> rows {
+        { "/godot/cue/M1/kind", word ("media") },
+        { "/godot/cue/M1/number", word ("12") },
+        { "/godot/cue/M1/name", word ("Rain") },
+        { "/godot/cue/M2/kind", word ("media") },
+        { "/godot/audio/status", word ("running") },
+        { "/godot/audio/hardwareOutputs", word ("8") },
+        { "/godot/audio/outputs", word ("2") },
+        { "/godot/audio/slots", word ("12") },
+        { "/godot/bus/B1/firstChannel", word ("0") },
+        { "/godot/bus/B1/width", word ("2") },
+        { "/godot/bus/B2/firstChannel", word ("2") },
+        { "/godot/bus/B2/width", word ("2") },
+    };
+
+    //  Thirteen slices on M1, past the twelve slots; nine on M2, inside them.
+    for (auto at = 0; at < 13; ++at)
+        rows.emplace ("/godot/range/RA" + std::to_string (at) + "/cue", word ("M1"));
+
+    for (auto at = 0; at < 9; ++at)
+        rows.emplace ("/godot/range/RB" + std::to_string (at) + "/cue", word ("M2"));
+
+    const auto snapshot = snapshotOf (rows);
+    const auto index = model::indexObjects (snapshot);
+    const auto problems = model::machineProblems (snapshot, index);
+
+    CHECK (anySays (problems, "Cue 12 Rain has 13 slices and the audio was built with room for 12 on one cue: GO plays"
+                              " nothing of it until Apply while stopped - Show settings, Audio interface."));
+    CHECK (! anySays (problems, "has 9 slices"));
+    CHECK (anySays (problems, "The show's outputs take 4 channels and the audio was built with 2: the last are not heard"
+                              " until Apply while stopped - Show settings, Audio interface."));
+
+    //  The cue is marked on its row by the same words.
+    const auto needs = model::needsOf (snapshot, { cueRow ("M1", "media"), cueRow ("M2", "media") }, index);
+    const auto marks = model::cueProblems (needs, problems);
+    REQUIRE (marks.count ("M1") == 1);
+    CHECK (marks.at ("M1").text == "too many slices");
+    CHECK (marks.count ("M2") == 0);
+
+    //  Built again with room for both, nothing is said.
+    rows["/godot/audio/slots"] = word ("17");
+    rows["/godot/audio/outputs"] = word ("4");
+    const auto rebuilt = snapshotOf (rows);
+    CHECK (model::machineProblems (rebuilt, model::indexObjects (rebuilt)).empty());
+}

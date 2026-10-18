@@ -66,9 +66,47 @@ namespace wfg::client::model
             return { Icon::loading, "rendering",
                      "Rendering the edit: Go.dot is making what the cue plays or shows, and gets it ready once that is there" };
 
-        if (prepare == "partial" && ! error.empty())
+        /*  WHAT THE AUDIO WAS BUILT WITH, which an edit since has gone past
+            (PRD §3.25): the file is there and nothing is wrong with it, so
+            "missing" would send somebody looking for the wrong thing. Each
+            says where it is put right. */
+        if (prepare == "partial" && error == "no-slot")
+            return { Icon::missing, "too many slices",
+                     "Too many slices: this cue has more than the audio was built with room for on one cue - GO will"
+                     " play nothing until Apply while stopped, in Show settings > Audio interface" };
+
+        if (prepare == "partial" && error == "bad-route")
+            return { Icon::missing, "no route",
+                     "Cannot be routed: its sound is wider than the audio was built to carry on one voice, or it is"
+                     " sent where the show has no output - GO will play nothing" };
+
+        if (prepare == "partial" && error == "not-built")
+            return { Icon::missing, "not loaded",
+                     "Not loaded: its rack channel was added since the audio was built - GO will play nothing until"
+                     " Load now, in Show settings > Rack" };
+
+        //  A mic cue's own (Phase 9b), put right in its inspector or the rack.
+        if (prepare == "partial" && error == "no-input")
+            return { Icon::missing, "no input",
+                     "No input: this mic cue takes no named input - GO will play nothing" };
+
+        if (prepare == "partial" && error == "bad-channel")
+            return { Icon::missing, "no channel",
+                     "No rack channel: it plays through none, or through one another mic cue uses - GO will play nothing" };
+
+        if (prepare == "partial" && error == "bad-width")
+            return { Icon::missing, "wrong width",
+                     "Wrong width: its input is not as wide as its rack channel takes - GO will play nothing" };
+
+        if (prepare == "partial" && error == "media-missing")
             return { Icon::missing, "missing",
                      std::string ("Missing: the file is not in the show's media, or Go.dot cannot read it - GO will ")
+                         + (picture (kind) ? "show nothing" : "play nothing") };
+
+        //  Any other refusal: said as not ready, never as a file that is missing.
+        if (prepare == "partial" && ! error.empty())
+            return { Icon::missing, "not ready",
+                     "Not ready: Go.dot could not get it ready (" + error + ") - GO will "
                          + (picture (kind) ? "show nothing" : "play nothing") };
 
         if (prepare == "partial")

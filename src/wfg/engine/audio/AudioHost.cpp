@@ -1896,7 +1896,7 @@ namespace wfg::audio
             {
                 error = "no-slot: this cue has " + std::to_string (ranges.size())
                           + " ranges and the graph was built with " + std::to_string (editSlots)
-                          + " slots a track, which is fixed until the show is reloaded";
+                          + " slots a track, which is fixed until the graph is built again (Apply while stopped)";
                 return false;
             }
 

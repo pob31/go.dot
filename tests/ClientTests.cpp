@@ -16275,3 +16275,29 @@ TEST_CASE ("updates: on Linux the answer is a program's - curl's status on its l
     CHECK (! up::answerFromWget (4, "").reached);
     CHECK (! up::answerFromWget (255, "").reached);         // not installed: started, said nothing
 }
+
+//==============================================================================
+//  A CUE REFUSED BY WHAT THE AUDIO WAS BUILT WITH (PRD §3.25) says so, not "missing".
+TEST_CASE ("client: a refusal that is not a missing file is said in its own words, with where it is put right")
+{
+    const auto slot = model::readinessMark ("partial", "no-slot", "media");
+    CHECK (slot.icon == model::Icon::missing);
+    CHECK (slot.text == "too many slices");
+    CHECK (slot.meaning.find ("Apply while stopped") != std::string::npos);
+
+    CHECK (model::readinessMark ("partial", "bad-route", "media").text == "no route");
+
+    const auto built = model::readinessMark ("partial", "not-built", "mic");
+    CHECK (built.text == "not loaded");
+    CHECK (built.meaning.find ("Load now") != std::string::npos);
+
+    CHECK (model::readinessMark ("partial", "no-input", "mic").text == "no input");
+    CHECK (model::readinessMark ("partial", "bad-channel", "mic").text == "no channel");
+    CHECK (model::readinessMark ("partial", "bad-width", "mic").text == "wrong width");
+
+    //  A missing file is still missing; anything else unknown is not ready, never "missing".
+    CHECK (model::readinessMark ("partial", "media-missing", "media").text == "missing");
+    const auto other = model::readinessMark ("partial", "no-port", "media");
+    CHECK (other.text == "not ready");
+    CHECK (other.meaning.find ("Missing") == std::string::npos);
+}

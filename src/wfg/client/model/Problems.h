@@ -59,9 +59,9 @@ namespace wfg::client::model
     /*  ONE THING MISSING OR FAILED. `page` is the Show settings page it is put
         right on (model/SettingsPages.h), empty for a cue's own file; `key` is
         what a cue's needs name it by - "audio", "port:<id>", "plugin:<id>",
-        "videoOutput:<id>", "file:<cue>" and the like; `word` is what a cue row
-        says in a few letters; `sentence` says what is wrong and where it is
-        put right, whole, for a tooltip. */
+        "videoOutput:<id>", "file:<cue>", "slices:<cue>" and the like; `word`
+        is what a cue row says in a few letters; `sentence` says what is wrong
+        and where it is put right, whole, for a tooltip. */
     struct Problem
     {
         std::string page;
@@ -100,6 +100,21 @@ namespace wfg::client::model
 
         int outputChannels = 0;     ///< the channels the show's outputs take
         bool needsSound = false;    ///< a cue somewhere in the show plays sound or takes a mic
+
+        /*  THE SOUND CUES WITH MORE SLICES THAN THE FEWEST THE AUDIO IS EVER
+            BUILT WITH (eight, PRD §3.25), by identifier, with how many and
+            what the row is called: the only ones that can have gone past
+            `audio/slots` since the graph was built. */
+        struct Sliced
+        {
+            std::string id;
+            std::string label;
+            int slices = 0;
+
+            bool operator== (const Sliced&) const = default;
+        };
+
+        std::vector<Sliced> sliced;
 
         bool operator== (const ObjectIndex&) const = default;
     };

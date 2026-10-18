@@ -31996,3 +31996,48 @@ Tests: `ClientTests` - the rule in the model and in the engine: the last cue lis
 there, a cart beside it removed, either of two cue lists removable and GO falling to the one left, the
 one left then refused, one undo. `AuthoringTests` builds its show with no list by hand now. `wfg_audio_ui_tests`: the
 tab's Remove greyed on the last cue list and saying why, live on a cart and asking the window.
+
+## 86. What the audio was built with, said where an edit goes past it
+
+Asked by the author on 2026-10-18: *"Currently what new cue, new slice, edits or other additions to the
+cue list need a restart for a rebuild of the TE structure?"* - and then, of the answer's three suggested
+changes: *"Makes the suggested changes"*.
+
+The answer: no edit to the cue list rebuilds the graph by itself, and none needs the app restarted.
+The graph is built when the show opens, at **Apply while stopped** (Show settings, Audio interface), at
+**Load now** (Plugins, Rack), and when the interface moves rate (with the layout it had). What it fixes
+(PRD §3.25): how many cues can sound at once (`Audio/@tracks`), the channels a voice carries
+(`@channelsPerTrack`), the slices one cue can play (eight, or four more than the busiest cue then had,
+`audio/slots`), how far the outputs reach (`audio/outputs`), the plugin set and the rack. A new cue of
+any kind, a slice inside the room, and every edit of a level, a route, a send, an EQ, a lane, a fade, a
+range's points or a file are heard without one. Past the room, before this: a cue with too many slices
+refused whole with `no-slot` and its row read "Missing: the file is not in the show's media"; an output
+past the built width was silent with nothing said; the words that did speak said "reopen the show" where
+Apply is enough. Decisions from AUM, mine (proposed):
+
+- **AUM** **A refused cue's row says why in its own words, never "missing"** unless the file is: `no-slot`
+  reads *too many slices* and names Apply while stopped; `bad-route` *no route*; `not-built` *not loaded*
+  and names Load now; a mic cue's `no-input`, `bad-channel` and `bad-width` *no input*, *no channel*,
+  *wrong width*; any other refusal *not ready*, with the engine's word in brackets.
+- **AUN** **A sound cue with more slices than `audio/slots` is a problem (§64) before it is a refusal**:
+  its row carries *too many slices*, and the main window's warning and the settings window's mark point at
+  the Audio interface page, whose Apply while stopped makes room. A refusal at GO is "failed", which §64
+  counts; it is not waiting.
+- **AUO** **The show's outputs past `audio/outputs` are a problem on the same page**, said only while the
+  interface gives those channels (past the interface, §64's own Outputs problem says it). `audio/outputs`
+  is the graph's built width - the furthest output channel or the output patch's length - and its
+  description in the parameter table now says so; it said "hardware output channels".
+- **AUP** **"Reopen" and "reload" become Apply while stopped** wherever Apply is enough: Make new slices'
+  question and its warning (§81), the `no-slot` error text, the parameter table's `audio/slots`,
+  `audio/channelsPerTrack`, `run/error` and `cue/prepareError` (which now lists `no-slot`, `bad-route` and
+  `not-built`), and the comments that said the hosted graph is built "never again" (Load now builds it).
+
+Tests: `ClientTests` - each refusal's words, a missing file still *missing*, an unknown one *not ready*.
+`ProblemsTests` - thirteen slices against twelve slots said and the cue marked, nine not; four output
+channels against two built said; both silent once built again. `wfg_audio_ui_tests` - Make new slices
+past the room names Apply while stopped.
+
+Owed: the author's reading of the words (*too many slices*, *no route*, *not loaded*, *not ready*).
+Not built: a movie's slices counted through its locked sound for AUN (its row says *too many slices* at
+standby, by AUM); a "not applied yet" mark for `@tracks` and `@channelsPerTrack`, which the client cannot
+compare with the graph's because neither built value is published.

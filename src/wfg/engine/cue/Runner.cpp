@@ -4363,8 +4363,9 @@ namespace wfg::cue
 
         /*  NO SLOT, and it is a refusal rather than a truncation. The graph is
             built with as many launcher slots as the show's widest cue has
-            ranges, once, when the show loads (§3.25) - so a range added during
-            the show has nowhere to be armed. Arming the first S of them would
+            ranges, when it is built (§3.25: the show opened, Apply while
+            stopped, Load now) - so a range added since has nowhere to be armed
+            until it is built again. Arming the first S of them would
             be a cue that plays most of what it says, which is worse than one
             that says it cannot. */
         if (static_cast<int> (request.ranges.size()) > audio->slotCount())

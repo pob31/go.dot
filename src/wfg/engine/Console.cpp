@@ -2828,7 +2828,8 @@ namespace
             show, plus room to work in. A property of the SHOW, like the track
             count, because §3.25 fixes the graph's shape when it is built and
             never after - and a range added beyond this has no slot until the
-            show is reloaded (`no-slot`). */
+            graph is built again, by Apply while stopped or Load now
+            (`no-slot`). */
         int slots = 1;
 
         /** The show's plugin set, in document order (Phase 9a). */
@@ -6475,10 +6476,11 @@ namespace
             if (! captureTaken())
                 return 2;
 
-            /*  THE EDIT IS BUILT HERE AND NEVER AGAIN. PRD §3.25: the graph is
-                fixed at show load, and this is show load. It happens before a
-                single block goes through, because building it while the pump
-                ran would be a structural edit racing the graph that reads it. */
+            /*  THE EDIT IS BUILT HERE, and again only by Load now, stopped.
+                PRD §3.25: the graph is fixed when it is built, and this is
+                show load. It happens before a single block goes through,
+                because building it while the pump ran would be a structural
+                edit racing the graph that reads it. */
             const auto spec = editSpecOf (shape, target, static_cast<std::int64_t> (proxyDeadlineUs));
 
             driver->host().setProxyServices (proxyServices);

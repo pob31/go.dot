@@ -7867,10 +7867,10 @@ TEST_CASE ("waveform: the right-click menus - the playhead's, a selection's, a m
     CHECK (sliceLength == doctest::Approx (30.0));
     CHECK (said.contains ("4 slices"));
 
-    //  More than the show was opened with room for: made, and said.
+    //  More than the audio was built with room for: made, and said.
     editor.makeSlices (12);
     CHECK (sliceCount == 12);
-    CHECK (said.contains ("reopen the show"));
+    CHECK (said.contains ("Apply while stopped"));
 
     //  Nought, or slices under a hundredth of a second: said, not sent.
     sliceCount = 0;
