@@ -2935,6 +2935,7 @@ namespace wfg::client::ui
                     g.drawText (names[at], cells[static_cast<std::size_t> (at)],
                                 juce::Justification::centredLeft);
                 g.drawText ("Kind", cells[12], juce::Justification::centredLeft);
+                g.drawText ("Per tick", cells[14], juce::Justification::centredLeft);
             }
 
         private:
@@ -3022,7 +3023,7 @@ namespace wfg::client::ui
                 Doh!'s setting (PRD §3.32), then the two switches, then the
                 numbers; the name takes what is left, because it is the one
                 that wants room. */
-            static std::array<juce::Rectangle<int>, 14> cellsFor (juce::Rectangle<int> row)
+            static std::array<juce::Rectangle<int>, 15> cellsFor (juce::Rectangle<int> row)
             {
                 auto area = row.reduced (8, 0);
 
@@ -3044,6 +3045,11 @@ namespace wfg::client::ui
                 const auto rollback = area.removeFromRight (150);
                 const auto doh = area.removeFromRight (80);
 
+                /*  PER TICK after Bundles (namespace draft §88, AUT): how many
+                    datagrams the device is given a tick. Last in the array, so
+                    no column before it moves its index. */
+                const auto perTick = area.removeFromRight (62);
+
                 /*  BUNDLES after the two switches (namespace draft 45, YQ): a
                     third ON or OFF, whether one tick's messages leave as one. */
                 const auto bundles = area.removeFromRight (62);
@@ -3057,23 +3063,25 @@ namespace wfg::client::ui
                     at all. Taken from the name, which has the rest of the row. */
                 const auto prefix = area.removeFromRight (200);
 
-                return { area, prefix, host, port, rx, tx, bundles, doh, rollback, sent, heard, problem, kind, cross };
+                return { area, prefix, host, port, rx, tx, bundles, doh, rollback, sent, heard, problem, kind, cross,
+                         perTick };
             }
 
             /*  What a click at this x is on, by the same arithmetic. Named
                 rather than an index, because a column moving should break a
                 compile and not a gesture. */
             enum class Cell { name, prefix, host, port, rx, tx, bundles, doh, rollback, none, problem, kind, cross,
-                              topics };   // topics is no column: edited over the host cell, from its menu (MQ.6)
+                              topics,     // topics is no column: edited over the host cell, from its menu (MQ.6)
+                              perTick };
 
             static Cell cellAt (int x, int width)
             {
                 const auto cells = cellsFor (juce::Rectangle<int> (0, 0, width, 34));
                 const Cell order[] { Cell::name, Cell::prefix, Cell::host, Cell::port,
                                      Cell::rx, Cell::tx, Cell::bundles, Cell::doh, Cell::rollback, Cell::none,
-                                     Cell::none, Cell::problem, Cell::kind, Cell::cross };
+                                     Cell::none, Cell::problem, Cell::kind, Cell::cross, Cell::perTick };
 
-                for (auto at = 0; at < 14; ++at)
+                for (auto at = 0; at < 15; ++at)
                     if (x >= cells[static_cast<std::size_t> (at)].getX()
                           && x < cells[static_cast<std::size_t> (at)].getRight())
                         return order[at];
@@ -3181,6 +3189,10 @@ namespace wfg::client::ui
                 g.setColour (Look::colour (theme, entry.doh == "takeBack" ? "ink" : "ink-off"));
                 g.drawText (juce::String (entry.dohRollback), cells[8], juce::Justification::centredLeft, true);
 
+                /*  How many datagrams it is given a tick (§88), as a number. */
+                g.setColour (Look::colour (theme, "ink"));
+                g.drawText (juce::String (entry.perTick), cells[14], juce::Justification::centredLeft);
+
                 g.setColour (Look::colour (theme, "ink-dim"));
                 g.drawText (juce::String (entry.sent), cells[9], juce::Justification::centredLeft);
                 g.drawText (juce::String (entry.heard), cells[10], juce::Justification::centredLeft);
@@ -3272,6 +3284,7 @@ namespace wfg::client::ui
 
                     case Cell::name:
                     case Cell::prefix:
+                    case Cell::perTick:
                     case Cell::rollback: editAt (row, cellAt (event.x, width), width); return;
 
                     case Cell::problem:
@@ -3294,6 +3307,7 @@ namespace wfg::client::ui
                     case Cell::topics:   return juce::String (entry.topics);
                     case Cell::rollback: return juce::String (entry.dohRollback);
                     case Cell::port:     return entry.port > 0 ? juce::String (entry.port) : juce::String();
+                    case Cell::perTick:  return juce::String (entry.perTick);
 
                     case Cell::rx:
                     case Cell::tx:
@@ -3496,7 +3510,8 @@ namespace wfg::client::ui
 
                 const auto cells = cellsFor (place.withWidth (width).withX (list.getX()));
                 const auto index = cell == Cell::name ? 0 : cell == Cell::prefix ? 1
-                                 : cell == Cell::host || cell == Cell::topics ? 2 : cell == Cell::rollback ? 8 : 3;
+                                 : cell == Cell::host || cell == Cell::topics ? 2 : cell == Cell::rollback ? 8
+                                 : cell == Cell::perTick ? 14 : 3;
 
                 editing = entry.id;
                 editingCell = cell;
@@ -3536,7 +3551,8 @@ namespace wfg::client::ui
                                     : cell == Cell::prefix   ? "prefix"
                                     : cell == Cell::host     ? "host"
                                     : cell == Cell::topics   ? "topics"
-                                    : cell == Cell::rollback ? "dohRollback" : "port";
+                                    : cell == Cell::rollback ? "dohRollback"
+                                    : cell == Cell::perTick  ? "perTick" : "port";
 
                     send (gesture::setNode ("/godot/mount/" + id + "/" + name,
                                             typed.toStdString()));

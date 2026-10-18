@@ -90,6 +90,7 @@ namespace wfg::client::model
 
         /** Whether what one tick sends it leaves as one bundle (namespace draft 45). */
         bool bundles = false;
+        int perTick = 20;           ///< datagrams it is given a tick (namespace draft §88, AUT)
 
         /** Empty for an opaque device, which is most of them. */
         std::string namespaceFile;

@@ -1716,8 +1716,23 @@ namespace
         column, OV-OX, moved both). */
     int networkDohAt (const juce::ListBox& list) { return list.getWidth() - 8 - 24 - 150 - 150 - 54 - 54 - 150 - 80 / 2; }
 
-    /*  And Bundles, left of Doh! (namespace draft 45): 62 wide. */
-    int networkBundlesAt (const juce::ListBox& list) { return list.getWidth() - 8 - 24 - 150 - 150 - 54 - 54 - 150 - 80 - 62 / 2; }
+    /*  Per tick, left of Doh! (namespace draft §88): 62 wide. And Bundles, left
+        of it (namespace draft 45): 62 wide. */
+    int networkPerTickAt (const juce::ListBox& list) { return list.getWidth() - 8 - 24 - 150 - 150 - 54 - 54 - 150 - 80 - 62 / 2; }
+    int networkBundlesAt (const juce::ListBox& list) { return list.getWidth() - 8 - 24 - 150 - 150 - 54 - 54 - 150 - 80 - 62 - 62 / 2; }
+
+    /*  The label a click opened its editor on, anywhere under `root`. */
+    juce::Label* labelBeingEdited (juce::Component& root)
+    {
+        if (auto* label = dynamic_cast<juce::Label*> (&root); label != nullptr && label->isBeingEdited())
+            return label;
+
+        for (auto* child : root.getChildren())
+            if (auto* found = labelBeingEdited (*child))
+                return found;
+
+        return nullptr;
+    }
     int midiDohAt (const juce::ListBox& list)    { return list.getWidth() - 8 - 24 - 190 - 150 - 80 / 2; }
 
     /*  The MIDI tab's "Sends on", left of Listens to (210 each) and Rx and Tx
@@ -1820,6 +1835,59 @@ TEST_CASE ("show settings UI: a network device's Bundles cell switches its messa
     rig.sent.clear();
     clickAt (*list, networkBundlesAt (*list));
     CHECK (theOneSet (rig.sent) == std::pair<std::string, std::string> { "/godot/mount/QX7DESK0/bundles", "false" });
+}
+
+/*  HOW MANY DATAGRAMS A DEVICE IS GIVEN A TICK (namespace draft §88, AUT): a
+    number after Bundles, 20 until somebody types another, typed in place. */
+TEST_CASE ("show settings UI: a network device's Per tick cell is typed in place and sent as its row (§88)")
+{
+    Rig rig;
+    REQUIRE (rig.document.createMount ("/wfs", "", "QX7DESK0").ok);
+
+    const auto first = rig.publish();
+    client::ui::ShowSettingsWindow panel (rig.theme, *first,
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+    panel.setSize (1400, 800);
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+    tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("Network"));
+    rig.sent.clear();
+
+    auto* list = listOn (*tabs->getCurrentContentComponent());
+    REQUIRE (list != nullptr);
+    CHECK (client::model::readDevices (*first).front().perTick == 20);
+
+    clickAt (*list, networkPerTickAt (*list));
+
+    auto* label = labelBeingEdited (*tabs->getCurrentContentComponent());
+    REQUIRE (label != nullptr);
+    REQUIRE (label->getCurrentTextEditor() != nullptr);
+    CHECK (label->getCurrentTextEditor()->getText() == "20");
+
+    /*  RETURN, DELIVERED: a TextEditor posts it as a command message
+        (`TextEditorDefs::returnKeyMessageId`, juce_TextEditor.cpp) and a test
+        runs no message loop, so the message is handed over here as the loop
+        would - the label then takes the typed text and closes its editor. Not
+        `Label::setText`, which closes the editor first and commits what was
+        there before. */
+    const auto pressReturn = [] (juce::Label& editing)
+    {
+        constexpr int returnKeyMessageId = 0x10003002;
+        static_cast<juce::Component&> (*editing.getCurrentTextEditor()).handleCommandMessage (returnKeyMessageId);
+    };
+
+    //  Unchanged is not a write.
+    pressReturn (*label);
+    CHECK (rig.sent.empty());
+
+    clickAt (*list, networkPerTickAt (*list));
+    label = labelBeingEdited (*tabs->getCurrentContentComponent());
+    REQUIRE (label != nullptr);
+    label->getCurrentTextEditor()->setText ("5", juce::dontSendNotification);
+    pressReturn (*label);
+
+    CHECK (theOneSet (rig.sent) == std::pair<std::string, std::string> { "/godot/mount/QX7DESK0/perTick", "5" });
 }
 
 TEST_CASE ("show settings UI: a MIDI port says whether it plays sound and what Doh! does with it")

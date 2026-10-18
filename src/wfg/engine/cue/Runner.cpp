@@ -15911,13 +15911,38 @@ namespace wfg::cue
                 Ended here, as the kill would have ended it a tick later. */
             const auto* selfRun = runs.find (job.self);
 
+            /*  WHAT BECAME OF ITS MESSAGES, counted for the run (namespace draft
+                §88, AVC), and a cue paced out over many ticks (AUT) is not
+                waiting while they keep leaving: its patience starts again on
+                each tick that saw one go. */
+            const auto tally = sender_ != nullptr ? sender_->tallyOf (job.self) : tree::MountSender::Tally {};
+
+            const auto moved = tally.settled() != job.settledSeen;
+
+            if (moved)
+            {
+                job.settledSeen = tally.settled();
+                job.ticksWaited = 0;
+            }
+
+            /*  A SINGLE ESC LETS A SENDING CUE FINISH (namespace draft §88, AUU,
+                the author's): half a snapshot is a state nobody declared, which
+                PRD §4.4 keeps for a double Esc. So a stopped run whose messages
+                are still leaving at its device's pace (`behind`) stays until the
+                last has gone, and ends then; a killed one ends now, its messages
+                dropped by the press (`dropQueued`). A value a rate cap holds
+                still leaves on its turn, and never kept a stopped run - nor
+                does it now. */
             if (selfRun != nullptr && ! selfRun->isFinished()
-                  && (selfRun->state == runState::stopping || beingKilled (*selfRun)))
+                  && (beingKilled (*selfRun) || (selfRun->state == runState::stopping && tally.behind == 0)))
             {
                 engine.submit (origin::engine, "run.ended", one (job.self));
                 job.finished = true;
                 continue;
             }
+
+            if (selfRun != nullptr && ! selfRun->isFinished() && selfRun->state == runState::stopping)
+                continue;
 
             /*  ALREADY OVER BY ANOTHER ROAD: revoked with the scene that held
                 it, or ended by a jump. Nothing more is written and nothing is
@@ -16054,12 +16079,6 @@ namespace wfg::cue
                 continue;
             }
 
-            /*  `none` FINISHES WITHOUT ASKING ANYTHING, which is what makes it
-                the right wait for a target that will never answer - a lighting
-                desk, a projector, anything that takes a message and says
-                nothing. It still finishes on the tick AFTER the cue fired,
-                because that is when a report is allowed to leave, not because
-                it waited for anything. */
             /*  NOTHING QUEUED AT ALL, for any of its messages - a curve's last
                 values that had already left (namespace draft 45) - is done
                 as `none` is. */
@@ -16067,7 +16086,7 @@ namespace wfg::cue
                                      || std::any_of (job.further.begin(), job.further.end(),
                                                      [] (const OscJob::Further& next) { return next.ticket != 0; });
 
-            if (job.wait == OscWait::none || sender_ == nullptr || ! queuedAny)
+            if (sender_ == nullptr || ! queuedAny)
             {
                 engine.submit (origin::engine, "run.ended", one (job.self));
                 job.finished = true;
@@ -16082,14 +16101,48 @@ namespace wfg::cue
                 `send-failed`. */
             /*  ANY OF ITS MESSAGES (namespace draft 45): the press dropped the
                 cue, whichever of them it caught still waiting. */
-            const auto dropped = sender_->wasDropped (job.ticket)
-                                   || std::any_of (job.further.begin(), job.further.end(),
-                                                   [this] (const OscJob::Further& next)
-                                                   {
-                                                       return next.ticket != 0 && sender_->wasDropped (next.ticket);
-                                                   });
+            if (tally.dropped > 0)
+            {
+                engine.submit (origin::engine, "run.ended", one (job.self));
+                job.finished = true;
+                continue;
+            }
 
-            if (dropped)
+            /*  STILL LEAVING, AT ITS DEVICE'S PACE (namespace draft §88, AUT):
+                the cue is playing until its last message has gone, whatever
+                its wait. And STILL WAITING FOR A FLUSH THAT WILL TAKE IT, which
+                a rate cap makes an ordinary thing rather than a wiring fault:
+                the message is queued, in order, holding the newest value for
+                its address, and it will go - which a `sent` cue waits for, and
+                a `verified` one too, since an address whose value has not left
+                would answer with the old one and read as a device that
+                disagreed. A `none` cue never waited on a cap, and does not.
+                Either is waited for with the cue's own patience, which every
+                tick that sees a message go starts again; a queue that stops
+                moving for the whole of it fails the cue `timeout`. */
+            if (tally.behind > 0 || (tally.waiting > 0 && job.wait != OscWait::none))
+            {
+                if (! moved)
+                    ++job.ticksWaited;
+
+                if (job.ticksWaited <= job.ticksAllowed)
+                    continue;
+
+                engine.submit (origin::engine, "run.failed",
+                               { osc::Value::string (job.self),
+                                 osc::Value::string (oscError::timeout) });
+                job.finished = true;
+                continue;
+            }
+
+            /*  `none` FINISHES WITHOUT ASKING ANYTHING, which is what makes it
+                the right wait for a target that will never answer - a lighting
+                desk, a projector, anything that takes a message and says
+                nothing. It finishes on the tick after its last message left
+                (namespace draft §88): the tick AFTER the cue fired, for a cue
+                its device takes in one frame, because that is when a report is
+                allowed to leave, not because it waited for anything. */
+            if (job.wait == OscWait::none)
             {
                 engine.submit (origin::engine, "run.ended", one (job.self));
                 job.finished = true;
@@ -16173,61 +16226,13 @@ namespace wfg::cue
                 continue;
             }
 
-            /*  `sent` ASKS THE SENDER WHAT HAPPENED. The flush ran at the end of
-                the tick that queued this, so the answer is here by now; still
-                pending means the flush never ran, which is a wiring fault and
-                not something to keep waiting on. Either way the cue reports
-                what happened rather than what was asked for, which is the whole
-                difference between this wait and the one above. */
-            /*  EVERY MESSAGE OF THE CUE (namespace draft 45): one that failed
-                fails it, one still queued keeps it waiting, and it is done when
-                all have left. */
-            auto outcome = job.ticket != 0 ? sender_->outcomeOf (job.ticket) : tree::MountSender::Outcome::sent;
-            auto queuedStill = job.ticket != 0 && outcome == tree::MountSender::Outcome::pending
-                                 && sender_->stillQueued (job.ticket);
-
-            for (const auto& next : job.further)
-            {
-                if (next.ticket == 0 || outcome == tree::MountSender::Outcome::failed)
-                    continue;
-
-                const auto its = sender_->outcomeOf (next.ticket);
-
-                if (its == tree::MountSender::Outcome::failed)
-                    outcome = its;
-                else if (its == tree::MountSender::Outcome::pending)
-                {
-                    if (sender_->stillQueued (next.ticket))
-                        queuedStill = true;
-                    else
-                        outcome = tree::MountSender::Outcome::failed;
-                }
-            }
-
-            if (queuedStill && outcome != tree::MountSender::Outcome::failed)
-                outcome = tree::MountSender::Outcome::pending;
-
-            /*  STILL WAITING FOR A FLUSH THAT WILL TAKE IT, which a rate cap
-                makes an ordinary thing rather than a wiring fault: the message
-                is queued, in order, holding the newest value for its address,
-                and it will go. What the cue asked for was that the value reach
-                the target, so it keeps waiting - up to its own timeout, which
-                is the same patience a `verified` cue has. */
-            if (outcome == tree::MountSender::Outcome::pending && queuedStill)
-            {
-                ++job.ticksWaited;
-
-                if (job.ticksWaited <= job.ticksAllowed)
-                    continue;
-
-                engine.submit (origin::engine, "run.failed",
-                               { osc::Value::string (job.self),
-                                 osc::Value::string (oscError::timeout) });
-                job.finished = true;
-                continue;
-            }
-
-            if (outcome == tree::MountSender::Outcome::sent)
+            /*  `sent` ASKS THE SENDER WHAT HAPPENED, now that nothing of it waits:
+                every message of the cue (namespace draft 45) counted for its run
+                (namespace draft §88, AVC) - one that failed fails it, and it is
+                done when all have left. Counted rather than asked ticket by
+                ticket of the last 512 answers, which a cue of more messages than
+                that outlived and ended `send-failed` with everything sent. */
+            if (tally.failed == 0)
                 engine.submit (origin::engine, "run.ended", one (job.self));
             else
                 engine.submit (origin::engine, "run.failed",
@@ -16236,6 +16241,12 @@ namespace wfg::cue
 
             job.finished = true;
         }
+
+        //  The counts of the runs that are over, let go (§88, AVC).
+        if (sender_ != nullptr)
+            for (const auto& job : sending)
+                if (job.finished)
+                    sender_->forgetTally (job.self);
 
         sending.erase (std::remove_if (sending.begin(), sending.end(),
                                        [] (const OscJob& job) { return job.finished; }),

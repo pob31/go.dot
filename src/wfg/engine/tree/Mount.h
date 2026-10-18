@@ -180,6 +180,14 @@ namespace wfg::tree
             `MountSender::flush`. */
         bool bundles = false;
 
+        /*  HOW MANY DATAGRAMS IT IS GIVEN A TICK (namespace draft §88, AUT, the
+            author's pick: the device's setting, `mount/perTick`). A cue holding
+            more sends the first in the GO's frame and the rest, in order, in the
+            frames after it: WFS-DIY takes what arrives into a queue of 256 and
+            drops the rest in silence, and a snapshot of seventy inputs in one
+            frame was thousands of datagrams. A bundle is one, a question is one. */
+        int perTick = 20;
+
         /*  NO INTERFACE HERE, AND THAT IS A DECISION (2026-09-22). Which
             network card an outgoing message leaves by is the operating
             system's to answer: it reads the destination address and picks the

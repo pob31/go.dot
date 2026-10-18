@@ -42,6 +42,7 @@
 
 #include <wfg/engine/osc/OscValue.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -195,6 +196,12 @@ namespace wfg::cue
             to want from a device on a local switch. */
         int ticksWaited = 0;
         int ticksAllowed = 250;
+
+        /*  HOW MANY OF ITS MESSAGES HAD SETTLED when it last looked (namespace
+            draft §88, AUT): a cue paced out over many ticks is not waiting
+            while its messages keep leaving, so its patience starts again each
+            tick that saw one go. */
+        std::size_t settledSeen = 0;
 
         bool finished = false;
 

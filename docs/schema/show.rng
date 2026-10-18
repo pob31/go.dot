@@ -3635,6 +3635,15 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="perTick">
+          <a:documentation>How many datagrams Go.dot gives this device in one tick (namespace draft 88, AUT, the author-s pick: the device-s setting). A cue holding more sends the first in the GO-s frame and the rest, in their order, in the frames after it, and is playing until the last has left; a bundle is one datagram, and so is a question. 20 - a thousand a second - is what a spatial processor with a queue of a few hundred takes; a desk that drops a burst wants less, a link that takes more can have more.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">1</param>
+            <param name="maxInclusive">1000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="port">
           <a:documentation>The port the target listens on. Required, and deliberately without a default for the same reason audio/tracks is: no number could be right for every device, and a mount that guessed would send into the dark and report success. UDP never tells you nobody was listening, so this one has to be right in the document or it is never right at all.</a:documentation>
           <data type="integer">

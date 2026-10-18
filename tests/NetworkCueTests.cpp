@@ -3595,6 +3595,283 @@ namespace
     }
 }
 
+//==============================================================================
+/*  A BIG CUE, SPREAD (namespace draft §88, AUT, the author's): a device takes at
+    most its `perTick` datagrams a flush, and what is past that waits in its
+    place in the order for the flushes after. The author's WFS-DIY snapshot of
+    seventy inputs left as 5,300 datagrams in one frame, and the processor took
+    256 of them. */
+namespace
+{
+    tree::MountSender::Destination paced (int port, int perTick, bool bundles = false)
+    {
+        tree::MountSender::Destination to { "127.0.0.1", port, 0.0, bundles };
+        to.perTick = perTick;
+        return to;
+    }
+
+    std::vector<std::string> addressesIn (const std::vector<osc::Datagram>& datagrams)
+    {
+        std::vector<std::string> out;
+
+        for (const auto& datagram : datagrams)
+        {
+            const auto packet = decodedFrom (datagram);
+
+            if (! packet.isBundle())
+            {
+                out.push_back (packet.address);
+                continue;
+            }
+
+            for (const auto& element : packet.elements)
+                out.push_back (element.address);
+        }
+
+        return out;
+    }
+
+    std::string inputAddress (int n)
+    {
+        return "/wfs/input/" + std::to_string (n / 10 + 1) + "/p" + std::to_string (n % 10);
+    }
+}
+
+TEST_CASE ("mount sender: a device's per-tick limit spreads one tick's messages over the flushes after, in order (§88)")
+{
+    Listener listener;
+    tree::MountSender sender { listener.endpoint };
+
+    for (int n = 0; n < 1000; ++n)
+        sender.queue ("W0RKS000", paced (listener.port(), 20), inputAddress (n),
+                      osc::Value::float32 (static_cast<float> (n)), "RVN00001");
+
+    sender.flush();
+
+    REQUIRE (listener.waitFor (20));
+    CHECK_FALSE (listener.waitFor (21, 150));
+    CHECK (sender.pending() == 980u);
+    CHECK (sender.tallyOf ("RVN00001").waiting == 980u);
+    CHECK (sender.tallyOf ("RVN00001").sent == 20u);
+
+    for (int flush = 1; flush < 50; ++flush)
+        sender.flush();
+
+    CHECK (sender.pending() == 0u);
+    REQUIRE (listener.waitFor (1000));
+
+    const auto addresses = addressesIn (listener.all());
+    REQUIRE (addresses.size() == 1000u);
+
+    for (int n = 0; n < 1000; ++n)
+        CHECK (addresses[static_cast<std::size_t> (n)] == inputAddress (n));
+
+    CHECK (sender.tallyOf ("RVN00001").sent == 1000u);
+    CHECK (sender.tallyOf ("RVN00001").waiting == 0u);
+    CHECK (sender.sentFor ("W0RKS000") == 1000u);
+
+    sender.forgetTally ("RVN00001");
+    CHECK (sender.tallyOf ("RVN00001").settled() == 0u);
+}
+
+TEST_CASE ("mount sender: bundled, no flush gives a device more datagrams than its limit (§88)")
+{
+    Listener listener;
+    tree::MountSender sender { listener.endpoint };
+
+    for (int n = 0; n < 1000; ++n)
+        sender.queue ("W0RKS000", paced (listener.port(), 2, true), inputAddress (n),
+                      osc::Value::float32 (static_cast<float> (n)), "RVN00002");
+
+    sender.flush();
+
+    REQUIRE (listener.waitFor (2));
+    CHECK_FALSE (listener.waitFor (3, 150));
+
+    for (const auto& datagram : listener.all())
+    {
+        CHECK (decodedFrom (datagram).isBundle());
+        CHECK (datagram.bytes.size() <= tree::MountSender::bundleBytes);
+    }
+
+    auto flushes = 1;
+
+    while (sender.pending() > 0u && flushes < 200)
+    {
+        sender.flush();
+        ++flushes;
+    }
+
+    CHECK (sender.pending() == 0u);
+
+    //  About thirty of these messages fit a bundle, two bundles a flush.
+    CHECK (flushes > 10);
+    CHECK (flushes < 30);
+
+    REQUIRE (listener.waitFor (static_cast<std::size_t> (flushes * 2 - 1)));
+    std::this_thread::sleep_for (std::chrono::milliseconds (100));
+
+    const auto addresses = addressesIn (listener.all());
+    REQUIRE (addresses.size() == 1000u);
+    CHECK (addresses.front() == inputAddress (0));
+    CHECK (addresses.back() == inputAddress (999));
+    CHECK (std::is_sorted (addresses.begin(), addresses.end(),
+                           [] (const std::string& a, const std::string& b)
+                           {
+                               //  In the order queued: the input's number, then its parameter.
+                               const auto number = [] (const std::string& address)
+                               {
+                                   return std::stoi (address.substr (11, address.find ('/', 11) - 11));
+                               };
+                               return number (a) < number (b) || (number (a) == number (b) && a < b);
+                           }));
+    CHECK (sender.tallyOf ("RVN00002").sent == 1000u);
+}
+
+TEST_CASE ("mount sender: a re-write of a waiting address keeps its place; a double Esc drops the rest (§88)")
+{
+    Listener listener;
+    tree::MountSender sender { listener.endpoint };
+
+    for (const auto* address : { "/wfs/a", "/wfs/b", "/wfs/c", "/wfs/d", "/wfs/e", "/wfs/f" })
+        sender.queue ("W0RKS000", paced (listener.port(), 2), address, osc::Value::int32 (1), "RVN00003");
+
+    sender.flush();
+    REQUIRE (listener.waitFor (2));
+
+    //  /wfs/d is waiting: written again, it keeps its place and goes with its new value.
+    sender.queue ("W0RKS000", paced (listener.port(), 2), "/wfs/d", osc::Value::int32 (2), "RVN00003");
+    CHECK (sender.tallyOf ("RVN00003").waiting == 4u);
+
+    sender.flush();
+    REQUIRE (listener.waitFor (4));
+    std::this_thread::sleep_for (std::chrono::milliseconds (50));
+
+    const auto arrived = listener.all();
+    REQUIRE (arrived.size() == 4u);
+    CHECK (decodedFrom (arrived[2]).address == "/wfs/c");
+    CHECK (decodedFrom (arrived[3]).address == "/wfs/d");
+    CHECK (decodedFrom (arrived[3]).args == osc::Values { osc::Value::int32 (2) });
+
+    //  What still waits is dropped by a double Esc, each ticket answered.
+    CHECK (sender.dropQueued() == 2u);
+    CHECK (sender.pending() == 0u);
+
+    const auto tally = sender.tallyOf ("RVN00003");
+    CHECK (tally.waiting == 0u);
+    CHECK (tally.dropped == 2u);
+    CHECK (tally.sent == 5u);       // four sent, one superseded
+}
+
+namespace
+{
+    /*  An opaque device under /wfs at the rig's listener, taking `perTick`
+        datagrams a tick, and a cue of `count` messages aimed at it. */
+    std::string bigCue (NetworkRig& rig, int count, const std::string& wait, int perTick = 20)
+    {
+        tree::MountDeclaration processor;
+        processor.id = "W0RKS000";
+        processor.prefix = "/wfs";
+        processor.host = "127.0.0.1";
+        processor.port = rig.listener.port();
+        processor.perTick = perTick;
+
+        if (rig.mounts.declarationOf ("W0RKS000") == nullptr)
+            REQUIRE (rig.mounts.declare (processor).ok);
+
+        const auto cueId = rig.makeOsc (inputAddress (0), "f:0.5", wait);
+
+        for (int n = 1; n < count; ++n)
+            REQUIRE (rig.document.createMessage (cueId, inputAddress (n), "f:0.5").ok);
+
+        return cueId;
+    }
+}
+
+TEST_CASE ("network cue: a cue of 5,000 messages leaves at its device's pace and is playing until the last has gone (§88)")
+{
+    NetworkRig rig;
+    std::string wait;
+
+    SUBCASE ("wait none") { wait = "none"; }
+    SUBCASE ("wait sent") { wait = "sent"; }
+
+    const auto cueId = bigCue (rig, 5000, wait);
+    const auto walksBefore = rig.document.idWalksTaken();
+
+    rig.fire (cueId);
+    REQUIRE (rig.listener.waitFor (20));
+    CHECK (rig.sender.pending() == 4980u);
+
+    //  The read of every message at GO walked nothing (§88, AVB).
+    CHECK (rig.document.idWalksTaken() == walksBefore);
+
+    auto ticks = 0;
+
+    while (rig.runOf (cueId) != nullptr && rig.runOf (cueId)->state == cue::runState::playing && ticks < 400)
+    {
+        rig.tickOnce();
+        ++ticks;
+    }
+
+    //  250 flushes of twenty, the first the GO's own, and the tick after the last.
+    CHECK (ticks >= 249);
+    CHECK (ticks <= 252);
+
+    REQUIRE (rig.runOf (cueId) != nullptr);
+    CHECK (rig.runOf (cueId)->state == cue::runState::done);
+
+    //  Every message, in order - and `sent` is not fooled by more answers than it once kept.
+    REQUIRE (rig.listener.waitFor (5000));
+    const auto addresses = addressesIn (rig.listener.all());
+    REQUIRE (addresses.size() == 5000u);
+    CHECK (addresses[0] == inputAddress (0));
+    CHECK (addresses[2500] == inputAddress (2500));
+    CHECK (addresses[4999] == inputAddress (4999));
+}
+
+TEST_CASE ("network cue: Esc lets a sending cue finish; a double Esc drops what has not left (§88, AUU)")
+{
+    NetworkRig rig;
+    const auto cueId = bigCue (rig, 1000, "none");
+
+    rig.fire (cueId);
+    rig.tickOnce();
+    REQUIRE (rig.runOf (cueId)->state == cue::runState::playing);
+
+    SUBCASE ("Esc: every message still leaves, and the run ends when the last has")
+    {
+        REQUIRE (rig.engine.submit ("cli", "run.stopAll", {}));
+        rig.tickOnce();
+
+        auto ticks = 0;
+
+        while (! rig.runOf (cueId)->isFinished() && ticks < 200)
+        {
+            rig.tickOnce();
+            ++ticks;
+        }
+
+        CHECK (rig.runOf (cueId)->state == cue::runState::done);
+        CHECK (ticks > 40);
+        REQUIRE (rig.listener.waitFor (1000));
+        CHECK (rig.sender.pending() == 0u);
+    }
+
+    SUBCASE ("double Esc: the rest is dropped and the run ends at once")
+    {
+        REQUIRE (rig.engine.submit ("cli", "run.killAll", {}));
+        rig.tickOnce();
+        rig.tickOnce();
+
+        CHECK (rig.runOf (cueId)->isFinished());
+        CHECK (rig.sender.pending() == 0u);
+
+        std::this_thread::sleep_for (std::chrono::milliseconds (100));
+        CHECK (rig.listener.count() < 1000u);
+    }
+}
+
 TEST_CASE ("network cue: a curve plays on the cue's own clock, sent as it changes, and holds its end")
 {
     NetworkRig rig;

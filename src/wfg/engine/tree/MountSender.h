@@ -25,11 +25,17 @@
     have all been applied. Three things follow, and each is a reason rather than
     a consequence.
 
-    EVERY MESSAGE BELONGING TO ONE GO LEAVES IN THE SAME FRAME (PRD §3.4). A cue
-    that moves twelve parameters is twelve datagrams that a receiving box sees
-    as one gesture, not a dribble spread across whatever the tick thread was
-    doing. Sending at the point of the write would have made the spread depend
-    on the order commands happened to arrive in.
+    EVERY MESSAGE BELONGING TO ONE GO STARTS LEAVING IN THE SAME FRAME (PRD
+    §3.4). A cue that moves twelve parameters is twelve datagrams that a
+    receiving box sees as one gesture, not a dribble spread across whatever the
+    tick thread was doing. Sending at the point of the write would have made the
+    spread depend on the order commands happened to arrive in.
+
+    UP TO WHAT THE DEVICE TAKES IN A FRAME (namespace draft §88, AUT, the
+    author's): `mount/perTick` datagrams a flush, 20 unless somebody changed it,
+    and what is past it waits in its place in the order for the flushes after.
+    A spatial processor's snapshot of seventy inputs was 5,300 datagrams in one
+    frame, and the processor took 256 of them. A bundle is one datagram.
 
     A NODE WRITTEN FORTY TIMES IN A TICK SENDS ONCE. The queue is keyed by
     address and the last value wins, which is the same coalescing the OSCQuery
@@ -52,11 +58,15 @@
     handler.
 
     WHAT IT DOES NOT DO. It does not retry, because UDP has no notion of a
-    delivery to retry and a resend of a stale value is worse than a gap. It does
-    not bundle: one message per
-    datagram, because bundle support is uneven in the field and Phase 4's
-    timetagged bundles to Go.dot's OWN processors are a different feature with a
-    different reason.
+    delivery to retry and a resend of a stale value is worse than a gap. It
+    bundles only for a device whose row says it reads bundles (namespace draft
+    45, YQ): one message per datagram otherwise, because bundle support is
+    uneven in the field.
+
+    WHAT BECAME OF A RUN'S MESSAGES IS COUNTED BY RUN (namespace draft §88,
+    AVC): waiting, sent, failed, dropped - so a cue of thousands of messages is
+    answered by four numbers, where a ticket at a time from the last 512 answers
+    outlived the cue it was asked for.
 
     AND A DOUBLE ESC EMPTIES IT (2026-10-02, namespace draft §23.10). PRD §4.4's
     immediate level "drops all actions", and a value a rate cap is holding back
@@ -119,6 +129,13 @@ namespace wfg::tree
                 `mount/@bundles` (namespace draft 45). Copied at queue time with
                 the rest, for the same reason. */
             bool bundles = false;
+
+            /*  HOW MANY DATAGRAMS A FLUSH GIVES THIS DEVICE, from `mount/perTick`
+                (namespace draft §88, AUT): what is past it waits, in its place
+                in the order, for the flushes after. Nought is no limit, as a
+                rate cap's nought is no cap - a destination written by hand in a
+                rig; every device's row says 20 unless somebody changed it. */
+            int perTick = 0;
 
             /*  THE SERIAL PORT IT GOES DOWN instead of the network, when the
                 device's transport is serial (namespace draft §51, PC.11): the
@@ -300,6 +317,36 @@ namespace wfg::tree
         /** How many are waiting for the next flush. */
         std::size_t pending() const noexcept { return queued.size(); }
 
+        /*  WHAT BECAME OF ONE RUN'S MESSAGES (namespace draft §88, AVC), by the
+            owner `queue` was given: how many still wait in the queue, and how
+            many have been sent, failed or been dropped by a double Esc. A
+            message a later write superseded is counted sent, as its ticket is
+            answered. A run that queued nothing reads all nought. */
+        struct Tally
+        {
+            std::size_t waiting = 0;
+            std::size_t sent = 0;
+            std::size_t failed = 0;
+            std::size_t dropped = 0;
+
+            /*  OF THOSE WAITING, HOW MANY THE LAST FLUSH HELD BACK BECAUSE THEIR
+                DEVICE HAD BEEN GIVEN ITS `perTick` (namespace draft §88, AUT):
+                a cue's own messages queued behind each other, which keep the cue
+                playing until they have gone. A value a rate cap holds is not one
+                of these - it is a device's tolerance for the same address written
+                again, and the next write supersedes it - and keeps nobody
+                playing that did not wait for it before. */
+            std::size_t behind = 0;
+
+            std::size_t settled() const noexcept { return sent + failed + dropped; }
+        };
+
+        Tally tallyOf (const std::string& owner) const;
+
+        /*  Forgets a run's count, when nothing of it waits: the Runner's, once
+            the run is over. One still waiting is kept, so its count goes on. */
+        void forgetTally (const std::string& owner);
+
     private:
         struct Message
         {
@@ -319,9 +366,22 @@ namespace wfg::tree
         };
 
         /*  One message as a datagram of its own, and one device's messages of
-            a flush as bundles (namespace draft 45). Each answers its tickets. */
+            a flush as bundles (namespace draft 45). Each answers its tickets.
+            The bundles stop at `datagramsAllowed` (namespace draft §88): how
+            many of `messages` went, from the front, and in how many datagrams. */
         void sendAlone (const Message& message);
-        void sendBundled (const std::vector<const Message*>& messages);
+
+        struct Bundled
+        {
+            std::size_t messages = 0;
+            int datagrams = 0;
+        };
+
+        Bundled sendBundled (const std::vector<const Message*>& messages, int datagramsAllowed);
+
+        /*  A ticket answered, and its run's count moved with it - the one place
+            both happen, so the two cannot disagree. */
+        void answer (const Message& message, Outcome outcome, bool dropped);
 
         osc::UdpEndpoint* udp = nullptr;
         SerialSink serialSink;
@@ -336,6 +396,10 @@ namespace wfg::tree
         bool deliver (const Destination& to, const std::vector<std::uint8_t>& bytes);
 
         std::vector<Message> queued;          // in first-queued order
+
+        /*  Each run's count, by its owner; a message nobody's run wrote (an
+            empty owner) is counted nowhere. */
+        std::map<std::string, Tally> tallies;
         std::map<std::string, std::size_t> queuedAt;   // address -> index in queued
         std::map<std::string, std::size_t> sent;       // mount id -> count
 

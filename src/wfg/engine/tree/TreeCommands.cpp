@@ -166,6 +166,9 @@ namespace wfg::tree
         declaration.mscDevice = integer ("mscDevice", 127);
         declaration.mscFormat = integer ("mscFormat", 127);
 
+        //  What it is given a tick (namespace draft §88, AUT).
+        declaration.perTick = integer ("perTick", 20);
+
         if (const auto port = document.getAttribute (base + "port"))
             if (const auto parsed = osc::parseDouble (*port))
                 declaration.port = static_cast<int> (*parsed);

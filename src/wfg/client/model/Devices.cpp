@@ -113,6 +113,7 @@ namespace wfg::client::model
             else if (name == "rx")         row.rx = text (node) == "true";
             else if (name == "tx")         row.tx = text (node) == "true";
             else if (name == "bundles")    row.bundles = text (node) == "true";
+            else if (name == "perTick")    row.perTick = number (text (node), 20);
             else if (name == "namespace")  row.namespaceFile = text (node);
             else if (name == "sent")       row.sent = number (text (node), 0);
             else if (name == "heard")      row.heard = number (text (node), 0);

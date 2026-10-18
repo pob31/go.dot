@@ -28,6 +28,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <limits>
 
 namespace wfg::tree
 {
@@ -56,18 +57,26 @@ namespace wfg::tree
                 three-valued wait exists to make visible. It reports SENT and
                 not failed: what the caller asked for was that this address
                 reach the target this tick, and it will. */
-            outcomes.push_back ({ message.ticket, Outcome::sent, false });
+            answer (message, Outcome::sent, false);
 
             message.ticket = ticket;
             message.mountId = mountId;
             message.destination = destination;
             message.values = values;
             message.owner = owner;
+
+            if (! owner.empty())
+                ++tallies[owner].waiting;
+
             return ticket;
         }
 
         queuedAt[address] = queued.size();
         queued.push_back (Message { ticket, mountId, destination, address, values, owner, false });
+
+        if (! owner.empty())
+            ++tallies[owner].waiting;
+
         return ticket;
     }
 
@@ -81,7 +90,7 @@ namespace wfg::tree
         if (existing != queuedAt.end())
         {
             auto& message = queued[existing->second];
-            outcomes.push_back ({ message.ticket, Outcome::sent, false });
+            answer (message, Outcome::sent, false);
             message.ticket = ticket;
             message.mountId = mountId;
             message.destination = destination;
@@ -121,19 +130,46 @@ namespace wfg::tree
             order it waits in is the order it was first queued in, which is the
             same rule the coalescing above follows and for the same reason - a
             cue that sets a mode and then a parameter of that mode has to arrive
-            in that order. */
-        std::vector<Message> waiting;
+            in that order. And a message past its device's limit for this flush
+            (namespace draft §88, AUT) waits the same way, in the same place. */
+        std::vector<bool> stays (queued.size(), false);
+
+        /*  HOW MANY DATAGRAMS EACH DEVICE HAS BEEN GIVEN THIS FLUSH, against its
+            `perTick` - copied onto every message at queue time, so each is
+            judged by the limit its device had when it was written. */
+        std::map<std::string, int> given;
+
+        const auto roomFor = [&given] (const Message& message)
+        {
+            const auto limit = message.destination.perTick;
+            return limit <= 0 || given[message.mountId] < limit;
+        };
+
+        const auto keyOf = [] (const Message& message)
+        {
+            return message.query ? "?" + message.address : message.address;
+        };
+
+        /*  WHO IS BEHIND, counted again by this flush. */
+        for (auto& entry : tallies)
+            entry.second.behind = 0;
+
+        const auto holdBack = [this] (const Message& message)
+        {
+            if (const auto tally = tallies.find (message.owner); ! message.owner.empty() && tally != tallies.end())
+                ++tally->second.behind;
+        };
 
         /*  WHAT GOES TO A DEVICE THAT TAKES BUNDLES (namespace draft 45, YQ),
             gathered by device in the order its first message was queued, and
-            sent once the rest have gone. Pointers into `queued`, which stands
-            until the end of this flush. */
-        std::vector<std::pair<std::string, std::vector<const Message*>>> bundled;
+            sent once the rest have gone - their indexes in `queued`. */
+        std::vector<std::pair<std::string, std::vector<std::size_t>>> bundled;
 
-        for (const auto& message : queued)
+        for (std::size_t index = 0; index < queued.size(); ++index)
         {
+            const auto& message = queued[index];
             const auto interval = intervalFor (message.destination.rateCap);
-            const auto key = message.query ? "?" + message.address : message.address;
+            const auto key = keyOf (message);
             const auto last = lastSentAt.find (key);
 
             /*  A MESSAGE THE RATE CAP HOLDS STAYS OUT OF THE BUNDLE, in its
@@ -141,11 +177,9 @@ namespace wfg::tree
             if (interval > 1 && last != lastSentAt.end()
                  && flushes - last->second < interval)
             {
-                waiting.push_back (message);
+                stays[index] = true;
                 continue;
             }
-
-            lastSentAt[key] = flushes;
 
             /*  AND ONLY THE OSC WIRE BUNDLES (AFJ): a line of text has no
                 bundle to travel in, whatever the device's row says. */
@@ -160,21 +194,62 @@ namespace wfg::tree
                     device = std::prev (bundled.end());
                 }
 
-                device->second.push_back (&message);
+                device->second.push_back (index);
                 continue;
             }
 
+            if (! roomFor (message))
+            {
+                stays[index] = true;
+                holdBack (message);
+                continue;
+            }
+
+            lastSentAt[key] = flushes;
+            ++given[message.mountId];
             sendAlone (message);
         }
 
-        for (const auto& device : bundled)
-            sendBundled (device.second);
+        for (const auto& [mountId, indexes] : bundled)
+        {
+            std::vector<const Message*> messages;
+            messages.reserve (indexes.size());
+
+            for (const auto index : indexes)
+                messages.push_back (&queued[index]);
+
+            const auto limit = messages.front()->destination.perTick;
+            const auto allowed = limit <= 0 ? std::numeric_limits<int>::max()
+                                            : std::max (0, limit - given[mountId]);
+            const auto went = sendBundled (messages, allowed);
+
+            given[mountId] += went.datagrams;
+
+            for (std::size_t at = 0; at < indexes.size(); ++at)
+            {
+                if (at < went.messages)
+                {
+                    lastSentAt[keyOf (queued[indexes[at]])] = flushes;
+                }
+                else
+                {
+                    stays[indexes[at]] = true;
+                    holdBack (queued[indexes[at]]);
+                }
+            }
+        }
+
+        std::vector<Message> waiting;
+
+        for (std::size_t index = 0; index < queued.size(); ++index)
+            if (stays[index])
+                waiting.push_back (std::move (queued[index]));
 
         queued = std::move (waiting);
         queuedAt.clear();
 
         for (std::size_t index = 0; index < queued.size(); ++index)
-            queuedAt[queued[index].query ? "?" + queued[index].address : queued[index].address] = index;
+            queuedAt[keyOf (queued[index])] = index;
 
         forgetOldAnswers();
     }
@@ -284,7 +359,7 @@ namespace wfg::tree
                     ok = deliver (message.destination, *bytes);
             }
 
-            outcomes.push_back ({ message.ticket, ok ? Outcome::sent : Outcome::failed, false });
+            answer (message, ok ? Outcome::sent : Outcome::failed, false);
             return;
         }
 
@@ -383,10 +458,10 @@ namespace wfg::tree
         if (ok)
             ++sent[message.mountId];
 
-        outcomes.push_back ({ message.ticket, ok ? Outcome::sent : Outcome::failed, false });
+        answer (message, ok ? Outcome::sent : Outcome::failed, false);
     }
 
-    void MountSender::sendBundled (const std::vector<const Message*>& messages)
+    MountSender::Bundled MountSender::sendBundled (const std::vector<const Message*>& messages, int datagramsAllowed)
     {
         /*  ONE DEVICE'S MESSAGES OF ONE FLUSH, in their order, as few bundles as
             fit (namespace draft 45, ZB): each closed before it would pass
@@ -394,15 +469,20 @@ namespace wfg::tree
             would be the ones to read a later time, and spatcore's parser drops
             it (PRD 3.12). A message too big to share a datagram goes alone, as
             a plain message, and a bundle of one is still a bundle: the device
-            said it reads them. Each message is answered and counted as itself. */
+            said it reads them. Each message is answered and counted as itself.
+
+            AND NO MORE DATAGRAMS THAN THE DEVICE IS GIVEN THIS FLUSH (namespace
+            draft §88, AUT): the messages from the first that would need one
+            more wait, in their order, for the next. */
         constexpr std::size_t header = 16;      // "#bundle\0" and the time tag
         constexpr std::size_t lengthField = 4;  // each element's size, before it
 
+        Bundled went;
         std::vector<const Message*> batch;
         std::vector<osc::Packet> elements;
         std::size_t size = header;
 
-        const auto close = [this, &batch, &elements, &size]
+        const auto close = [this, &batch, &elements, &size, &went]
         {
             if (batch.empty())
                 return;
@@ -419,9 +499,10 @@ namespace wfg::tree
                 if (ok)
                     ++sent[message->mountId];
 
-                outcomes.push_back ({ message->ticket, ok ? Outcome::sent : Outcome::failed, false });
+                answer (*message, ok ? Outcome::sent : Outcome::failed, false);
             }
 
+            ++went.datagrams;
             batch.clear();
             elements.clear();
             size = header;
@@ -437,19 +518,31 @@ namespace wfg::tree
             if (! bytes.has_value() || header + lengthField + length > bundleBytes)
             {
                 close();
+
+                if (went.datagrams >= datagramsAllowed)
+                    break;
+
                 sendAlone (*message);
+                ++went.datagrams;
+                ++went.messages;
                 continue;
             }
 
             if (size + lengthField + length > bundleBytes)
                 close();
 
+            //  A new datagram, and none left to give.
+            if (batch.empty() && went.datagrams >= datagramsAllowed)
+                break;
+
             elements.push_back (std::move (element));
             batch.push_back (message);
             size += lengthField + length;
+            ++went.messages;
         }
 
         close();
+        return went;
     }
 
     std::size_t MountSender::dropQueued (const std::function<bool (const std::string& owner)>& keep)
@@ -472,7 +565,7 @@ namespace wfg::tree
                 flush it, and a cue waiting on a ticket that cannot arrive is a
                 cue that hangs. `failed`, because it did not reach the target;
                 marked dropped, because nothing went wrong on the wire. */
-            outcomes.push_back ({ message.ticket, Outcome::failed, true });
+            answer (message, Outcome::failed, true);
             ++dropped;
         }
 
@@ -482,8 +575,51 @@ namespace wfg::tree
         for (std::size_t index = 0; index < queued.size(); ++index)
             queuedAt[queued[index].query ? "?" + queued[index].address : queued[index].address] = index;
 
+        //  What is kept is judged again by the next flush (§88).
+        for (auto& entry : tallies)
+            entry.second.behind = 0;
+
         forgetOldAnswers();
         return dropped;
+    }
+
+    void MountSender::answer (const Message& message, Outcome outcome, bool dropped)
+    {
+        outcomes.push_back ({ message.ticket, outcome, dropped });
+
+        if (message.owner.empty())
+            return;
+
+        /*  A run whose count was forgotten while something of it still waited
+            - the Runner forgets only when nothing does - is not counted again
+            from nought here: it would read a message settled that it never saw
+            queued. */
+        const auto tally = tallies.find (message.owner);
+
+        if (tally == tallies.end())
+            return;
+
+        if (tally->second.waiting > 0)
+            --tally->second.waiting;
+
+        if (dropped)
+            ++tally->second.dropped;
+        else if (outcome == Outcome::sent)
+            ++tally->second.sent;
+        else
+            ++tally->second.failed;
+    }
+
+    MountSender::Tally MountSender::tallyOf (const std::string& owner) const
+    {
+        const auto found = tallies.find (owner);
+        return found == tallies.end() ? Tally {} : found->second;
+    }
+
+    void MountSender::forgetTally (const std::string& owner)
+    {
+        if (const auto found = tallies.find (owner); found != tallies.end() && found->second.waiting == 0)
+            tallies.erase (found);
     }
 
     void MountSender::forgetOldAnswers()
@@ -540,6 +676,7 @@ namespace wfg::tree
         destination.port = declaration.port;
         destination.rateCap = declaration.rateCap;
         destination.bundles = declaration.bundles;
+        destination.perTick = declaration.perTick;
         destination.serial = declaration.transport == "serial" ? declaration.serial : std::string {};
         destination.link = declaration.transport == "tcp" || declaration.transport == "mqtt" ? declaration.id : std::string {};
         destination.wire = declaration.wire.empty() ? std::string ("osc") : declaration.wire;
