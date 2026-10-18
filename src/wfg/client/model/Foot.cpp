@@ -351,6 +351,90 @@ namespace wfg::client::model
         return picked;
     }
 
+    std::string footTypeOf (const tree::TreeSnapshot& snapshot, const std::string& cueId)
+    {
+        if (cueId.empty())
+            return {};
+
+        const auto dual = dualOf (snapshot, cueId);
+        const auto cue = dual.isPair() ? dual.movie : cueId;
+        const auto kind = text (snapshot, "/godot/cue/" + cue + "/kind");
+
+        if (kind == "video")
+            return kind + ":" + text (snapshot, "/godot/cue/" + cue + "/source");
+
+        return kind;
+    }
+
+    bool panelFits (const tree::TreeSnapshot& snapshot, Subject::Kind kind, const std::string& picked)
+    {
+        if (picked.empty())
+            return false;
+
+        const auto cue = footCueForPick (snapshot, kind, picked);
+        const auto cueKind = text (snapshot, "/godot/cue/" + cue + "/kind");
+        const auto sound = cueKind == "media" || cueKind == "mic";
+
+        switch (kind)
+        {
+            case Subject::Kind::waveform:
+                return cueKind == "media"
+                    || (cueKind == "video" && text (snapshot, "/godot/cue/" + cue + "/source") == "movie");
+
+            case Subject::Kind::sends:
+            case Subject::Kind::fx:        return sound;
+            case Subject::Kind::eq:        return sound || cueKind == "fade";
+            case Subject::Kind::take:      return cueKind == "mic";
+            case Subject::Kind::curve:
+            case Subject::Kind::fade:      return cueKind == "fade";
+            case Subject::Kind::messages:  return cueKind == "osc";
+            case Subject::Kind::picture:   return cueKind == "video";
+            case Subject::Kind::patch:     return cueKind == "process";
+            case Subject::Kind::code:      return cueKind == "script";
+
+            //  A group, or a cue in one: the panel arranges that group.
+            case Subject::Kind::timeline:
+                return cueKind == "group"
+                    || text (snapshot, "/godot/cue/" + text (snapshot, "/godot/cue/" + cue + "/parent") + "/kind") == "group";
+
+            case Subject::Kind::none:      break;
+        }
+
+        return false;
+    }
+
+    Subject footAfterPick (const tree::TreeSnapshot& snapshot, const Subject& open, const std::string& picked,
+                           const std::map<std::string, Subject::Kind>& lastOfType, bool shutForFit)
+    {
+        /*  ON THE CUE, or for a timeline on the group it arranges: the group
+            picked, or the one the cue picked is in. */
+        const auto onPick = [&snapshot, &picked] (Subject::Kind kind) -> Subject
+        {
+            auto cue = footCueForPick (snapshot, kind, picked);
+
+            if (kind == Subject::Kind::timeline && text (snapshot, "/godot/cue/" + cue + "/kind") != "group")
+                cue = text (snapshot, "/godot/cue/" + cue + "/parent");
+
+            return { kind, cue };
+        };
+
+        if (picked.empty())
+            return open;
+
+        if (open.isOpen() && panelFits (snapshot, open.kind, picked))
+            return onPick (open.kind);
+
+        //  Shut by a hand, it stays shut: only a panel shut for want of a fit comes back.
+        if (! open.isOpen() && ! shutForFit)
+            return open;
+
+        if (const auto last = lastOfType.find (footTypeOf (snapshot, picked));
+              last != lastOfType.end() && last->second != Subject::Kind::none && panelFits (snapshot, last->second, picked))
+            return onPick (last->second);
+
+        return {};
+    }
+
     FootReading readFoot (const tree::TreeSnapshot& snapshot, const Subject& subject,
                           const std::vector<std::string>& picked)
     {

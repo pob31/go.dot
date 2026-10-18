@@ -3292,84 +3292,70 @@ namespace wfg::client
                                                      .value_or (0.0)),
                                 model::isYes (reading.locked));
 
-                if (shell->footSubject().isOpen())
+                /*  THE FOOT FOLLOWS THE PICK, when the pick moves (namespace draft
+                    §90, AVH; the author, 2026-10-18: "When switching cue if the
+                    newly selected cue has no parameter matching the one of the
+                    previous cue the panel stays open on the old panel type ...
+                    it could fall back to the last mode of foot panel for this
+                    type of cue unless it was closed, and then that means the
+                    panel will temporarily close until another cue type is
+                    selected with an eventual panel mode other than closed").
+
+                    A PANEL THAT FITS THE CUE PICKED FOLLOWS IT: the waveform of
+                    the cue just clicked is what somebody wants next, a movie and
+                    its sound are one cue (§47, AAD), and a timeline goes to the
+                    group the cue is in (author, 2026-09-22: "the group panel
+                    stays visible when selecting other cues").
+
+                    ONE THAT DOES NOT gives way to the panel this type of cue was
+                    last left on, and to none when that was shut or there was
+                    none: a fade's mixer leaves when something not a fade is
+                    picked (author, 2026-09-22: "collapse the fade foot panel when
+                    selecting another type of cue"), a timeline when a cue at the
+                    top of a list is, and an OSC cue's messages for a sound's
+                    waveform. Shut for want of a fit, the panel comes back on the
+                    next cue whose type has one; shut by a hand, it stays shut.
+
+                    ONLY WHEN THE PICK MOVES, so a panel asked for by hand on a
+                    cue it has nothing for still says so (author, 2026-10-07:
+                    "make it plain obvious ... this is not relevant to them"). */
+                const auto picked = selection.anchor();
+
+                if (! surfaceHoldsFoot && ! picked.empty())
                 {
-                    auto subject = shell->footSubject();
-
-                    /*  A TIMELINE IS ABOUT A CONTAINER, so picking a cue moves
-                        it to that cue's GROUP rather than to the cue (author,
-                        2026-09-22: "the group panel stays visible when
-                        selecting other cues").
-
-                        Three answers rather than two, and each one is what
-                        somebody meant: pick a group and the panel arranges
-                        THAT group; pick a cue inside one and it arranges the
-                        group the cue is in, which is the scene they are
-                        working on; pick a cue at the top of a list, where
-                        there is no group to arrange, and the panel shuts
-                        rather than sitting there showing somewhere else.
-
-                        The last is the plan's own rule for every subject - "re-
-                        points where that makes sense and closes where it does
-                        not" - and it is the one a timeline had wrong. */
-                    const auto picked = selection.anchor();
-
-                    if (! surfaceHoldsFoot && model::followsPick (subject.kind) && ! picked.empty())
+                    if (picked != footPickSeen)
                     {
-                        /*  A MOVIE AND ITS SOUND ARE ONE CUE (namespace draft
-                            §47, AAD): an EQ follows a pick of either line to
-                            the sound, a strip to the movie. */
-                        auto wanted = model::footCueForPick (*snapshot, subject.kind, picked);
+                        footPickSeen = picked;
+                        const auto before = shell->footSubject();
+                        const auto after = model::footAfterPick (*snapshot, before, picked, footModeOfType, footShutForFit);
 
-                        /*  A PANEL THAT OPENS BY ITSELF MAY CLOSE BY ITSELF
-                            (author, 2026-09-22: "collapse the fade foot panel
-                            when selecting another type of cue").
-
-                            The rule is not "every panel follows or shuts", it
-                            is which of the two a subject was ASKED for. A
-                            waveform and a send mixer were opened by hand and
-                            stay until a hand shuts them - clicking a group to
-                            check something must not cost somebody the zoom
-                            they set. A fade's curve was never asked for: it
-                            arrived because a fade was picked, so it leaves
-                            when one is not, and picking a fade again brings it
-                            straight back at no cost. */
-                        if ((subject.kind == model::Subject::Kind::curve || subject.kind == model::Subject::Kind::fade)
-                              && model::text (*snapshot, "/godot/cue/" + picked + "/kind") != "fade")
-                            wanted.clear();
-
-                        if (subject.kind == model::Subject::Kind::timeline)
+                        if (after != before)
                         {
-                            const auto isGroup = [&snapshot] (const std::string& id)
-                            {
-                                return ! id.empty()
-                                         && model::text (*snapshot, "/godot/cue/" + id + "/kind") == "group";
-                            };
+                            if (before.isOpen() != after.isOpen())
+                                footShutForFit = ! after.isOpen();
 
-                            if (! isGroup (wanted))
-                                wanted = model::text (*snapshot, "/godot/cue/" + picked + "/parent");
+                            shell->setFoot (after);
 
-                            /*  A CUE AT THE TOP OF A LIST HAS A LIST FOR A
-                                PARENT, and a list is not a cue and has no
-                                members to arrange in time. Asked rather than
-                                assumed, because `parent` is never empty for a
-                                placed cue and an unchecked climb would land
-                                the panel on an identifier it cannot read. */
-                            if (! isGroup (wanted))
-                                wanted.clear();
-                        }
-
-                        if (wanted.empty())
-                        {
-                            shell->setFoot ({});
-                            menuItemsChanged();
-                        }
-                        else if (wanted != subject.objectId)
-                        {
-                            subject.objectId = wanted;
-                            shell->setFoot (subject);
+                            if (after.kind != before.kind)
+                                menuItemsChanged();
                         }
                     }
+
+                    //  And what this type of cue is left on now: a panel that fits it, or shut by a hand.
+                    if (const auto now = shell->footSubject(); now.isOpen() && model::panelFits (*snapshot, now.kind, picked))
+                    {
+                        footModeOfType[model::footTypeOf (*snapshot, picked)] = now.kind;
+                        footShutForFit = false;
+                    }
+                    else if (! now.isOpen() && ! footShutForFit)
+                    {
+                        footModeOfType[model::footTypeOf (*snapshot, picked)] = model::Subject::Kind::none;
+                    }
+                }
+
+                if (shell->footSubject().isOpen())
+                {
+                    const auto subject = shell->footSubject();
 
                     /*  THE THIRD DOOR, read here and only here, and only while
                         the take panel is what is open: a take's picture is
@@ -3957,6 +3943,15 @@ namespace wfg::client
             bool surfaceHoldsFoot = false;
             model::Subject footBeforeSurface;
             std::string lastSurfaceEdit;
+
+            /*  THE PANEL EACH TYPE OF CUE WAS LAST LEFT ON (namespace draft
+                §90, AVH): by `model::footTypeOf`, `none` for one a hand shut;
+                whether the foot is shut because the cue picked had nothing for
+                it, which is not a hand's; and the pick it last followed. For
+                this window's life, as the zoom is: the show holds none of it. */
+            std::map<std::string, model::Subject::Kind> footModeOfType;
+            bool footShutForFit = false;
+            std::string footPickSeen;
 
             /*  The pick the surfaces were last aimed from (§47, AAA): the aim
                 is sent when the pick moves, not every pass. */

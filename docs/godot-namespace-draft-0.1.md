@@ -32259,3 +32259,36 @@ Owed: the author's bench of the same gestures - the movie at the top of the list
 it while it plays, Esc, GO - and whether the movie's line of the row shows its own mark ("Ready: read
 ahead") beside its sound's. Not built: reading a movie "in chunks" - it already is read only where it is
 played.
+
+## 90. The foot panel on a new pick: the panel that fits, or that type's last
+
+Asked by the author on 2026-10-18, before the next release: *"When switching cue if the newly selected cue
+has no parameter matching the one of the previous cue the panel stays open on the old panel type. For
+instance I was on an OSC cue looking at the contents, selected a media cue and the panel stays empty
+saying nothing to show. In this case it could fall back to the last mode of foot panel for this type of
+cue unless it was closed, and then that means the panel will temporarily close until another cue type is
+selected with an eventual panel mode other than closed and so on."* Decision AVH, his rule; the details
+mine (proposed):
+
+- **AVH** When the pick moves, the open panel **follows it if it fits** the cue picked (a waveform a sound
+  or a movie, sends and FX a sound or a mic, the EQ those and a fade, a take a mic, a curve and a fade's
+  mixer a fade, messages an OSC cue, a picture a video cue, a patch a process cue, code a script, a
+  timeline a group or a cue in one - over a movie and its sound, the line it follows to, §47 AAD).
+  **Otherwise it opens on the panel that type of cue was last left on**, and shuts when that was shut or
+  there was none. Shut that way, it comes back on the next cue whose type has a panel; **shut by a hand,
+  it stays shut**. A type is the cue's kind, a video cue told apart as a movie or a still, the sound
+  locked to a movie taken as its movie. Remembered for the window's life, never in the show.
+- What it replaces: the fade's mixer and curve leaving when something not a fade is picked (2026-09-22)
+  and the timeline shutting on a cue at the top of a list - both are this rule now, and may open that
+  type's last panel instead of shutting. What it leaves: the panels that open by themselves (a fade's
+  mixer, a process cue's patch, a script's code, an OSC cue of several messages), and a panel asked for
+  by hand on a cue it has nothing for, which still says so (2026-10-07) - the rule runs when the pick
+  moves, not on every pass.
+
+Tests: `ClientTests` - what fits what; a fitting panel followed, a timeline to the cue's group; the
+author's case, an OSC cue's messages then a sound, opening the waveform sounds were last left on; a type
+never seen or last shut, shut; shut for a fit and back on the next OSC cue, shut by a hand and not; a
+remembered panel that does not fit the cue not opened. `wfg_audio_ui_tests` whole, both locales.
+
+Owed: the author's try in the window, and his word on a fade or a top-level cue now opening its type's
+last panel rather than always shutting.

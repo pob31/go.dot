@@ -44,6 +44,7 @@
 */
 
 #include <cstddef>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -337,6 +338,32 @@ namespace wfg::client::model
         EQ, the FX and the sends are the sound's and the strip the movie's,
         whichever line was picked. */
     std::string footCueForPick (const tree::TreeSnapshot& snapshot, Subject::Kind kind, const std::string& picked);
+
+    /*  WHAT TYPE OF CUE A PICK IS, for the panel each type was last left on
+        (namespace draft §90, AVH): its kind, a picture cue told apart as a
+        movie or a still, and the sound locked to a movie taken as its movie -
+        the list draws the pair as one cue. Empty for nothing picked. */
+    std::string footTypeOf (const tree::TreeSnapshot&, const std::string& cueId);
+
+    /*  WHETHER A PANEL OF THIS KIND HAS SOMETHING TO SHOW FOR THE CUE PICKED
+        (§90): a waveform for a sound or a movie, the sends and the FX for a
+        sound or a mic, the EQ for those and a fade, a take for a mic, a curve
+        and a fade's mixer for a fade, the messages for an OSC cue, a picture
+        for a video cue, a patch for a process cue, code for a script, and a
+        timeline for a group or a cue in one. Over a movie and its sound, the
+        line the panel follows to (`footCueForPick`). */
+    bool panelFits (const tree::TreeSnapshot&, Subject::Kind, const std::string& picked);
+
+    /*  WHERE THE OPEN PANEL GOES WHEN THE PICK MOVES (author, 2026-10-18:
+        "if the newly selected cue has no parameter matching the one of the
+        previous cue ... it could fall back to the last mode of foot panel for
+        this type of cue unless it was closed"): `open` re-pointed at the cue
+        picked when it fits it - a timeline at the picked cue's group - else
+        the panel this type of cue was last left on (`lastOfType`), on the cue,
+        when that fits; else shut, until a cue whose type has a panel is picked.
+        A panel shut by a hand stays shut; `shutForFit` is one this shut. */
+    Subject footAfterPick (const tree::TreeSnapshot&, const Subject& open, const std::string& picked,
+                           const std::map<std::string, Subject::Kind>& lastOfType, bool shutForFit);
 
     FootReading readFoot (const tree::TreeSnapshot&, const Subject&,
                           const std::vector<std::string>& picked = {});

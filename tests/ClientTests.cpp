@@ -16303,3 +16303,77 @@ TEST_CASE ("client: a refusal that is not a missing file is said in its own word
     CHECK (other.text == "not ready");
     CHECK (other.meaning.find ("Missing") == std::string::npos);
 }
+
+//==============================================================================
+//  THE FOOT ON A NEW PICK (namespace draft §90, AVH; the author, 2026-10-18).
+TEST_CASE ("client: a foot panel the new cue has nothing for falls back to the panel that type was last left on, or shuts")
+{
+    const auto snapshotOf = [] (std::map<std::string, std::string> rows)
+    {
+        std::vector<tree::Node> nodes;
+
+        for (auto& [address, value] : rows)
+        {
+            tree::Node node;
+            node.address = address;
+            node.values = { osc::Value::string (value) };
+            nodes.push_back (std::move (node));
+        }
+
+        return tree::TreeSnapshot (0, nullptr, nullptr, std::move (nodes));
+    };
+
+    const auto snapshot = snapshotOf ({
+        { "/godot/cue/OSC1/kind", "osc" },     { "/godot/cue/OSC1/parent", "LIST" },
+        { "/godot/cue/OSC2/kind", "osc" },     { "/godot/cue/OSC2/parent", "LIST" },
+        { "/godot/cue/MED1/kind", "media" },   { "/godot/cue/MED1/parent", "LIST" },
+        { "/godot/cue/MED2/kind", "media" },   { "/godot/cue/MED2/parent", "LIST" },
+        { "/godot/cue/FAD1/kind", "fade" },    { "/godot/cue/FAD1/parent", "LIST" },
+        { "/godot/cue/MIC1/kind", "mic" },     { "/godot/cue/MIC1/parent", "LIST" },
+        { "/godot/cue/GRP1/kind", "group" },   { "/godot/cue/GRP1/parent", "LIST" },
+        { "/godot/cue/MEDG/kind", "media" },   { "/godot/cue/MEDG/parent", "GRP1" },
+        { "/godot/cue/MOV1/kind", "video" },   { "/godot/cue/MOV1/source", "movie" },
+        { "/godot/cue/PIC1/kind", "video" },   { "/godot/cue/PIC1/source", "picture" },
+    });
+
+    using Kind = model::Subject::Kind;
+
+    //  What fits what.
+    CHECK (model::panelFits (snapshot, Kind::waveform, "MED1"));
+    CHECK (model::panelFits (snapshot, Kind::waveform, "MOV1"));
+    CHECK_FALSE (model::panelFits (snapshot, Kind::waveform, "PIC1"));
+    CHECK_FALSE (model::panelFits (snapshot, Kind::messages, "MED1"));
+    CHECK (model::panelFits (snapshot, Kind::eq, "FAD1"));
+    CHECK_FALSE (model::panelFits (snapshot, Kind::sends, "FAD1"));
+    CHECK (model::panelFits (snapshot, Kind::timeline, "MEDG"));
+    CHECK_FALSE (model::panelFits (snapshot, Kind::timeline, "MED1"));
+    CHECK (model::footTypeOf (snapshot, "MOV1") == "video:movie");
+    CHECK (model::footTypeOf (snapshot, "PIC1") == "video:picture");
+
+    std::map<std::string, Kind> last;
+
+    //  A panel that fits follows; a timeline goes to the cue's group.
+    CHECK (model::footAfterPick (snapshot, { Kind::waveform, "MED1" }, "MED2", last, false)
+             == model::Subject { Kind::waveform, "MED2" });
+    CHECK (model::footAfterPick (snapshot, { Kind::timeline, "GRP1" }, "MEDG", last, false)
+             == model::Subject { Kind::timeline, "GRP1" });
+
+    //  The author's case: an OSC cue's messages, then a sound - its waveform, the panel sounds were last left on.
+    last["media"] = Kind::waveform;
+    CHECK (model::footAfterPick (snapshot, { Kind::messages, "OSC1" }, "MED1", last, false)
+             == model::Subject { Kind::waveform, "MED1" });
+
+    //  A type never seen, or last shut: shut, for now.
+    CHECK_FALSE (model::footAfterPick (snapshot, { Kind::messages, "OSC1" }, "MIC1", last, false).isOpen());
+    last["fade"] = Kind::none;
+    CHECK_FALSE (model::footAfterPick (snapshot, { Kind::messages, "OSC1" }, "FAD1", last, false).isOpen());
+
+    //  Shut for want of a fit, it comes back on the next cue whose type has a panel; shut by a hand, it does not.
+    last["osc"] = Kind::messages;
+    CHECK (model::footAfterPick (snapshot, {}, "OSC2", last, true) == model::Subject { Kind::messages, "OSC2" });
+    CHECK_FALSE (model::footAfterPick (snapshot, {}, "OSC2", last, false).isOpen());
+
+    //  A remembered panel that does not fit this cue - a still's type left on a waveform - is not opened.
+    last["video:picture"] = Kind::waveform;
+    CHECK_FALSE (model::footAfterPick (snapshot, { Kind::messages, "OSC1" }, "PIC1", last, false).isOpen());
+}
