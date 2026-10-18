@@ -382,7 +382,9 @@ namespace wfg::video
 
             /*  Each movie a layer plays now, and the frame its playhead is on.
                 Replaces the layers' list, asked every pass; what the engine
-                named to read ahead is a list of its own (below). */
+                named to read ahead is a list of its own (below). THE ONE PLACE
+                a file is let go of (§91, AVI): named by neither list, as both
+                stand in this pass. */
             void want (const std::map<std::string, int>& frames)
             {
                 {
@@ -398,7 +400,11 @@ namespace wfg::video
                 movie, the second GO will start it at and which way it will play
                 - opened, and its frames from there read, beside whatever the
                 layers want; let go when neither wants it. Replaced only when the
-                engine's list changes. */
+                engine's list changes. NOTHING IS LET GO OF HERE (§91, AVI): the
+                pass reads this list before the layers, and the Runner writes a
+                GO's layer before the list that no longer names its file - a trim
+                here, against the layers of the pass before, let go of a file read
+                ahead in the very pass a layer named it. `want` trims, with both. */
             struct Ahead
             {
                 std::string path;
@@ -411,7 +417,6 @@ namespace wfg::video
                 {
                     const std::lock_guard<std::mutex> hold (lock);
                     prepared = movies;
-                    letGoOfUnwanted();
                 }
 
                 notify();
@@ -662,9 +667,19 @@ namespace wfg::video
                 int heading = 1;
             };
 
+            /*  A FILE OPEN, with its open's verdict kept beside it (§91, AVJ):
+                what is held of the file is made again from these whenever it
+                is named and open without one. */
+            struct Opened
+            {
+                std::unique_ptr<movie::MovieFile> file;
+                bool hap = false;
+                bool there = false;
+            };
+
             void run() override
             {
-                std::map<std::string, std::unique_ptr<movie::MovieFile>> files;
+                std::map<std::string, Opened> files;
                 std::map<std::string, Preview> previews;
                 std::set<std::string> awaitingPreview;      // not HAP, and no decoder for it yet
                 std::vector<std::uint8_t> bytes;
@@ -720,27 +735,49 @@ namespace wfg::video
                     {
                         const auto layer = onLayers.find (path);
                         const auto* ahead = aheadOf (path);
-                        auto& file = files[path];
+                        auto& record = files[path];
+                        const auto opening = record.file == nullptr;
 
-                        if (file == nullptr)
+                        if (opening)
                         {
-                            file = std::make_unique<movie::MovieFile>();
+                            record.file = std::make_unique<movie::MovieFile>();
                             std::string why;
-                            const auto hap = file->open (path, why) && file->info().isHap();
-                            const auto there = hap || juce::File (juce::String::fromUTF8 (path.c_str())).existsAsFile();
+                            record.hap = record.file->open (path, why) && record.file->info().isHap();
+                            record.there = record.hap || juce::File (juce::String::fromUTF8 (path.c_str())).existsAsFile();
 
                             //  NOT HAP: a preview, where FFmpeg is here - opened below.
-                            if (! hap && there)
+                            if (! record.hap && record.there)
                                 awaitingPreview.insert (path);
+                        }
 
+                        auto& file = record.file;
+
+                        /*  WHAT IS HELD OF IT, made as the file is opened - AND
+                            MADE AGAIN if it was let go of while the file stayed
+                            open (§91, AVJ): named by nobody in one pass and by a
+                            layer in the next, before this thread looked. Before
+                            this, such a file was open and never read again - the
+                            author's black movie after a stop. The picture store
+                            has always read a still again that way. */
+                        {
                             const std::lock_guard<std::mutex> hold (lock);
-                            auto& entry = held[path];
-                            entry.open = hap;
-                            entry.failed = ! there;
-                            entry.problem = there ? std::string {} : std::string ("not found");
 
-                            if (hap)
-                                entry.info = file->info();
+                            if (opening || held.count (path) == 0)
+                            {
+                                auto& entry = held[path];
+                                entry.open = record.hap;
+                                entry.failed = ! record.there;
+                                entry.problem = record.there ? std::string {} : std::string ("not found");
+
+                                if (record.hap)
+                                    entry.info = file->info();
+                                else if (record.there && ! opening)
+                                {
+                                    //  A preview's record lost: its decoder is opened again below, and the record with it.
+                                    previews.erase (path);
+                                    awaitingPreview.insert (path);
+                                }
+                            }
                         }
 
                         /*  A PREVIEW'S DECODER, for a layer at once, and for the
@@ -811,27 +848,40 @@ namespace wfg::video
                         {
                             const std::lock_guard<std::mutex> hold (lock);
 
-                            if (const auto found = held.find (path); found != held.end() && layer != onLayers.end())
+                            if (const auto found = held.find (path); found != held.end())
                             {
                                 auto& entry = found->second;
-                                const auto first = std::clamp (layer->second, 0, count - 1);
 
-                                //  A step of more than half the file is a wrap, not a turn.
-                                if (entry.lastFirst >= 0 && first != entry.lastFirst)
+                                /*  NO LAYER PLAYS IT: the way it went is forgotten
+                                    (§91, AVL), so the next layer of it is first
+                                    seen and takes the read-ahead's way, rather than
+                                    turning back for its first look from where the
+                                    run before it stopped. */
+                                if (layer == onLayers.end())
                                 {
-                                    const auto step = first - entry.lastFirst;
-                                    entry.heading = (std::abs (step) * 2 > count) == (step < 0) ? 1 : -1;
+                                    entry.lastFirst = -1;
                                 }
-
-                                /*  FIRST SEEN ON A LAYER: the way it was read ahead
-                                    is the way it plays (§48). */
-                                else if (entry.lastFirst < 0 && ahead != nullptr)
+                                else
                                 {
-                                    entry.heading = ahead->direction < 0 ? -1 : 1;
-                                }
+                                    const auto first = std::clamp (layer->second, 0, count - 1);
 
-                                entry.lastFirst = first;
-                                heads.push_back ({ first, entry.heading });
+                                    //  A step of more than half the file is a wrap, not a turn.
+                                    if (entry.lastFirst >= 0 && first != entry.lastFirst)
+                                    {
+                                        const auto step = first - entry.lastFirst;
+                                        entry.heading = (std::abs (step) * 2 > count) == (step < 0) ? 1 : -1;
+                                    }
+
+                                    /*  FIRST SEEN ON A LAYER: the way it was read ahead
+                                        is the way it plays (§48). */
+                                    else if (entry.lastFirst < 0 && ahead != nullptr)
+                                    {
+                                        entry.heading = ahead->direction < 0 ? -1 : 1;
+                                    }
+
+                                    entry.lastFirst = first;
+                                    heads.push_back ({ first, entry.heading });
+                                }
                             }
                         }
 
@@ -3795,10 +3845,14 @@ namespace wfg::video
 
                 /*  WHAT THE ENGINE NAMED TO READ AHEAD (VX; namespace draft
                     §48), read again only when it wrote it again - and read
-                    BEFORE THE LAYERS. The engine writes a GO's layer before the
-                    list that no longer names its file; read the other way
-                    round, a pass between the two would find the file in
-                    neither, and let go of what was read ahead for this frame. */
+                    BEFORE THE LAYERS, so a new start second reaches the store
+                    before the layer that plays from it. What the store lets go
+                    of is decided once a pass, by its `want` below, against this
+                    list and these layers together (§91, AVI): the engine writes
+                    a GO's layer before the list that no longer names its file,
+                    and a trim on this list alone, against the layers of the
+                    pass before, let go of what was read ahead in the very pass
+                    the layer named it. */
                 if (const auto seqNow = r.preparedSeq.load (std::memory_order_acquire);
                     ! preparedRead || seqNow != preparedUnder)
                 {
@@ -3856,8 +3910,14 @@ namespace wfg::video
                         want (layer.file);
 
                     /*  A MOVIE AND THE FRAME ITS PLAYHEAD IS ON NOW - the store
-                        reads from there on. */
-                    if (layer.source == region::Source::movie && ! layer.file.empty())
+                        reads from there on. NOT A SLOT PAST ITS REMOVAL (§91,
+                        AVK): unseen until it is let go a second on, it would
+                        hold the file's one playhead where a new layer of the
+                        same file wants its start - and `frame` gives the nearest
+                        frame BEFORE an index, so a start would get nothing. */
+                    const auto removed = layer.removeAt != region::notRemoved && now >= layer.removeAt;
+
+                    if (layer.source == region::Source::movie && ! layer.file.empty() && ! removed)
                         moviesWanted[layer.file] = std::max (0, movies.frameAt (layer.file,
                                                                                  valueOf (layer, Property::time, std::max<std::int64_t> (now, 0), 0.0)));
                 }

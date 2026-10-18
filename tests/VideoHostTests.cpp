@@ -3798,3 +3798,141 @@ TEST_CASE ("video host: a movie played, stopped and named again from its start s
 
     folder.deleteRecursively();
 }
+
+/*  THE AUTHOR'S BENCH OF 2026-10-18 (namespace draft §91): a movie in the list,
+    GO, Esc or a stop, the standby straight back on it, GO - black, "not before
+    a rather long time", and in a group never. The engine's part was whole in
+    his logs; the renderer's movie store had let go of the file's record in the
+    same pass the layer named it again, and nothing made the record again while
+    the file stayed open. Twelve times over, the movie's start is seen at once
+    at every GO, whether the run before it ended at once or went Esc's road
+    with the standby put back while its slot still lingered. */
+TEST_CASE ("video host: a movie stopped and named again, then started as the list drops it, is seen at once, every time (namespace draft §91)")
+{
+    using namespace wfg::testing::hapmovie;
+
+    juce::TemporaryFile work;
+    const auto folder = work.getFile().getSiblingFile ("godot-video-every-time-" + juce::String (juce::Random::getSystemRandom().nextInt (1 << 30)));
+    folder.createDirectory();
+
+    /*  SIXTEEN FRAMES OF 1920 BY 1080 at two a second - a megabyte each, so
+        the reader's loops are long enough to straddle a pass of the renderer's
+        - the first red, the rest blue; six seconds in is the thirteenth. */
+    std::vector<Bytes> frames;
+    frames.push_back (section (0xAB, solidDxt1 (1920, 1080, 0xFF0000)));
+
+    for (int n = 1; n < 16; ++n)
+        frames.push_back (section (0xAB, solidDxt1 (1920, 1080, 0x0000FF)));
+
+    const auto movie = writeMovie (folder, "again.mov", hapMovie (1920, 1080, frames, 2));
+    const auto path = movie.getFullPathName().toStdString();
+
+    video::HostSpec spec;
+    spec.workFolder = folder.getFullPathName().toStdString();
+    spec.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName().toStdString();
+    spec.leadingArgs = { "video-render" };
+    spec.headless = true;
+
+    doc::ShowDocument document;
+    REQUIRE (doc::Bundle::open (videoBundle(), document).ok);
+
+    TestClock clock;
+    video::VideoHost host { spec };
+    host.configure (document);
+    REQUIRE (tickUntil (host, clock, [&host] { return host.readouts().renderer == "running"; }));
+
+    auto& r = *host.regionForTests();
+
+    const auto readyAt = [&host]
+    {
+        const auto readouts = host.readouts();
+        return readouts.heldCurrent && ! readouts.held.empty()
+                 && readouts.held[0].state == video::region::HeldState::ready;
+    };
+
+    //  A tenth of a second of ticks: passes enough for the renderer to let go of what nobody names.
+    const auto settle = [&host, &clock]
+    {
+        const auto from = clock.now();
+        tickUntil (host, clock, [&clock, from] { return clock.now() > from + 4800; });
+    };
+
+    const video::Preload fromItsStart { path, true, 0.0, 1 };
+
+    //  The standby on the movie, before the first GO.
+    host.sink().prepare ({ fromItsStart });
+    REQUIRE (tickUntil (host, clock, readyAt));
+
+    int unseen = 0;
+    int late = 0;
+
+    for (int cycle = 0; cycle < 12; ++cycle)
+    {
+        CAPTURE (cycle);
+        const auto id = "RUN000" + std::to_string (10 + cycle);
+
+        /*  GO: the layer, its points, and the list that no longer names its
+            file - the standby moved on - written in one breath, as the Runner
+            writes them in one tick. */
+        video::LayerSpec layer;
+        layer.id = id;
+        layer.canvas = "VD000011";
+        layer.order = static_cast<std::uint64_t> (cycle + 1);
+        layer.source = "movie";
+        layer.file = path;
+
+        const auto shownAt = clock.now() + 960;
+        host.sink().show (layer);
+        host.sink().opacity (id, { shownAt, 1.0 });
+        host.sink().move (id, video::Property::time, { shownAt, 0.0 });
+        host.sink().prepare ({});
+
+        const auto lag = lagToFirstSight (host, clock, r, shownAt, 0xFF0000);
+        CHECK (lag >= 0);
+        CHECK (lag < seenSoonEnough);
+        unseen += lag < 0 ? 1 : 0;
+        late += lag >= seenSoonEnough ? 1 : 0;
+
+        if (lag < 0)
+        {
+            /*  NEVER SEEN: everything let go and a moment given, so the next
+                cycle starts from nothing and is its own. */
+            host.sink().remove (id, -1);
+            settle();
+            host.sink().prepare ({ fromItsStart });
+            REQUIRE (tickUntil (host, clock, readyAt));
+            continue;
+        }
+
+        //  It plays on, six seconds in.
+        host.sink().move (id, video::Property::time, { clock.now(), 6.0 });
+        std::int64_t seen = -1;
+        REQUIRE (tickUntil (host, clock, [&] { return probeOf (r, 0, seen) == 0x0000FFu; }));
+
+        if (cycle % 2 == 0)
+        {
+            /*  ENDED AT ONCE - a stop, or its own end - a moment, and the
+                standby put back on it: named again from its start. */
+            host.sink().remove (id, -1);
+            settle();
+            host.sink().prepare ({ fromItsStart });
+            REQUIRE (tickUntil (host, clock, readyAt));
+        }
+        else
+        {
+            /*  ESC'S ROAD: removed at its sample, the slot let go a second
+                after - and the standby put back on it BEFORE that, "before a
+                rather long time". Its start is read ahead again all the same,
+                and the slot is gone before the next GO. */
+            const auto removedAt = clock.now();
+            host.sink().remove (id, removedAt);
+            host.sink().prepare ({ fromItsStart });
+            REQUIRE (tickUntil (host, clock, readyAt));
+            REQUIRE (tickUntil (host, clock, [&clock, removedAt] { return clock.now() > removedAt + 48000 * 3 / 2; }));
+        }
+    }
+
+    MESSAGE ("twelve GOs after a stop, the movie's start: ", unseen, " never seen, ", late, " seen late");
+
+    folder.deleteRecursively();
+}

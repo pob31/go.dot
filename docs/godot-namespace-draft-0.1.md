@@ -32260,6 +32260,9 @@ it while it plays, Esc, GO - and whether the movie's line of the row shows its o
 ahead") beside its sound's. Not built: reading a movie "in chunks" - it already is read only where it is
 played.
 
+The bench failed the same evening: *"The fix didn't work at all. Same issue after the fix."* AVF was real
+and was not this; the cause was in the renderer's movie store, §91.
+
 ## 90. The foot panel on a new pick: the panel that fits, or that type's last
 
 Asked by the author on 2026-10-18, before the next release: *"When switching cue if the newly selected cue
@@ -32292,3 +32295,61 @@ remembered panel that does not fit the cue not opened. `wfg_audio_ui_tests` whol
 
 Owed: the author's try in the window, and his word on a fade or a top-level cue now opening its type's
 last panel rather than always shutting.
+
+## 91. A movie let go and named again in one breath stays unread
+
+Asked by the author on 2026-10-18, on 0.1.3, as §89's bench: *"I'm not getting any more playback of videos
+after stopping it (panic or Esc) and moving the playhead back to it before a rather long time as if it had
+to slowly unload and reload. This doesn't happen when the video cue is in a group and it is assigned to
+the preset header."* Then, as it was looked at: *"The fix didn't work at all. Same issue after the fix."*,
+*"If I turn off the output and turn it back on again it also clears the problem and next time I try to
+play the video it will work, once."*, *"The wait doesn't always work."*, *"In the video effects I can see
+the video. Changing the geometry will give one playback and fail the second time. In the timeline the
+video monitor opens and I can see the video."*, *"And sometimes more..."*, *"At least a change in the
+geometry helps. It's as if when the video should play basically without a group or a geometry
+modification everything is okay."*
+
+His logs showed the engine's whole part each time - the standby set, the sound armed, GO, both runs
+started - and nothing of the picture, which the engine does not log. The fault was the renderer's.
+
+The renderer's movie store keeps two records of each movie by its path. What it holds of it - open or
+failed, its index, the frames read, the way it is going - is let go of under the lock, by the pass that
+reads the region, whenever neither a layer nor the engine's read-ahead list names the path. The open file
+itself belongs to the reading thread and goes only when that thread's own look finds the path named by
+neither. The record of what is held was made in one place only: when the file was opened. A pass read
+the engine's list before the layers and let go after each. The Runner writes a GO's layer and then, last
+in the same tick, the list that no longer names its file - the standby has moved on - so the pass that
+saw both let go of the record against the layers of the pass before, none of them this file, and named
+the file again a few microseconds later. Whether the reading thread looked in between decided it. If it
+did, it closed the file and opened it again for the layer, cold but whole. If not, the file stayed open
+with no record of it, no frame was ever read again, and the layer was black - for as long as anyone named
+the file at every look, which the standby put back on the cue did without a gap. A group's member is
+made a drain later than the GO, so its layer lands a tick after the list, with a pass between that names
+the file by neither: closed cleanly, opened again - which is why the group road never showed it. The
+monitor's tile reads the movie through a store of its own. A toggle of the output, or of the projector's
+hiding by the mapping window, binds the outputs again, which touches no store; what it gave was the race
+going the other way.
+
+Decisions AVI to AVL, mine (proposed):
+
+- **AVI** **What the store lets go of is decided once a pass**, against the layers and the list of the
+  same pass: the list is still read first, so a new start second is seen before its layer, and the trim
+  runs with the layers. A GO's layer and the list that drops its file, read in one pass, keep what was
+  read ahead.
+- **AVJ** **The record of a file is made again whenever a named file is open without one** - the open's
+  verdict kept beside the file, as the picture store has always done for a still. An open file with no
+  record cannot stay so; at worst its frames are read again.
+- **AVK** **A slot past its removal names nothing**: an invisible layer, let go a second after its
+  removal was due, no longer holds the file's one playhead where a new layer wants its start. §89's AVG,
+  narrowed; one head per layer is still not built.
+- **AVL** **The way a file was read is forgotten when no layer plays it**, so the next layer takes the
+  read-ahead's direction rather than turning back for its first look.
+
+Tests: `VideoHostTests` - a projector-sized movie stopped and named again, then started as the list drops
+it, is seen at once, twelve times over, the run before it ended at once or gone Esc's road with the
+standby put back while its slot lingered. On the code before AVI and AVJ, run three times on the author's
+machine, 4 of those 36 GOs never showed the start at all - on both roads - which is the race seen. The
+§89 and M54a cases as they were.
+
+Owed: the author's bench - the movie at the top of the list, GO, Esc and double Esc, the standby straight
+back on it, GO - on the release he asked for.
