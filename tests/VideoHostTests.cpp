@@ -1737,52 +1737,74 @@ TEST_CASE ("video host: the monitor's pictures, drawn while a movie plays and it
         std::int64_t seen = -1;
         REQUIRE (tickUntil (host, clock, [&] { return probeOf (r, 0, seen) == 0xFF0000u; }));
 
-        //  The monitor open, the cue's tile asked for on every pass, as the window asks while it plays.
-        host.setMonitoring (true);
-
-        const auto began = std::chrono::steady_clock::now();
-        auto lastChange = began;
-        auto lastTick = began - std::chrono::milliseconds (20);
-        std::int64_t lastSample = -1;
-        double worstGapMs = 0.0;
-        auto tiles = 0;
-
-        while (std::chrono::steady_clock::now() - began < std::chrono::seconds (3))
+        /*  THE PROBE'S WORST GAP over three seconds, the first one let go by:
+            the renderer's ticks as this machine keeps them, ticked as the window
+            ticks it, and with the monitor open the cue's tile asked for on every
+            pass, as the window asks while it plays. */
+        const auto worstGap = [&] (bool monitoring, int& tiles)
         {
-            const auto now = std::chrono::steady_clock::now();
+            const auto began = std::chrono::steady_clock::now();
+            auto lastChange = began;
+            auto lastTick = began - std::chrono::milliseconds (20);
+            std::int64_t lastSample = -1;
+            double worstMs = 0.0;
+            tiles = 0;
 
-            if (now - lastTick >= std::chrono::milliseconds (20))
+            while (std::chrono::steady_clock::now() - began < std::chrono::seconds (3))
             {
-                lastTick = now;
-                host.showTile (layer, 0.2, 1.0);
-                host.tick (clock.now(), 48000);
-                ++tiles;
+                const auto now = std::chrono::steady_clock::now();
+
+                if (now - lastTick >= std::chrono::milliseconds (20))
+                {
+                    lastTick = now;
+
+                    if (monitoring)
+                    {
+                        host.showTile (layer, 0.2, 1.0);
+                        ++tiles;
+                    }
+
+                    host.tick (clock.now(), 48000);
+                }
+
+                std::int64_t sample = -1;
+                probeOf (r, 0, sample);
+
+                if (sample != lastSample)
+                {
+                    //  After the first second, once the monitor's drawing is under way.
+                    if (lastSample >= 0 && now - began > std::chrono::seconds (1))
+                        worstMs = std::max (worstMs, std::chrono::duration<double, std::milli> (now - lastChange).count());
+
+                    lastSample = sample;
+                    lastChange = now;
+                }
+
+                std::this_thread::sleep_for (std::chrono::milliseconds (2));
             }
 
-            std::int64_t sample = -1;
-            probeOf (r, 0, sample);
+            return worstMs;
+        };
 
-            if (sample != lastSample)
-            {
-                //  After the first second, once the monitor's drawing is under way.
-                if (lastSample >= 0 && now - began > std::chrono::seconds (1))
-                    worstGapMs = std::max (worstGapMs, std::chrono::duration<double, std::milli> (now - lastChange).count());
+        auto tiles = 0;
+        const auto closedMs = worstGap (false, tiles);
 
-                lastSample = sample;
-                lastChange = now;
-            }
-
-            std::this_thread::sleep_for (std::chrono::milliseconds (2));
-        }
+        host.setMonitoring (true);
+        const auto worstGapMs = worstGap (true, tiles);
 
         //  The monitor did draw: its tile is there.
         CHECK (host.cueTile().width > 0);
-        MESSAGE ("the probe's worst gap with the monitor drawing: " << worstGapMs << " ms over " << tiles << " tile requests");
+        MESSAGE ("the probe's worst gap: " << closedMs << " ms with the monitor closed, " << worstGapMs
+                 << " ms with it drawing, over " << tiles << " tile requests");
 
         /*  The renderer's ticks are 10 ms apart; a monitor drawn on them stalled
             them for a tile's and the previews' time - well over a tenth of a
-            second in a debug build. */
-        CHECK (worstGapMs < 100.0);
+            second in a debug build (328 ms, against 14.5 ms drawn apart). A
+            hosted runner short of cores keeps them worse with no monitor at
+            all (CI's macOS, 2026-10-18: 101 ms over 89 requests of 150), so
+            the bar is this machine's own gap with the monitor closed, and a
+            tile's draw-time over it - never under a tenth of a second. */
+        CHECK (worstGapMs < std::max (100.0, closedMs + 60.0));
         CHECK (probeOf (r, 0, seen) == 0xFF0000u);
 
         host.setMonitoring (false);
