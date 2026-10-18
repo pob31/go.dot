@@ -18,6 +18,7 @@
 
 #include <wfg/client/ui/Look.h>
 
+#include <algorithm>
 #include <utility>
 
 namespace wfg::client::ui
@@ -157,6 +158,42 @@ namespace wfg::client::ui
                 if (actions.rename && mayEdit)
                     actions.rename (drawnTabs[at].id);
 
+                return;
+            }
+    }
+
+    juce::PopupMenu ListTabsComponent::menuFor (const std::string& listId)
+    {
+        juce::PopupMenu menu;
+        const auto found = std::find_if (drawnTabs.begin(), drawnTabs.end(),
+                                         [&listId] (const model::ListTab& tab) { return tab.id == listId; });
+
+        if (found == drawnTabs.end())
+            return menu;
+
+        const auto cart = found->cart;
+
+        menu.addItem ("Rename...", mayEdit, false, [this, listId] { if (actions.rename) actions.rename (listId); });
+
+        /*  NEVER THE LAST CUE LIST, and said so in the line itself rather than
+            only greyed (PRD §4.8): a show keeps one for GO. */
+        const auto removable = mayEdit && model::mayRemoveList (drawnTabs, listId);
+        menu.addItem (cart ? "Remove this cart"
+                           : removable || ! mayEdit ? "Remove this cue list"
+                                                    : "Remove this cue list - the show keeps one for GO",
+                      removable, false, [this, listId] { if (actions.remove) actions.remove (listId); });
+        return menu;
+    }
+
+    void ListTabsComponent::mouseUp (const juce::MouseEvent& event)
+    {
+        if (! event.mods.isPopupMenu())
+            return;
+
+        for (std::size_t at = 0; at < buttons.size() && at < drawnTabs.size(); ++at)
+            if (event.eventComponent == buttons[at].get())
+            {
+                menuFor (drawnTabs[at].id).showMenuAsync (juce::PopupMenu::Options().withMousePosition());
                 return;
             }
     }

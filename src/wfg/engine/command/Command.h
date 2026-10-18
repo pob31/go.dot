@@ -382,6 +382,12 @@ namespace wfg
             the sections are live again and the render follows them. */
         inline constexpr const char* frozen          = "frozen";
 
+        /*  THE SHOW'S LAST CUE LIST was asked to go (the author, 2026-10-18:
+            "There can't be less than one cuelist"; namespace draft §85): GO acts
+            on a cue list, and a show with none would have nothing for it. A
+            cart may always go. The remedy is to make another list first. */
+        inline constexpr const char* lastList        = "last-list";
+
         /*  THE STACK IS EMPTY, and that is not the same fact as the show being
             unedited: a `document.revert`, a `document.recover` or a bundle load
             clears the history without clearing the show, and an edit that wrote

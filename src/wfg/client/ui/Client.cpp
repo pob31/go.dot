@@ -149,6 +149,10 @@ namespace wfg::client
                 flagged or unflagged, and the cue the last GO fired flagged. */
             menuFlagPicked, menuFlagLastGo,
 
+            /*  THE LIST DRAWN, REMOVED (namespace draft §85): under Edit, beside
+                the cue's own delete. */
+            menuRemoveList,
+
             /*  HELP (namespace draft §78, ASQ): which Go.dot this is, a newer one
                 asked about now, whether to ask at launch, and the release page. */
             menuAbout, menuCheckUpdates, menuAskAtLaunch, menuReleasePage,
@@ -886,6 +890,7 @@ namespace wfg::client
                     tabActions.show = [this] (const std::string& listId) { showList (listId); };
                     tabActions.create = [this] (bool cart) { newList (cart); };
                     tabActions.rename = [this] (const std::string& listId) { renameList (listId); };
+                    tabActions.remove = [this] (const std::string& listId) { removeList (listId); };
                     shell->tabs.setActions (std::move (tabActions));
                 }
 
@@ -1036,6 +1041,7 @@ namespace wfg::client
                         The surfaces window takes the number keys for its pads
                         once it is open, and needs no key of its own to open. */
                     case menuRevert:
+                    case menuRemoveList:
                     case menuShowSettings:
                     case menuSurfaces:
                     case menuNetworkMonitor:
@@ -1120,6 +1126,8 @@ namespace wfg::client
                     case menuPaste:     return unlocked && ! last.listId.empty();
                     case menuSelectAll: return true;
                     case menuDeleteCue: return unlocked && ! selection.empty();
+                    case menuRemoveList: return unlocked && latest != nullptr
+                                                  && model::mayRemoveList (model::readListTabs (*latest), listShown());
                     case menuLock:      return last.locked != model::Flag::unsaid;
                     case menuLoadToTime: return ! last.listId.empty();
                     case menuUndoHistory: return unlocked;
@@ -1301,6 +1309,18 @@ namespace wfg::client
                     addMenuItem (menu, menuDeleteCue, selection.size() > 1
                                                         ? "Delete " + juce::String (static_cast<int> (selection.size())) + " cues"
                                                         : "Delete cue");
+
+                    /*  AND THE LIST ITSELF (the author, 2026-10-18: "There should be a
+                        menu item in edit to remove a cuelist"; namespace draft §85):
+                        the one drawn, by its name - greyed for the show's last cue list. */
+                    {
+                        const auto cart = latest != nullptr && model::text (*latest, "/godot/list/" + listShown() + "/kind") == "cart";
+                        const auto name = latest != nullptr ? model::text (*latest, "/godot/list/" + listShown() + "/name")
+                                                            : std::string {};
+                        addMenuItem (menu, menuRemoveList, juce::String (cart ? "Remove the cart" : "Remove the cue list")
+                                                             + (name.empty() ? juce::String() : " \"" + juce::String::fromUTF8 (name.c_str()) + "\"")
+                                                             + "...");
+                    }
                 }
                 else if (index == 2)
                 {
@@ -1451,6 +1471,7 @@ namespace wfg::client
                     case menuPaste:     pasteFromClipboard(); break;
                     case menuSelectAll: selection.all (show.rows()); inspectNow(); break;
                     case menuDeleteCue: removeChosen(); break;
+                    case menuRemoveList: removeList (listShown()); break;
                     case menuLock:      send (gesture::setLocked (! model::isYes (last.locked))); break;
                     case menuGoDoh:     doh(); break;
                     case menuFlagPicked: flagChosen(); break;
@@ -2664,6 +2685,67 @@ namespace wfg::client
 
                         send (gesture::setNode ("/godot/list/" + listId + "/name", name));
                     }), true);
+            }
+
+            //  The list the window draws: a cart picked by its tab, else GO's.
+            std::string listShown() const
+            {
+                return listDrawn.empty() ? last.listId : listDrawn;
+            }
+
+            /*  A LIST TAKEN AWAY (the author, 2026-10-18: "There should be a menu
+                item in edit to remove a cuelist. There can't be less than one
+                cuelist. Right clicking on the list should allow to delete it too";
+                namespace draft §85): one `object.delete`, everything in it with it,
+                one step of Undo, asked first when it holds cues; the show's last
+                cue list is never offered, and the engine
+                refuses it too (`last-list`). GO's list, gone, falls to the first
+                cue list left, and the window with it. */
+            void removeList (const std::string& listId)
+            {
+                if (latest == nullptr || listId.empty() || refusedWhileLocked())
+                    return;
+
+                if (! model::mayRemoveList (model::readListTabs (*latest), listId))
+                {
+                    shell->transport.setNotice ("a show keeps one cue list for GO: this is its last");
+                    return;
+                }
+
+                const auto cart = model::text (*latest, "/godot/list/" + listId + "/kind") == "cart";
+                const auto name = juce::String::fromUTF8 (model::text (*latest, "/godot/list/" + listId + "/name").c_str());
+                const auto members = model::words (orderOf (listId)).size();
+                const auto what = juce::String (cart ? "cart" : "cue list") + (name.isEmpty() ? "" : " \"" + name + "\"");
+
+                const auto remove = [this, listId]
+                {
+                    if (shownList == listId)
+                        shownList.clear();
+
+                    send (gesture::deleteObject (listId));
+                };
+
+                /*  ASKED FIRST WHEN IT HOLDS CUES, saying how many (the author,
+                    2026-10-18: "there should be a confirmation when deleting a
+                    cuelist" - and "empty cuelist can be removed without
+                    confirmation"). */
+                if (members == 0)
+                {
+                    remove();
+                    return;
+                }
+
+                juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::WarningIcon,
+                                                    "Remove the " + juce::String (cart ? "cart" : "cue list"),
+                                                    "Remove the " + what + " and the " + juce::String (static_cast<int> (members))
+                                                      + (members == 1 ? " cue" : " cues") + " in it? Undo brings them back.",
+                                                    "Remove", "Cancel", nullptr,
+                                                    juce::ModalCallbackFunction::create (
+                                                        [remove, safe = juce::Component::SafePointer<ui::MainWindow> (window.get())] (int result)
+                                                        {
+                                                            if (safe != nullptr && result != 0)
+                                                                remove();
+                                                        }));
             }
 
             bool cueNeedsStale = true;

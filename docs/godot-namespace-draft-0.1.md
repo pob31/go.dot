@@ -31974,3 +31974,25 @@ group."* §80 (ATM) grew the empty footer of the group under the hand only. Deci
 
 Tests: `wfg_audio_ui_tests` - an act whose last member is a scene: on the scene's last cue both footers
 show, they stay down to the act's, and a cue dropped there goes into the act's footer.
+
+## 85. A cue list removed
+
+Asked by the author on 2026-10-18: *"There should be a menu item in edit to remove a cuelist. There can't
+be less than one cuelist. Right clicking on the list should allow to delete it too."* Then: *"there
+should be a confirmation when deleting a cuelist"* and *"empty cuelist can be removed without
+confirmation. That's fine."* Decisions from AUJ.
+
+- **AUJ** (the author's) **Edit > Remove the cue list "name"...** acts on the list the window draws, and a
+  tab's right-click offers **Remove this cue list** (or cart). **Never the show's last cue list**: the
+  window greys the line and says why, and the engine refuses `object.delete` on it with `last-list`. A
+  cart may always go.
+- **AUK** (the author's) A list holding cues **asks first**, saying how many go with it; an empty one goes
+  at once. Either way it is one `object.delete`, everything in it with it, one step of Undo.
+- **AUL** (mine, proposed) The right-click offers Rename... beside it, as a double click does. GO's list
+  removed, GO falls to the first cue list left - the focus is worked out, never stored stale (`Focus`) -
+  and a cart the window drew, removed, gives the window back to GO's list.
+
+Tests: `ClientTests` - the rule in the model and in the engine: the last cue list refused and still
+there, a cart beside it removed, either of two cue lists removable and GO falling to the one left, the
+one left then refused, one undo. `AuthoringTests` builds its show with no list by hand now. `wfg_audio_ui_tests`: the
+tab's Remove greyed on the last cue list and saying why, live on a cart and asking the window.

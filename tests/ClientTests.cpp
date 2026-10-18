@@ -3385,6 +3385,62 @@ TEST_CASE ("client: a group copied with the cues in it carries each once, and is
 }
 
 //==============================================================================
+TEST_CASE ("client: a list is removed by its id - never the show's last cue list, a cart always, GO falling to the list left (§85)")
+{
+    /*  The author, 2026-10-18: "There should be a menu item in edit to remove
+        a cuelist. There can't be less than one cuelist." */
+    std::vector<model::ListTab> tabs { { "L1", "Main", false }, { "C1", "Pads", true } };
+    CHECK_FALSE (model::mayRemoveList (tabs, "L1"));
+    CHECK (model::mayRemoveList (tabs, "C1"));
+    CHECK_FALSE (model::mayRemoveList (tabs, "NOWHERE1"));
+    tabs.push_back ({ "L2", "Act 2", false });
+    CHECK (model::mayRemoveList (tabs, "L1"));
+
+    Rig rig;
+    const auto first = model::readTransport (*rig.publish (0)).listId;
+    REQUIRE (! first.empty());
+    auto tick = std::int64_t { 1 };
+
+    const auto idNamed = [&] (const std::string& name)
+    {
+        for (const auto& tab : model::readListTabs (*rig.publish (tick)))
+            if (tab.name == name)
+                return tab.id;
+
+        return std::string {};
+    };
+
+    //  The show's last cue list: refused, and still there.
+    CHECK (rig.apply (tick++, "window", "object.delete", { osc::Value::string (first) }).applied == 0);
+    CHECK (rig.document.findById (first).isValid());
+    CHECK (rig.document.remove (first).reason == std::string ("last-list"));
+
+    //  A cart beside it goes.
+    REQUIRE (rig.apply (tick++, "window", "list.create", { osc::Value::string ("Pads"), osc::Value::string (""),
+                                                          osc::Value::string ("kind"), osc::Value::string ("cart") }).applied == 1);
+    const auto cart = idNamed ("Pads");
+    REQUIRE (! cart.empty());
+    CHECK (rig.apply (tick++, "window", "object.delete", { osc::Value::string (cart) }).applied == 1);
+    CHECK_FALSE (rig.document.findById (cart).isValid());
+
+    //  Beside a second cue list either may go - GO's own too, and GO falls to the one left.
+    REQUIRE (rig.apply (tick++, "window", "list.create", { osc::Value::string ("Act 2") }).applied == 1);
+    const auto second = idNamed ("Act 2");
+    REQUIRE (! second.empty());
+    CHECK (model::readTransport (*rig.publish (tick)).listId == first);
+
+    CHECK (rig.apply (tick++, "window", "object.delete", { osc::Value::string (first) }).applied == 1);
+    CHECK (model::readTransport (*rig.publish (tick)).listId == second);
+
+    //  And then the one left is the last: refused.
+    CHECK (rig.apply (tick++, "window", "object.delete", { osc::Value::string (second) }).applied == 0);
+
+    //  One undo brings the first back.
+    REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
+    CHECK (rig.document.findById (first).isValid());
+}
+
+//==============================================================================
 TEST_CASE ("client: an OSC cue's messages read as a grid - a family a table, a channel a column, a parameter a row")
 {
     /*  The author, 2026-10-17: "the same grid as the scope of WFS-DIY with the

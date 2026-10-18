@@ -2192,6 +2192,18 @@ for 0.1.2, no tag.
 **Done when:** a slide does what §82.1 says and replays; the renderer's ticks keep coming while the
 monitor draws (§83.3); the tests pass in C and fr_FR, the strict build is green, and CI is green.
 
+### A cue list removed, never the last (2026-10-18)
+
+The author: "There should be a menu item in edit to remove a cuelist. There can't be less than one
+cuelist. Right clicking on the list should allow to delete it too", and on asking first, "empty cuelist
+can be removed without confirmation. That's fine." - namespace draft §85, AUJ-AUK his, AUL mine: the
+Edit menu's line and a tab's right-click, the engine refusing the show's last cue list as `last-list`,
+a list holding cues asked about first, one Undo bringing it back. One stage; for 0.1.2, no tag.
+
+**Done when:** the Edit line and the tab's menu remove a list as §85 says, the last cue list is
+refused by the engine as well as greyed, the tests §85 lists pass in C and fr_FR, the strict build is
+green, and CI is green.
+
 ---
 
 ## Cross-cutting, every phase

@@ -59,4 +59,10 @@ namespace wfg::client::model
     /*  A NAME FOR A NEW LIST nobody has named yet: "Cart", then "Cart 2"; a
         show list "List 2" and on. Renamed by a double click on its tab. */
     std::string newListName (const std::vector<ListTab>& tabs, bool cart);
+
+    /*  WHETHER A LIST MAY BE REMOVED (the author, 2026-10-18: "There can't be
+        less than one cuelist"; namespace draft §85): a cart always, a cue list
+        while another cue list is left - the engine's own rule, asked first so the
+        window never offers what it would refuse. */
+    bool mayRemoveList (const std::vector<ListTab>& tabs, const std::string& listId);
 }

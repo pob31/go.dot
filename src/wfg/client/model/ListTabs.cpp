@@ -62,6 +62,19 @@ namespace wfg::client::model
         return std::string (goActsOnIt ? "\xe2\x96\xb8 " : "") + name + (tab.cart ? " \xc2\xb7 cart" : "");
     }
 
+    bool mayRemoveList (const std::vector<ListTab>& tabs, const std::string& listId)
+    {
+        const auto found = std::find_if (tabs.begin(), tabs.end(), [&listId] (const ListTab& tab) { return tab.id == listId; });
+
+        if (found == tabs.end())
+            return false;
+
+        if (found->cart)
+            return true;
+
+        return std::count_if (tabs.begin(), tabs.end(), [] (const ListTab& tab) { return ! tab.cart; }) > 1;
+    }
+
     std::string newListName (const std::vector<ListTab>& tabs, bool cart)
     {
         const std::string stem = cart ? "Cart" : "List";

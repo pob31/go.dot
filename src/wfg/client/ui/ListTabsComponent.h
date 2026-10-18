@@ -52,6 +52,10 @@ namespace wfg::client::ui
 
             /** A tab double-clicked: its name to be asked for. */
             std::function<void (const std::string& listId)> rename;
+
+            /*  A TAB'S RIGHT-CLICK, "Remove" (namespace draft §85): the list to
+                be taken away, which the window asks about first. */
+            std::function<void (const std::string& listId)> remove;
         };
 
         explicit ListTabsComponent (const model::Theme& theme);
@@ -70,6 +74,14 @@ namespace wfg::client::ui
         void paint (juce::Graphics& g) override;
         void resized() override;
         void mouseDoubleClick (const juce::MouseEvent& event) override;
+
+        /*  A RIGHT-CLICK ON A TAB (namespace draft §85): rename it, or remove it -
+            never the show's last cue list, and nothing while the show may not be
+            edited. */
+        void mouseUp (const juce::MouseEvent& event) override;
+
+        /** The right-click's menu for a list, built as it opens: for a test. */
+        juce::PopupMenu menuFor (const std::string& listId);
 
         /*  WHAT A TEST PRESSES: a tab by its list, and the + with its choice. */
         void pressTab (const std::string& listId);

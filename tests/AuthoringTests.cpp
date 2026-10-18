@@ -410,7 +410,14 @@ TEST_CASE ("authoring: with nothing standing by a capture lands at the end; with
     {
         AuthoringRig rig;
         REQUIRE (rig.declare().applied == 1u);
-        REQUIRE (rig.document.remove (rig.listId).ok);
+
+        /*  The show's last cue list may not be deleted (namespace draft §85); a
+            show with none - an old file, say - is made by hand. */
+        CHECK (rig.document.remove (rig.listId).reason == std::string ("last-list"));
+        auto lists = rig.document.root().getChildWithName ("Lists");
+        lists.removeChild (rig.document.findById (rig.listId), nullptr);
+        REQUIRE_FALSE (rig.document.findById (rig.listId).isValid());
+
         CHECK (rig.capture ("standby", "", "", { { "/proc/a", "i:1" } }).rejected == 1u);
     }
 }

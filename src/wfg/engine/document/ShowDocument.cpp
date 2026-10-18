@@ -5737,6 +5737,21 @@ namespace wfg::doc
         if (! parent.isValid())
             return EditResult::failed (reason::unknownId);
 
+        /*  NEVER THE SHOW'S LAST CUE LIST (the author, 2026-10-18: "There can't
+            be less than one cuelist"; namespace draft §85): GO acts on one. A
+            cart may always go; so may a cue list beside another. */
+        if (node.hasType ("List") && ! cue::isCart (node))
+        {
+            auto showLists = 0;
+
+            for (const auto& sibling : parent)
+                if (sibling.hasType ("List") && ! cue::isCart (sibling))
+                    ++showLists;
+
+            if (showLists <= 1)
+                return EditResult::failed (reason::lastList);
+        }
+
         /*  A RANGE OF A SOUND LOCKED TO ITS MOVIE is the movie's to take away
             (namespace draft 37.5, WL). */
         if (node.hasType ("Range") && ! keepingSounds && followsAMovie (parent))

@@ -8501,6 +8501,37 @@ TEST_CASE ("list tabs: one a list, the shown one lit, GO's marked, a cart in wor
     CHECK (shown == std::vector<std::string> { "CART0001" });
     CHECK (made == std::vector<bool> { true });
 
+    /*  A TAB'S RIGHT-CLICK (§85): Remove - greyed on the show's last cue list,
+        and saying why; live on a cart, and asking the window for it. */
+    {
+        std::vector<std::string> removed;
+        ui::ListTabsComponent::Actions removing;
+        removing.remove = [&removed] (const std::string& id) { removed.push_back (id); };
+        tabs.setActions (std::move (removing));
+
+        const auto removeLine = [&tabs] (const std::string& id)
+        {
+            auto menu = tabs.menuFor (id);
+            juce::PopupMenu::MenuItemIterator lines (menu);
+
+            while (lines.next())
+                if (lines.getItem().text.startsWith ("Remove"))
+                    return lines.getItem();
+
+            return juce::PopupMenu::Item {};
+        };
+
+        CHECK_FALSE (removeLine ("MAIN0001").isEnabled);
+        CHECK (removeLine ("MAIN0001").text.contains ("keeps one"));
+        CHECK (removeLine ("CART0001").isEnabled);
+        CHECK (removeLine ("CART0001").text == "Remove this cart");
+
+        const auto line = removeLine ("CART0001");
+        REQUIRE (line.action != nullptr);
+        line.action();
+        CHECK (removed == std::vector<std::string> { "CART0001" });
+    }
+
     //  Under the lock, no +.
     const auto plusShowing = [&tabs]
     {
