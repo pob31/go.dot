@@ -165,8 +165,16 @@ rate decides *where to go*; audio rate decides *how smoothly to get there*
 (per-block slewing on internal audio parameters, or you trade Live's overload
 for zipper noise).
 
-Launches quantise to the tick: every message belonging to one GO leaves in the
-same frame.
+Launches quantise to the tick: every message belonging to one GO starts leaving
+in the same frame.
+
+*Amended 2026-10-18, at the author's direction* (`docs/godot-namespace-draft-0.1.md`
+§88, AUT): **a device takes at most its per-tick limit of datagrams a frame**
+(`mount/perTick`, 20 by default), so a cue larger than that - a spatial
+processor's snapshot of seventy inputs is thousands of messages - sends the
+first in the GO's frame and carries the rest, in order, over the frames that
+follow, and is playing until the last has left. A single Esc lets it finish
+(AUU); a double Esc drops what has not left.
 
 *Amended in 0.8 — `docs/spikes/spike04-graph-stability.md`,
 `spike05-param-50hz.md`.* Two measured facts bear on this clock.

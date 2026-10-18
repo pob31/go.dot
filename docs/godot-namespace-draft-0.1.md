@@ -32063,3 +32063,95 @@ flash when ready, steady on when armed while the automation recording is on."* D
 
 Tests: `SurfaceBridgeTests` - flipped and unarmed, REC both lit and dark across 40 ticks; armed, steady
 and never dark; a pass writing it, still steady.
+
+## 88. A big OSC cue, captured, sent and shown without stopping the clock
+
+The author on 2026-10-18: *"When sending large amounts of OSC data to WFS, Go.dot fails to send
+everything and locks up. I created a 56 mono channels and 8 stereo. Sent everything to Go.dot fine, but
+sending the cue is a struggle."* And: *"This was only the positions after testing a complete setup for 8
+inputs (all parameters)."*
+
+### 88.1 What happened
+
+The session's log (installed 0.1.1, Release) says it in four lines. WFS-DIY's export arrived as 190
+`cue.capture` chunks, about 5,300 address/value pairs, sent back to back and so **applied in one tick**;
+the tick thread came out of it **14.3 s late**. The GO on that cue then put **every message on the wire
+in one flush**, one datagram each (the device's Bundles was off), and the tick ran 2.2 s and 1.5 s late.
+From the capture on, the window's own thread spun at 100 % for minutes. An earlier full setup of eight
+inputs, about 770 pairs, had cost the tick 244 ms.
+
+Three faults, each enough on its own:
+
+1. **Quadratic lookups on the tick thread.** `ShowDocument::findById` walked the whole show from the
+   top, and every read of an object's row by its address (`/godot/message/<id>/value`) goes through it.
+   A GO read each further message four times that way (`Runner::fireOsc`, `curveTargetsOf`), each walk
+   passing every message before it; a capture looked up every declared device's ~23 rows for every
+   pair, each a walk of a show growing by the pair. Its own comment said what to do when it showed up in
+   a profile: "a cache invalidated in one place".
+2. **One burst.** §3.4 of the PRD said every message of one GO leaves in the same frame, and the sender
+   did exactly that. WFS-DIY takes what arrives into a queue of 256 items, emptied 32 at a time every
+   16 ms, and drops the rest without a word until a thousand are lost; its socket keeps the system's
+   64 KB. Thousands of datagrams in one frame cannot get through that, and nothing on either side said
+   so.
+3. **The window walked every message on every pass**, 25 times a second: the Messages panel's model
+   gathered every message of the show from the whole tree (twice), the inspector built a target pair
+   for every message and every device, and the panel kept nine components per message and refreshed
+   all of them.
+
+And a cost that grows with such a cue: each message is six rows of the show's half of the tree, and
+serve rebuilt that whole half on every tick that applied any command - a GO, a run ending - and
+compared the whole tree with the last on every publish.
+
+### 88.2 Decisions
+
+The author's (asked 2026-10-18):
+
+- **AUT** **A big cue is spread, per device.** A device takes at most its *per tick* limit of datagrams
+  a tick - a Network-tab column, 20 by default, a thousand a second. The first leave on the GO's own
+  frame and the rest follow in order over the frames after it; the cue is playing until its last
+  message has left. PRD §3.4 says so now.
+- **AUU** **A single Esc lets a sending cue finish.** Half a snapshot is a state nobody declared, which
+  PRD §4.4 keeps for a double Esc - and a double Esc still drops what has not left (§23.10).
+- **AUV** **The tree is rebuilt in part.** Asked whether the show's half may be left alone on a tick
+  where only the engine did something (§60's open question), the author answered with another: *"Is it
+  possible to rebuild partly? Skip large ones for stopped rebuilds? And only allow small items to
+  rebuild instantly the part where it sits?"* So, the design mine: the rows of every OSC cue's further
+  messages and of every curve - what makes a cue large - are a half of their own, kept message by
+  message and made again only for the messages an edit touched. A GO, a stop or a run ending never
+  touches them. The rest of the show's half is small and is rebuilt as before, so §60's question stands
+  for it. Each half is compared with the last only when it is a new one.
+- **AUW** **WFS-DIY changes too.** It says it takes bundles when it declares itself, and its receiver is
+  hardened: a larger socket buffer and queue, and a line in its log at the first drop.
+
+Mine, proposed:
+
+- **AUX** The words: the Network tab's column **Per tick**, the row `mount/perTick` (1 to 1000, 20 by
+  default, kept in the show), and `mount.declare`'s seventh argument `bundles`.
+- **AUY** The limit counts **datagrams**, since WFS-DIY's queue counts items: a bundle of up to 1,200
+  bytes is one, and so is a question (DP.10). With Bundles on, a 5,300-message cue is about 200
+  datagrams, ten frames.
+- **AUZ** `bundles` from `mount.declare` is applied **when the device is made**, as its name, Rx and Tx
+  are (§56, AEJ): an operator who has switched Bundles off is not overruled by the next declare. A
+  device made before this keeps what it has; Bundles is ticked once by hand.
+- **AVA** Go.dot's own socket asks the system for a 4 MB receive buffer and a 1 MB send buffer: a
+  capture of 190 chunks is 228 KB in one burst, past the 64 KB the system gives, and a lost chunk is 28
+  messages missing from a cue with nothing said.
+- **AVB** `findById` answers from an index of every identifier in the show, kept by the document's own
+  listener as nodes come and go (an undo, a paste and a revert included) - the one place the comment
+  asked for. A show file with a duplicate identifier keeps the first in document order, as the walk
+  did.
+- **AVC** What became of a cue's messages is counted **per run** - waiting, sent, failed, dropped -
+  rather than looked up ticket by ticket in the last 512 answers, which a cue of more than 511 messages
+  with `wait=sent` would have outlived and ended `send-failed` with everything sent.
+- **AVD** No new row says how far a sending cue has got: its run stays *playing* until the last
+  message has left, and the running pane already says that.
+
+### 88.3 Built
+
+(Kept current as the stages land.)
+
+### 88.4 Not built
+
+- Doh! still puts back only the first 256 writes of a GO (§24.13).
+- The page's poll of the whole tree and the tablet's PATH_ADDED per node both grow with a big cue.
+- A capture of 190 chunks is 190 undo steps.

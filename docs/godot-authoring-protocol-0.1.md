@@ -31,8 +31,9 @@ Go.dot owns both ends here, so the exchange is one message out and one message b
   together and land as one undo step.
 - **The processor names the cue.** It draws the identifier, keeps it beside its snapshot, and
   sends it again on the next export, which updates the same cue instead of making another.
-- **A Go.dot OSC cue holds many messages** (namespace draft §45), sent in one tick and bundled
-  where the device takes bundles. A snapshot is one cue.
+- **A Go.dot OSC cue holds many messages** (namespace draft §45), sent from the GO's tick at the
+  device's limit of datagrams a tick (20 by default, namespace draft §88) and bundled where the
+  device takes bundles. A snapshot is one cue.
 
 ## 2. Transport and spelling
 
@@ -58,7 +59,7 @@ Go.dot owns both ends here, so the exchange is one message out and one message b
 ## 3. `mount.declare`: the processor becomes a device
 
 ```
-/godot/cmd/mount/declare  ,siis[s][s]  prefix  port  queryPort  name  [id]  [host]
+/godot/cmd/mount/declare  ,siis[s[s[i]]]  prefix  port  queryPort  name  [id  [host  [bundles]]]
 ```
 
 | Argument | Meaning |
@@ -69,13 +70,14 @@ Go.dot owns both ends here, so the exchange is one message out and one message b
 | `name` | The device's name in Go.dot's Network tab. |
 | `id` | Optional: the device identifier to create with. Empty or absent: Go.dot draws one. |
 | `host` | Optional: the processor's address. Absent: the address the datagram came from. |
+| `bundles` | Optional, `,i`: `1` when the processor takes OSC bundles, `0` when it does not. Applied when the device is made, like its name; absent, Go.dot's default (off). Sent with `id` and `host`, either of which may be empty to mean absent (namespace draft §88, AUW). |
 
 What Go.dot does, in one undo step:
 - **A device already has this root** among its prefixes: its host, port and query port are
   written if they changed. Its name, Rx and Tx are left alone, so an operator's edits survive.
   Outcome `updated`.
-- **No device has it**: one is made with the root, host, port, query port and name, Rx on, Tx on.
-  Outcome `created`.
+- **No device has it**: one is made with the root, host, port, query port and name, Rx on, Tx on,
+  and Bundles as `bundles` says. Outcome `created`.
 - **Refused** with `bad-value` for an empty root or name, a root under `/godot`, `/ui` or
   `/media`, or a port outside 1..65535 (the query port may be 0). A declare from a script with no
   host, or with a host that cannot be read, is `bad-value`.
@@ -162,6 +164,9 @@ A capture longer than 1,200 bytes is sent as several datagrams, back to back:
   fields empty (an `id` repeating the identifier is read the same way), and the next pairs.
 - Go.dot applies them in arrival order. An update's first chunk replaces the messages and the
   `more` chunks add the rest.
+- Space them a few milliseconds apart (WFS-DIY: 5 ms, its gap between bundles). Go.dot asks its
+  system for a 4 MB receive buffer, but a burst of hundreds of datagrams is still a burst, and a
+  lost chunk is pairs missing from the cue with nothing said.
 
 ### 4.5 The answer
 

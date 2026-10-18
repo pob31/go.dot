@@ -2214,6 +2214,21 @@ mine. One stage; for 0.1.2, no tag.
 the bridge's test, the tests pass in C and fr_FR, the strict build is green, and CI is green; the D700
 itself is the author's to see.
 
+### A big OSC cue, captured and sent without stopping the clock (2026-10-18)
+
+The author fired a WFS-DIY snapshot of 72 inputs (~5,300 messages): the capture cost the tick 14 s, the
+GO lost most of the cue at WFS-DIY's door, and the window spun for minutes - namespace draft §88,
+AUT-AUW his (a per-device limit of datagrams a tick, Esc lets a sending cue finish, the tree rebuilt in
+part, WFS-DIY changed too), AUX-AVD mine. Stages BC.0-BC.11 in a worktree: an index behind `findById`,
+the capture's device found once, the sender paced and counted per run, the setting, the messages as a
+half of the tree of their own, the window reading by address, `mount.declare`'s `bundles`, WFS-DIY and
+spatcore's receiver, a black-box driver and M82.
+
+**Done when:** a capture of 7,500 pairs in one tick and its GO each cost under one tick in Release (M82),
+`big_cue.py` receives every message in order at the device's limit, the tests §88 lists pass in C and
+fr_FR, the strict build is green, CI is green, and the author's 72 inputs reach WFS-DIY whole with the
+window answering.
+
 ---
 
 ## Cross-cutting, every phase

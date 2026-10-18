@@ -25,8 +25,11 @@ both reference implementations do, so a rename is one edit.
 - **It can drive Go.dot**: GO, fire a cue by identifier or by number, stop.
 
 When the operator fires one of those cues, Go.dot sends its messages to your receive port as plain
-OSC, one message after another in the order the cue holds them. Your application receives exactly
-what it would receive from any other controller: there is nothing new to write on that side.
+OSC, one message after another in the order the cue holds them - at most 20 datagrams a tick (a
+thousand a second) unless the operator changes the device's limit, and bundled up to 1,200 bytes a
+datagram when you say you take bundles (§4). Your application receives exactly what it would receive
+from any other controller. What it must do is take a snapshot of thousands of messages without
+dropping any: a receive queue of a few hundred items, emptied a few dozen at a time, does not.
 
 ## Reference implementations
 
@@ -182,7 +185,7 @@ it: a value read back from a file may be a string when the parameter is a float.
 ## 4. `mount.declare`: become a device
 
 ```
-/godot/cmd/mount/declare  ,siis[s[s]]  prefix  port  queryPort  name  [id  [host]]
+/godot/cmd/mount/declare  ,siis[s[s[i]]]  prefix  port  queryPort  name  [id  [host  [bundles]]]
 ```
 
 | Argument | Meaning |
@@ -193,6 +196,7 @@ it: a value read back from a file may be a string when the parameter is a float.
 | `name` | The device's name in Go.dot's Network tab. Not empty. |
 | `id` | Optional. The device identifier to create the device with. Empty or absent: Go.dot draws one. |
 | `host` | Optional. Your IP address as Go.dot should reach it, a literal address and not a host name. Absent: the address the datagram came from, which is nearly always what you want. |
+| `bundles` | Optional, an integer: `1` if you take OSC bundles, `0` if you do not. Go.dot then sends your cues' messages bundled, up to 1,200 bytes a datagram - a few dozen messages in one. Applied when the device is made, like its name. To send it, send `id` and `host` too; an empty string for either means absent. |
 
 ### 4.1 What Go.dot does
 
@@ -201,8 +205,8 @@ you, whatever the operator has called it since.
 
 - **Found**: its host, port and query port are updated where they changed. Its name, Rx and Tx stay
   as the operator set them. The answer is `updated`.
-- **Not found**: a device is made with your root, host, ports and name, Rx and Tx on. The answer is
-  `created`.
+- **Not found**: a device is made with your root, host, ports and name, Rx and Tx on, and Bundles as
+  your `bundles` says. The answer is `created`.
 - Either way it is one undo step in Go.dot, and a declare that repeats the last one changes nothing.
 
 ```
@@ -334,7 +338,9 @@ of four; the type-tag string is `,` and one `s` per argument, padded the same wa
 A single pair too long for a datagram of its own still goes, alone, in its own chunk.
 `captureMessages` in WFS-DIY's `GoDotProtocol.h` does all of this in about fifty lines.
 
-WFS-DIY sends its chunks back to back, which is fine on a show network. Where datagrams may be
+Space the chunks a few milliseconds apart: WFS-DIY leaves 5 ms, its gap between bundles. A snapshot
+of seventy inputs is nearly two hundred chunks, and two hundred datagrams back to back can overrun a
+receive buffer on the way even when nothing is wrong with the network. Where datagrams may be
 reordered, wait for the first chunk's answer before sending the `more` chunks: a `more` that
 overtakes its first chunk on a new cue is refused `unknown-id`.
 
@@ -459,7 +465,9 @@ answers come from the main.
 
 ## 12. Checklist
 
-1. A UDP port you receive OSC on, and a socket to send to Go.dot's port, 8010.
+1. A UDP port you receive OSC on, with a receive buffer and a queue that take a cue of thousands of
+   messages at Go.dot's pace (20 datagrams a tick by default), and a socket to send to Go.dot's
+   port, 8010.
 2. `GET <prefix>` served as OSCQuery JSON, the connection closed after the body: `ACCESS` on every
    node a cue should reach, `TYPE` one tag per argument, `VALS` where a menu helps.
 3. A declare when the connection is set up, at launch, when the description changes, when your
