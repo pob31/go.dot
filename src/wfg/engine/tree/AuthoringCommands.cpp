@@ -382,9 +382,14 @@ namespace wfg::tree
                             auto host = args.size() > 5 ? args[5].getString() : std::string {};
 
                             /*  WHETHER IT READS BUNDLES, when it says (namespace draft
-                                §88, AUW): applied when the device is made, as its
-                                name, rx and tx are (AUZ) - an operator who switched
-                                Bundles off is not overruled by the next declare. */
+                                §88, AUW): switched ON by any declare that says so,
+                                never off (AVE, the author, 2026-10-18, overturning
+                                AUZ's "when it is made"). A device made by an older
+                                sender, or by one that fell back to the short form
+                                when nobody answered, is put right by the next
+                                declare; an operator who wants it off on a sender
+                                that reads bundles has no reason the sender cannot
+                                hear. */
                             const auto saysBundles = args.size() > 6;
                             const auto takesBundles = saysBundles && args[6].getInt32() != 0;
 
@@ -420,11 +425,12 @@ namespace wfg::tree
                                 writes.push_back ({ "name", deviceName });
                                 writes.push_back ({ "rx", "true" });
                                 writes.push_back ({ "tx", "true" });
-
-                                if (takesBundles)
-                                    writes.push_back ({ "bundles", "true" });
                             }
-                            else
+
+                            if (takesBundles)
+                                writes.push_back ({ "bundles", "true" });
+
+                            if (! creating)
                             {
                                 const auto base = "/godot/mount/" + deviceId + "/";
                                 std::erase_if (writes, [&document, &base] (const auto& write)

@@ -255,7 +255,7 @@ TEST_CASE ("authoring: a processor declares itself and becomes a device, answere
     CHECK (rig.processor.words (0) == std::vector<std::string> { "/godot/declared", deviceId, "created" });
 }
 
-TEST_CASE ("authoring: a processor that says it reads bundles is made with Bundles on, and a later declare overrules nobody (§88)")
+TEST_CASE ("authoring: a processor that says it reads bundles has Bundles switched on, and never off (§88, AVE)")
 {
     AuthoringRig rig;
 
@@ -273,12 +273,22 @@ TEST_CASE ("authoring: a processor that says it reads bundles is made with Bundl
     REQUIRE (record.args.size() == 7u);
     CHECK (record.args[6].getInt32() == 1);
 
-    //  The operator switches it off; the processor's next declare leaves it so.
+    /*  Off - by hand, or a device made by a sender that did not say - and the
+        next declare that says so switches it back on (the author, 2026-10-18:
+        his WFS-DIY device stayed off through every later declare). */
     REQUIRE (rig.document.setAttribute ("/godot/mount/" + deviceId + "/bundles", "false").ok);
     REQUIRE (rig.apply (rig.fromProcessor(), "mount.declare",
                         { text ("/proc"), number (rig.processor.port()), number (0), text ("Processor"),
                           text (""), text (""), number (1) }).applied == 1u);
-    CHECK_FALSE (tree::mountDeclarationFor (rig.document, deviceId)->bundles);
+    CHECK (tree::mountDeclarationFor (rig.document, deviceId)->bundles);
+
+    //  A declare saying it does not read them, or saying nothing, never switches them off.
+    REQUIRE (rig.apply (rig.fromProcessor(), "mount.declare",
+                        { text ("/proc"), number (rig.processor.port()), number (0), text ("Processor"),
+                          text (""), text (""), number (0) }).applied == 1u);
+    CHECK (tree::mountDeclarationFor (rig.document, deviceId)->bundles);
+    REQUIRE (rig.declare ("/proc").applied == 1u);
+    CHECK (tree::mountDeclarationFor (rig.document, deviceId)->bundles);
 
     //  And one that says nothing is made as it always was.
     REQUIRE (rig.declare ("/other").applied == 1u);

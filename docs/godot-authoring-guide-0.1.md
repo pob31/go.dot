@@ -196,15 +196,16 @@ it: a value read back from a file may be a string when the parameter is a float.
 | `name` | The device's name in Go.dot's Network tab. Not empty. |
 | `id` | Optional. The device identifier to create the device with. Empty or absent: Go.dot draws one. |
 | `host` | Optional. Your IP address as Go.dot should reach it, a literal address and not a host name. Absent: the address the datagram came from, which is nearly always what you want. |
-| `bundles` | Optional, an integer: `1` if you take OSC bundles, `0` if you do not. Go.dot then sends your cues' messages bundled, up to 1,200 bytes a datagram - a few dozen messages in one. Applied when the device is made, like its name. To send it, send `id` and `host` too; an empty string for either means absent. |
+| `bundles` | Optional, an integer: `1` if you take OSC bundles, `0` if you do not. Go.dot then sends your cues' messages bundled, up to 1,200 bytes a datagram - a few dozen messages in one. `1` switches Bundles on, when the device is made and whenever you declare again; `0`, or leaving it out, never switches it off. To send it, send `id` and `host` too; an empty string for either means absent. |
 
 ### 4.1 What Go.dot does
 
 The device is found by its **root**: whichever device already holds `/myapp` among its prefixes is
 you, whatever the operator has called it since.
 
-- **Found**: its host, port and query port are updated where they changed. Its name, Rx and Tx stay
-  as the operator set them. The answer is `updated`.
+- **Found**: its host, port and query port are updated where they changed, and Bundles is switched
+  on if your `bundles` is `1`. Its name, Rx and Tx stay as the operator set them. The answer is
+  `updated`.
 - **Not found**: a device is made with your root, host, ports and name, Rx and Tx on, and Bundles as
   your `bundles` says. The answer is `created`.
 - Either way it is one undo step in Go.dot, and a declare that repeats the last one changes nothing.

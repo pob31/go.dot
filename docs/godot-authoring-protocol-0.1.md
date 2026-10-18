@@ -70,12 +70,12 @@ Go.dot owns both ends here, so the exchange is one message out and one message b
 | `name` | The device's name in Go.dot's Network tab. |
 | `id` | Optional: the device identifier to create with. Empty or absent: Go.dot draws one. |
 | `host` | Optional: the processor's address. Absent: the address the datagram came from. |
-| `bundles` | Optional, `,i`: `1` when the processor takes OSC bundles, `0` when it does not. Applied when the device is made, like its name; absent, Go.dot's default (off). Sent with `id` and `host`, either of which may be empty to mean absent (namespace draft §88, AUW). |
+| `bundles` | Optional, `,i`: `1` when the processor takes OSC bundles, `0` when it does not. `1` switches the device's Bundles on, when it is made and on any later declare; `0` or absent never switches it off (namespace draft §88, AVE). Absent when the device is made, Go.dot's default (off). Sent with `id` and `host`, either of which may be empty to mean absent (namespace draft §88, AUW). |
 
 What Go.dot does, in one undo step:
 - **A device already has this root** among its prefixes: its host, port and query port are
-  written if they changed. Its name, Rx and Tx are left alone, so an operator's edits survive.
-  Outcome `updated`.
+  written if they changed, and Bundles switched on if `bundles` is `1`. Its name, Rx and Tx are left
+  alone, so an operator's edits survive. Outcome `updated`.
 - **No device has it**: one is made with the root, host, port, query port and name, Rx on, Tx on,
   and Bundles as `bundles` says. Outcome `created`.
 - **Refused** with `bad-value` for an empty root or name, a root under `/godot`, `/ui` or
@@ -241,7 +241,9 @@ the path to choose from, then the next depending on the previous selection and s
 on, no patch number. Connecting the row declares `/wfs` with WFS-DIY's UDP receive port and its
 OSCQuery port (5005 by default, 0 when OSCQuery is off), and since 1.0.0beta58 `bundles` 1: WFS-DIY
 reads bundles. A Go.dot that does not know the seventh argument answers nothing, and WFS-DIY says the
-declare without it next time (namespace draft §88). It spaces a capture's chunks 5 ms apart, and its
+declare without it next time (namespace draft §88). When the short form is answered, WFS-DIY says the
+long form once more (after 1.0.0beta58), so a WFS-DIY started before Go.dot does not stay on the short
+form; an older Go.dot leaves that one unanswered, and WFS-DIY keeps to the short form. It spaces a capture's chunks 5 ms apart, and its
 receive queue takes a cue of thousands of messages at Go.dot's pace.
 
 **What it describes**, beyond today's `/wfs/input`, `/wfs/output`, `/wfs/reverb` and `/wfs/config`:

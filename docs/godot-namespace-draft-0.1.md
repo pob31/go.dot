@@ -32132,7 +32132,14 @@ Mine, proposed:
   datagrams, ten frames.
 - **AUZ** `bundles` from `mount.declare` is applied **when the device is made**, as its name, Rx and Tx
   are (§56, AEJ): an operator who has switched Bundles off is not overruled by the next declare. A
-  device made before this keeps what it has; Bundles is ticked once by hand.
+  device made before this keeps what it has; Bundles is ticked once by hand. *Overturned by AVE.*
+- **AVE** *(the author, 2026-10-18, after his bench)*: a declare that says it reads bundles **switches
+  Bundles on, on a device that already exists too, and never off**; one that says `0`, or nothing,
+  leaves it as it is. His WFS-DIY device had been made by the short form - WFS-DIY, started before
+  Go.dot, turns the form over at every unanswered declare, and the short one was heard first - and it
+  stayed off through every later declare that said bundles, so his 64-input recall left one message a
+  datagram, 304 ticks. WFS-DIY, for its part, says the long form once more when a short one is
+  answered (after 1.0.0beta58).
 - **AVA** Go.dot's own socket asks the system for a 4 MB receive buffer and a 1 MB send buffer: a
   capture of 190 chunks is 228 KB in one burst, past the 64 KB the system gives, and a lost chunk is 28
   messages missing from a cue with nothing said.
@@ -32175,7 +32182,8 @@ Mine, proposed:
   messages half and the cue's own rows are what they were; the Messages panel has components for the
   rows in view; the inspector's target line makes its writes when a target is chosen
   (`model::alongsideOf`); the grid paints what its clip holds.
-- **BC.8, AUW, AUZ.** `mount.declare`'s seventh argument `bundles`, applied when the device is made.
+- **BC.8, AUW, AVE.** `mount.declare`'s seventh argument `bundles`: on when the device is made, and
+  switched on by any later declare that says so.
 - **And, found while measuring:** `OscQueryServer::publishChanges` asks who listens to a changed value
   before it encodes it; a further message's rows are read off its node at GO (the schema's `Reader`),
   not through its address.
@@ -32202,7 +32210,11 @@ had left.
 
 **On the bench** (the author, 2026-10-18, Go.dot 0.1.2 with WFS-DIY 1.0.0beta58): a cue recalling the
 full configuration of 64 inputs - every parameter, not only positions - *"survived... and sent it all
-in a matter of seconds."*
+in a matter of seconds."* Bundles was off, and two things kept it off. The device had been made by
+WFS-DIY's short declare (AVE above). And the Network tab redrew a row only when a field on a list
+moved, and Bundles and Per tick were not on it: each click reached the show while the box went on
+saying OFF, so the author clicked again and switched it back off, three times. The row is now compared
+whole (`DeviceRow`'s own `==`; ShowSettingsUiTests counts the redraws asked for).
 
 ### 88.4 Not built
 
