@@ -503,11 +503,11 @@ namespace wfg::client::model
             written while the show is. */
         if (subject.kind == Subject::Kind::messages)
         {
-            out.oscMessages = readOscMessages (snapshot, out.subject.objectId);
+            out.oscMessages = sharedOscMessages (snapshot, out.subject.objectId);
             out.oscCurves = readOscCurves (snapshot, out.subject.objectId);
-            out.locked = out.oscMessages.locked;
+            out.locked = out.oscMessages->locked;
 
-            if (out.oscMessages.rows.empty())
+            if (out.oscMessages->rows.empty())
                 out.notice = "Not an OSC cue";
         }
 

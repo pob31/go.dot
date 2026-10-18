@@ -273,7 +273,9 @@ namespace wfg::client::model
         /*  AN OSC CUE'S MESSAGES, filled only when they are what is open
             (namespace draft 45, O.5): the cue's own message first, each value
             with its type and the curve on it. */
-        OscMessagesReading oscMessages;
+        /*  Shared (namespace draft §88): the one reading the panel is shown,
+            the same object from pass to pass while nothing in it moved. */
+        std::shared_ptr<const OscMessagesReading> oscMessages = std::make_shared<const OscMessagesReading>();
 
         /*  A VIDEO CUE'S PICTURE (namespace draft §47, AAG): where it lies on
             its canvas, its grade and curves, its mask, its colour. */

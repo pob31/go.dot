@@ -34,6 +34,7 @@
 
 #include <cstddef>
 #include <optional>
+#include <memory>
 #include <string>
 #include <utility>
 #include <vector>
@@ -89,9 +90,17 @@ namespace wfg::client::model
         bool locked = false;
     };
 
-    /*  The cue's messages, in one pass over the snapshot. Empty rows for a cue
+    /*  The cue's messages, read where they are - the cue's `messages` row names
+        them in their order (namespace draft §88) - and kept from one pass to the
+        next while nothing they were read from has moved. Empty rows for a cue
         that is not an OSC cue, or that is not there. */
     OscMessagesReading readOscMessages (const tree::TreeSnapshot&, const std::string& cueId);
+
+    /*  THE SAME READING, SHARED (namespace draft §88): what the window's passes
+        hand round, one object while nothing it was read from has moved - so a
+        panel or a grid shown the same object as last pass has nothing to do,
+        and a cue of 5,300 messages is not copied twice a pass. */
+    std::shared_ptr<const OscMessagesReading> sharedOscMessages (const tree::TreeSnapshot&, const std::string& cueId);
 
     //==============================================================================
     /*  THE TYPES A VALUE MAY BE, in the order the menu offers them, each with

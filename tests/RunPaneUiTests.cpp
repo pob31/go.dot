@@ -8075,6 +8075,69 @@ TEST_CASE ("waveform: a movie's strip and its cuts follow the edit - each slot t
     arrow beside the address asks for the menu with the row it writes and the
     address it holds, and the menu is the tree nested - a submenu per part that
     holds others, an item per node, the current one ticked. */
+TEST_CASE ("osc messages: a cue of 7,500 messages has components for the rows in view, made again as it scrolls (§88)")
+{
+    /*  The author's snapshot of seventy inputs was 5,300 messages, nine
+        components each, refreshed every pass and taken down one by one: the
+        window's thread spun for minutes. Now a few dozen rows have components,
+        whatever the cue holds, and the same reading shown twice does nothing. */
+    std::vector<std::pair<std::string, std::string>> written;
+
+    ui::OscMessagesComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& value) { written.emplace_back (address, value); };
+
+    auto reading = std::make_shared<model::OscMessagesReading>();
+    reading->cueId = "CUE00001";
+
+    for (int n = 0; n < 7500; ++n)
+    {
+        model::OscMessageRow row;
+        row.id = n == 0 ? std::string {} : "M" + std::to_string (10000000 + n).substr (1);
+        row.base = n == 0 ? std::string ("/godot/cue/CUE00001/") : "/godot/message/" + row.id + "/";
+        row.address = "/wfs/input/" + std::to_string (n / 100 + 1) + "/p" + std::to_string (n % 100);
+        row.value = "f:0.5";
+        row.args = { { 'f', "0.5", true, {} } };
+        reading->rows.push_back (std::move (row));
+    }
+
+    const std::shared_ptr<const model::OscMessagesReading> shared = reading;
+
+    ui::OscMessagesComponent table (model::Theme {}, actions);
+    table.setSize (1100, 400);
+    table.show (shared);
+
+    CHECK (table.rowsMade() < 80u);
+    REQUIRE (table.addressBox (0) != nullptr);
+    CHECK (table.addressBox (0)->getText() == "/wfs/input/1/p0");
+    CHECK (table.addressBox (7000) == nullptr);
+
+    //  The same object again: nothing made, nothing moved.
+    auto* before = table.addressBox (3);
+    table.show (shared);
+    CHECK (table.addressBox (3) == before);
+
+    //  Scrolled near the end: the rows there have components, and still only a few dozen do.
+    auto* port = static_cast<juce::Viewport*> (nullptr);
+
+    for (auto* child : table.getChildren())
+        if (auto* found = dynamic_cast<juce::Viewport*> (child))
+            port = found;
+
+    REQUIRE (port != nullptr);
+    port->setViewPosition (0, port->getViewedComponent()->getHeight() - port->getHeight());
+
+    CHECK (table.rowsMade() < 80u);
+    CHECK (table.addressBox (0) == nullptr);
+    REQUIRE (table.addressBox (7499) != nullptr);
+    CHECK (table.addressBox (7499)->getText() == "/wfs/input/75/p99");
+
+    //  And a row there writes its own message.
+    REQUIRE (table.valueBox (7490, 0) != nullptr);
+    table.valueBox (7490, 0)->setText ("0.25", juce::sendNotificationSync);
+    REQUIRE (written.size() == 1u);
+    CHECK (written.front() == std::pair<std::string, std::string> { reading->rows[7490].base + "value", "f:0.25" });
+}
+
 TEST_CASE ("osc messages: the arrow beside an address asks for its device's tree, built as nested menus")
 {
     std::vector<std::pair<std::string, std::string>> asked;

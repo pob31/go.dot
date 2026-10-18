@@ -214,6 +214,12 @@ namespace wfg::client::ui
                     const auto top = tableTop (t);
                     const auto right = labelWidth() + cellWidth() * static_cast<int> (table.columns.size());
 
+                    /*  ONLY WHAT IS TO BE PAINTED (namespace draft §88): a cue of
+                        seventy inputs is a table of thousands of cells, and a
+                        repaint of the corner a cell is typed in drew all of them. */
+                    if (! g.clipRegionIntersects (juce::Rectangle<int> (0, top, getWidth(), tableTop (t + 1) - top)))
+                        continue;
+
                     //  The family, as its addresses spell it.
                     g.setColour (Look::colour (look, "ink"));
                     g.setFont (font.boldened());
@@ -237,6 +243,9 @@ namespace wfg::client::ui
                     for (std::size_t r = 0; r < table.parameters.size(); ++r)
                     {
                         const auto y = headTop + rowHeight() * (1 + static_cast<int> (r));
+
+                        if (! g.clipRegionIntersects (juce::Rectangle<int> (0, y, right, rowHeight())))
+                            continue;
 
                         g.setColour (Look::colour (look, "ink-dim"));
                         g.drawText (juce::String::fromUTF8 (table.parameters[r].c_str()),

@@ -11732,15 +11732,17 @@ TEST_CASE ("client: an OSC cue's target moves every further message to the devic
     REQUIRE (devices.size() == 2u);
     const auto& other = model::deviceOf ("/wfs/source/1/gain", devices) == devices[0].id ? devices[1] : devices[0];
 
-    const auto toDesk = target->alongside.find (model::retarget ("/wfs/source/1/gain", devices, other.id));
-    REQUIRE (toDesk != target->alongside.end());
-    REQUIRE (toDesk->second.size() == 1u);
-    CHECK (toDesk->second.front().first == "/godot/message/" + message + "/address");
-    CHECK (toDesk->second.front().second == model::retarget ("/wfs/source/2/gain", devices, other.id));
-    CHECK (toDesk->second.front().second != "/wfs/source/2/gain");
+    //  Made when the choice is made (§88), of the tree as it is then.
+    const auto now = rig.publish (6);
+    const auto toDesk = model::alongsideOf (*now, *target, model::retarget ("/wfs/source/1/gain", devices, other.id));
+    REQUIRE (toDesk.size() == 1u);
+    CHECK (toDesk.front().first == "/godot/message/" + message + "/address");
+    CHECK (toDesk.front().second == model::retarget ("/wfs/source/2/gain", devices, other.id));
+    CHECK (toDesk.front().second != "/wfs/source/2/gain");
 
     //  Every choice carries the messages, none included.
-    CHECK (target->alongside.size() == target->choices.size());
+    for (const auto& [key, label] : target->choices)
+        CHECK_FALSE (model::alongsideOf (*now, *target, key).empty());
 }
 
 //==============================================================================

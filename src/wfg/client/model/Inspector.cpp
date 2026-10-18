@@ -1439,30 +1439,9 @@ namespace wfg::client::model
                     address as it rewrites the cue's - built in the order
                     `targetChoices` builds its keys, none first. */
                 const auto cueBase = field.address.substr (0, field.address.size() - std::string ("address").size());
-                std::vector<std::pair<std::string, std::string>> messages;
 
-                for (const auto& id : words (text (snapshot, cueBase + "messages")))
-                {
-                    const auto row = "/godot/message/" + id + "/address";
-                    messages.push_back ({ row, text (snapshot, row) });
-                }
-
-                if (! messages.empty())
-                {
-                    std::vector<std::string> deviceIds { std::string {} };
-
-                    for (const auto& row : devices)
-                        if (! row.prefixes().empty())
-                            deviceIds.push_back (row.id);
-
-                    for (const auto& deviceId : deviceIds)
-                    {
-                        auto& writes = aim.alongside[retarget (field.value, devices, deviceId)];
-
-                        for (const auto& [row, address] : messages)
-                            writes.push_back ({ row, retarget (address, devices, deviceId) });
-                    }
-                }
+                if (! text (snapshot, cueBase + "messages").empty())
+                    aim.alongsideCue = cueBase;
 
                 /*  THEN THE PATH, ONE MENU PER PART (namespace draft §56, AEP,
                     the author's: "Selecting the client then shows a menu with
@@ -2163,6 +2142,42 @@ namespace wfg::client::model
 
         out.cueId = picked;
         return out;
+    }
+
+    //==============================================================================
+    std::vector<std::pair<std::string, std::string>> alongsideOf (const tree::TreeSnapshot& snapshot,
+                                                                  const Field& target, const std::string& choice)
+    {
+        std::vector<std::pair<std::string, std::string>> writes;
+
+        if (target.alongsideCue.empty())
+            return writes;
+
+        /*  The device the choice names: the one whose rewrite of the cue's
+            address is the choice's key - none first, as `targetChoices` builds
+            its keys. */
+        const auto devices = readDevices (snapshot);
+        std::vector<std::string> deviceIds { std::string {} };
+
+        for (const auto& row : devices)
+            if (! row.prefixes().empty())
+                deviceIds.push_back (row.id);
+
+        for (const auto& deviceId : deviceIds)
+        {
+            if (retarget (target.value, devices, deviceId) != choice)
+                continue;
+
+            for (const auto& id : words (text (snapshot, target.alongsideCue + "messages")))
+            {
+                const auto row = "/godot/message/" + id + "/address";
+                writes.push_back ({ row, retarget (text (snapshot, row), devices, deviceId) });
+            }
+
+            break;
+        }
+
+        return writes;
     }
 
     Inspection inspectMany (const tree::TreeSnapshot& snapshot, const std::vector<std::string>& cueIds,

@@ -73,7 +73,9 @@ namespace wfg::client::model
         OscCurvesReading out;
         out.cueId = cueId;
 
-        const auto messages = readOscMessages (snapshot, cueId);
+        //  The shared reading (§88): no copy of a cue's every message a pass.
+        const auto shared = sharedOscMessages (snapshot, cueId);
+        const auto& messages = *shared;
 
         if (messages.rows.empty())
             return out;

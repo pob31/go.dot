@@ -83,8 +83,14 @@ namespace wfg::client::ui
 
         void applyTheme (const model::Theme&);
 
-        /** The reading for this pass. Cheap when nothing came or went. */
+        /*  The reading for this pass: nothing at all when it is the object shown
+            last pass, cheap when nothing came or went. */
+        void show (std::shared_ptr<const model::OscMessagesReading>);
         void show (const model::OscMessagesReading&);
+
+        /*  For a test: how many rows have components now - those in view and a
+            few either side, never the cue's every message (namespace draft §88). */
+        std::size_t rowsMade() const noexcept { return rows.size(); }
 
         void paint (juce::Graphics&) override;
         void resized() override;
@@ -114,16 +120,30 @@ namespace wfg::client::ui
         void rebuild();
         void refresh();
         void layOut();
+
+        /*  The rows in view, and a few either side: [first, first + rows). */
+        std::pair<std::size_t, std::size_t> window() const;
+        Row* rowAt (std::size_t at) const;
+        const model::OscMessagesReading& reading() const noexcept { return *shown; }
         std::string shapeOf (const model::OscMessagesReading&) const;
         void wire (Row&);
         void wireCell (Row&, Cell&, std::size_t arg);
 
         model::Theme theme;
         Actions actions;
-        model::OscMessagesReading reading;
+        std::shared_ptr<const model::OscMessagesReading> shown = std::make_shared<const model::OscMessagesReading>();
         std::string drawnShape;
 
-        juce::Viewport viewport;
+        /*  A VIEWPORT THAT SAYS WHEN IT SCROLLED, so the rows in view can be
+            made for where it now looks. */
+        struct Port final : juce::Viewport
+        {
+            std::function<void()> moved;
+            void visibleAreaChanged (const juce::Rectangle<int>&) override { if (moved) moved(); }
+        };
+
+        Port viewport;
+        std::size_t first = 0;
         juce::Component content;
         juce::TextButton add { "+ message" };
         std::vector<std::unique_ptr<Row>> rows;

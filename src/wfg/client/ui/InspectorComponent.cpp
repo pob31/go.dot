@@ -1070,13 +1070,15 @@ namespace wfg::client::ui
     {
         /*  A CHOICE THAT MOVES MORE THAN ITS OWN ROW (namespace draft 45): the
             cue's address and each further message's, together. */
-        if (const auto along = field.alongside.find (text);
-            field.addresses.empty() && along != field.alongside.end() && ! along->second.empty() && actions.setMany)
+        if (! field.alongsideCue.empty() && field.addresses.empty() && actions.setMany && actions.alongside)
         {
-            std::vector<std::pair<std::string, std::string>> writes { { field.address, text } };
-            writes.insert (writes.end(), along->second.begin(), along->second.end());
-            actions.setMany (writes);
-            return;
+            if (const auto along = actions.alongside (field, text); ! along.empty())
+            {
+                std::vector<std::pair<std::string, std::string>> writes { { field.address, text } };
+                writes.insert (writes.end(), along.begin(), along.end());
+                actions.setMany (writes);
+                return;
+            }
         }
 
         if (field.addresses.empty())

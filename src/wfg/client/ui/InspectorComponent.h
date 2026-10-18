@@ -73,6 +73,12 @@ namespace wfg::client::ui
                 device (namespace draft 45), one `node.setMany`. */
             std::function<void (const std::vector<std::pair<std::string, std::string>>& writes)> setMany;
 
+            /*  What a choice on an OSC cue's target writes beside the cue's own
+                address (namespace draft §88): asked when the choice is made, of
+                the tree as it is then. */
+            std::function<std::vector<std::pair<std::string, std::string>> (const model::Field& target,
+                                                                            const std::string& choice)> alongside;
+
             /*  ASKS THE MACHINE FOR A FILE, which is the one thing a
                 browser cannot do (decision Y) and so the one control here
                 that is the desktop's alone. It is an ACCELERATOR and never a

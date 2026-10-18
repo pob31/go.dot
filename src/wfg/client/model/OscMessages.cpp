@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <limits>
 #include <map>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -86,93 +87,200 @@ namespace wfg::client::model
         }
     }
 
-    OscMessagesReading readOscMessages (const tree::TreeSnapshot& snapshot, const std::string& cueId)
+    namespace
     {
-        OscMessagesReading out;
-        out.cueId = cueId;
-
-        if (cueId.empty() || text (snapshot, "/godot/cue/" + cueId + "/kind") != "osc")
-            return out;
-
-        out.locked = isYes (flag (snapshot, "/godot/document/locked"));
-
-        OscMessageRow own;
-        own.base = "/godot/cue/" + cueId + "/";
-        own.address = text (snapshot, own.base + "address");
-        own.value = text (snapshot, own.base + "value");
-
-        /*  ONE PASS for the further messages and every curve, gathered by
-            identifier and kept to this cue - the shape `readRanges` uses. */
-        struct Further
+        /*  ONE PASS OVER THE WHOLE SNAPSHOT, the way the messages were read until
+            §88 - kept for a snapshot that names no `messages` row for the cue,
+            which a tree made by hand in a test may not. */
+        OscMessagesReading readByWalk (const tree::TreeSnapshot& snapshot, const std::string& cueId)
         {
-            OscMessageRow row;
-            std::string cue;
-            int index = 0;
-        };
+            OscMessagesReading out;
+            out.cueId = cueId;
 
-        struct Curve
-        {
-            std::string cue, message;
-            int arg = 0;
-        };
+            if (cueId.empty() || text (snapshot, "/godot/cue/" + cueId + "/kind") != "osc")
+                return out;
 
-        std::map<std::string, Further> messages;
-        std::map<std::string, Curve> curves;
+            out.locked = isYes (flag (snapshot, "/godot/document/locked"));
 
-        for (const auto* node : snapshot.all())
-        {
-            std::string id, row;
+            OscMessageRow own;
+            own.base = "/godot/cue/" + cueId + "/";
+            own.address = text (snapshot, own.base + "address");
+            own.value = text (snapshot, own.base + "value");
 
-            if (split (node->address, messagePrefix, id, row))
+            /*  ONE PASS for the further messages and every curve, gathered by
+                identifier and kept to this cue - the shape `readRanges` uses. */
+            struct Further
             {
-                auto& message = messages[id];
-                message.row.id = id;
-                message.row.base = std::string (messagePrefix) + id + "/";
+                OscMessageRow row;
+                std::string cue;
+                int index = 0;
+            };
 
-                if (row == "cue")           message.cue = text (node);
-                else if (row == "address")  message.row.address = text (node);
-                else if (row == "value")    message.row.value = text (node);
-                else if (row == "index")    message.index = static_cast<int> (osc::parseDouble (text (node)).value_or (0.0));
-            }
-            else if (split (node->address, curvePrefix, id, row))
+            struct Curve
             {
-                auto& curve = curves[id];
+                std::string cue, message;
+                int arg = 0;
+            };
 
-                if (row == "cue")           curve.cue = text (node);
-                else if (row == "message")  curve.message = text (node);
-                else if (row == "arg")      curve.arg = static_cast<int> (osc::parseDouble (text (node)).value_or (0.0));
+            std::map<std::string, Further> messages;
+            std::map<std::string, Curve> curves;
+
+            for (const auto* node : snapshot.all())
+            {
+                std::string id, row;
+
+                if (split (node->address, messagePrefix, id, row))
+                {
+                    auto& message = messages[id];
+                    message.row.id = id;
+                    message.row.base = std::string (messagePrefix) + id + "/";
+
+                    if (row == "cue")           message.cue = text (node);
+                    else if (row == "address")  message.row.address = text (node);
+                    else if (row == "value")    message.row.value = text (node);
+                    else if (row == "index")    message.index = static_cast<int> (osc::parseDouble (text (node)).value_or (0.0));
+                }
+                else if (split (node->address, curvePrefix, id, row))
+                {
+                    auto& curve = curves[id];
+
+                    if (row == "cue")           curve.cue = text (node);
+                    else if (row == "message")  curve.message = text (node);
+                    else if (row == "arg")      curve.arg = static_cast<int> (osc::parseDouble (text (node)).value_or (0.0));
+                }
             }
-        }
 
-        std::vector<Further> mine;
+            std::vector<Further> mine;
 
-        for (auto& [id, message] : messages)
-            if (message.cue == cueId)
-                mine.push_back (std::move (message));
+            for (auto& [id, message] : messages)
+                if (message.cue == cueId)
+                    mine.push_back (std::move (message));
 
-        std::stable_sort (mine.begin(), mine.end(),
-                          [] (const Further& a, const Further& b) { return a.index < b.index; });
+            std::stable_sort (mine.begin(), mine.end(),
+                              [] (const Further& a, const Further& b) { return a.index < b.index; });
 
-        out.rows.push_back (std::move (own));
+            out.rows.push_back (std::move (own));
 
-        for (auto& message : mine)
-            out.rows.push_back (std::move (message.row));
-
-        for (auto& row : out.rows)
-            fillArguments (row);
-
-        //  Each curve on the value it moves, of the message it sits under.
-        for (const auto& [id, curve] : curves)
-        {
-            if (curve.cue != cueId || curve.arg < 0)
-                continue;
+            for (auto& message : mine)
+                out.rows.push_back (std::move (message.row));
 
             for (auto& row : out.rows)
-                if (row.id == curve.message && static_cast<std::size_t> (curve.arg) < row.args.size())
-                    row.args[static_cast<std::size_t> (curve.arg)].curveId = id;
+                fillArguments (row);
+
+            //  Each curve on the value it moves, of the message it sits under.
+            for (const auto& [id, curve] : curves)
+            {
+                if (curve.cue != cueId || curve.arg < 0)
+                    continue;
+
+                for (auto& row : out.rows)
+                    if (row.id == curve.message && static_cast<std::size_t> (curve.arg) < row.args.size())
+                        row.args[static_cast<std::size_t> (curve.arg)].curveId = id;
+            }
+
+            return out;
         }
 
-        return out;
+        /*  BY ADDRESS (namespace draft §88): the cue's `messages` row names its
+            further messages in their order, the cue's and each message's
+            `curves` row its curves, and every row is looked up where it is.
+            The walk above went over every node of the tree to find them - every
+            message of every cue - twice a pass, twenty-five passes a second. */
+        OscMessagesReading readByAddress (const tree::TreeSnapshot& snapshot, const std::string& cueId,
+                                          const std::string& listed)
+        {
+            OscMessagesReading out;
+            out.cueId = cueId;
+            out.locked = isYes (flag (snapshot, "/godot/document/locked"));
+
+            OscMessageRow own;
+            own.base = "/godot/cue/" + cueId + "/";
+            own.address = text (snapshot, own.base + "address");
+            own.value = text (snapshot, own.base + "value");
+            out.rows.push_back (std::move (own));
+
+            for (const auto& id : words (listed))
+            {
+                OscMessageRow row;
+                row.id = id;
+                row.base = std::string (messagePrefix) + id + "/";
+                row.address = text (snapshot, row.base + "address");
+                row.value = text (snapshot, row.base + "value");
+                out.rows.push_back (std::move (row));
+            }
+
+            for (auto& row : out.rows)
+            {
+                fillArguments (row);
+
+                //  Each curve on the value it moves.
+                for (const auto& curveId : words (text (snapshot, row.base + "curves")))
+                {
+                    const auto arg = static_cast<int> (osc::parseDouble (text (snapshot, std::string (curvePrefix) + curveId + "/arg"))
+                                                         .value_or (-1.0));
+
+                    if (arg >= 0 && static_cast<std::size_t> (arg) < row.args.size())
+                        row.args[static_cast<std::size_t> (arg)].curveId = curveId;
+                }
+            }
+
+            return out;
+        }
+    }
+
+    OscMessagesReading readOscMessages (const tree::TreeSnapshot& snapshot, const std::string& cueId)
+    {
+        return *sharedOscMessages (snapshot, cueId);
+    }
+
+    std::shared_ptr<const OscMessagesReading> sharedOscMessages (const tree::TreeSnapshot& snapshot, const std::string& cueId)
+    {
+        if (cueId.empty() || text (snapshot, "/godot/cue/" + cueId + "/kind") != "osc")
+        {
+            OscMessagesReading none;
+            none.cueId = cueId;
+            return std::make_shared<const OscMessagesReading> (std::move (none));
+        }
+
+        const auto base = "/godot/cue/" + cueId + "/";
+        const auto* listed = snapshot.find (base + "messages");
+
+        if (listed == nullptr)
+            return std::make_shared<const OscMessagesReading> (readByWalk (snapshot, cueId));
+
+        /*  KEPT WHILE NOTHING IT WAS READ FROM HAS MOVED (namespace draft §88):
+            the messages half the same object, and the cue's own rows - its
+            address, value, list of messages and curves - and the lock as they
+            were. A GO rebuilds the rest of the show's half and leaves these
+            alone, so a cue of 5,300 messages is read again only when an edit
+            touched it. One reading kept, for the cue being looked at. */
+        struct Kept
+        {
+            std::shared_ptr<const std::vector<tree::Node>> half;
+            std::string cueId, address, value, messages, curves;
+            bool locked = false;
+            std::shared_ptr<const OscMessagesReading> reading;
+        };
+
+        static thread_local Kept kept;
+
+        const auto& half = snapshot.messagesHalf();
+        const auto address = text (snapshot, base + "address");
+        const auto value = text (snapshot, base + "value");
+        const auto messages = text (listed);
+        const auto curves = text (snapshot, base + "curves");
+        const auto locked = isYes (flag (snapshot, "/godot/document/locked"));
+
+        if (half != nullptr && half == kept.half && cueId == kept.cueId && address == kept.address
+              && value == kept.value && messages == kept.messages && curves == kept.curves && locked == kept.locked)
+            return kept.reading;
+
+        auto reading = std::make_shared<const OscMessagesReading> (readByAddress (snapshot, cueId, messages));
+
+        if (half != nullptr)
+            kept = Kept { half, cueId, address, value, messages, curves, locked, reading };
+
+        return reading;
     }
 
     //==============================================================================

@@ -215,12 +215,16 @@ namespace wfg::client::model
         std::string address;        ///< the full address `node.set` would be given
         std::string name;           ///< the attribute, as the tree spells it
 
-        /*  WHAT ELSE A CHOICE WRITES, by the choice's key: an OSC cue's target
-            menu moves every further message to the device it moves the cue to
-            (namespace draft 45, YV - one device per cue), each message's
-            address rewritten as the cue's is, in the same `node.setMany`.
-            Empty for every other line. */
-        std::map<std::string, std::vector<std::pair<std::string, std::string>>> alongside;
+        /*  WHAT ELSE A CHOICE WRITES: an OSC cue's target menu moves every
+            further message to the device it moves the cue to (namespace draft
+            45, YV - one device per cue), each message's address rewritten as
+            the cue's is, in the same `node.setMany`. NAMED HERE, MADE WHEN
+            CHOSEN (namespace draft §88): the base address of the cue whose
+            messages move, and `alongsideOf` makes the writes for a choice. A
+            cue of 5,300 messages had a map of every rewritten address for every
+            device made and copied with this line twenty-five times a second.
+            Empty for every other line, and for a cue with no further message. */
+        std::string alongsideCue;
 
         /*  What to call it on screen, when its own name is not what somebody
             reading it would call it (author: "Play could read 'Items to play'
@@ -345,6 +349,13 @@ namespace wfg::client::model
 
     /** Everything published under one cue, sorted into blocks. Empty for no cue. */
     Inspection inspect (const tree::TreeSnapshot& snapshot, const std::string& cueId);
+
+    /*  WHAT A CHOICE ON AN OSC CUE'S TARGET WRITES BESIDE THE CUE'S OWN ADDRESS
+        (namespace draft §88): each further message's address, rewritten for the
+        device the choice moves the cue to. Nothing for a line that moves no
+        message, or a choice no device answers to. */
+    std::vector<std::pair<std::string, std::string>> alongsideOf (const tree::TreeSnapshot& snapshot,
+                                                                  const Field& target, const std::string& choice);
 
     /*  DOH!'S PREVIOUS COMMAND, as the engine's `cue::previousCommandOf`
         reads it from the document and from this side of the door: the

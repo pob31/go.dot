@@ -401,6 +401,14 @@ namespace wfg::client
                 inspectorActions.setMany = [this] (const std::vector<std::pair<std::string, std::string>>& writes)
                                            { send (gesture::setNodes (writes)); };
 
+                /*  AND WHAT THE MESSAGES BESIDE IT BECOME, asked of the latest
+                    tree when the choice is made (namespace draft §88). */
+                inspectorActions.alongside = [this] (const model::Field& target, const std::string& choice)
+                {
+                    return latest != nullptr ? model::alongsideOf (*latest, target, choice)
+                                             : std::vector<std::pair<std::string, std::string>> {};
+                };
+
                 /*  CLOSING THE PANEL IS PICKING NOTHING, which is client state
                     like the folds and never reaches the engine. */
                 inspectorActions.close = [this] { selection.clear(); };
@@ -2181,7 +2189,7 @@ namespace wfg::client
                     gridWindow = std::make_unique<ui::OscGridWindow> (theme, std::move (gridActions));
                 }
 
-                gridWindow->show (model::readOscMessages (*latest, cueId), model::shownCueName (*latest, cueId));
+                gridWindow->show (*model::sharedOscMessages (*latest, cueId), model::shownCueName (*latest, cueId));
                 gridWindow->open();
             }
 
@@ -2197,7 +2205,7 @@ namespace wfg::client
                 if (! picked.empty() && picked != cueId && model::text (snapshot, "/godot/cue/" + picked + "/kind") == "osc")
                     cueId = picked;
 
-                gridWindow->show (model::readOscMessages (snapshot, cueId), model::shownCueName (snapshot, cueId));
+                gridWindow->show (*model::sharedOscMessages (snapshot, cueId), model::shownCueName (snapshot, cueId));
             }
 
             //======================================================================

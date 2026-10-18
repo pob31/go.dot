@@ -93,6 +93,17 @@ namespace wfg::client::ui
         viewport.setScrollBarsShown (true, true);
         addAndMakeVisible (viewport);
 
+        /*  THE ROWS IN VIEW, made again when it scrolls past them (namespace
+            draft §88): only those have components. */
+        viewport.moved = [this]
+        {
+            if (window().first != first)
+            {
+                rebuild();
+                return;
+            }
+        };
+
         /*  ONE MORE MESSAGE, after the last: to the address the last one is
             at, with its values, which is the commonest next message there is -
             the same kind of thing on the next channel, the next object. */
@@ -100,7 +111,7 @@ namespace wfg::client::ui
         add.setTooltip ("Adds a message after the last, copying its address and its values");
         add.onClick = [this]
         {
-            if (reading.rows.empty() || reading.rows.front().address.empty())
+            if (reading().rows.empty() || reading().rows.front().address.empty())
             {
                 if (actions.say)
                     actions.say ("Give the cue an address first: it is the first message");
@@ -108,10 +119,10 @@ namespace wfg::client::ui
                 return;
             }
 
-            const auto& last = reading.rows.back();
+            const auto& last = reading().rows.back();
 
             if (actions.createMessage)
-                actions.createMessage (reading.cueId, last.address, last.value);
+                actions.createMessage (reading().cueId, last.address, last.value);
         };
         addAndMakeVisible (add);
     }
@@ -168,9 +179,18 @@ namespace wfg::client::ui
 
     void OscMessagesComponent::show (const model::OscMessagesReading& readingToUse)
     {
-        reading = readingToUse;
+        show (std::make_shared<const model::OscMessagesReading> (readingToUse));
+    }
 
-        const auto shape = shapeOf (reading);
+    void OscMessagesComponent::show (std::shared_ptr<const model::OscMessagesReading> readingToUse)
+    {
+        //  The same object as last pass: nothing came, went or moved.
+        if (readingToUse == nullptr || readingToUse == shown)
+            return;
+
+        shown = std::move (readingToUse);
+
+        const auto shape = shapeOf (reading());
 
         if (shape != drawnShape)
         {
@@ -247,7 +267,7 @@ namespace wfg::client::ui
             if (now.curveId.empty())
             {
                 if (actions.createCurve)
-                    actions.createCurve (raw->message.parentId (reading.cueId), static_cast<int> (arg));
+                    actions.createCurve (raw->message.parentId (reading().cueId), static_cast<int> (arg));
             }
             else if (actions.removeObject)
             {
@@ -355,22 +375,58 @@ namespace wfg::client::ui
                 return;
             }
 
-            if (rows.size() > 1 && actions.promoteMessage)
-                actions.promoteMessage (rows[1]->message.id);
+            if (reading().rows.size() > 1 && actions.promoteMessage)
+                actions.promoteMessage (reading().rows[1].id);
         };
         content.addAndMakeVisible (row.drop);
     }
 
+    std::pair<std::size_t, std::size_t> OscMessagesComponent::window() const
+    {
+        /*  WHAT IS IN VIEW, AND EIGHT ROWS EITHER SIDE (namespace draft §88): a cue
+            of 5,300 messages had nine components a message, all of them
+            refreshed every pass and taken down one by one; now some forty rows
+            have components, whatever the cue holds. Thirty-two at the least,
+            so a short cue - or a panel not yet laid out - has all of its own. */
+        constexpr std::size_t margin = 8, least = 32;
+
+        const auto row = std::max (1, juce::roundToInt (theme.row * theme.type));
+        const auto top = static_cast<std::size_t> (std::max (0, viewport.getViewPositionY() / row));
+        const auto seen = static_cast<std::size_t> (std::max (0, viewport.getHeight() / row)) + 1;
+        const auto count = std::max (least, seen + margin * 2);
+        const auto total = reading().rows.size();
+
+        auto from = top > margin ? top - margin : 0;
+
+        if (from + count > total)
+            from = total > count ? total - count : 0;
+
+        return { from, std::min (count, total - std::min (total, from)) };
+    }
+
+    OscMessagesComponent::Row* OscMessagesComponent::rowAt (std::size_t at) const
+    {
+        if (at < first || at - first >= rows.size())
+            return nullptr;
+
+        return rows[at - first].get();
+    }
+
     void OscMessagesComponent::rebuild()
     {
-        rows.clear();
+        /*  TAKEN OFF THE CONTENT BEFORE THEY GO, so no row's destructor looks
+            for itself among the content's children. */
         content.removeAllChildren();
+        rows.clear();
 
-        for (std::size_t at = 0; at < reading.rows.size(); ++at)
+        const auto [from, count] = window();
+        first = from;
+
+        for (std::size_t at = first; at < first + count; ++at)
         {
             auto row = std::make_unique<Row>();
             row->at = at;
-            row->message = reading.rows[at];
+            row->message = reading().rows[at];
             wire (*row);
             rows.push_back (std::move (row));
         }
@@ -382,14 +438,19 @@ namespace wfg::client::ui
 
     void OscMessagesComponent::refresh()
     {
-        const auto editable = ! reading.locked;
+        const auto editable = ! reading().locked;
 
         add.setEnabled (editable);
 
-        for (std::size_t at = 0; at < rows.size() && at < reading.rows.size(); ++at)
+        for (auto& pooled : rows)
         {
-            auto& row = *rows[at];
-            row.message = reading.rows[at];
+            auto& row = *pooled;
+            const auto at = row.at;
+
+            if (at >= reading().rows.size())
+                continue;
+
+            row.message = reading().rows[at];
 
             if (! row.address.isBeingEdited())
                 row.address.setText (juce::String (row.message.address), juce::dontSendNotification);
@@ -397,10 +458,10 @@ namespace wfg::client::ui
             row.address.setEditable (editable, editable, false);
             row.pick.setEnabled (editable);
             row.addArg.setEnabled (editable && row.message.spells);
-            row.drop.setEnabled (editable && (at > 0 || rows.size() > 1));
+            row.drop.setEnabled (editable && (at > 0 || reading().rows.size() > 1));
             row.drop.setTooltip (at > 0 ? "Removes this message"
-                                        : rows.size() > 1 ? "Removes the first message: the second becomes the cue's own"
-                                                          : "A cue keeps its own message");
+                                        : reading().rows.size() > 1 ? "Removes the first message: the second becomes the cue's own"
+                                                                    : "A cue keeps its own message");
 
             for (std::size_t arg = 0; arg < row.cells.size() && arg < row.message.args.size(); ++arg)
             {
@@ -449,16 +510,18 @@ namespace wfg::client::ui
 
         std::size_t widest = 0;
 
-        for (const auto& line : rows)
-            widest = std::max (widest, line->cells.size());
+        //  As wide as the widest message of the cue, in view or not, so a scroll does not move the columns.
+        for (const auto& message : reading().rows)
+            widest = std::max (widest, message.args.size());
 
         const auto inner = std::max (viewport.getWidth() - scaled (14, theme),
                                      scaled (numberWidth + addressWidth + gap * 3 + dropWidth * 2
                                                + static_cast<int> (widest + 1) * cellWidth, theme));
 
-        content.setSize (inner, std::max (row, static_cast<int> (rows.size()) * row));
+        content.setSize (inner, std::max (row, static_cast<int> (reading().rows.size()) * row));
 
-        auto y = 0;
+        //  Each row where its message sits among all of the cue's.
+        auto y = static_cast<int> (first) * row;
 
         for (auto& line : rows)
         {
@@ -508,7 +571,7 @@ namespace wfg::client::ui
         g.setColour (Look::colour (theme, "rule"));
         g.fillRect (head.getX(), head.getBottom() - 1, head.getWidth(), 1);
 
-        if (reading.rows.empty())
+        if (reading().rows.empty())
         {
             g.setColour (Look::colour (theme, "ink-dim"));
             g.drawText ("Not an OSC cue", getLocalBounds().withTrimmedTop (row), juce::Justification::centred, false);
@@ -517,42 +580,50 @@ namespace wfg::client::ui
 
     juce::Label* OscMessagesComponent::addressBox (std::size_t row)
     {
-        return row < rows.size() ? &rows[row]->address : nullptr;
+        auto* line = rowAt (row);
+        return line != nullptr ? &line->address : nullptr;
     }
 
     juce::Label* OscMessagesComponent::valueBox (std::size_t row, std::size_t arg)
     {
-        return row < rows.size() && arg < rows[row]->cells.size() ? &rows[row]->cells[arg]->value : nullptr;
+        auto* line = rowAt (row);
+        return line != nullptr && arg < line->cells.size() ? &line->cells[arg]->value : nullptr;
     }
 
     juce::ComboBox* OscMessagesComponent::typeMenu (std::size_t row, std::size_t arg)
     {
-        return row < rows.size() && arg < rows[row]->cells.size() ? &rows[row]->cells[arg]->type : nullptr;
+        auto* line = rowAt (row);
+        return line != nullptr && arg < line->cells.size() ? &line->cells[arg]->type : nullptr;
     }
 
     juce::ToggleButton* OscMessagesComponent::curveSwitch (std::size_t row, std::size_t arg)
     {
-        return row < rows.size() && arg < rows[row]->cells.size() ? &rows[row]->cells[arg]->curve : nullptr;
+        auto* line = rowAt (row);
+        return line != nullptr && arg < line->cells.size() ? &line->cells[arg]->curve : nullptr;
     }
 
     juce::Button* OscMessagesComponent::removeValue (std::size_t row, std::size_t arg)
     {
-        return row < rows.size() && arg < rows[row]->cells.size() ? &rows[row]->cells[arg]->drop : nullptr;
+        auto* line = rowAt (row);
+        return line != nullptr && arg < line->cells.size() ? &line->cells[arg]->drop : nullptr;
     }
 
     juce::Button* OscMessagesComponent::addValue (std::size_t row)
     {
-        return row < rows.size() ? &rows[row]->addArg : nullptr;
+        auto* line = rowAt (row);
+        return line != nullptr ? &line->addArg : nullptr;
     }
 
     juce::Button* OscMessagesComponent::removeMessage (std::size_t row)
     {
-        return row < rows.size() ? &rows[row]->drop : nullptr;
+        auto* line = rowAt (row);
+        return line != nullptr ? &line->drop : nullptr;
     }
 
     juce::Button* OscMessagesComponent::pickAddress (std::size_t row)
     {
-        return row < rows.size() ? &rows[row]->pick : nullptr;
+        auto* line = rowAt (row);
+        return line != nullptr ? &line->pick : nullptr;
     }
 
     juce::PopupMenu OscMessagesComponent::menuOf (const std::vector<model::TreeMenuItem>& items,
