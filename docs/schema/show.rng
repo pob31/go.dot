@@ -3798,7 +3798,7 @@
       </optional>
       <optional>
         <attribute name="channelsPerTrack">
-          <a:documentation>How many channels one track carries, and so the widest cue this show can play. Two is a stereo file, which is what almost every show is; a six-channel bed or a first-order ambisonic one needs it said. A cue wider than this fails its arm as bad-route rather than being quietly narrowed - PRD 3.9b: width is explicit and never automatic. Fixed when the graph is built and never after, like tracks and for the same reason (3.25), so a show is reopened to change it. It costs: every track carries this many buffers whether a cue uses them or not.</a:documentation>
+          <a:documentation>How many channels one track carries, and so the widest cue this show can play. Two is a stereo file, which is what almost every show is; a six-channel bed or a first-order ambisonic one needs it said. A cue wider than this fails its arm as bad-route rather than being quietly narrowed - PRD 3.9b: width is explicit and never automatic. Fixed when the graph is built and never after, like tracks and for the same reason (3.25), so a change lands at the next Apply while stopped, or when the show is next opened. It costs: every track carries this many buffers whether a cue uses them or not.</a:documentation>
           <data type="integer">
             <param name="minInclusive">1</param>
             <param name="maxInclusive">64</param>
