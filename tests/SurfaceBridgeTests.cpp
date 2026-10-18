@@ -931,6 +931,45 @@ TEST_CASE ("surface bridge: with the faders flipped a strip's REC arms its lane,
     desk.ticks (2);
     REQUIRE (desk.published ("/godot/slot/" + strips[0] + "/target") == "/godot/surface/laneRide");
 
+    const auto lit = [&desk] (int note)
+    {
+        for (const auto& message : desk.sink.sent)
+            if (message.bytes.size() == 3 && message.bytes[0] == 0x90 && message.bytes[1] == note
+                  && message.bytes[2] == 0x7f)
+                return true;
+
+        return false;
+    };
+
+    const auto dark = [&desk] (int note)
+    {
+        for (const auto& message : desk.sink.sent)
+            if (message.bytes.size() == 3 && message.bytes[0] == 0x90 && message.bytes[1] == note
+                  && message.bytes[2] == 0x00)
+                return true;
+
+        return false;
+    };
+
+    /*  WHAT A LIGHT WAS LAST SENT, followed across the clears: a steady light
+        is sent once and then left alone. */
+    auto recLight = -1;
+
+    const auto followRec = [&desk, &recLight]
+    {
+        for (const auto& message : desk.sink.sent)
+            if (message.bytes.size() == 3 && message.bytes[0] == 0x90 && message.bytes[1] == 0x00)
+                recLight = message.bytes[2];
+    };
+
+    /*  FLIPPED AND NOTHING ARMED, ITS REC BLINKS for a hand to press it (the
+        author, 2026-10-18, namespace draft §87). */
+    desk.clear();
+    desk.ticks (40);
+    CHECK (lit (0x00));
+    CHECK (dark (0x00));
+    followRec();
+
     //  ITS REC ARMS THE LANE - and no starting level is set.
     desk.clear();
     desk.arrive ("PORTMCU1", { 0x90, 0x00, 0x7f });
@@ -946,21 +985,13 @@ TEST_CASE ("surface bridge: with the faders flipped a strip's REC arms its lane,
     for (const auto& event : desk.submitted)
         CHECK (event.command != "node.set");
 
-    const auto lit = [&desk] (int note)
-    {
-        for (const auto& message : desk.sink.sent)
-            if (message.bytes.size() == 3 && message.bytes[0] == 0x90 && message.bytes[1] == note
-                  && message.bytes[2] == 0x7f)
-                return true;
-
-        return false;
-    };
-
-    //  ARMED: its REC light is lit, and pressed again it asks to disarm.
+    //  ARMED: its REC light is steady, and pressed again it asks to disarm.
     lanes.setArmed ("level", true);
     desk.clear();
-    desk.ticks (2);
-    CHECK (lit (0x00));
+    desk.ticks (40);
+    followRec();
+    CHECK (recLight == 0x7f);
+    CHECK_FALSE (dark (0x00));
 
     desk.clear();
     desk.arrive ("PORTMCU1", { 0x90, 0x00, 0x7f });
@@ -992,26 +1023,18 @@ TEST_CASE ("surface bridge: with the faders flipped a strip's REC arms its lane,
     REQUIRE_FALSE (desk.submitted.empty());
     CHECK (desk.submitted[0].command == "lane.record");
 
-    //  THE PASS RUNNING: Rec's light is lit; the strip writing, its REC blinks.
+    /*  THE PASS RUNNING: Rec's light is lit; the strip writing, its REC stays
+        steady - a blink is for a lane still to be armed (§87). */
     lanes.startPass ("RN000001");
     lanes.rideOf ("level").touched = true;
     desk.clear();
     desk.ticks (40);
 
     CHECK (lit (0x5f));
-    CHECK (lit (0x00));
-
-    const auto dark = [&desk] (int note)
-    {
-        for (const auto& message : desk.sink.sent)
-            if (message.bytes.size() == 3 && message.bytes[0] == 0x90 && message.bytes[1] == note
-                  && message.bytes[2] == 0x00)
-                return true;
-
-        return false;
-    };
-
-    CHECK (dark (0x00));
+    CHECK (desk.published ("/godot/slot/" + strips[0] + "/word") == "recording");
+    followRec();
+    CHECK (recLight == 0x7f);
+    CHECK_FALSE (dark (0x00));
 
     //  AND REC AGAIN STOPS IT.
     desk.clear();

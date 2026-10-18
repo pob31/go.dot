@@ -2204,6 +2204,16 @@ a list holding cues asked about first, one Undo bringing it back. One stage; for
 refused by the engine as well as greyed, the tests §85 lists pass in C and fr_FR, the strict build is
 green, and CI is green.
 
+### Nothing armed, said where it is seen (2026-10-18)
+
+The author recorded a pass with no lane armed: the waveform's line saying so in yellow, and the
+surface's REC lights blinking until armed, steady once armed - namespace draft §87, AUQ-AUR his, AUS
+mine. One stage; for 0.1.2, no tag.
+
+**Done when:** the line is yellow while nothing is armed, the REC lights blink and hold as §87 says on
+the bridge's test, the tests pass in C and fr_FR, the strict build is green, and CI is green; the D700
+itself is the author's to see.
+
 ---
 
 ## Cross-cutting, every phase

@@ -2982,13 +2982,20 @@ namespace wfg::surface
             }
 
             /*  REC, lit a moment after it set the starting level - and on a
-                flipped fader, steady while its lane is armed and blinking while
-                a pass writes it (§34, UR). */
+                flipped fader, BLINKING WHILE ITS LANE WAITS TO BE ARMED, steady
+                once it is, through a pass that writes it too (the author,
+                2026-10-18, who recorded a pass with nothing armed: "the Rec
+                switches on the controller can flash when ready, steady on when
+                armed while the automation recording is on"; namespace draft
+                §87, it was §34 UR's steady-when-armed, blinking-while-written).
+                A send switched off stays dark: nothing there to ride. The
+                strip's screen says "lane", "rec" or "REC" (§4.8). */
             const auto onLane = isLaneRide (target);
-            const auto recLit = tick < strip.recLitUntil       ? Led::on
-                              : onLane && word == "recording" ? blinked (Led::flash, tick)
-                              : onLane && word == "rec"       ? Led::on
-                                                              : Led::off;
+            const auto armed = word == "rec" || word == "recording";
+            const auto recLit = tick < strip.recLitUntil ? Led::on
+                              : onLane && armed           ? Led::on
+                              : onLane && word == "lane"  ? blinked (Led::flash, tick)
+                                                          : Led::off;
 
             if (static_cast<int> (recLit) != strip.recLed)
             {

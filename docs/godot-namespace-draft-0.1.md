@@ -20626,7 +20626,7 @@ The implementer's, open to overruling:
   run alone, as a fade brings a mix in from silence (§26, PB). At the end a send is made, at nought,
   holding a lane that is silence outside the ride - the convention the importer writes a moving send
   in (§29). The sends made and every lane written are one step of undo.
-- **UR - The strip's REC light**: steady when armed, blinking while it writes (armed and touched in a
+- **UR - The strip's REC light** (*overruled 2026-10-18 by §87 AUR: blinking while unarmed, steady once armed*): steady when armed, blinking while it writes (armed and touched in a
   pass). The transport Rec's light shows the pass, as DI.
 - **US - A send's switch is not the ride's.** A send switched off is shown and ridden at its level,
   and its strip says `off`; what it rides is written, and not heard until the send is switched on.
@@ -32041,3 +32041,25 @@ Owed: the author's reading of the words (*too many slices*, *no route*, *not loa
 Not built: a movie's slices counted through its locked sound for AUN (its row says *too many slices* at
 standby, by AUM); a "not applied yet" mark for `@tracks` and `@channelsPerTrack`, which the client cannot
 compare with the graph's because neither built value is published.
+
+## 87. Nothing armed, said where it is seen
+
+The author on 2026-10-18: *"Yesterday evening I tested the automation recording and forgot to arm the
+tracks. The text saying the tracks to be automated should be armed using Rec on the surface should be
+in yellow to make it jump out. And for users not reading this, the Rec switches on the controller can
+flash when ready, steady on when armed while the automation recording is on."* Decisions from AUQ.
+
+- **AUQ** (the author's) The waveform editor's lane line, while the faders show the cue and no lane is
+  armed (*"the faders show this cue - a fader's REC arms its lane, then Record"*, and during a pass
+  *"playing back - a fader's REC joins the pass"*), is drawn in GO's yellow. The words already said it;
+  the colour makes them seen (PRD §4.8). With a lane armed the line is as before.
+- **AUR** (the author's; overrules §34 UR) On a flipped fader, the surface's REC light **blinks while
+  its lane waits to be armed** and is **steady once armed**, through a pass that writes it too: a
+  blink asks for a hand. The strip's screen still says *lane*, *rec* or *REC*, so the pass's writing is
+  told in words rather than a blink.
+- **AUS** (mine, proposed) A send switched off (*off*) keeps its REC dark: nothing there to ride. The
+  on-screen surface panel's REC pads are unchanged - they say *REC* in words and colour already, and a
+  blink there would need a timer the panel has not had.
+
+Tests: `SurfaceBridgeTests` - flipped and unarmed, REC both lit and dark across 40 ticks; armed, steady
+and never dark; a pass writing it, still steady.

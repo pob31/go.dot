@@ -1748,7 +1748,13 @@ namespace wfg::client::ui
             for (const auto& name : laneRecord.armedNames())
                 armed += (armed.isEmpty() ? "" : ", ") + juce::String::fromUTF8 (name.c_str());
 
-            g.setColour (Look::colour (theme, laneRecord.recording ? "failed" : "ink-dim"));
+            /*  NOTHING ARMED IS SAID IN GO'S YELLOW, before a pass or during
+                one (the author, 2026-10-18, who recorded with nothing armed:
+                "should be in yellow to make it jump out"; namespace draft §87):
+                the words say it, the colour makes them seen. */
+            g.setColour (Look::colour (theme, armed.isEmpty()          ? "go"
+                                              : laneRecord.recording ? "failed"
+                                                                     : "ink-dim"));
             g.drawText (laneRecord.recording
                           ? (armed.isEmpty() ? juce::String ("playing back - a fader's REC joins the pass")
                                              : "recording " + armed + ", each from its first touch - a fader's"
