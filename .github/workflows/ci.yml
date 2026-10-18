@@ -558,10 +558,11 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # The fuzz targets (tests/fuzz, docs/fuzzing.md): the byte-reading modules
-  # (Bplist, OscCodec) under ASan + UBSan, fed valid seeds and 20000
-  # deterministic mutations each. No submodules and no JUCE - the targets
-  # compile their own std-only sources - so this job takes seconds and needs
-  # no `pins` gate. A red run left `crash-input` in the build tree; reproduce
+  # (Bplist, OscCodec, and the QLab and Ableton readers and walkers) under
+  # ASan + UBSan, fed valid seeds and 20000 deterministic mutations each.
+  # The targets compile their own sources, not the product: the only submodule
+  # is JUCE, shallow, for the one juce_core translation unit the readers need
+  # (the QLab and ALS targets are skipped without it). No `pins` gate. A red run left `crash-input` in the build tree; reproduce
   # it with `fuzz_<target> crash-input` and add the case to the module's tests.
   # ---------------------------------------------------------------------------
   fuzz:
@@ -569,6 +570,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+
+      - name: JUCE, shallow, for juce_core
+        run: git submodule update --init --depth 1 ThirdParty/JUCE
 
       - name: Configure
         run: cmake -S tests/fuzz -B build/fuzz -DCMAKE_BUILD_TYPE=Debug

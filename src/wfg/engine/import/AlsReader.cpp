@@ -21,9 +21,11 @@
 #include <juce_core/juce_core.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstddef>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -94,7 +96,15 @@ namespace wfg::import::als
 
         int integer (const juce::XmlElement* from, std::string_view path, int fallback = 0)
         {
-            return static_cast<int> (std::lround (number (from, path, static_cast<double> (fallback))));
+            /*  SATURATED, NOT WRAPPED: a value that is not a number reads as the
+                fallback, and one past an int's range as the end of it, so the
+                arithmetic on what is read cannot overflow. */
+            const auto value = number (from, path, static_cast<double> (fallback));
+
+            if (std::isnan (value))
+                return fallback;
+
+            return static_cast<int> (std::clamp (std::round (value), -2147483520.0, 2147483520.0));
         }
 
         std::int64_t whole (const juce::XmlElement* from, std::string_view path)
@@ -307,7 +317,7 @@ namespace wfg::import::als
             const auto channel = integer (keyMidi, "Channel", -1);
             const auto controller = integer (keyMidi, "NoteOrController", -1);
 
-            if (channel < 0 || controller < 0)
+            if (channel < 0 || channel > 15 || controller < 0)   // Live counts channels 0 to 15
                 return std::nullopt;
 
             Mapping out;
@@ -714,7 +724,7 @@ namespace wfg::import::als
                 const auto channel = integer (key, "Channel", -1);
                 const auto controller = integer (key, "NoteOrController", -1);
 
-                if (channel < 0 || controller < 0)
+                if (channel < 0 || channel > 15 || controller < 0)   // Live counts channels 0 to 15
                     return std::nullopt;
 
                 Mapping out;
@@ -801,6 +811,31 @@ namespace wfg::import::als
     ReadResult readSetXml (const std::string& xml)
     {
         ReadResult out;
+
+        /*  NOT HANDED TO JUCE UNLESS IT ENDS WHERE XML ENDS. JUCE's parser, on an
+            `&#x` entity that meets the end of the text, steps over the end and
+            reads on into whatever follows the buffer (found by tests/fuzz): a
+            set cut short in the middle of one is read past its end. A document
+            ends with its root's closing tag, so one that does not - after a
+            NUL, which JUCE takes for the end, and any trailing white space - is
+            refused as the cut-short file it is. */
+        if (xml.size() > static_cast<std::size_t> (std::numeric_limits<int>::max()))
+        {
+            out.error = "the set is too large to read";
+            return out;
+        }
+
+        auto end = xml.find ('\0');
+        end = end == std::string::npos ? xml.size() : end;
+
+        while (end > 0 && std::isspace (static_cast<unsigned char> (xml[end - 1])))
+            --end;
+
+        if (end == 0 || xml[end - 1] != '>')
+        {
+            out.error = "the set is not XML: it ends before its last tag";
+            return out;
+        }
 
         const auto root = juce::XmlDocument::parse (juce::String::fromUTF8 (xml.data(), static_cast<int> (xml.size())));
 

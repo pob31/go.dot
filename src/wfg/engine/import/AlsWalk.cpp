@@ -690,10 +690,20 @@ namespace wfg::import::als
 
                 if (grid)
                 {
-                    const auto step = laws.sampleSeconds * beatsPerRealSecond;
+                    /*  BOUNDED: a loop end of a million years, or a step of nothing, is a
+                        file that lies, and a grid with no end is an import that never
+                        returns. At most `maxGrid` points, the step widened to fit; none
+                        where the span or the step is not a number. */
+                    constexpr double maxGrid = 100000.0;
+                    auto step = laws.sampleSeconds * beatsPerRealSecond;
 
-                    for (auto at = from + step; at < to; at += step)
-                        beats.push_back (at);
+                    if (std::isfinite (from) && std::isfinite (to) && std::isfinite (step) && step > 0.0)
+                    {
+                        step = std::max (step, (to - from) / maxGrid);
+
+                        for (auto at = from + step; at < to; at += step)
+                            beats.push_back (at);
+                    }
                 }
 
                 std::sort (beats.begin(), beats.end());
@@ -1600,9 +1610,14 @@ namespace wfg::import::als
                         for (const auto& sound : step.sounds)
                             if (sound.trackId == target.trackId)
                             {
-                                const auto& clip = *mapped->slots[static_cast<std::size_t> (sound.scene)].clip;
+                                /*  TWO TRACKS CAN CARRY ONE ID in a set that was damaged or edited by
+                                    hand, and `mapped` is the first of them: its slot for this scene may
+                                    be absent or empty. No clip found is no envelope found. */
+                                const auto at = static_cast<std::size_t> (sound.scene);
+                                const auto* clip = at < mapped->slots.size() && mapped->slots[at].clip.has_value()
+                                                     ? &*mapped->slots[at].clip : nullptr;
 
-                                if (envelopeOn (clip, target.trackId, target.what, target.sendIndex) == nullptr)
+                                if (clip == nullptr || envelopeOn (*clip, target.trackId, target.what, target.sendIndex) == nullptr)
                                     covered = false;
                             }
 

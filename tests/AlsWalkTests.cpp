@@ -572,3 +572,44 @@ TEST_CASE ("walk: the author's own sets, GO by GO, when WFG_ALS_CORPUS names a s
         MESSAGE (std::string (note.kind == Note::Kind::info ? "info " : note.kind == Note::Kind::approximated ? "approx " : "dropped ")
                  << note.scene << " " << note.track << ": " << note.text);
 }
+
+TEST_CASE ("walk: a loop that ends at the end of time still returns, and a return with a track's Id is walked (found by tests/fuzz)")
+{
+    //  A loop end of 1e308 beats made the curve's sample grid run until memory
+    //  did; the grid is bounded now. The session fixture with that one number
+    //  changed is the input the fuzzer found.
+    auto text = juce::File { juce::String (std::string (WFG_TEST_FIXTURES_DIR)) }
+                    .getChildFile ("als").getChildFile ("session.als.xml").loadFileAsString().toStdString();
+    const std::string loopEnd = "<LoopEnd Value=\"16\" />";
+    const auto at = text.find (loopEnd);
+    REQUIRE (at != std::string::npos);
+    text.replace (at, loopEnd.size(), "<LoopEnd Value=\"1e308\" />");
+
+    const auto read = readSetXml (text);
+    REQUIRE (read.set.has_value());
+    (void) walk (*read.set);
+
+    //  A return that carries a track's Id, as a set damaged or edited by hand
+    //  can: the hand's fader finds the return, which has no slot for the
+    //  scene. That is no envelope, said in a note, not a read past its slots.
+    auto set = setOf (1);
+    auto played = trackOf ("1", "played", 1, 2);
+    played.slots[0].clip = clipOf ("rain", 0.0, 8.0);
+    set.tracks = { played };
+    set.returns[0].id = "1";
+
+    Mapping fader;
+    fader.channel = 7;
+    fader.number = 120;
+    fader.target.trackId = "1";
+    fader.target.what = Parameter::volume;
+    set.mappings = { fader };
+
+    const auto walked = walk (set);
+
+    const auto said = std::any_of (walked.notes.begin(), walked.notes.end(), [] (const Note& note)
+    {
+        return note.kind == Note::Kind::approximated && note.text.find ("no envelope on it") != std::string::npos;
+    });
+    CHECK (said);
+}

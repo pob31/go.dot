@@ -22,8 +22,9 @@
         <target> --write-seeds DIR     write seeds() out as a starting corpus
 
     Mutations are bit flips, byte sets, inserts, deletes, truncations,
-    splices and block copies - the kinds of damage a truncated or corrupt
-    file or datagram actually has. The PRNG is fixed, so a failure reproduces
+    splices, block copies and number swaps (a run of digits in a text format
+    replaced by an extreme or hostile one) - the kinds of damage a truncated
+    or corrupt file or datagram actually has. The PRNG is fixed, so a failure reproduces
     from its seed number; the failing input is written next to the working
     directory as `crash-input` before the target runs, so a trap leaves it behind.
 */
@@ -36,6 +37,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iterator>
+#include <vector>
 #include <string>
 
 namespace
@@ -63,7 +65,7 @@ namespace
         const auto edits = 1 + r.below (4);
         for (std::size_t e = 0; e < edits; ++e)
         {
-            switch (r.below (8))
+            switch (r.below (9))
             {
                 case 0: if (! b.empty()) b[r.below (b.size())] ^= static_cast<std::uint8_t> (1u << r.below (8)); break;
                 case 1: if (! b.empty()) b[r.below (b.size())] = static_cast<std::uint8_t> (r.next()); break;
@@ -89,6 +91,27 @@ namespace
                         std::copy_n (b.begin() + static_cast<std::ptrdiff_t> (from), len, b.begin() + static_cast<std::ptrdiff_t> (to));
                     }
                     break;
+                case 7:   // a run of digits replaced: the numbers a text format trusts
+                {
+                    static constexpr const char* hostile[] { "0", "-1", "2147483648", "-2147483649", "4294967296",
+                                                             "9223372036854775808", "1e308", "-1e308", "1e-320",
+                                                             "nan", "inf", "99999999999999999999", "0.0000001" };
+                    std::vector<std::size_t> digits;
+                    for (std::size_t i = 0; i < b.size(); ++i)
+                        if (b[i] >= '0' && b[i] <= '9' && (i == 0 || b[i - 1] < '0' || b[i - 1] > '9'))
+                            digits.push_back (i);
+                    if (! digits.empty())
+                    {
+                        const auto at = digits[r.below (digits.size())];
+                        auto end = at;
+                        while (end < b.size() && ((b[end] >= '0' && b[end] <= '9') || b[end] == '.'))
+                            ++end;
+                        const std::string with = hostile[r.below (std::size (hostile))];
+                        b.erase (b.begin() + static_cast<std::ptrdiff_t> (at), b.begin() + static_cast<std::ptrdiff_t> (end));
+                        b.insert (b.begin() + static_cast<std::ptrdiff_t> (at), with.begin(), with.end());
+                    }
+                    break;
+                }
                 default:  // a splice with another seed
                     if (! pool.empty())
                     {

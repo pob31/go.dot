@@ -535,3 +535,36 @@ TEST_CASE ("als: a third-party plugin is read with what names it and the state L
     //  Live's own Reverb has none.
     CHECK_FALSE (one.devices[4].plugin.has_value());
 }
+
+TEST_CASE ("als: a set cut short, or a control with a channel no desk has, is refused or left out (found by tests/fuzz)")
+{
+    //  JUCE's parser reads past the end of a text that stops inside an `&#x`
+    //  entity; the reader does not hand it one.
+    for (const char* cut : { "<Ableton Creator=\"x\"><LiveSet><Annotation Value=\"a&#xA", "<Ableton Creator=\"x\"><LiveSet>", "" })
+    {
+        const auto result = readSetXml (cut);
+        INFO (cut);
+        CHECK_FALSE (result.set.has_value());
+        CHECK_FALSE (result.error.empty());
+    }
+
+    //  Trailing white space after the last tag is not a cut.
+    CHECK (readSetXml ("<Ableton Creator=\"Ableton Live 12.0\"/>\n\n").set.has_value());
+
+    //  A channel past an int's range was added to, and wrapped.
+    for (const char* channel : { "2147483647", "1e308", "16", "-1" })
+    {
+        const auto result = readSetXml (std::string ("<Ableton Creator=\"x\"><LiveSet><KeyMidiSceneUp>"
+                                                     "<IsNote Value=\"false\"/><Channel Value=\"") + channel
+                                        + "\"/><NoteOrController Value=\"1\"/></KeyMidiSceneUp></LiveSet></Ableton>");
+        INFO (channel);
+        REQUIRE (result.set.has_value());
+        CHECK_FALSE (result.set->sceneUp.has_value());
+    }
+
+    const auto last = readSetXml ("<Ableton Creator=\"x\"><LiveSet><KeyMidiSceneUp><IsNote Value=\"false\"/>"
+                                  "<Channel Value=\"15\"/><NoteOrController Value=\"1\"/></KeyMidiSceneUp></LiveSet></Ableton>");
+    REQUIRE (last.set.has_value());
+    REQUIRE (last.set->sceneUp.has_value());
+    CHECK (last.set->sceneUp->channel == 16);
+}
