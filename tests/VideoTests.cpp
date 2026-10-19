@@ -1367,6 +1367,64 @@ TEST_CASE ("video: a fade cue moves a picture's opacity, scale, offset and turn,
     CHECK (rig.runs.find (picture)->isFinished());
 }
 
+TEST_CASE ("video: Doh! puts back what a GO's fade moved on a picture, and leaves what a hand moved since (namespace draft §94)")
+{
+    VideoRig rig;
+
+    //  After the wash in the list: the GO after the wash's moves it.
+    REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000001"), osc::Value::int32 (1),
+                                                osc::Value::string ("fade"), osc::Value::string ("Drift"),
+                                                osc::Value::string ("VD000050"),
+                                                osc::Value::string ("target"), osc::Value::string ("VD000002"),
+                                                osc::Value::string ("duration"), osc::Value::string ("1"),
+                                                osc::Value::string ("video"),
+                                                osc::Value::string ("offsetX:10 opacity:50 scale:150") }).applied >= 1);
+
+    REQUIRE (rig.submitAndTick ("list.focus", { osc::Value::string ("VD000001") }).applied >= 1);
+    rig.submitAndTick ("go");
+    rig.ticks (80);
+
+    const auto picture = rig.runOf ("VD000002")->id;
+
+    rig.submitAndTick ("go");
+    REQUIRE (rig.runOf ("VD000050") != nullptr);
+    rig.ticks (70);
+
+    const auto& scales = rig.sink.geometry[picture][video::Property::scale];
+    const auto& offsets = rig.sink.geometry[picture][video::Property::offsetX];
+    const auto& opacity = rig.sink.points[picture];
+    REQUIRE_FALSE (scales.empty());
+    REQUIRE (scales.back().value == doctest::Approx (150.0));
+    REQUIRE (opacity.back().value == doctest::Approx (0.5));
+
+    //  A hand on the offset since the GO: a step to 25.
+    rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/VD000002/offsetX"), osc::Value::float64 (25.0) });
+    rig.ticks (2);
+    REQUIRE (offsets.back().value == doctest::Approx (25.0));
+
+    /*  DOH! brings the scale and the opacity back over the panic fade, from
+        where they are, and leaves the offset where the hand put it. The
+        picture stays up: the GO did not start it. */
+    const auto before = scales.size();
+    rig.submitAndTick ("go.doh");
+    rig.ticks (70);
+
+    CHECK (scales.back().value == doctest::Approx (100.0));
+    CHECK (opacity.back().value == doctest::Approx (1.0));
+    CHECK (offsets.back().value == doctest::Approx (25.0));
+    CHECK_FALSE (rig.runs.find (picture)->isFinished());
+    CHECK (rig.sink.removed.empty());
+
+    //  Along the way, not in one step: Doh!'s points.
+    auto between = 0;
+
+    for (auto n = before; n < scales.size(); ++n)
+        if (scales[n].value > 100.5 && scales[n].value < 149.5)
+            ++between;
+
+    CHECK (between > 40);
+}
+
 TEST_CASE ("video: a movie with no Range plays once from its start offset at its speed, and its run ends there")
 {
     VideoRig rig;

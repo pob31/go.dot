@@ -96,6 +96,22 @@ namespace wfg::cue
         else                                             { lowest = 20.0;   highest = 20000.0; }
     }
 
+    bool isMovableVideoRow (const std::string& row)
+    {
+        return row == "opacity" || row == "scale" || row == "offsetX" || row == "offsetY"
+            || row == "rotation" || row == "rate" || row == "blur";
+    }
+
+    void videoRowRange (const std::string& row, double& lowest, double& highest)
+    {
+        if (row == "opacity")                              { lowest = 0.0;     highest = 100.0; }
+        else if (row == "scale")                           { lowest = 0.0;     highest = 1000.0; }
+        else if (row == "offsetX" || row == "offsetY")     { lowest = -1000.0; highest = 1000.0; }
+        else if (row == "rotation")                        { lowest = -3600.0; highest = 3600.0; }
+        else if (row == "rate")                            { lowest = -20.0;   highest = 20.0; }
+        else                                               { lowest = 0.0;     highest = 500.0; }
+    }
+
     MoveDomain eqRowDomain (const std::string& row)
     {
         std::string suffix;
@@ -143,13 +159,13 @@ namespace wfg::cue
         auto rest = entry.substr (slash + 1);
         index = -1;
 
-        if (kind == "send" || kind == "eq")
+        if (kind == "send" || kind == "eq" || kind == "video")
         {
             if (rest.find ('/') != std::string::npos || rest.find (':') != std::string::npos)
                 return false;
 
             name = rest;
-            return kind == "send" || isMovableEqRow (rest);
+            return kind == "send" || (kind == "eq" ? isMovableEqRow (rest) : isMovableVideoRow (rest));
         }
 
         if (kind != "fx")
@@ -179,6 +195,7 @@ namespace wfg::cue
         if (kind == "send") return "sends";
         if (kind == "eq")   return "eq";
         if (kind == "fx")   return "fx";
+        if (kind == "video") return "video";
         return "";
     }
 

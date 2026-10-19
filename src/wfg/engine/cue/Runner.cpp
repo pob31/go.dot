@@ -12338,6 +12338,49 @@ namespace wfg::cue
     }
 
     //------------------------------------------------------------------------------
+    namespace
+    {
+        /*  THE `video` PAIRS A FADE MOVES ON THE PICTURE SIDE, by name (§36,
+            VS) - a movie's `rate` is the Runner's, and not among them. */
+        std::optional<video::Property> pictureProperty (const std::string& name)
+        {
+            if (name == "opacity")  return video::Property::opacity;
+            if (name == "scale")    return video::Property::scale;
+            if (name == "offsetX")  return video::Property::offsetX;
+            if (name == "offsetY")  return video::Property::offsetY;
+            if (name == "rotation") return video::Property::rotation;
+            if (name == "blur")     return video::Property::blur;
+            return std::nullopt;
+        }
+
+        std::string pictureName (video::Property property)
+        {
+            switch (property)
+            {
+                case video::Property::opacity:  return "opacity";
+                case video::Property::scale:    return "scale";
+                case video::Property::offsetX:  return "offsetX";
+                case video::Property::offsetY:  return "offsetY";
+                case video::Property::rotation: return "rotation";
+                case video::Property::blur:     return "blur";
+                case video::Property::time:
+                case video::Property::dca:
+                    break;
+            }
+
+            return {};
+        }
+
+        //  The inspector's words for each (§36.5).
+        std::string pictureWords (const std::string& name)
+        {
+            if (name == "offsetX") return "offset right";
+            if (name == "offsetY") return "offset up";
+            if (name == "rate")    return "speed";
+            return name;
+        }
+    }
+
     void Runner::putBackLevels (PutBack& back, const GoChanges& changes)
     {
         /*  b. LEVELS, SPEEDS AND DCA TRIMS (GS): one job per key, from where it
@@ -12366,6 +12409,12 @@ namespace wfg::cue
 
             if (touch.dca.empty() && touch.aux.empty() && held == nullptr)
                 continue;
+
+            if (! touch.picture.empty())
+            {
+                putBackPicture (back, touch);
+                continue;
+            }
 
             const auto writtenBy = [this, &back] (const FadeJob& job, bool ours)
             {
@@ -12468,6 +12517,76 @@ namespace wfg::cue
 
             running.push_back (job);
         }
+    }
+
+    void Runner::putBackPicture (PutBack& back, const LevelTouch& touch)
+    {
+        /*  A PICTURE'S VALUE (namespace draft §94): from where it is now back
+            to where it stood before the GO, over the panic fade, by a fade of
+            Doh!'s own on the video run - unless another fade has it, or a hand
+            has moved it off the GO's value since, as for a sound's (L22). */
+        const auto job = std::find_if (showing.begin(), showing.end(),
+                                       [&touch] (const VideoJob& held) { return held.self == touch.heldRun; });
+
+        if (job == showing.end() || job->removed || ! job->placed)
+            return;
+
+        const auto rate = touch.picture == "rate";
+        const auto property = pictureProperty (touch.picture);
+
+        if (! rate && ! property.has_value())
+            return;
+
+        const auto now = rate ? job->rate : videoValueOf (*job, *property, videoSampleAhead());
+
+        const auto moves = [&] (const VideoFade& fade)
+        {
+            if (fade.done || fade.target != touch.heldRun)
+                return false;
+
+            if (rate)
+                return fade.movesRate;
+
+            return std::any_of (fade.to.begin(), fade.to.end(),
+                                [&property] (const auto& moved) { return moved.first == *property; });
+        };
+
+        auto goHolds = false, otherHolds = false;
+
+        for (const auto& fade : videoFades)
+            if (moves (fade))
+                (! fade.putBack && goOfRun (fade.self) == back.serial ? goHolds : otherHolds) = true;
+
+        const auto tolerance = std::max (1.0e-3, std::abs (touch.goTo) * 1.0e-3);
+
+        if (otherHolds || (! goHolds && std::abs (now - touch.goTo) > tolerance))
+        {
+            const auto* held = runs.find (touch.heldRun);
+
+            back.items.push_back ((held != nullptr ? cueLabel (held->cue) : touch.heldRun) + ": its "
+                                  + pictureWords (touch.picture) + " moved by another hand since the GO - left where it is");
+            return;
+        }
+
+        /*  The GO's own fade ends with its run in g, and stops placing points
+            before this one begins - in the order they are kept. */
+        VideoFade fade;
+        fade.target = touch.heldRun;
+        fade.putBack = true;
+        fade.startTick = back.tick;
+        fade.ticks = back.fadeTicks;
+
+        if (rate)
+        {
+            fade.movesRate = true;
+            fade.rateTo = touch.from;
+        }
+        else
+        {
+            fade.to.push_back ({ *property, touch.from });
+        }
+
+        videoFades.push_back (std::move (fade));
     }
 
     void Runner::putBackStops (Engine& engine, PutBack& back, const GoChanges& changes)
@@ -20501,6 +20620,34 @@ namespace wfg::cue
         }
 
         job.target = live->id;
+
+        /*  A PICTURE THE GO MOVED (Doh!, namespace draft §94), noted as a
+            sound's moved value is (§26, PE): on a run the GO did not start,
+            each pair where it stands now, in the picture side's units. The
+            fade's own `from` is taken a tick later, when it begins; nothing
+            moves the value in between. */
+        if (ofTheOpenGo (runId) && goOfRun (live->id) != goRecord.serial)
+            if (const auto* shown = showingJobOf (live->id); shown != nullptr && shown->placed && ! shown->removed)
+            {
+                const auto at = videoSampleAhead();
+
+                const auto note = [this, &live, tick] (const std::string& name, double from, double goTo)
+                {
+                    const auto key = "video:" + live->id + ":" + name;
+                    noteLevelTouch (key, live->id, {}, false, from, goTo, tick, std::nullopt);
+
+                    for (auto& touch : goChanges.levels)
+                        if (touch.key == key)
+                            touch.picture = name;
+                };
+
+                for (const auto& [property, value] : job.to)
+                    note (pictureName (property), videoValueOf (*shown, property, at), value);
+
+                if (job.movesRate)
+                    note ("rate", shown->rate, job.rateTo);
+            }
+
         videoFades.push_back (std::move (job));
         return true;
     }
@@ -20879,8 +21026,8 @@ namespace wfg::cue
             const auto* self = runs.find (fade.self);
 
             /*  THE FADE'S OWN RUN STOPPED - Esc, a kill, Doh! - and the values
-                stay where the fade had taken them. */
-            if (self == nullptr || self->isFinished())
+                stay where the fade had taken them. Doh!'s own has no run. */
+            if (! fade.putBack && (self == nullptr || self->isFinished()))
             {
                 fade.done = true;
                 continue;
@@ -20892,7 +21039,9 @@ namespace wfg::cue
 
             if (job == showing.end() || job->removed || target == nullptr || target->isFinished())
             {
-                engine.submit (origin::engine, "run.ended", one (fade.self));
+                if (! fade.putBack)
+                    engine.submit (origin::engine, "run.ended", one (fade.self));
+
                 fade.done = true;
                 continue;
             }
@@ -20938,7 +21087,9 @@ namespace wfg::cue
                 target->askStop (0);
             }
 
-            engine.submit (origin::engine, "run.ended", one (fade.self));
+            if (! fade.putBack)
+                engine.submit (origin::engine, "run.ended", one (fade.self));
+
             fade.done = true;
         }
 

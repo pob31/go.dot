@@ -3591,6 +3591,11 @@ namespace wfg::cue
             bool stopWhenDone = false;
             bool begun = false;
             bool done = false;
+
+            /*  DOH!'S, putting back what a GO's fade moved (namespace draft
+                §94): it has no run of its own, so it neither waits on one nor
+                reports one ended. */
+            bool putBack = false;
         };
 
         std::vector<VideoFade> videoFades;
@@ -4445,6 +4450,12 @@ namespace wfg::cue
             /*  Or an aux's (namespace draft §93): its identifier, `move` the
                 entry - `level` among them. */
             std::string aux;
+
+            /*  Or a picture's (namespace draft §94): the `video` pair a fade on
+                a video cue moved - `opacity`, `scale`, `offsetX`, `offsetY`,
+                `rotation`, `blur` or `rate` - in the picture side's own units,
+                the opacity 0..1. `heldRun` is the video run. */
+            std::string picture;
             double from = 0.0, goTo = 0.0;
             std::int64_t atTick = 0;
             std::optional<FadeJob> superseded;
@@ -4618,6 +4629,10 @@ namespace wfg::cue
         };
 
         void putBackLevels (PutBack& back, const GoChanges& changes);
+
+        /*  One picture's value a GO's fade moved, put back by a fade of Doh!'s
+            own - or left, and said, when another hand has it (§94). */
+        void putBackPicture (PutBack& back, const LevelTouch& touch);
         void putBackStops (Engine& engine, PutBack& back, const GoChanges& changes);
         void putBackFlagsBanksTakes (Engine& engine, PutBack& back, const GoChanges& changes);
 

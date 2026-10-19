@@ -72,12 +72,19 @@ namespace wfg::cue
     std::vector<FadeMove> readFadeMoves (const std::string& sends, const std::string& eq,
                                          const std::string& fx);
 
-    /*  An entry split into what it names: `kind` is send, eq or fx; `name`
-        the bus, the row or the plugin entry; `index` the parameter, for fx.
-        False for anything else. */
+    /*  THE PICTURE'S ROWS A FADE MOVES (namespace draft §36, VS; §94): the
+        `video` pairs - opacity, scale, offsetX, offsetY, rotation, a movie's
+        rate and a blur cue's blur - and the range each takes, in the row's
+        own units (godot-parameters.csv, the video rows). */
+    bool isMovableVideoRow (const std::string& row);
+    void videoRowRange (const std::string& row, double& lowest, double& highest);
+
+    /*  An entry split into what it names: `kind` is send, eq, fx or video;
+        `name` the bus, the row or the plugin entry; `index` the parameter,
+        for fx. False for anything else. */
     bool splitMoveEntry (const std::string& entry, std::string& kind, std::string& name, int& index);
 
-    /** The fade attribute an entry kind lives in: sends, eq, fx. */
+    /** The fade attribute an entry kind lives in: sends, eq, fx, video. */
     const char* moveListAttribute (const std::string& kind);
 
     /** The value along a move: `progress` 0..1, shaped by `sCurve` when asked. */

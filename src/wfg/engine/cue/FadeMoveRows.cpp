@@ -75,12 +75,15 @@ namespace wfg::cue
             if (! splitMoveEntry (target->entry, kind, name, index))
                 return Outcome::rejected (reason::badAddress);
 
-            //  What the entry names has to be this show's.
+            /*  What the entry names has to be this show's: a send's a bus, or
+                an aux (namespace draft §93) - a shared rack channel. */
             if (kind == "send")
             {
                 const auto bus = document.findById (name);
+                const auto aux = bus.isValid() && bus.hasType ("Channel")
+                                   && bus.getProperty ("access").toString() == "shared";
 
-                if (! bus.isValid() || ! bus.hasType ("Bus"))
+                if (! bus.isValid() || (! bus.hasType ("Bus") && ! aux))
                     return Outcome::rejected (reason::unknownId);
             }
             else if (kind == "fx")
@@ -124,6 +127,10 @@ namespace wfg::cue
                 else if (kind == "eq")
                 {
                     eqRowRange (name, lowest, highest);
+                }
+                else if (kind == "video")
+                {
+                    videoRowRange (name, lowest, highest);
                 }
 
                 if (*parsed < lowest || *parsed > highest)

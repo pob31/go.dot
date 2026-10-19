@@ -21222,6 +21222,47 @@ TEST_CASE ("fade moves: the door sets one entry, an empty text takes it out, and
     CHECK_FALSE (write (fade + "fx/nothing/0", "0.5")->applied);
 }
 
+TEST_CASE ("fade moves: the door sets a picture's pair and a send into an aux, and refuses a row a fade cannot move (namespace draft §94)")
+{
+    FadeRig rig;
+    auto door = cue::fadeMoveWriteFor (rig.document, nullptr);
+
+    const auto write = [&] (const std::string& address, const std::string& text)
+    {
+        return door (address, text, { osc::Value::string (address), osc::Value::string (text) });
+    };
+
+    const auto fade = "/godot/cue/" + rig.fadeId + "/moves/";
+    const auto pairs = [&] { return rig.document.getAttribute ("/godot/cue/" + rig.fadeId + "/video").value_or (""); };
+
+    //  The picture's pairs, in the rows' own units: the opacity in %.
+    REQUIRE (write (fade + "video/scale", "150")->applied);
+    REQUIRE (write (fade + "video/opacity", "0")->applied);
+    REQUIRE (write (fade + "video/rate", "0.5")->applied);
+    CHECK (pairs() == "opacity:0 rate:0.5 scale:150");
+
+    //  The tick box cleared.
+    REQUIRE (write (fade + "video/rate", "")->applied);
+    CHECK (pairs() == "opacity:0 scale:150");
+
+    //  Refused: a row a fade does not move, one out of its range.
+    CHECK_FALSE (write (fade + "video/contrast", "1")->applied);
+    CHECK_FALSE (write (fade + "video/flipH", "1")->applied);
+    CHECK_FALSE (write (fade + "video/opacity", "150")->applied);
+    CHECK_FALSE (write (fade + "video/blur", "-1")->applied);
+    CHECK (pairs() == "opacity:0 scale:150");
+
+    //  A send into an aux (namespace draft §93), and not into a channel of the rack that is not one.
+    const auto aux = rig.document.createRackChannel ("stereo", {}, "shared");
+    REQUIRE (aux.ok);
+    const auto mic = rig.document.createRackChannel ("mono", {}, "exclusive");
+    REQUIRE (mic.ok);
+
+    REQUIRE (write (fade + "send/" + aux.id, "-10")->applied);
+    CHECK (rig.document.getAttribute ("/godot/cue/" + rig.fadeId + "/sends").value_or ("") == aux.id + ":-10");
+    CHECK_FALSE (write (fade + "send/" + mic.id, "-10")->applied);
+}
+
 //==============================================================================
 //  ENABLE, DISABLE AND JUMP TO (2026-10-05, namespace draft §27)
 //==============================================================================
