@@ -686,6 +686,22 @@ namespace
             would while the patch opens, for up to ten seconds. A quick machine
             never gets that far, and the counted waits elsewhere - a run ended
             within five ticks - keep their count. */
+        /*  A PATCH'S ANSWER AT `address`, waited for as `running` waits for a
+            patch to open: the patches answer on their own thread, and a slow
+            runner's one tick comes before they have (macOS CI, 0c6e82b3, twice). */
+        bool answers (const std::string& address)
+        {
+            const auto until = std::chrono::steady_clock::now() + std::chrono::seconds (10);
+
+            while (! listener.valueAt (address).has_value() && std::chrono::steady_clock::now() < until)
+            {
+                tickOnce();
+                std::this_thread::sleep_for (std::chrono::milliseconds (1));
+            }
+
+            return listener.valueAt (address).has_value();
+        }
+
         bool running (const std::string& cueId)
         {
             const auto isRunning = [&] { const auto* run = runOf (cueId); return run != nullptr && run->processState == "running"; };
@@ -1021,7 +1037,7 @@ TEST_CASE ("process cue: a stuck patch fails its run and holds Pd, and the show 
         // A patch already running carries on.
         rig.listener.clear();
         rig.hear ("/dev/in", 0.25f);
-        rig.tickOnce();
+        REQUIRE (rig.answers ("/dev/out"));
         const auto sent = rig.listener.valueAt ("/dev/out");
         REQUIRE (sent.has_value());
         CHECK (sameNumber (*sent, 0.5));
@@ -1373,8 +1389,7 @@ TEST_CASE ("script cue: a stuck script fails its run and is freed; patches open 
     //  The patch runs on, and a patch asked for now opens.
     rig.listener.clear();
     rig.hear ("/dev/in", 0.25f);
-    rig.tickOnce();
-    REQUIRE (rig.listener.valueAt ("/dev/out").has_value());
+    REQUIRE (rig.answers ("/dev/out"));
 
     const auto later = rig.makeProcess (doubling ("3"));
     rig.fire (later);
@@ -2306,8 +2321,7 @@ TEST_CASE ("serial port: a line heard reaches the patch the next tick, and a lin
     //  Every line, not only a changed one: the same line twice is heard twice.
     rig.listener.clear();
     rig.submit ("serial.heard", { wfg::osc::Value::string ("SR000001"), wfg::osc::Value::string ("21") });
-    rig.tickOnce();
-    CHECK (rig.listener.valueAt ("/dev/out").has_value());
+    CHECK (rig.answers ("/dev/out"));
 
     //  In the log as the port said it.
     const auto records = rig.records();
