@@ -2043,7 +2043,9 @@ Left: the show half rebuilt on every tick that applies a command (§31.5).
   arrives first as what records an OSC cue's curves - the item before Phase 10,
   namespace draft §45.) (2026-10-16: the Stream Deck's keys will be a cart's
   triggers and its dials bindings, namespace draft §74, so it waits for that
-  round.)*
+  round.) (2026-10-19: built for every model, namespace draft §95 - a deck of
+  keys shows a cart and, switched on, the show's keys; the Stream Deck+'s dials
+  are the D700's pages on the aimed cue, not bindings, at the author's word.)*
 - **OSC and MIDI processing cues as persistent processes** (PRD §3.29): the
   state-machine phase §3.5 deferred, arriving as rows in the persistent section;
   a stateful process restarts at its resting state, and no fixed pool is needed
@@ -2228,6 +2230,20 @@ spatcore's receiver, a black-box driver and M82.
 `big_cue.py` receives every message in order at the device's limit, the tests §88 lists pass in C and
 fr_FR, the strict build is green, CI is green, and the author's 72 inputs reach WFS-DIY whole with the
 window answering.
+
+### The Stream Deck, every model, over HID (2026-10-19)
+
+The author, with the bench tries of the mic cues, sampling, inserts, the rack, cameras and script cues
+theirs to make: *"The HID implementation for Streamdecks is also outstanding. Then I think we can start
+working on the MCP implementation."* - namespace draft §95, AWR-AWU his (every model over HID; a deck of
+keys for carts and show control, the Stream Deck+ for the dials; the show's keys optional and off; the
+dials as the D700's pages on the aimed cue), AWV-AXD mine. Stages SD.1-SD.9: the protocol, the decks'
+thread, the layout and the bridge, the pictures, the rows and serve, the Surfaces page, a black-box driver
+and a bench case, the udev rule, the words. The MCP server (0.2.0) comes after, once the features are solid
+and the UI polished.
+
+**Done when:** the tests §95 lists pass in C and fr_FR, the strict build is green, CI is green, and the
+author's MK.2 and Stream Deck+ do on the desk what §95.5 lists.
 
 ---
 

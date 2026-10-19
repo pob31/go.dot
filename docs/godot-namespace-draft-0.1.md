@@ -32704,3 +32704,149 @@ Owed: the author's try - a fade on a movie, its Picture panel, Scale 150 % and O
 Doh!; a fade on a sound, FX, Edit... on a plugin; the head's buttons on a narrow window. The words "moves",
 "stays", "moves 2 values: ..." and the sentences on the Picture panel and the mixer are mine, for the
 author to keep or change.
+
+## 95. The Stream Deck: a deck of keys for carts and the show, the Stream Deck+ for the dials
+
+Asked by the author on 2026-10-19, after listing what is still to be tried on the bench (mic cues, live
+sampling, FX inserts, rack channels, camera cues, JS and Lua script cues - theirs to try, with nothing
+asked of me): *"The HID implementation for Streamdecks is also outstanding. Then I think we can start
+working on the MCP implementation."* The plan is `C:\Users\pierr\.claude\plans\among-the-few-things-inherited-stonebraker.md`.
+
+What was found:
+
+- **§3.16 and §16.10 had the Stream Deck as a later profile**, §74.7 as "a transport whose keys are cart
+  triggers with pictures and whose dials are relative bindings", and the surface-pages draft (§6) as "the
+  same model, other profiles".
+- **spatcore drives the Stream Deck+ only** (`controllers/streamdeck/*`, at Go.dot's pin), with JUCE
+  threads and writes on the message thread; WFS-DIY gives it fixed pages. **S21_HiJack drives every model**
+  through the Rust crate `elgato-streamdeck` 0.9.2 (MPL-2.0), with a key map the user edits on a picture
+  of any model, plugged in or not. Go.dot already builds hidapi 0.15 (`wfg_hidapi`), for its own
+  SpaceMouse reader (§45).
+
+### 95.1 Decisions
+
+The author's, asked 2026-10-19 (the options and their wording mine, AQ's rule):
+
+- **AWR** **Every model, over USB HID directly**: the Original (MK.1), the Original V2, the MK.2, the XL
+  and XL V2, the Mini and Mini MK.2, the Neo and the Stream Deck+ (the Pedal joined them, mine). Go.dot
+  owns the deck and draws every key; Elgato's own app must be closed while it does.
+- **AWS** **Two jobs, by model**: *"the cues are for most of them temporary. The Streamdeck can be an aid
+  when programming not only when performing ... a key only Streamdeck could be for carts and show control
+  when a Streamdeck+ is mostly for encoding and parameter interactions."*
+- **AWT** **The show's keys on a deck - GO, Esc, Doh! and the standby's arrows - are optional, and off by
+  default.**
+- **AWU** **The Stream Deck+'s dials are pages on the aimed cue**, the WFS-DIY way, with the D700's
+  Send, EQ, FX and Loop pages.
+
+Mine *(proposed)*, the author's to overrule:
+
+- **AWV** **A deck is a surface of the show, driven by a bridge of its own.** `<Surface
+  profile="streamDeck">`, on the Surfaces page beside the D700, its status at `/godot/surface/<id>` - but
+  `DeckBridge` drives it, not `SurfaceBridge`, against §16.10's "a new surface is a new word, not a second
+  bridge": a deck has no strips, motors, MIDI or SysEx, and its keys show pictures, which nothing in the
+  Mackie bridge carries. What the two share is the pages' laws (`SurfacePages.h`) and the aim
+  (`SurfaceTable`), so a Stream Deck+ dial turns a band as a D700 rotary does. **A debt**: the deck's page
+  composition (`DeckBridge::compose`) repeats `SurfaceBridge::composePage` for four dials; the two should
+  become one helper the next time either moves.
+- **AWW** **A deck has no strips.** `surface.create streamDeck` makes none and `strip.create` is refused on
+  one, so a deck never takes a sampler bank's strips from the faders that play it (AQT fills every
+  surface's sampler strips). A key presses a cue with `cue.press` and lets it go with `cue.release`, the
+  tablet's Cart tab's commands, so a bank's member presses its strip wherever that strip is (AQU).
+- **AWX** **A deck of keys shows one cart** (`surface/cart`, the show's first when empty): its cues from
+  the top left in the cart's order, a sampler group's members one key each (AQQ's reading). A cart longer
+  than the deck gives its last free key to turning the page ("More", with "1/3" on it); the Neo turns it
+  with its two touch keys and gives no key up. **The show's keys** stand at the end of the last row, as
+  many as the deck has room for: the standby's up and down, Doh!, Esc, GO on fifteen keys or more - GO
+  bottom right, where a right hand finds it without looking; Doh!, Esc, GO on eight; Esc and GO on a
+  Mini; Esc, GO, Doh! on the Pedal, GO under the middle foot. Esc pressed again within the double-stop
+  window is `run.killAll`, the D700 STOP's rule.
+- **AWY** **The Stream Deck+'s eight keys**: Send, EQ, FX and Loop along the top, the page up lit and a
+  second press moving to its next four controls; below, the previous and the next cue to aim at - the
+  media and mic cues of the list GO acts on, in the order it reads, groups opened, stopping at either end
+  - and the controls' arrows, which become Esc and GO when the show's keys are on (a swipe along the strip
+  still moves along). It opens on the Send page. **A dial's click** is a press and a let-go with no turn
+  between them, and does what a D700 rotary's press does on that page; turned while held, it only turns.
+  No fine step and no acceleration of Go.dot's own: the deck reports a flick as many detents at once, as
+  the D700 does, and the page's laws are sized for that. The strip shows, over each dial, what it turns,
+  its value and a bar, the page and the cue over the first.
+- **AWZ** **Which deck** is `surface/device`, its serial - the one identifier another USB port keeps - or
+  the first deck plugged in that no other surface names. What is wrong is said in one sentence: "no Stream
+  Deck is plugged in", "the Stream Deck AL12K1A00001 is not plugged in", "every Stream Deck plugged in
+  already carries another surface", "Elgato's Stream Deck app holds it: close the app to use it here",
+  "another program holds it". **Elgato's app is closed only when the operator asks** (`streamdeck.closeApp`,
+  machine-local, a no-op on a replay), as 3Dconnexion's driver is (ZF).
+- **AXA** **The look of a key** is the cue's colour darkened under white words - its number small at the
+  top, its name in the middle on up to three lines, what it is doing at the foot ("playing", "waiting",
+  "off" for a cue switched off) - and a white frame while it goes. The show's keys wear their own colours,
+  GO green, Esc red, Doh! amber, and always their word; Doh! is dim with "nothing to undo", GO says what
+  is next. Drawn by the engine (`DeckPainter`) with JUCE's software renderer, never on the tick thread.
+- **AXB** **What every key shows is published** (`surface/<id>/keys`, a line a key) and **the Surfaces
+  page draws it with the same painter** - plugged in or not: with no deck found the keys are laid out as an
+  MK.2's (S21_HiJack's offline templates' reason). A pad, GO, Esc, Doh! or an arrow pressed on that
+  picture is pressed, so a deck's layout is tried with no deck.
+- **AXC** **One thread for every deck** (`StreamDecks`), the SpaceMouse's way: it lists the decks every
+  second, opens what the show asks for and lets the rest go, reads their reports and keeps them for the
+  tick, and draws and sends what the tick asked - the newest word for a key replacing one not yet sent. A
+  deck is reset when it is opened and when it is let go of, back to Elgato's own picture (PRD §4.9).
+  hidapi is held by each reader (`HidLibrary`), so the SpaceMouse stopping no longer exits it from under
+  a deck.
+- **AXD** **The Neo's screen** says what GO does next and the cart's name and page.
+
+### 95.2 Rows and commands
+
+| Address | Type | Access | Notes |
+|---|---|---|---|
+| `surface/<id>/profile` | `s` | rw | gains `streamDeck` |
+| `surface/<id>/device` | `s` | rw | the deck's serial, or empty for the first free one (AWZ) |
+| `surface/<id>/cart` | `s` | rw | the cart a deck of keys shows; empty, the show's first (AWX) |
+| `surface/<id>/showKeys` | `T` | rw | the show's keys on the deck, `false` (AWT) |
+| `surface/<id>/brightness` | `i` | rw | 0..100, `70` |
+| `surface/<id>/model` | `s` | r | the model found: `original`, `originalV2`, `mini`, `miniMk2`, `mk2`, `xl`, `xlV2`, `neo`, `pedal`, `plus`; empty when none is |
+| `surface/<id>/keys` | `s` | r | a line a key: what it does (`cue <id>`, `go`, `esc`, `doh`, `standbyUp`, `standbyDown`, `cartPage`, `send`, `eq`, `fx`, `loop`, `aimPrevious`, `aimNext`, `controlsPrevious`, `controlsNext`, or nothing), its number, its words, what it is doing, its colour, `lit` or `dim` - tab-separated; runtime, like a page |
+| `engine/streamDecks` | `s` | r | the decks plugged in, a line each: the model's word and the serial |
+| `engine/streamDeckApp` | `T` | r | Elgato's app running while a deck the show asks for will not open |
+
+`streamdeck.closeApp` closes Elgato's app (AWZ). A deck's page - `surface/<id>/page`, `pageIndex`,
+`pageCount`, `edited` - is published as a D700's.
+
+### 95.3 As built
+
+- **The protocol**, pure (`surface/StreamDeckReport`): every model's row - keys, columns, picture size, BMP
+  or JPEG and which way up, dials, strip, touch keys, screen - by product and by word; input reports read
+  into keys in the hand's order (the Original v1 numbers a row from the right), dial turns and presses,
+  taps, long taps and swipes; pictures cut into each family's reports; brightness, reset, touch-key
+  colour and the firmware's version as feature reports; a picture turned and mirrored, and a 24-bit
+  bitmap for the first decks. Read off the crate and checked against spatcore's Stream Deck+ driver; no
+  code taken from either.
+- **The decks' thread** (`surface/StreamDeck`, `DeckHost` for the bridge, `StreamDecks` the real one);
+  **the layout** (`surface/DeckLayout`), **the bridge** (`surface/DeckBridge`), **the pictures**
+  (`surface/DeckPicture`, `surface/DeckPainter`). Serve declares the deck surfaces to `DeckBridge`, ticks
+  it beside `SurfaceBridge` - its hands before the Runner's hook, its pictures after the publish - and
+  publishes what it found.
+- **The Surfaces page**: Stream Deck in the profiles; a deck picked shows, where its strips would be, its
+  Deck and Cart menus, Show keys, Brightness, Close Elgato's app... while the app holds the decks, and the
+  picture of its keys (`DeckPanel`).
+- **Linux**: the package's udev rule gives an Elgato deck (vendor `0fd9`) to the person at the seat.
+
+### 95.4 Stages
+
+| stage | what | commit |
+|---|---|---|
+| SD.1 | the protocol, every model, pure (StreamDeckTests) | 1af557e5 |
+| SD.2, SD.4, SD.5 | the decks' thread, the layout, the bridge, the pictures (DeckBridgeTests, with a deck of the test's making) | 25529ade |
+| SD.3, SD.7, SD.8 | the rows, serve, the Surfaces page; `blackbox/streamdeck.py`; the bench case; the udev rule | 96059ef8 |
+| SD.9 | these words, the PRD, the devplan, the tester guides | |
+
+### 95.5 Owed
+
+- **The author's bench**, with the MK.2 and the Stream Deck+: `WFG_STREAMDECK_REAL=1 wfg_tests
+  --test-case="stream deck: a deck on this machine*"` first (every key drawn with its number, the hands
+  listed), then the window - a show with a cart, the deck plugged in, pads pressed and lit, GO, Esc and
+  Esc Esc from the deck, the deck unplugged while a hold pad is down (it lets go), the Stream Deck+'s
+  dials on a picked cue's EQ and sends, Elgato's app running (the sentence and the button). The XL, the
+  Mini, the Neo, the Pedal and the Original on whatever units can be found: their layouts are the
+  crate's facts, not yet seen on a deck.
+- **M84**, a press to its command and a picture to its write, taken on a real deck.
+- The words on the keys and the page - "More", "Prev cue", "Next cue", "nothing next", "twice: all",
+  "nothing to undo", "Keys of", "First free deck", "The show's first cart", the status sentences - are
+  mine, for the author to keep or change; so is everything marked *(proposed)* above.

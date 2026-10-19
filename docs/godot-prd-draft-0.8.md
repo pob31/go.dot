@@ -1461,6 +1461,18 @@ state-display surface**, not a binding surface. Same abstraction, different role
 the layout model knows the difference. Natural fit: one running item per tile,
 kill on press.
 
+*As built (2026-10-19, namespace draft §95):* every model, over HID, Go.dot drawing
+every key and Elgato's app closed. The author split the role by model: **a deck of
+keys is for carts and show control** - one cart's cues from the top left, a sampler
+group's members a key each, pressed as the tablet's Cart tab presses them, and, when
+switched on (off by default), GO, Esc, Doh! and the standby's arrows at the end of
+the last row - and **the Stream Deck+ is for the dials**, the D700's Send, EQ, FX and
+Loop pages on the aimed cue, its strip showing what each dial turns. So the
+Stream Deck+ is the parameter surface this paragraph says a Stream Deck is not. A
+running item per tile, killed on press, is not built: a cart's pad shows whether its
+cue is going, and pressed again it does what pressing that cue again does - a sampler
+member what its `secondPress` says, any other cue fired once more.
+
 ### 3.17 Tablet and multitouch
 
 **Desktop UI layout is deliberately undesigned at this stage.** Tabs, collapsible
