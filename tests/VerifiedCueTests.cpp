@@ -935,20 +935,29 @@ TEST_CASE ("prepare: the pointer leaving puts the desk back, as an ordinary writ
     alone: it is not running, and the pointer has not moved. */
 namespace
 {
-    /*  Ticks until the desk holds `wanted`, or the patience runs out. The
-        pre-send's read crosses a socket, so how long it takes is the operating
-        system's business. */
-    void tickUntilDeskHolds (VerifiedRig& rig, float wanted)
+    /*  Ticks until the desk holds `wanted`, or the patience runs out - and
+        says which. The pre-send's read crosses a socket, so how long it takes
+        is the operating system's business: the patience is TIME, twenty
+        seconds, and not a count of ticks. Six hundred ticks were a second and
+        a bit, which a slow sanitizer runner's read across the socket could
+        outlast, and a case went on to press Doh! before the next scene had
+        pre-sent at all (VerifiedCueTests.cpp's "changed since the GO", red on
+        CI again and again from 2026-10-14). A wait that is met returns at once. */
+    bool tickUntilDeskHolds (VerifiedRig& rig, float wanted)
     {
-        for (int n = 0; n < 600; ++n)
+        const auto until = std::chrono::steady_clock::now() + std::chrono::seconds (20);
+
+        while (std::chrono::steady_clock::now() < until)
         {
             if (const auto* now = rig.mounts.valueOf ("/desk/fader");
                 now != nullptr && *now == osc::Values { osc::Value::float32 (wanted) })
-                return;
+                return true;
 
             rig.tickOnce();
             std::this_thread::sleep_for (std::chrono::milliseconds (2));
         }
+
+        return false;
     }
 
     /*  Where a record stands in the session's log: the first one of that
@@ -3578,20 +3587,22 @@ TEST_CASE ("go.doh: a value the next scene pre-sent after the GO goes back to wh
     /*  The desk says what it holds, as a desk does: 0.2 until the GO's write
         reaches it, then the GO's 0.5 - which the next scene's pre-send reads,
         if it asks after. A sweep answering before the write would otherwise
-        say 0.5 for what was there before the GO. */
-    for (int n = 0; n < 600; ++n)
-    {
-        if (const auto* now = rig.mounts.valueOf ("/desk/fader"); now != nullptr)
-            break;
+        say 0.5 for what was there before the GO. Waited for by time, as the
+        pre-send below is (`tickUntilDeskHolds`), and required. */
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds (20);
 
+    while (rig.mounts.valueOf ("/desk/fader") == nullptr && std::chrono::steady_clock::now() < until)
+    {
         rig.tickOnce();
         std::this_thread::sleep_for (std::chrono::milliseconds (2));
     }
 
+    REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+
     rig.device.target.says ({ osc::Value::float32 (0.5f) });
 
-    //  The next scene pre-sent over the GO's value.
-    tickUntilDeskHolds (rig, 0.8f);
+    //  The next scene pre-sent over the GO's value - REQUIRED, or the Doh! below answers a case this is not.
+    REQUIRE (tickUntilDeskHolds (rig, 0.8f));
     ticksOf (rig, 3);
 
     rig.engine.submit ("cli", "go.doh", {});
