@@ -18,6 +18,7 @@
 
 #include <wfg/client/model/Fader.h>
 #include <wfg/client/model/OutputList.h>
+#include <wfg/client/model/Rack.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/tree/Node.h>
@@ -124,18 +125,16 @@ namespace wfg::client::model
         std::vector<SendStrip> out;
         const auto& lead = cueIds.front();
 
-        for (const auto& row : readOutputs (snapshot))
+        const auto addStrip = [&] (const std::string& destination, const std::string& name,
+                                   const std::string& widthWord, const std::string& channelWord)
         {
-            if (row.kind != "mix")
-                continue;
-
             SendStrip strip;
-            strip.busId = row.id;
-            strip.name = row.name.empty() ? row.id : row.name;
-            strip.widthWord = row.widthWord();
-            strip.channelWord = row.channelWord();
+            strip.busId = destination;
+            strip.name = name.empty() ? destination : name;
+            strip.widthWord = widthWord;
+            strip.channelWord = channelWord;
 
-            if (const auto found = byCueAndBus.find ({ lead, row.id }); found != byCueAndBus.end())
+            if (const auto found = byCueAndBus.find ({ lead, destination }); found != byCueAndBus.end())
             {
                 strip.sendId = found->second.id;
                 strip.levelDb = found->second.level;
@@ -160,7 +159,7 @@ namespace wfg::client::model
                 SendShare share;
                 share.cueId = cueId;
 
-                if (const auto found = byCueAndBus.find ({ cueId, row.id }); found != byCueAndBus.end())
+                if (const auto found = byCueAndBus.find ({ cueId, destination }); found != byCueAndBus.end())
                 {
                     share.sendId = found->second.id;
                     share.levelDb = found->second.level;
@@ -182,7 +181,20 @@ namespace wfg::client::model
             }
 
             out.push_back (std::move (strip));
-        }
+        };
+
+        for (const auto& row : readOutputs (snapshot))
+            if (row.kind == "mix")
+                addStrip (row.id, row.name, row.widthWord(), row.channelWord());
+
+        /*  AND EVERY AUX (namespace draft §93), after the mixes: a shared rack
+            channel takes a send as a mix does, into its chain rather than onto
+            the interface's channels - which is what its strip says in their
+            place. An aux's own mixer shows itself too: sending into itself is a
+            loop the show may ask for (AVW). */
+        for (const auto& channel : readRack (snapshot).channels)
+            if (channel.aux)
+                addStrip (channel.id, channel.name, channel.classWord(), "Aux");
 
         return out;
     }

@@ -121,7 +121,7 @@ namespace wfg::client::model
                     how. Each thing a fade can move is a switch and then where it
                     goes, level then speed (namespace draft §22.7); the curve is
                     both's shape, so it comes after both. */
-                { "fade",    { "target", "dca", "levelOn", "level", "rateOn", "rate", "curve", "points", "video",
+                { "fade",    { "target", "dca", "aux", "levelOn", "level", "rateOn", "rate", "curve", "points", "video",
                                "stopWhenDone" } },
                 { "transport", { "target", "verb", "andGo", "range", "curve" } },
                 { "start",   { "target" } },
@@ -1055,9 +1055,24 @@ namespace wfg::client::model
                     field.control = Control::channelRef;
                     field.choices = { { "", "(none)" } };
 
+                    /*  NOT AN AUX (namespace draft §93): a mic cue plays through
+                        a channel of its own, and an aux is fed by sends. */
                     for (const auto& channel : readRack (snapshot).channels)
-                        field.choices.push_back ({ channel.id, channel.name + " \xc2\xb7 "
-                                                                  + channel.classWord() });
+                        if (! channel.aux)
+                            field.choices.push_back ({ channel.id, channel.name + " \xc2\xb7 "
+                                                                      + channel.classWord() });
+                }
+                else if (field.name == "aux")
+                {
+                    /*  THE AUX A FADE MOVES (namespace draft §93), instead of a
+                        cue: every aux of the show, by name. */
+                    field.control = Control::channelRef;
+                    field.choices = { { "", "(none)" } };
+
+                    for (const auto& channel : readRack (snapshot).channels)
+                        if (channel.aux)
+                            field.choices.push_back ({ channel.id, channel.name + " \xc2\xb7 "
+                                                                      + channel.classWord() });
                 }
             }
         }
@@ -1896,6 +1911,10 @@ namespace wfg::client::model
             fitToTheRig (snapshot, cueId, decided);
             offerTheInputsAndChannels (snapshot, decided);
         }
+
+        /*  A FADE'S AUX is a menu of the show's auxes (namespace draft §93). */
+        if (out.kind == "fade")
+            offerTheInputsAndChannels (snapshot, decided);
 
         /*  And the same kind of second pass for a network cue, for the same
             reason: which devices exist is a fact about THIS show and cannot

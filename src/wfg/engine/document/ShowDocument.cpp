@@ -456,7 +456,10 @@ namespace wfg::doc
             media cue's Insert - stays the media cue's. */
         bool isSoundingCue (const juce::ValueTree& cue)
         {
-            return cue.hasType ("Media") || cue.hasType ("Mic");
+            /*  AND AN AUX (namespace draft §93): a shared rack channel holds a
+                sound of its own - its sends, routes, inserts and direct out. */
+            return cue.hasType ("Media") || cue.hasType ("Mic")
+                     || (cue.hasType ("Channel") && cue["access"].toString() == "shared");
         }
 
         /*  THE ADDRESSES OF A `node.setMany`, as the key its writes coalesce
@@ -2641,7 +2644,8 @@ namespace wfg::doc
     }
 
     EditResult ShowDocument::createRackChannel (const std::string& channelClass,
-                                                const std::string& id)
+                                                const std::string& id,
+                                                const std::string& access)
     {
         /*  ASKED HERE AS WELL AS AT THE DOOR, because this is the one create
             that changes the document before it reaches `insertObject`: the
@@ -2675,8 +2679,12 @@ namespace wfg::doc
             audio.addChild (rack, -1, nullptr);
         }
 
-        return insertObject (rack, endOfSequence, "Channel", id,
-                             { { "class", channelClass } });
+        std::vector<std::pair<std::string_view, std::string>> attributes { { "class", channelClass } };
+
+        if (! access.empty())
+            attributes.push_back ({ "access", access });
+
+        return insertObject (rack, endOfSequence, "Channel", id, attributes);
     }
 
     //==============================================================================
@@ -3305,8 +3313,10 @@ namespace wfg::doc
         const auto list = entry.getParent();
         const auto rightList = cue.hasType ("Media")
                                  ? list.hasType ("Plugins")
-                                 : list.hasType ("Channel")
-                                     && list[idProperty].toString() == cue["channel"].toString();
+                                 : cue.hasType ("Channel")
+                                     ? list == cue          // an aux switches in its own chain's (§93)
+                                     : list.hasType ("Channel")
+                                         && list[idProperty].toString() == cue["channel"].toString();
 
         if (! rightList)
             return EditResult::failed (reason::badValue);
@@ -5882,6 +5892,35 @@ namespace wfg::doc
         std::vector<std::string> released;
         collectIds (node, released);
 
+        /*  AN AUX TAKES THE SENDS INTO IT WITH IT (namespace draft §93), in
+            this same transaction, as an output takes its routes and sends: a
+            send naming nothing would be a strip in the mixer that feeds
+            nowhere. Its own sends go with it as its children. */
+        if (node.hasType ("Channel"))
+        {
+            std::vector<juce::ValueTree> orphans;
+
+            const auto visit = [&] (const juce::ValueTree& at, auto&& recurse) -> void
+            {
+                for (const auto& child : at)
+                {
+                    if (child.hasType ("Send") && child["bus"].toString().toStdString() == id
+                          && ! child.isAChildOf (node))
+                        orphans.push_back (child);
+
+                    recurse (child, recurse);
+                }
+            };
+
+            visit (showNode, visit);
+
+            for (auto& orphan : orphans)
+            {
+                collectIds (orphan, released);
+                orphan.getParent().removeChild (orphan, structuralHistory());
+            }
+        }
+
         /*  If the list this cue belongs to is parked on it, work out where the
             standby goes BEFORE the cue disappears - afterwards there is no
             sequence left to ask.
@@ -7089,7 +7128,12 @@ namespace wfg::doc
                             const auto found = ownerForElement (
                                 target.getType().toString().toStdString());
 
-                            if (found != refers)
+                            /*  A SEND MAY NAME AN AUX as well as a mix channel
+                                (namespace draft §93): a shared rack channel. */
+                            const auto sendIntoAux = refers == "bus" && element == "Send" && found == "rackChannel"
+                                                       && target["access"].toString() == "shared";
+
+                            if (found != refers && ! sendIntoAux)
                                 problems.push_back (here + ": names \"" + value + "\", which is a "
                                                      + (found.empty() ? std::string ("thing of no kind")
                                                                       : std::string (found))

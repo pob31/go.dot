@@ -196,7 +196,7 @@ TEST_CASE ("walk: a scene that launches a clip is a GO, an empty one is not, and
     CHECK (walked.mixes[0].name == "Face");
     CHECK (walked.mixes[0].pair == 0);
     CHECK (walked.mixes[1].name == "Loin");
-    CHECK_FALSE (walked.mixes[1].parked);
+    CHECK_FALSE (walked.mixes[1].aux);
 }
 
 TEST_CASE ("walk: a new clip on a track stops the one it replaces, in the same GO")
@@ -402,11 +402,11 @@ TEST_CASE ("walk: a track listening with its monitoring In is a carrier whatever
     CHECK (walked.steps[0].fades.empty());
 }
 
-TEST_CASE ("walk: a fader a hand rode is a DCA, a send it rode is the Send page, an effects return is parked")
+TEST_CASE ("walk: a fader a hand rode is a DCA, a send it rode is the Send page, an effects return is an aux")
 {
     auto set = setOf (1);
 
-    /*  The second return carries a reverb: parked (QE). */
+    /*  The second return carries a reverb: an aux (namespace draft §93, answering QE). */
     Device reverb;
     reverb.kind = "Reverb";
     set.returns[1].devices.push_back (reverb);
@@ -443,18 +443,52 @@ TEST_CASE ("walk: a fader a hand rode is a DCA, a send it rode is the Send page,
     CHECK (walked.hands[1].goDot.find ("Send page") != std::string::npos);
     CHECK (walked.hands[1].goDot.find ("Face") != std::string::npos);
 
-    /*  THE PARKED RETURN: its send kept at its level and switched off. */
-    CHECK (walked.mixes[1].parked);
-    const auto* parked = sendTo (walked.steps[0].sounds[0], "return:1");
-    REQUIRE (parked != nullptr);
-    CHECK_FALSE (parked->on);
-    CHECK (parked->levelDb == doctest::Approx (-6.0).epsilon (0.001));
+    /*  THE EFFECTS RETURN IS AN AUX: its send heard, at its level, and Live's
+        reverb said - the aux's chain is left for a plugin of the author's. */
+    CHECK (walked.mixes[1].aux);
+    REQUIRE (walked.mixes[1].liveDevices.size() == 1u);
+    const auto* intoAux = sendTo (walked.steps[0].sounds[0], "return:1");
+    REQUIRE (intoAux != nullptr);
+    CHECK (intoAux->on);
+    CHECK (intoAux->levelDb == doctest::Approx (-6.0).epsilon (0.001));
 
     const auto said = std::any_of (walked.notes.begin(), walked.notes.end(), [] (const Note& note)
     {
-        return note.kind == Note::Kind::dropped && note.text.find ("switched off") != std::string::npos;
+        return note.kind == Note::Kind::approximated && note.text.find ("Live's own") != std::string::npos;
     });
     CHECK (said);
+}
+
+TEST_CASE ("walk: a return sending into another is an aux, its send its own, a mix's fader folded into it")
+{
+    auto set = setOf (1);
+
+    /*  The first return sends half into the second, a plain mix whose fader is
+        at -3 dB; nothing on either. */
+    set.returns[0].sends.assign (set.returns.size(), 0.0);
+    set.returns[0].sends[1] = 0.5011872336;
+    set.returns[1].volume = 0.7079457844;
+
+    auto source = trackOf ("1", "1", 1, 2);
+    source.sends[0] = 1.0;
+    source.slots[0].clip = clipOf ("rain", 0.0, 8.0);
+    set.tracks.push_back (source);
+
+    const auto walked = walk (set);
+
+    REQUIRE (walked.mixes.size() >= 2u);
+    CHECK (walked.mixes[0].aux);
+    CHECK_FALSE (walked.mixes[1].aux);
+
+    REQUIRE (walked.mixes[0].sends.size() == 1u);
+    CHECK (walked.mixes[0].sends[0].mix == "return:1");
+    CHECK (walked.mixes[0].sends[0].levelDb == doctest::Approx (-9.0).epsilon (0.01));
+
+    /*  And the sound's send into the aux carries no fader of the aux's: the
+        aux's own level does (it is nought here). */
+    const auto* intoAux = sendTo (walked.steps.at (0).sounds.at (0), "return:0");
+    REQUIRE (intoAux != nullptr);
+    CHECK (intoAux->on);
 }
 
 TEST_CASE ("walk: the session fixture, end to end")
@@ -503,7 +537,7 @@ TEST_CASE ("walk: the author's own sets, GO by GO, when WFG_ALS_CORPUS names a s
     CHECK_FALSE (walked.steps.empty());
 
     for (const auto& mix : walked.mixes)
-        MESSAGE ("mix " << mix.key << " \"" << mix.name << "\" pair " << mix.pair << std::string (mix.parked ? " PARKED" : ""));
+        MESSAGE ("mix " << mix.key << " \"" << mix.name << "\" pair " << mix.pair << std::string (mix.aux ? " AUX" : ""));
 
     for (const auto& step : walked.steps)
     {

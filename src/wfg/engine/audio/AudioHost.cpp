@@ -18,6 +18,7 @@
 
 #include <wfg/engine/rt/RtCheck.h>
 
+#include <wfg/engine/audio/AuxPlugins.h>
 #include <wfg/engine/audio/CueOutputPlugin.h>
 #include <wfg/engine/audio/EqPlugin.h>
 #include <wfg/engine/audio/LiveInputPlugin.h>
@@ -347,6 +348,8 @@ namespace wfg::audio
             engine->getPluginManager().createBuiltInType<ProxyPlugin>();
             engine->getPluginManager().createBuiltInType<LiveInputPlugin>();
             engine->getPluginManager().createBuiltInType<LooperPlugin>();
+            engine->getPluginManager().createBuiltInType<AuxTapPlugin>();
+            engine->getPluginManager().createBuiltInType<AuxInputPlugin>();
 
             /*  TRACKTION'S CPU-OVERLOAD MUTE, OFF (the author, 2026-09-29).
                 DeviceManager answers a block that took more than 0.98 of its
@@ -463,6 +466,7 @@ namespace wfg::audio
             liveInputs.clear();
             rackTracks.clear();
             rackShutAt.clear();
+            clearAuxes();
             voices = 0;
             handles.clear();
             slotSpeeds.clear();
@@ -532,6 +536,27 @@ namespace wfg::audio
             const auto placeholder = ensureSilentPlaceholder (spec.channelsPerTrack);
             const auto tracks = te::getAudioTracks (*edit);
             auto trackIndex = 0;
+
+            /*  THE AUXES' COLUMNS (namespace draft §93): every aux's input
+                channels one after another, in the rack's order, and a slot on
+                the bus for every track - its index is its writer. Laid out
+                before any track is made, because every track's tap is as wide
+                as the whole of them. A show with no aux has no bus, no tap and
+                no aux send: its graph is the one it always had. */
+            auxColumns.clear();
+            auxOrder.clear();
+            auxTotal = 0;
+
+            for (const auto& channel : spec.rack)
+                if (channel.aux)
+                {
+                    auxColumns[channel.id] = auxTotal;
+                    auxOrder[channel.id] = static_cast<int> (auxOrder.size());
+                    auxTotal += std::clamp (channel.auxWidth, 1, 2);
+                }
+
+            auxBus.prepare (auxTotal > 0 ? voices + static_cast<int> (spec.rack.size()) : 0,
+                            auxTotal, current.blockSize);
 
             for (auto* track : tracks)
             {
@@ -652,6 +677,16 @@ namespace wfg::audio
                     trackLanes.back().push_back (&proxy->lane());
                 }
 
+                if (! insertAuxTap (*track, spec.channelsPerTrack, index, 0))
+                {
+                    error = "the aux tap would not insert";
+                    trackLanes.clear();
+                    edit.reset();
+                    matrices.clear();
+                    eqs.clear();
+                    return false;
+                }
+
                 auto plugin = track->pluginList.insertPlugin (
                     CueOutputPlugin::create (spec.channelsPerTrack, current.outputChannels), -1);
 
@@ -669,6 +704,7 @@ namespace wfg::audio
 
                 matrices.push_back (&output->matrix());
                 plugins.push_back (output);
+                bindAuxTap (index, output->matrix());
 
                 /*  Routed once, to the one wide device. This is the structural
                     edit that never happens again. */
@@ -1006,17 +1042,46 @@ namespace wfg::audio
                 trackLanes.clear();
                 eqs.clear();
                 liveInputs.clear();
+                clearAuxes();
                 return false;
             };
 
-            auto inputPlugin = track.pluginList.insertPlugin (LiveInputPlugin::create (rackChannels), -1);
-            auto* stage = dynamic_cast<LiveInputPlugin*> (inputPlugin.get());
+            /*  AN AUX (namespace draft §93): the return that waits for every
+                track the graph runs before it - the voices and the rack for the
+                first aux, the aux above it for the next - and then its own
+                input, the sum of its columns of the bus. No live input, no take. */
+            if (channel.aux)
+            {
+                const auto order = auxOrder[channel.id];
 
-            if (stage == nullptr)
-                return fail ("the live input stage would not insert");
+                if (! insertAuxReturn (track, order))
+                    return fail ("the aux return would not insert");
 
-            stage->bindTap (&tapView);
-            liveInputs.push_back (stage);
+                auto auxPlugin = track.pluginList.insertPlugin (
+                    AuxInputPlugin::create (rackChannels, auxColumns[channel.id],
+                                            std::clamp (channel.auxWidth, 1, 2)), -1);
+                auto* auxStage = dynamic_cast<AuxInputPlugin*> (auxPlugin.get());
+
+                if (auxStage == nullptr)
+                    return fail ("the aux input would not insert");
+
+                auxStage->bind (&auxBus);
+                liveInputs.push_back (nullptr);
+                auxInputs.resize (static_cast<std::size_t> (index - voices) + 1, nullptr);
+                auxInputs[static_cast<std::size_t> (index - voices)] = auxStage;
+            }
+            else
+            {
+                auto inputPlugin = track.pluginList.insertPlugin (LiveInputPlugin::create (rackChannels), -1);
+                auto* stage = dynamic_cast<LiveInputPlugin*> (inputPlugin.get());
+
+                if (stage == nullptr)
+                    return fail ("the live input stage would not insert");
+
+                stage->bindTap (&tapView);
+                liveInputs.push_back (stage);
+                auxInputs.resize (static_cast<std::size_t> (index - voices) + 1, nullptr);
+            }
 
             /*  A SAMPLING CHANNEL (Phase 9c, namespace draft §19.2): the
                 plugins before the recorder, the recorder, then the EQ and the
@@ -1026,7 +1091,7 @@ namespace wfg::audio
                 the EQ, then every plugin. A lane keeps its place in the
                 channel's own order whichever side it is built on, since a mic
                 cue's inserts are sent by that place. */
-            const auto take = channel.takeSeconds > 0.0 ? takeFor (channel.id) : nullptr;
+            const auto take = channel.takeSeconds > 0.0 && ! channel.aux ? takeFor (channel.id) : nullptr;
             trackLanes.emplace_back (channel.plugins.size(), nullptr);
 
             const auto insertProxies = [&] (bool beforeTheRecorder)
@@ -1077,6 +1142,13 @@ namespace wfg::audio
             if (! insertProxies (false))
                 return fail ("the plugin proxy would not insert on a rack channel");
 
+            /*  AND ITS SENDS INTO THE AUXES: a mic cue's, or an aux's own into
+                another aux. An aux's send names the bus the aux after it
+                returns, so the next aux waits for this one. */
+            if (! insertAuxTap (track, rackChannels, index,
+                                channel.aux ? auxOrder[channel.id] + 1 : 0))
+                return fail ("the aux tap would not insert on a rack channel");
+
             auto outputPlugin = track.pluginList.insertPlugin (
                 CueOutputPlugin::create (rackChannels, current.outputChannels), -1);
             auto* output = dynamic_cast<CueOutputPlugin*> (outputPlugin.get());
@@ -1086,6 +1158,7 @@ namespace wfg::audio
 
             matrices.push_back (&output->matrix());
             plugins.push_back (output);
+            bindAuxTap (index, output->matrix());
 
             if (auto& manager = engine->getDeviceManager(); manager.getNumWaveOutDevices() > 0)
                 if (auto* wide = manager.getWaveOutDevice (0))
@@ -1094,6 +1167,74 @@ namespace wfg::audio
             rackTracks[channel.id] = index;
             rackShutAt.push_back (-1);
             return true;
+        }
+
+        /*  A TRACK'S AUX TAP AND THE SEND THAT ORDERS THE AUXES AFTER IT
+            (namespace draft §93). Nothing on a graph with no aux. The send is
+            Tracktion's own, at a fader position of nought - a gain of exactly
+            nought - so it carries no sound at all: what it carries is the
+            dependency. Tracktion's return waits for every send on its bus
+            before it runs, and the aux bus's rows are written by the tap just
+            before it. `orderBus` is the bus the send names: nought for a voice
+            and a rack channel, which the first aux returns; one past an aux's
+            own place for an aux, which the aux after it returns. */
+        bool insertAuxTap (te::AudioTrack& track, int channels, int index, int orderBus)
+        {
+            taps.resize (static_cast<std::size_t> (index) + 1, nullptr);
+
+            if (auxTotal <= 0)
+                return true;
+
+            auto tapPlugin = track.pluginList.insertPlugin (AuxTapPlugin::create (channels, index, auxTotal), -1);
+            auto* auxTap = dynamic_cast<AuxTapPlugin*> (tapPlugin.get());
+
+            if (auxTap == nullptr)
+                return false;
+
+            taps[static_cast<std::size_t> (index)] = auxTap;
+
+            auto send = track.pluginList.insertPlugin (
+                te::createValueTree (te::IDs::PLUGIN,
+                                     te::IDs::type, te::AuxSendPlugin::xmlTypeName,
+                                     te::IDs::busNum, orderBus,
+                                     te::IDs::auxSendSliderPos, 0.0f), -1);
+
+            return send != nullptr;
+        }
+
+        /*  The tap follows the level its output stage is told, so it can only
+            be bound once the output stage exists. */
+        void bindAuxTap (int index, const CueMatrix& level)
+        {
+            if (index < 0 || index >= static_cast<int> (taps.size()))
+                return;
+
+            if (auto* auxTap = taps[static_cast<std::size_t> (index)])
+                auxTap->bind (&auxBus, &level);
+        }
+
+        /*  AN AUX'S RETURN: Tracktion's, on the bus the tracks before it send
+            on - nought for the first aux, its own place for the rest. It hands
+            on the silent sends; the aux input after it clears them. */
+        bool insertAuxReturn (te::AudioTrack& track, int order)
+        {
+            auto back = track.pluginList.insertPlugin (
+                te::createValueTree (te::IDs::PLUGIN,
+                                     te::IDs::type, te::AuxReturnPlugin::xmlTypeName,
+                                     te::IDs::busNum, order), -1);
+
+            return back != nullptr;
+        }
+
+        /** An aux's input stage, or null for any other track. */
+        AuxInputPlugin* auxInputOf (int trackIndex) const noexcept
+        {
+            const auto rack = trackIndex - voices;
+
+            if (trackIndex < 0 || rack < 0 || rack >= static_cast<int> (auxInputs.size()))
+                return nullptr;
+
+            return auxInputs[static_cast<std::size_t> (rack)];
         }
 
         /*  THE RACK'S CHILDREN (Phase 9b, decision CL): one child per distinct
@@ -1315,6 +1456,15 @@ namespace wfg::audio
             return liveInputs[static_cast<std::size_t> (rack)];
         }
 
+        void clearAuxes()
+        {
+            taps.clear();
+            auxInputs.clear();
+            auxColumns.clear();
+            auxOrder.clear();
+            auxTotal = 0;
+        }
+
         void stop()
         {
             proxies.clear();
@@ -1322,6 +1472,7 @@ namespace wfg::audio
             liveInputs.clear();
             rackTracks.clear();
             rackShutAt.clear();
+            clearAuxes();
             voices = 0;
             proxySlots = 0;
 
@@ -2043,12 +2194,38 @@ namespace wfg::audio
                 for (int output = 0; output < matrix->numOutputs(); ++output)
                     matrix->setGain (input, output, 0.0f);
 
+            /*  AND ITS SENDS INTO THE AUXES (namespace draft §93), which are
+                the coefficients past the rig's outputs: cleared with the rest,
+                for the same reason. */
+            auto* sends = trackIndex < static_cast<int> (taps.size()) && taps[static_cast<std::size_t> (trackIndex)] != nullptr
+                            ? &taps[static_cast<std::size_t> (trackIndex)]->matrix() : nullptr;
+
+            if (sends != nullptr)
+                for (int input = 0; input < sends->numInputs(); ++input)
+                    for (int column = 0; column < sends->numOutputs(); ++column)
+                        sends->setGain (input, column, 0.0f);
+
+            const auto outputs = matrix->numOutputs();
+
             for (const auto& coefficient : coefficients)
-                matrix->setGain (static_cast<int> (coefficient[0]),
-                                 static_cast<int> (coefficient[1]),
-                                 static_cast<float> (coefficient[2]));
+            {
+                const auto output = static_cast<int> (coefficient[1]);
+
+                if (output >= outputs && sends != nullptr)
+                    sends->setGain (static_cast<int> (coefficient[0]), output - outputs,
+                                    static_cast<float> (coefficient[2]));
+                else
+                    matrix->setGain (static_cast<int> (coefficient[0]), output,
+                                     static_cast<float> (coefficient[2]));
+            }
 
             matrix->setLevelDb (static_cast<float> (levelDb));
+
+            if (sends != nullptr)
+            {
+                sends->setLevelDb (static_cast<float> (levelDb));
+                sends->snapToTargets();
+            }
 
             /*  SNAPPED, NOT SLEWED. This is an arm, which happens while the
                 voice is silent; sliding the coefficients up from whatever the
@@ -2488,6 +2665,17 @@ namespace wfg::audio
         std::map<std::string, int> rackTracks;
         LiveInputTap tapView;
 
+        /*  THE AUXES (namespace draft §93): the bus every track's tap writes
+            into, every track's tap (by its index, null on a graph with no
+            aux), every aux's input stage (index - voices, null on a rack
+            channel), and each aux's first column and place in the order. */
+        AuxBus auxBus;
+        std::vector<AuxTapPlugin*> taps;
+        std::vector<AuxInputPlugin*> auxInputs;
+        std::map<std::string, int> auxColumns;
+        std::map<std::string, int> auxOrder;
+        int auxTotal = 0;
+
         /*  WHEN EACH RACK CHANNEL WAS LAST SHUT, in Go.dot's count - the start
             of its ring-out - or -1 while it is open or has never been, and -2
             after a kill, which rings out nothing. Tick thread's own, sized with
@@ -2822,6 +3010,17 @@ namespace wfg::audio
 
             const auto voice = track < impl->voices;
 
+            /*  AN AUX (namespace draft §93, AWA): no run holds it and no kill
+                will reach it, so the sweep shuts it - its input in a
+                millisecond, its level to silence behind its ramp. What its
+                plugins and EQ still hold is silent from the next tick, and is
+                emptied when the next GO opens it again. */
+            if (isAuxTrack (track))
+            {
+                shutAux (track);
+                continue;
+            }
+
             if (voice)
                 if (auto* matrix = trackMatrix (track))
                     matrix->setLevelDb (CueMatrix::silenceDb);
@@ -2860,7 +3059,77 @@ namespace wfg::audio
 
     bool AudioHost::isRackTrack (int trackIndex) const noexcept
     {
-        return impl->liveInputOf (trackIndex) != nullptr;
+        return impl->liveInputOf (trackIndex) != nullptr || impl->auxInputOf (trackIndex) != nullptr;
+    }
+
+    int AudioHost::auxColumnOf (const std::string& channelId) const noexcept
+    {
+        const auto found = impl->auxColumns.find (channelId);
+
+        if (found == impl->auxColumns.end() || impl->plugins.empty() || impl->plugins.front() == nullptr)
+            return -1;
+
+        return impl->plugins.front()->numOutputChannels() + found->second;
+    }
+
+    int AudioHost::auxColumnCount() const noexcept
+    {
+        return impl->auxTotal;
+    }
+
+    bool AudioHost::isAuxTrack (int trackIndex) const noexcept
+    {
+        return impl->auxInputOf (trackIndex) != nullptr;
+    }
+
+    void AudioHost::shutAux (int trackIndex) noexcept
+    {
+        auto* stage = impl->auxInputOf (trackIndex);
+
+        if (stage == nullptr)
+            return;
+
+        stage->shut (AuxInputPlugin::killSeconds);
+
+        if (auto* matrix = trackMatrix (trackIndex))
+            matrix->setLevelDb (CueMatrix::silenceDb);
+    }
+
+    void AudioHost::openAux (int trackIndex) noexcept
+    {
+        auto* stage = impl->auxInputOf (trackIndex);
+
+        if (stage == nullptr)
+            return;
+
+        /*  EMPTIED BEFORE IT TAKES ANYTHING AGAIN: whatever its EQ and its
+            plugins held when it was shut was silenced, not let go of. */
+        if (! stage->isPassing())
+        {
+            if (auto* eq = trackEq (trackIndex))
+                eq->reset();
+
+            for (auto* lane : impl->trackLanes[static_cast<std::size_t> (trackIndex)])
+                if (lane != nullptr)
+                    lane->requestReset();
+        }
+
+        stage->open();
+    }
+
+    bool AudioHost::isAuxOpen (int trackIndex) const noexcept
+    {
+        const auto* stage = impl->auxInputOf (trackIndex);
+        return stage != nullptr && stage->isPassing();
+    }
+
+    CueMatrix* AudioHost::trackAuxMatrix (int trackIndex) noexcept
+    {
+        if (trackIndex < 0 || trackIndex >= static_cast<int> (impl->taps.size()))
+            return nullptr;
+
+        auto* tap = impl->taps[static_cast<std::size_t> (trackIndex)];
+        return tap != nullptr ? &tap->matrix() : nullptr;
     }
 
     bool AudioHost::isRackSounding (int trackIndex) const noexcept

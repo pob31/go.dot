@@ -689,6 +689,24 @@ namespace wfg::doc
                             return fromEdit (edit, withId (args, 1, edit.id));
                         } });
 
+        /*  AN AUX (namespace draft §93): a shared rack channel, made in one
+            step so its undo is one too. Fed by the cues' sends; its own sound
+            is set on it afterwards, as a cue's is. */
+        registry.add ({ "aux.create",
+                        "Adds an aux to the live rack: a shared channel the cues send into, with a"
+                        " chain, a level, a direct out and sends of its own. Class is mono,"
+                        " monoToStereo or stereo. Makes the rack if the show has none.",
+                        { { "class", 's', false }, { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args.size() > 1 ? args[1].getString() : std::string {};
+
+                            const auto edit = document.createRackChannel (args[0].getString(), id, "shared");
+
+                            return fromEdit (edit, withId (args, 1, edit.id));
+                        } });
+
         //----------------------------------------------------------------------
         registry.add ({ "feed.create",
                         "Adds a destination to a media cue that is a processor input rather than"

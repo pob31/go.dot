@@ -68,6 +68,15 @@ namespace wfg::client::model
         What every label reads; an edit of the name reads `name` itself. */
     std::string shownCueName (const tree::TreeSnapshot& snapshot, std::string_view cueId);
 
+    /*  WHERE A SOUND'S ROWS ARE (namespace draft §93): a cue's at
+        /godot/cue/<id>/, an aux's at /godot/slot/<id>/ - an aux being a shared
+        rack channel that holds a sound of its own, its level, EQ and sends.
+        With the slash at the end, so a row's name follows it. */
+    std::string soundBase (const tree::TreeSnapshot& snapshot, std::string_view id);
+
+    /** Whether this identifier is an aux's: a shared rack channel. */
+    bool isAux (const tree::TreeSnapshot& snapshot, std::string_view id);
+
     /** A `T` node's three answers: absent, false, true. */
     Flag flag (const tree::TreeSnapshot& snapshot, std::string_view address);
 

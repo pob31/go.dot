@@ -795,7 +795,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::createInput (1, -1), gesture::createInput (2, 0),
         gesture::deleteInput ("N1000001"), gesture::moveInput ("N1000001", 1),
         gesture::setInputPatchSettled (true), gesture::setInputPatchSettled (false),
-        gesture::createRackChannel ("mono"),
+        gesture::createRackChannel ("mono"), gesture::createAux ("stereo"),
         gesture::createChannelPlugin ("K1000001", "Verb", "VST3-0badf00d-verb", "VST3", "C:/plugins/verb.vst3"),
 
         /*  THE NEW-CUE LISTS (2026-09-27): a group made around the picked cues,
@@ -8916,11 +8916,13 @@ TEST_CASE ("client: a cue's DCA is a menu of the show's DCAs, and the sampler ro
     //  A fade's DCA beside its target - the other thing it can move - and a menu too.
     const auto fading = model::inspect (*snapshot, fade.id);
     const auto fadeRows = namesUnder (fading, "what it does");
-    REQUIRE (fadeRows.size() >= 4u);
+    /*  And its aux after them (namespace draft §93): the third thing it can move. */
+    REQUIRE (fadeRows.size() >= 5u);
     CHECK (fadeRows[0] == "target");
     CHECK (fadeRows[1] == "dca");
-    CHECK (fadeRows[2] == "levelOn");
-    CHECK (fadeRows[3] == "level");
+    CHECK (fadeRows[2] == "aux");
+    CHECK (fadeRows[3] == "levelOn");
+    CHECK (fadeRows[4] == "level");
     REQUIRE (rowIn (fading, "dca") != nullptr);
     CHECK (rowIn (fading, "dca")->control == model::Control::dcaRef);
 

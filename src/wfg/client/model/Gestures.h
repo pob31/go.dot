@@ -220,6 +220,10 @@ namespace wfg::client::gesture
         the four words a replay needs. A chain is reordered with `object.move`
         into its channel, and emptied with `object.delete`, as anything is. */
     Event createRackChannel (const std::string& channelClass);
+
+    /*  AN AUX (namespace draft §93): a shared rack channel the cues send into,
+        made in one step. */
+    Event createAux (const std::string& channelClass);
     Event createChannelPlugin (const std::string& channelId, const std::string& name,
                                const std::string& identifier, const std::string& format,
                                const std::string& path);

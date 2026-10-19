@@ -309,8 +309,11 @@ namespace wfg::doc
         EditResult createSlot (const std::string& mountId, const std::string& address,
                                const std::string& id = {});
 
+        /*  `access` empty is the row's default, an exclusive channel; `shared`
+            makes an aux (namespace draft §93) in the same step. */
         EditResult createRackChannel (const std::string& channelClass,
-                                      const std::string& id = {});
+                                      const std::string& id = {},
+                                      const std::string& access = {});
 
         /*  THE OUTPUT LAYOUT (PRD §3.9b, §6.2). A show's outputs are a list
             somebody wrote - so many mono direct outs, so many stereo mix

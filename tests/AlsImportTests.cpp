@@ -341,3 +341,126 @@ TEST_CASE ("als import: into a folder that already holds a show, nothing is writ
 
     root.deleteRecursively();
 }
+
+TEST_CASE ("als import: a return carrying devices is an aux - its own output, level, EQ and plugin, its sends heard")
+{
+    /*  Namespace draft §93 (answering QE): the fixture's second return, "Loin",
+        given Live's Reverb, an EQ Eight with one bell, and a VST3 this machine's
+        scan knows. */
+    auto set = sessionFixture();
+    REQUIRE (set.returns.size() >= 2u);
+
+    Device reverb;
+    reverb.kind = "Reverb";
+    reverb.name = "Reverb";
+
+    Device eq;
+    eq.kind = "Eq8";
+    eq.bands.resize (8);
+    eq.bands[1].on = true;
+    eq.bands[1].mode = 3;
+    eq.bands[1].frequency = 2000.0;
+    eq.bands[1].gain = 3.0;
+    eq.bands[1].q = 1.0;
+
+    Device verb;
+    verb.kind = "PluginDevice";
+    verb.name = "Verb";
+    verb.plugin = PluginInfo { "VST3", "Verb", {}, "0123456789ABCDEF0123456789ABCDEF", { 1, 2, 3 }, { 4, 5 } };
+
+    set.returns[1].devices = { reverb, eq, verb };
+
+    WalkOptions options;
+    options.scenes = { 0, 1, 2 };
+    const auto walked = walk (set, options);
+
+    std::map<std::string, std::pair<std::string, int>> media;
+
+    for (const auto& step : walked.steps)
+        for (const auto& sound : step.sounds)
+            media[sound.key] = { sound.file.name, 2 };
+
+    plugin::KnownPlugin known;
+    known.name = "Verb";
+    known.identifier = "VST3-Verb-1a2b3c4d-5e6f7a8b";
+    known.format = "VST3";
+    known.path = "C:/plugins/Verb.vst3";
+
+    doc::ShowDocument document;
+    const auto shown = build (set, walked, "Session", media, document, { known });
+
+    INFO ("problems: " << (document.validate().empty() ? std::string ("none") : document.validate().front()));
+    CHECK (document.validate().empty());
+
+    const auto aux = idFor ("aux:return:1");
+    const auto out = idFor ("out:return:1");
+
+    REQUIRE (elementOf (document, aux) == "Channel");
+    CHECK (at (document, "/godot/slot/" + aux + "/access") == "shared");
+    CHECK (at (document, "/godot/slot/" + aux + "/name") == "Loin");
+    CHECK (at (document, "/godot/slot/" + aux + "/directOut") == out);
+    CHECK (at (document, "/godot/bus/" + out + "/kind") == "direct");
+
+    //  Its EQ Eight's bell on band 2.
+    CHECK (at (document, "/godot/slot/" + aux + "/eqB2Freq") == "2000");
+    CHECK (at (document, "/godot/slot/" + aux + "/eqB2Gain") == "3");
+
+    //  Its plugin, found in the scan, its state a file beside the show.
+    const auto plugin = idFor ("plugin:return:1:0");
+    REQUIRE (elementOf (document, plugin) == "Plugin");
+    CHECK (parentOf (document, plugin) == aux);
+    CHECK (at (document, "/godot/plugin/" + plugin + "/identifier") == known.identifier);
+    CHECK (at (document, "/godot/plugin/" + plugin + "/preset") == "aux-" + plugin + ".state");
+    REQUIRE (shown.files.size() == 1u);
+    CHECK (shown.files[0].first == "plugins/aux-" + plugin + ".state");
+
+    //  Every send into it is heard.
+    auto sendsIntoAux = 0;
+
+    for (const auto& step : walked.steps)
+        for (const auto& sound : step.sounds)
+        {
+            const auto sendId = idFor (sound.key + ":send:return:1");
+
+            if (! document.findById (sendId).isValid())
+                continue;
+
+            ++sendsIntoAux;
+            CHECK (at (document, "/godot/send/" + sendId + "/bus") == aux);
+            CHECK (at (document, "/godot/send/" + sendId + "/on") != "false");
+        }
+
+    CHECK (sendsIntoAux > 0);
+
+    //  And Live's reverb said, for the author to replace.
+    CHECK (std::any_of (walked.notes.begin(), walked.notes.end(), [] (const Note& note)
+                        { return note.text.find ("Live's own") != std::string::npos; }));
+}
+
+TEST_CASE ("als import: a VST3's state is written as JUCE keeps one, an AU's as it is, a VST2's not at all")
+{
+    PluginInfo vst3 { "VST3", "Verb", {}, "0123456789ABCDEF0123456789ABCDEF", { 1, 2, 3 }, { 4, 5 } };
+    const auto bytes = presetBytesOf (vst3);
+
+    REQUIRE (bytes.size() > 8u);
+    CHECK (bytes[0] == 0x56);
+    CHECK (bytes[1] == 0x43);
+    CHECK (bytes[2] == 0x32);
+    CHECK (bytes[3] == 0x21);
+
+    const std::string text (reinterpret_cast<const char*> (bytes.data() + 8), bytes.size() - 9);
+    const auto xml = juce::parseXML (juce::String::fromUTF8 (text.c_str()));
+    REQUIRE (xml != nullptr);
+    CHECK (xml->hasTagName ("VST3PluginState"));
+
+    juce::MemoryBlock component;
+    REQUIRE (component.fromBase64Encoding (xml->getChildByName ("IComponent")->getAllSubText()));
+    CHECK (component.getSize() == 3u);
+    CHECK (static_cast<const std::uint8_t*> (component.getData())[2] == 3);
+
+    PluginInfo au { "AudioUnit", "Verb", {}, "aufx/verb/Acme", { 9, 8, 7 }, {} };
+    CHECK (presetBytesOf (au) == std::vector<std::uint8_t> { 9, 8, 7 });
+
+    PluginInfo vst2 { "VST", "Verb", "C:/Verb.dll", "1234", { 1 }, {} };
+    CHECK (presetBytesOf (vst2).empty());
+}

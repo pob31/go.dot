@@ -465,10 +465,12 @@ namespace wfg::client::model
             }
         }
 
-        const auto cue = "/godot/cue/" + out.subject.objectId + "/";
+        const auto cue = soundBase (snapshot, out.subject.objectId);
+        const auto aux = isAux (snapshot, out.subject.objectId);
 
-        out.cueName = shownCueName (snapshot, out.subject.objectId);
-        out.cueKind = at (cue + "kind");
+        out.base = cue;
+        out.cueName = aux ? at (cue + "name") : shownCueName (snapshot, out.subject.objectId);
+        out.cueKind = aux ? std::string ("aux") : at (cue + "kind");
 
         if (subject.kind == Subject::Kind::waveform)
         {
@@ -662,8 +664,8 @@ namespace wfg::client::model
             for (const auto& id : out.cues)
                 out.cueLevels.push_back (osc::parseDouble (at ("/godot/cue/" + id + "/level")).value_or (0.0));
 
-            if (out.cueKind != "media" && out.cueKind != "mic")
-                out.notice = "Only an audio or a mic cue has send levels.";
+            if (out.cueKind != "media" && out.cueKind != "mic" && out.cueKind != "aux")
+                out.notice = "Only an audio cue, a mic cue or an aux has send levels.";
             else if (out.sends.empty())
                 out.notice = "This show declares no mix channels yet: add one in Show settings, "
                              "on the Outputs tab.";

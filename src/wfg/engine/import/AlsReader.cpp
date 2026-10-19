@@ -67,6 +67,7 @@ namespace wfg::import::als
             return at (from, path) != nullptr;
         }
 
+
         /*  NUMBERS THROUGH THE ENGINE'S OWN PARSER, which no locale moves: a
             French machine reads "0.5" as a half, as Live wrote it. */
         double number (const juce::XmlElement* from, std::string_view path, double fallback = 0.0,
@@ -99,6 +100,106 @@ namespace wfg::import::als
         std::int64_t whole (const juce::XmlElement* from, std::string_view path)
         {
             return static_cast<std::int64_t> (std::llround (number (from, path, 0.0)));
+        }
+
+        /*  BYTES AS LIVE WRITES THEM: hex in the element's text, broken over
+            lines and indented - every character that is not a hex digit is
+            passed over. An odd digit at the end is dropped. */
+        std::vector<std::uint8_t> hexBytes (const juce::XmlElement* element)
+        {
+            std::vector<std::uint8_t> out;
+
+            if (element == nullptr)
+                return out;
+
+            const auto written = element->getAllSubText().toStdString();
+            int high = -1;
+
+            for (const auto c : written)
+            {
+                const auto digit = c >= '0' && c <= '9' ? c - '0'
+                                 : c >= 'a' && c <= 'f' ? c - 'a' + 10
+                                 : c >= 'A' && c <= 'F' ? c - 'A' + 10
+                                                        : -1;
+
+                if (digit < 0)
+                    continue;
+
+                if (high < 0)
+                {
+                    high = digit;
+                }
+                else
+                {
+                    out.push_back (static_cast<std::uint8_t> (high * 16 + digit));
+                    high = -1;
+                }
+            }
+
+            return out;
+        }
+
+        /*  A FOUR-LETTER CODE from the number Live keeps it as: 'aufx' from
+            1635083896, big end first. */
+        std::string fourCharacters (std::int64_t number)
+        {
+            const auto value = static_cast<std::uint32_t> (number);
+            std::string out;
+
+            for (int shift = 24; shift >= 0; shift -= 8)
+                out.push_back (static_cast<char> ((value >> shift) & 0xffu));
+
+            return out;
+        }
+
+        /*  WHICH PLUGIN, AND ITS STATE (namespace draft §93, AVX), from a
+            device's `PluginDesc`: a VST3's, a VST2's or an AU's. Empty for a
+            device of Live's own. */
+        std::optional<PluginInfo> pluginOf (const juce::XmlElement* element)
+        {
+            if (const auto* vst3 = at (element, "PluginDesc/Vst3PluginInfo"))
+            {
+                PluginInfo info;
+                info.format = "VST3";
+                info.name = text (vst3, "Name");
+
+                for (int field = 0; field < 4; ++field)
+                {
+                    const auto value = static_cast<std::uint32_t> (whole (vst3, "Uid/Fields." + std::to_string (field)));
+                    info.uid += juce::String::toHexString (static_cast<juce::int64> (value)).paddedLeft ('0', 8)
+                                    .toUpperCase().toStdString();
+                }
+
+                const auto* preset = at (vst3, "Preset/Vst3Preset");
+                info.state = hexBytes (at (preset, "ProcessorState"));
+                info.controllerState = hexBytes (at (preset, "ControllerState"));
+                return info;
+            }
+
+            if (const auto* vst2 = at (element, "PluginDesc/VstPluginInfo"))
+            {
+                PluginInfo info;
+                info.format = "VST";
+                info.name = text (vst2, "PlugName");
+                info.path = text (vst2, "Path");
+                info.uid = std::to_string (whole (vst2, "UniqueId"));
+                info.state = hexBytes (at (vst2, "Preset/VstPreset/Buffer"));
+                return info;
+            }
+
+            if (const auto* au = at (element, "PluginDesc/AuPluginInfo"))
+            {
+                PluginInfo info;
+                info.format = "AudioUnit";
+                info.name = text (au, "Name");
+                info.uid = fourCharacters (whole (au, "ComponentType")) + "/"
+                             + fourCharacters (whole (au, "ComponentSubType")) + "/"
+                             + fourCharacters (whole (au, "ComponentManufacturer"));
+                info.state = hexBytes (at (au, "Preset/AuPreset/Buffer"));
+                return info;
+            }
+
+            return std::nullopt;
         }
 
         //======================================================================
@@ -299,6 +400,8 @@ namespace wfg::import::als
                         device.name = text (element, "PluginDesc/AuPluginInfo/Name");
                     if (device.name.empty())
                         device.name = text (element, "UserName");
+
+                    device.plugin = pluginOf (element);
 
                     const auto deviceIndex = index++;
 

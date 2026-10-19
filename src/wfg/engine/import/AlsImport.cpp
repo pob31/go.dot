@@ -252,13 +252,14 @@ namespace wfg::import::als
 
             for (const auto& mix : walked.mixes)
             {
-                if (mix.pair < 0 || sentTo.count (mix.key) == 0)
+                if ((mix.pair < 0 && ! mix.aux) || sentTo.count (mix.key) == 0)
                     continue;
 
-                out << "- **" << mix.name << "**: " << (mix.mono ? "output " + std::to_string (mix.pair + 1)
+                out << "- **" << mix.name << "**: " << (mix.pair < 0 ? std::string ("no output of its own")
+                                                     : mix.mono ? "output " + std::to_string (mix.pair + 1)
                                                                  : "outputs " + std::to_string (2 * mix.pair + 1) + "/"
                                                                      + std::to_string (2 * mix.pair + 2))
-                    << (mix.parked ? " - **parked**: its effects are Live's, its sends are written switched off" : "")
+                    << (mix.aux ? " - **an aux**: a rack channel of its own, its sends heard (namespace draft §93)" : "")
                     << "\n";
             }
 
@@ -358,9 +359,56 @@ namespace wfg::import::als
     }
 
     //==========================================================================
+    std::vector<std::uint8_t> presetBytesOf (const PluginInfo& info)
+    {
+        if (info.state.empty())
+            return {};
+
+        /*  AN AU's class info is a property list, which JUCE's AU loader takes
+            as it is. */
+        if (info.format == "AudioUnit")
+            return info.state;
+
+        if (info.format != "VST3")
+            return {};
+
+        /*  A VST3's two states in the form JUCE's own saves them in - XML with
+            each state in JUCE's base64, behind JUCE's binary header - which the
+            loader's setStateInformation reads back. A .vstpreset would need the
+            class id spelt the way the SDK spells it, which Live's four numbers
+            do not settle. */
+        juce::XmlElement xml ("VST3PluginState");
+
+        juce::MemoryBlock component (info.state.data(), info.state.size());
+        xml.createNewChildElement ("IComponent")->addTextElement (component.toBase64Encoding());
+
+        if (! info.controllerState.empty())
+        {
+            juce::MemoryBlock controller (info.controllerState.data(), info.controllerState.size());
+            xml.createNewChildElement ("IEditController")->addTextElement (controller.toBase64Encoding());
+        }
+
+        //  copyXmlToBinary's shape: its magic, the text's length with its nought, the text, a nought.
+        const auto text = xml.toString (juce::XmlElement::TextFormat().singleLine().withoutHeader()).toStdString();
+        std::vector<std::uint8_t> out;
+
+        const auto little = [&out] (std::uint32_t value)
+        {
+            for (int shift = 0; shift < 32; shift += 8)
+                out.push_back (static_cast<std::uint8_t> ((value >> shift) & 0xffu));
+        };
+
+        little (0x21324356u);
+        little (static_cast<std::uint32_t> (text.size() + 1));
+        out.insert (out.end(), text.begin(), text.end());
+        out.push_back (0);
+        return out;
+    }
+
     BuiltShow build (const LiveSet& set, const Walk& walked, const std::string& listName,
                      const std::map<std::string, std::pair<std::string, int>>& media,
-                     doc::ShowDocument& document)
+                     doc::ShowDocument& document,
+                     const std::vector<plugin::KnownPlugin>& knownPlugins)
     {
         BuiltShow built;
         Identities ids;
@@ -421,23 +469,96 @@ namespace wfg::import::als
                 for (const auto& send : sound.sends)
                     sentTo.insert (send.mix);
 
+        /*  AND WHAT AN AUX SENDS INTO, for every aux something reaches - round
+            again until nothing new is reached (§93). */
+        for (auto grew = true; grew;)
+        {
+            grew = false;
+
+            for (const auto& mix : walked.mixes)
+                if (mix.aux && sentTo.count (mix.key) != 0)
+                    for (const auto& send : mix.sends)
+                        grew = sentTo.insert (send.mix).second || grew;
+        }
+
         std::vector<const Mix*> mixes;
 
         for (const auto& mix : walked.mixes)
-            if (mix.pair >= 0 && sentTo.count (mix.key) != 0)
+            if ((mix.pair >= 0 || mix.aux) && sentTo.count (mix.key) != 0)
                 mixes.push_back (&mix);
 
         std::stable_sort (mixes.begin(), mixes.end(), [] (const Mix* a, const Mix* b)
         {
-            return a->parked != b->parked ? b->parked : a->pair < b->pair;
+            return a->pair < b->pair;
         });
 
         std::map<std::string, std::string> busOf;
         std::vector<std::string> patch;
         std::set<int> patchedPairs;
 
+        /*  WHERE A MIX OR AN AUX'S OUTPUT LANDS: the channels Live patched it
+            to. Two Live put on one pair sum there, which Go.dot allows and says
+            so. */
+        const auto patchPair = [&] (const Mix& mix)
+        {
+            if (mix.mono)
+            {
+                patch.push_back (std::to_string (mix.pair));
+                return;
+            }
+
+            if (! patchedPairs.insert (mix.pair).second)
+                said (Note::Kind::info, -1, mix.name, "shares its outputs with another mix, as in Live: the two sum");
+
+            patch.push_back (std::to_string (2 * mix.pair));
+            patch.push_back (std::to_string (2 * mix.pair + 1));
+        };
+
+        std::vector<std::pair<const Mix*, std::string>> auxes;
+
         for (const auto* mix : mixes)
         {
+            /*  AN AUX (namespace draft §93): its output a direct out of its own
+                on its pair, and the channel the sends reach. */
+            if (mix->aux)
+            {
+                std::string outId;
+
+                if (mix->pair >= 0)
+                {
+                    outId = ids.of ("out:" + mix->key);
+
+                    if (document.createBus ("direct", mix->mono ? 1 : 2, -1, outId).ok)
+                    {
+                        write ("/godot/bus/" + outId + "/name", mix->name, -1);
+                        patchPair (*mix);
+                    }
+                    else
+                    {
+                        outId.clear();
+                    }
+                }
+
+                const auto auxId = ids.of ("aux:" + mix->key);
+                const auto made = document.createRackChannel ("stereo", auxId, "shared");
+
+                if (! made.ok)
+                {
+                    said (Note::Kind::dropped, -1, mix->name, "its aux could not be made (" + made.reason + ")");
+                    continue;
+                }
+
+                write ("/godot/slot/" + auxId + "/name", mix->name, -1);
+                write ("/godot/slot/" + auxId + "/level", number (std::clamp (mix->levelDb, -120.0, 12.0), 2), -1);
+
+                if (! outId.empty())
+                    write ("/godot/slot/" + auxId + "/directOut", outId, -1);
+
+                busOf[mix->key] = auxId;
+                auxes.push_back ({ mix, auxId });
+                continue;
+            }
+
             const auto busId = ids.of ("mix:" + mix->key);
             const auto made = document.createBus ("mix", mix->mono ? 1 : 2, -1, busId);
 
@@ -450,25 +571,77 @@ namespace wfg::import::als
             write ("/godot/bus/" + busId + "/name", mix->name, -1);
             busOf[mix->key] = busId;
 
-            /*  ON THE CHANNELS LIVE PATCHED IT TO - and a parked return on none,
-                since nothing it would carry is heard. Two mixes Live put on one
-                pair sum there, which Go.dot allows and says so. */
-            if (mix->parked)
-            {
-                for (int side = 0; side < (mix->mono ? 1 : 2); ++side)
-                    patch.push_back ("-1");
-            }
-            else if (mix->mono)
-            {
-                patch.push_back (std::to_string (mix->pair));
-            }
-            else
-            {
-                if (! patchedPairs.insert (mix->pair).second)
-                    said (Note::Kind::info, -1, mix->name, "shares its outputs with another mix, as in Live: the two sum");
+            //  ON THE CHANNELS LIVE PATCHED IT TO.
+            patchPair (*mix);
+        }
 
-                patch.push_back (std::to_string (2 * mix->pair));
-                patch.push_back (std::to_string (2 * mix->pair + 1));
+        /*  EACH AUX'S OWN SOUND (§93): its EQ Eight as its EQ when it fits, its
+            plugins found in this machine's scan with the state Live saved, and
+            its sends into the other returns. */
+        for (const auto& [mix, auxId] : auxes)
+        {
+            if (! mix->eqs.empty())
+            {
+                const auto fit = fitEq (*mix->eqs.front());
+
+                for (const auto& [row, value] : fit.rows)
+                    write ("/godot/slot/" + auxId + "/" + row, value, -1);
+
+                for (const auto& unfit : fit.unfit)
+                    said (Note::Kind::approximated, -1, mix->name, "its EQ Eight has " + unfit);
+            }
+
+            for (std::size_t at = 0; at < mix->plugins.size(); ++at)
+            {
+                const auto& info = *mix->plugins[at]->plugin;
+                const auto format = info.format == "AudioUnit" ? std::string ("AU") : info.format;
+
+                if (format != "VST3" && format != "AU")
+                {
+                    said (Note::Kind::dropped, -1, mix->name, "its " + info.name + " is a VST2 plugin, which Go.dot "
+                                                              "does not host: put its VST3 on the aux");
+                    continue;
+                }
+
+                const auto found = std::find_if (knownPlugins.begin(), knownPlugins.end(), [&] (const plugin::KnownPlugin& known)
+                {
+                    return known.format == format
+                             && juce::String::fromUTF8 (known.name.c_str()).trim()
+                                  .equalsIgnoreCase (juce::String::fromUTF8 (info.name.c_str()).trim());
+                });
+
+                if (found == knownPlugins.end())
+                {
+                    said (Note::Kind::dropped, -1, mix->name, "its " + info.name + " (" + format + ") is not in this "
+                                                              "machine's scan: scan in Show settings, Plugins, then put it "
+                                                              "on the aux");
+                    continue;
+                }
+
+                const auto pluginId = ids.of ("plugin:" + mix->key + ":" + std::to_string (at));
+                const auto made = document.createChannelPlugin (auxId, found->name, found->identifier, found->format,
+                                                                found->path, pluginId);
+
+                if (! made.ok)
+                    continue;
+
+                if (const auto bytes = presetBytesOf (info); ! bytes.empty())
+                {
+                    const auto file = "aux-" + pluginId + ".state";
+                    built.files.push_back ({ "plugins/" + file, bytes });
+                    write ("/godot/plugin/" + pluginId + "/preset", file, -1);
+                }
+            }
+
+            for (const auto& send : mix->sends)
+            {
+                const auto target = busOf.find (send.mix);
+
+                if (target == busOf.end())
+                    continue;
+
+                document.createSend (auxId, target->second, ids.of ("auxsend:" + mix->key + ":" + send.mix),
+                                     number (std::clamp (send.levelDb, -120.0, 12.0), 2));
             }
         }
 
@@ -872,18 +1045,26 @@ namespace wfg::import::als
             report beside it. */
         ImportOutcome writeShow (const juce::File& setFile, const LiveSet& set, const Walk& walked,
                                  std::vector<Note> notes, const Placed& placed, const juce::File& folder,
-                                 const std::string& listName)
+                                 const std::string& listName, const std::vector<plugin::KnownPlugin>& knownPlugins)
         {
             ImportOutcome outcome;
             outcome.missingMedia = placed.missing;
             notes.insert (notes.end(), placed.notes.begin(), placed.notes.end());
 
             doc::ShowDocument document;
-            const auto built = build (set, walked, listName, placed.media, document);
+            const auto built = build (set, walked, listName, placed.media, document, knownPlugins);
             notes.insert (notes.end(), built.notes.begin(), built.notes.end());
 
             const auto saved = import::saveShow (document, folder, "set");
             outcome.problems = saved.problems;
+
+            /*  THE FILES THE SHOW NAMES BESIDE IT: an aux's plugin's state (§93). */
+            for (const auto& [path, bytes] : built.files)
+            {
+                const auto file = folder.getChildFile (juce::String::fromUTF8 (path.c_str()));
+                file.getParentDirectory().createDirectory();
+                file.replaceWithData (bytes.data(), bytes.size());
+            }
 
             if (! saved.ok)
             {
@@ -1008,7 +1189,7 @@ namespace wfg::import::als
 
         say ("writing the show");
         outcome = writeShow (setFile, set, walked, walked.notes, placed, options.into,
-                             setFile.getFileNameWithoutExtension().toStdString());
+                             setFile.getFileNameWithoutExtension().toStdString(), options.knownPlugins);
         say ("done");
         return outcome;
     }
@@ -1153,7 +1334,7 @@ namespace wfg::import::als
                 return failed;
             }
 
-            return writeShow (sets[index], set, walked, notes, placed, folder, listName);
+            return writeShow (sets[index], set, walked, notes, placed, folder, listName, options.knownPlugins);
         };
 
         //  --- The template, in the show folder ---------------------------------

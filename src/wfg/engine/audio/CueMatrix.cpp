@@ -123,6 +123,8 @@ namespace wfg::audio
             if (output[out] != nullptr)
                 juce::FloatVectorOperations::clear (output[out], numSamples);
 
+        wroteLastBlock = false;
+
         if (frames <= 0 || inputs <= 0 || outputs <= 0 || input == nullptr)
             return;
 
@@ -165,6 +167,8 @@ namespace wfg::audio
 
                 if (smoother.isSmoothing())
                 {
+                    wroteLastBlock = true;
+
                     /*  Per sample only while it is actually moving. This is the
                         expensive path and it lasts 50 ms after a change. */
                     for (int n = 0; n < frames; ++n)
@@ -178,8 +182,11 @@ namespace wfg::audio
                         feeds two destinations out of sixty-four - so skipping
                         it is not a micro-optimisation, it is the common case. */
                     if (! juce::exactlyEqual (steady, 0.0f))
+                    {
+                        wroteLastBlock = true;
                         juce::FloatVectorOperations::addWithMultiply (destination, source,
                                                                       steady, frames);
+                    }
                 }
             }
 

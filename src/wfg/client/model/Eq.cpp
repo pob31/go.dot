@@ -85,16 +85,21 @@ namespace wfg::client::model
         if (cueId.empty())
             return out;
 
+        /*  AN AUX'S ROWS ARE AT ITS SLOT (namespace draft §93), a cue's at
+            the cue: every row below is read from the one base. */
+        const auto base = soundBase (snapshot, cueId);
+        const auto rowAt = [&base] (const std::string& row) { return base + row; };
+
         /*  THE ROWS EXIST ONLY ON A MEDIA CUE, and `eqOn` is the one asked
             first: a cue with no such node has no EQ, whatever its kind word
             says, and the rest are read against the defaults the table gives
             them - which is what a flat EQ is, and what a saved one that was
             never touched reads as. */
-        const auto on = flag (snapshot, eqAddress (cueId, "eqOn"));
+        const auto on = flag (snapshot, rowAt ("eqOn"));
 
         if (on == Flag::unsaid)
         {
-            out.notice = "Only an audio or a mic cue has an EQ.";
+            out.notice = "Only an audio cue, a mic cue or an aux has an EQ.";
             return out;
         }
 
@@ -102,14 +107,14 @@ namespace wfg::client::model
 
         const auto number = [&] (const std::string& row, float fallback)
         {
-            const auto reading = text (snapshot, eqAddress (cueId, row));
+            const auto reading = text (snapshot, rowAt (row));
             const auto value = osc::parseDouble (reading);
             return value.has_value() ? static_cast<float> (*value) : fallback;
         };
 
         const auto isYes = [&] (const std::string& row)
         {
-            return flag (snapshot, eqAddress (cueId, row)) == Flag::yes;
+            return flag (snapshot, rowAt (row)) == Flag::yes;
         };
 
         auto& s = out.settings;
@@ -128,13 +133,13 @@ namespace wfg::client::model
 
             /*  A BAND'S SWITCH is on unless the tree says off: a switch it
                 has not published is the default, which is in. */
-            b.on = flag (snapshot, eqAddress (cueId, eqBandRow (band, "On"))) != Flag::no;
+            b.on = flag (snapshot, rowAt (eqBandRow (band, "On"))) != Flag::no;
         }
 
-        s.band[0].shape = eqShapeFor (text (snapshot, eqAddress (cueId, "eqB1Shape")));
-        s.band[3].shape = eqShapeFor (text (snapshot, eqAddress (cueId, "eqB4Shape")));
+        s.band[0].shape = eqShapeFor (text (snapshot, rowAt ("eqB1Shape")));
+        s.band[3].shape = eqShapeFor (text (snapshot, rowAt ("eqB4Shape")));
 
-        out.live = text (snapshot, eqAddress (cueId, "live"));
+        out.live = text (snapshot, rowAt ("live"));
 
         return out;
     }
@@ -143,7 +148,9 @@ namespace wfg::client::model
     {
         /*  THE TARGET'S EQ WITH THE FADE'S ROWS OVER IT (namespace draft §26,
             PH): what the fade arrives at, drawn as the curve it is. */
-        const auto targetId = text (snapshot, "/godot/cue/" + fadeId + "/target");
+        //  Or the aux it moves (namespace draft §93), which has an EQ of its own.
+        const auto auxId = text (snapshot, "/godot/cue/" + fadeId + "/aux");
+        const auto targetId = ! auxId.empty() ? auxId : text (snapshot, "/godot/cue/" + fadeId + "/target");
 
         if (! text (snapshot, "/godot/cue/" + fadeId + "/dca").empty())
         {

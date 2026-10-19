@@ -97,6 +97,10 @@ has stood in front of the thing.
   changes the show follows it and resamples.
 - **Live inputs.** Mic cues on named rack channels, through plugins; and live
   sampling — a take recorded during the show, then looped, layered or cleared.
+- **Aux channels** (namespace draft §93). Shared rack channels the media and mic
+  cues send into - a reverb or a delay return - each with its own plugins, EQ,
+  level, output and sends, held by the show and moved for the night by fades;
+  an imported Live set's effects returns become auxes.
 - **Carts and bindings** (namespace draft §74). A cart is a list GO never
   meets, for cues fired out of order - by a trigger, a key, or the Android
   remote's Cart tab - holding any kind of cue, a group being a macro; its

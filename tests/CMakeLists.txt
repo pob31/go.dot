@@ -85,6 +85,8 @@ add_executable(wfg_tests
     TreeTests.cpp
     PublishCostTests.cpp
     AudioTests.cpp
+    AuxTests.cpp
+    AuxRunTests.cpp
     CueMatrixTests.cpp
     CueEqTests.cpp
     LooperTests.cpp

@@ -121,6 +121,9 @@ namespace wfg::audio
             stop now with the output silenced and those emptied - the inserts
             unless the voice was silent already - killTrack. */
         int rackTrackOf (const std::string& channelId) const override;
+        int auxColumnOf (const std::string& channelId) const override;
+        void openAux (int track) override;
+        bool isAuxOpen (int track) const override;
         bool openLive (int track, std::int64_t sample, double fadeInSeconds) override;
         void shutLive (int track, double seconds) override;
         bool kill (int track) override;

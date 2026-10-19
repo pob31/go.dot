@@ -120,7 +120,7 @@ namespace wfg::client::ui
                 inSwitch.onClick = [this]
                 {
                     if (owner.actions.set)
-                        owner.actions.set (model::eqAddress (owner.reading.subject.objectId, "eqOn"),
+                        owner.actions.set (owner.reading.rowAt ("eqOn"),
                                            inSwitch.getToggleState() ? "true" : "false");
                 };
 

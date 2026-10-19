@@ -568,6 +568,16 @@ namespace wfg::cue
             stop alone. Defaults a test's player is complete with: the default
             kill is the stop. */
         virtual int rackTrackOf (const std::string&) const { return -1; }
+
+        /*  THE AUXES (namespace draft §93): where an aux's input begins in a
+            track's routing - a coefficient aimed at it plus c is a send into
+            channel c of that aux - or -1 for an aux the graph was built
+            without, and for a player with no aux at all. An aux's own track is
+            `rackTrackOf`. A double Esc's sweep shuts every aux
+            (`resetEffects`); the next GO opens them again. */
+        virtual int auxColumnOf (const std::string&) const { return -1; }
+        virtual void openAux (int) {}
+        virtual bool isAuxOpen (int) const { return true; }
         virtual bool openLive (int track, std::int64_t sample, double) { return launchAtSample (track, 0, sample); }
         virtual void shutLive (int, double) {}
         virtual bool kill (int track) { return stop (track); }
@@ -2620,6 +2630,48 @@ namespace wfg::cue
             silence, a plugin value it has not set at the catalogue's default. */
         double movedValueNow (const Run& run, const std::string& entry) const;
 
+        /*  The same for any element holding a sound - a cue's, or an aux's
+            (namespace draft §93) - with what has moved it tonight. `level` is
+            the element's own level. */
+        double movedValueOf (const std::string& cueId, const std::map<std::string, double>& moved,
+                             const std::string& entry) const;
+
+        /*  A FADE AIMED AT AN AUX (`fade/aux`, namespace draft §93, AVU): its
+            level and the entries listed move from wherever they stand tonight
+            to where the fade says, one job each under the fade's one report.
+            No run to find and nothing to stop: the show holds an aux. */
+        void beginAuxFade (std::int64_t tick, const std::string& auxId, const std::string& selfRunId,
+                           bool levelOn, double toDb, const std::vector<FadeMove>& moves,
+                           double seconds, FadeCurve curve, std::vector<doc::FadePoint> points);
+
+        /*  THE AUXES' OWN SOUND, ONE TICK (namespace draft §93): every aux the
+            graph was built with given its level, routing, EQ and inserts - the
+            show's, with what a fade has moved tonight on top - where they
+            changed. An aux a double Esc shut stays so until the next GO, which
+            opens it again at the show's values (AWA). */
+        void applyAuxes();
+
+        /*  WHAT THE RUNNER HOLDS OF AN AUX: the track it was built as and the
+            audio side that built it, what fades have moved tonight, what was
+            last sent, and whether a double Esc shut it - with the GO it was
+            shut under, so the next one opens it. */
+        struct AuxState
+        {
+            int track = -1;
+            std::uint64_t epoch = 0;
+            std::map<std::string, double> moved;
+            double level = 0.0;
+            bool levelSent = false;
+            std::vector<FxSetting> fx;
+            bool fxSent = false;
+            std::uint64_t routingAt = 0, eqAt = 0, fxAt = 0;
+            bool shut = false;
+            std::uint64_t shutUnderGo = 0;
+        };
+
+        std::map<std::string, AuxState> auxes;
+        std::uint64_t auxMovedRevision = 1;
+
         /** Every move job on a run let go - Esc's, for what it leaves where it is (PD). */
         void releaseMovesOf (const std::string& runId);
 
@@ -4389,6 +4441,10 @@ namespace wfg::cue
                 §26, PE): its entry, and the domain it travels in. */
             std::string move;
             MoveDomain moveDomain = MoveDomain::linear;
+
+            /*  Or an aux's (namespace draft §93): its identifier, `move` the
+                entry - `level` among them. */
+            std::string aux;
             double from = 0.0, goTo = 0.0;
             std::int64_t atTick = 0;
             std::optional<FadeJob> superseded;

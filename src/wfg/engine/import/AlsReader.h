@@ -169,6 +169,22 @@ namespace wfg::import::als
         double q = 0.7071;
     };
 
+    /*  A PLUGIN OF SOMEBODY ELSE'S, as Live saved it (namespace draft §93,
+        AVX): which plugin, and the state it was left in. `uid` is what names it
+        to its format - a VST3's class id as 32 hex digits, a VST2's unique id
+        as a number, an AU's type, subtype and manufacturer as three four-letter
+        codes. `state` is the bytes Live kept: a VST3's processor state (and
+        `controllerState` beside it), a VST2's chunk or an AU's class info. */
+    struct PluginInfo
+    {
+        std::string format;         ///< "VST3", "VST" or "AudioUnit"
+        std::string name;
+        std::string path;           ///< a VST2's file, as the machine that saved it had it
+        std::string uid;
+        std::vector<std::uint8_t> state;
+        std::vector<std::uint8_t> controllerState;
+    };
+
     struct Device
     {
         std::string kind;           ///< Live's element: `Eq8`, `Reverb`, `PluginDevice`...
@@ -176,6 +192,7 @@ namespace wfg::import::als
         bool on = true;
         std::map<std::string, double> values;   ///< every automatable number by its path, as saved
         std::vector<EqBand> bands;  ///< an EQ Eight's eight, empty for anything else
+        std::optional<PluginInfo> plugin;       ///< a third-party plugin's, empty for Live's own
     };
 
     /*  WHERE A TRACK'S SOUND GOES OR COMES FROM, in Live's words: `None`, a

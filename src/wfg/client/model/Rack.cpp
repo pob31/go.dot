@@ -136,9 +136,10 @@ namespace wfg::client::model
             row.name = text (snapshot, base + "name");
             row.channelClass = text (snapshot, base + "class");
             row.latencySamples = static_cast<int> (numberOf (text (snapshot, base + "latencySamples"), 0.0));
+            row.aux = text (snapshot, base + "access") == "shared";
 
             if (row.name.empty())
-                row.name = "Channel " + std::to_string (out.channels.size() + 1);
+                row.name = (row.aux ? "Aux " : "Channel ") + std::to_string (out.channels.size() + 1);
 
             if (row.channelClass.empty())
                 row.channelClass = "mono";

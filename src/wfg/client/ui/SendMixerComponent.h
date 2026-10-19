@@ -79,6 +79,10 @@ namespace wfg::client::ui
 
             /** A click or a touch on a strip: its level on the master dial (2026-09-26). */
             std::function<void (const std::string& address)> dial;
+
+            /*  A CLICK ON AN AUX'S NAME (namespace draft §93): the panel opens on
+                that aux's own sends, its level and where it goes. */
+            std::function<void (const std::string& auxId)> openAux;
         };
 
         SendMixerComponent (const model::Theme&, Actions);

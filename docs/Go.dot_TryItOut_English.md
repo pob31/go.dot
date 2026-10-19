@@ -120,6 +120,7 @@ Everything below is built. Sections marked new arrived after v0.1 and need the n
 | Feature | What it does | Where |
 | --- | --- | --- |
 | Mic cues | Bring a named input up through a rack channel with its own plugins | *Add > mic*; *Show settings > Inputs*, *Rack* |
+| Aux channels (new) | A reverb or delay return the cues send into: its own plugins, level, output and sends, kept with the show; a fade can move them for the night. Click an aux's name in a cue's sends panel to open the aux itself | *Show settings > Rack*: + Mono aux, + Stereo aux; a cue's *sends* panel |
 | Live sampling | Record sound during the show, then loop it, overdub it or clear it | *Take* panel; *transport > On a take* |
 | Live recorder | Keep the moment of every cue you fire during a run, as a take | Ctrl+Shift+R |
 
@@ -223,7 +224,7 @@ Right-click a cue in the list, or a port in the Serial tab, and choose *Copy for
 ### Importing QLab and Ableton Live shows (new)
 
 - **QLab**: File > Import QLab workspace… reads a QLab 4 or 5 workspace file directly, with no QLab needed. Tick the cue lists you want; Go.dot writes a new show (cues, groups, levels, fades, routing and targets) and a report of what it could not carry over. Text and video cues come over too (new): each QLab stage becomes a canvas of its size, its outputs waiting for a projector to be picked, and movies, stills and titles are placed and faded as in QLab. Some of QLab's own numbers are still being checked against a test workspace, and the report names the fonts a title uses that this machine has not got.
-- **Ableton Live**: the importer unzips the .als file (a gzipped XML document) and reads the XML inside to turn the Live set into cues and groups, so a show built in a session can move to the cue list. One scene is one GO, and the silent "track in" clips become the fades they stand for. It reads Live 10 to 12, turns a tour into one show with a performance per venue, and lives under File > Import Ableton Live set…
+- **Ableton Live**: the importer unzips the .als file (a gzipped XML document) and reads the XML inside to turn the Live set into cues and groups, so a show built in a session can move to the cue list. One scene is one GO, and the silent "track in" clips become the fades they stand for. It reads Live 10 to 12, turns a tour into one show with a performance per venue, and lives under File > Import Ableton Live set… A return with effects on it now comes over as an aux, its sends heard: Live's own effects (Reverb, Delay…) cannot be loaded outside Live, so the aux is left empty for a plugin of yours, and the report says which ones were there.
 
 ### Keeping the show safe
 

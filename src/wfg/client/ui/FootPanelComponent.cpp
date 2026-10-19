@@ -412,6 +412,11 @@ namespace wfg::client::ui
                 };
 
                 mixing.dial = actions.dial;
+                mixing.openAux = [this] (const std::string& auxId)
+                {
+                    if (actions.openSubject)
+                        actions.openSubject ({ model::Subject::Kind::sends, auxId });
+                };
 
                 sends = std::make_unique<SendMixerComponent> (theme, std::move (mixing));
                 sends->showDial (dialed);

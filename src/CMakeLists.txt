@@ -298,6 +298,10 @@ add_library(wfg_engine STATIC
     wfg/engine/audio/AudioCommands.cpp
     wfg/engine/audio/AudioHost.h
     wfg/engine/audio/AudioHost.cpp
+    wfg/engine/audio/AuxBus.h
+    wfg/engine/audio/AuxBus.cpp
+    wfg/engine/audio/AuxPlugins.h
+    wfg/engine/audio/AuxPlugins.cpp
     wfg/engine/audio/CueMatrix.h
     wfg/engine/audio/CueMatrix.cpp
     wfg/engine/audio/EqSettings.h

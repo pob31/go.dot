@@ -385,7 +385,7 @@ namespace wfg::client::ui
                 const auto* editor = box->value.getCurrentTextEditor();
                 const auto said = juce::String (numberText (box->current(), box->decimals));
                 const auto onTheDial = ! dialed.empty() && ! reading.subject.objectId.empty()
-                                         && model::eqAddress (reading.subject.objectId, box->row) == dialed;
+                                         && reading.rowAt (box->row) == dialed;
 
                 if (editor == nullptr || ! onTheDial || editor->getText() != box->value.getText()
                     || said == box->value.getText())
@@ -451,7 +451,7 @@ namespace wfg::client::ui
             return;
         }
 
-        actions.set (model::eqAddress (reading.subject.objectId, row), text);
+        actions.set (reading.rowAt (row), text);
     }
 
     void EqPanelComponent::dialRow (const std::string& row)
@@ -462,7 +462,7 @@ namespace wfg::client::ui
             return;
 
         if (actions.dial && ! reading.subject.objectId.empty())
-            actions.dial (model::eqAddress (reading.subject.objectId, row));
+            actions.dial (reading.rowAt (row));
     }
 
     void EqPanelComponent::markDial()
@@ -470,7 +470,7 @@ namespace wfg::client::ui
         for (auto& box : boxes)
         {
             const auto on = ! dialed.empty() && ! reading.subject.objectId.empty()
-                              && model::eqAddress (reading.subject.objectId, box->row) == dialed;
+                              && reading.rowAt (box->row) == dialed;
             box->value.setColour (juce::Label::outlineColourId,
                                   on ? Look::colour (theme, "picked") : juce::Colours::transparentBlack);
         }
@@ -863,9 +863,9 @@ namespace wfg::client::ui
                 const auto freq = std::clamp (static_cast<double> (band.freq), lowestHz, highestHz);
                 const auto gain = std::clamp (static_cast<double> (band.gain), -rangeDb, rangeDb);
 
-                actions.setMany ({ { model::eqAddress (reading.subject.objectId, model::eqBandRow (dragged, "Freq")),
+                actions.setMany ({ { reading.rowAt (model::eqBandRow (dragged, "Freq")),
                                      numberText (freq, 0) },
-                                   { model::eqAddress (reading.subject.objectId, model::eqBandRow (dragged, "Gain")),
+                                   { reading.rowAt (model::eqBandRow (dragged, "Gain")),
                                      numberText (gain, 1) } });
             }
             else

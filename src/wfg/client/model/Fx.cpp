@@ -211,11 +211,14 @@ namespace wfg::client::model
             return out;
         }
 
-        const auto kind = text (snapshot, "/godot/cue/" + cueId + "/kind");
+        /*  AN AUX (namespace draft §93) has inserts of its own: its chain's. */
+        const auto aux = isAux (snapshot, cueId);
+        const auto auxBase = "/godot/slot/" + cueId + "/";
+        const auto kind = aux ? std::string ("aux") : text (snapshot, "/godot/cue/" + cueId + "/kind");
 
-        if (kind != "media" && kind != "mic")
+        if (kind != "media" && kind != "mic" && kind != "aux")
         {
-            out.notice = "Inserts belong to audio and mic cues; this cue plays no sound.";
+            out.notice = "Inserts belong to audio cues, mic cues and auxes; this cue plays no sound.";
             return out;
         }
 
@@ -226,7 +229,19 @@ namespace wfg::client::model
             plays through (Phase 9b, decision BX), in that channel's order. */
         std::vector<std::string> order;
 
-        if (kind == "mic")
+        if (kind == "aux")
+        {
+            order = words (text (snapshot, auxBase + "plugins"));
+
+            if (order.empty())
+            {
+                const auto called = text (snapshot, auxBase + "name");
+                out.notice = (called.empty() ? std::string ("This aux") : called)
+                               + " carries no plugins yet: Show settings, Rack.";
+                return out;
+            }
+        }
+        else if (kind == "mic")
         {
             const auto channel = text (snapshot, "/godot/cue/" + cueId + "/channel");
 
@@ -271,6 +286,16 @@ namespace wfg::client::model
         out.chainChannels = integer (snapshot, "/godot/cue/" + cueId + "/chainChannels");
         out.insertLatency = integer (snapshot, "/godot/cue/" + cueId + "/insertLatency");
         out.sampleRate = integer (snapshot, "/godot/engine/sampleRate");
+
+        /*  AN AUX'S SOURCE IS WHAT IS SENT TO IT, as wide as its class takes in,
+            on a rack track two channels wide (§93). */
+        if (kind == "aux")
+        {
+            out.source = "sends";
+            out.fileChannels = text (snapshot, auxBase + "class") == "stereo" ? 2 : 1;
+            out.chainChannels = 2;
+            out.insertLatency = integer (snapshot, auxBase + "latencySamples");
+        }
 
         /*  A MIC CUE'S SOURCE IS ITS INPUT, as wide as the input is, and its
             path is said against the interface's delays and the budget. */

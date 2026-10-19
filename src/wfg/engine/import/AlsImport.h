@@ -30,7 +30,12 @@
     - one list, named after the set;
     - a mix bus for every mix something is sent to, in the order of the
       interface pairs Live patched them to, and `audio/outputPatch` putting
-      each back on those channels - a parked return on none (QK, QE);
+      each back on those channels (QK);
+    - an AUX for every return that carries devices or sends into another
+      (namespace draft §93): a shared rack channel with a direct out on the
+      pair Live patched the return to, its level, its EQ Eight as its EQ, its
+      third-party plugins found in this machine's scan and put on its chain with
+      the state Live saved, and its own sends;
     - a DCA for every track whose fader a hand rode (QN);
     - a GO per step of the walk: the one cue the scene makes, numbered, or a
       timeline group of its sounds, fades and stops, numbered, named after the
@@ -45,9 +50,11 @@
 
 #include <wfg/engine/import/AlsReader.h>
 #include <wfg/engine/import/AlsWalk.h>
+#include <wfg/engine/plugin/PluginScan.h>
 
 #include <juce_core/juce_core.h>
 
+#include <cstdint>
 #include <functional>
 #include <map>
 #include <optional>
@@ -84,6 +91,11 @@ namespace wfg::import::als
         std::set<int> scenes;           ///< empty: `defaultScenes`
         bool copyMedia = true;
         Laws laws;
+
+        /*  WHAT THIS MACHINE'S SCAN FOUND (namespace draft §93, AVX), which a
+            return's plugin is looked for in by its format and its name. Empty,
+            a return's plugin is said and not carried. */
+        std::vector<plugin::KnownPlugin> knownPlugins;
 
         /*  A sentence at each step - reading, walking, each sound copied -
             from whichever thread runs the import. */
@@ -145,9 +157,20 @@ namespace wfg::import::als
         std::vector<Note> notes;
         int gos = 0;
         int sounds = 0;
+
+        /*  FILES THE SHOW NEEDS BESIDE IT, by their path in the bundle: an aux's
+            plugin's state as Live saved it, under `plugins/` (§93). */
+        std::vector<std::pair<std::string, std::vector<std::uint8_t>>> files;
     };
 
     BuiltShow build (const LiveSet&, const Walk&, const std::string& listName,
                      const std::map<std::string, std::pair<std::string, int>>& media,
-                     doc::ShowDocument& document);
+                     doc::ShowDocument& document,
+                     const std::vector<plugin::KnownPlugin>& knownPlugins = {});
+
+    /*  A PLUGIN'S STATE AS GO.DOT'S LOADER TAKES IT, from what Live saved (§93,
+        AVX): a VST3's processor and controller states in JUCE's own wrapping,
+        an AU's class info as it is. Empty for a format Go.dot does not host -
+        a VST2 - or a plugin Live saved nothing for. */
+    std::vector<std::uint8_t> presetBytesOf (const PluginInfo&);
 }

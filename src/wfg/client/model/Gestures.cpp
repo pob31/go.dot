@@ -178,6 +178,11 @@ namespace wfg::client::gesture
         return { origin::window, "channel.create", { osc::Value::string (channelClass) } };
     }
 
+    Event createAux (const std::string& channelClass)
+    {
+        return { origin::window, "aux.create", { osc::Value::string (channelClass) } };
+    }
+
     Event createChannelPlugin (const std::string& channelId, const std::string& name,
                                const std::string& identifier, const std::string& format,
                                const std::string& path)

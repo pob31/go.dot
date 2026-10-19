@@ -2384,6 +2384,12 @@
         <ref name="identifier"/>
       </attribute>
       <optional>
+        <attribute name="aux">
+          <a:documentation>The aux whose own sound this fade moves, by identifier, instead of a cue&apos;s (namespace draft §93, AVU): its level, and the sends, EQ numbers and plugin values the fade lists, for tonight - never the show&apos;s. When it is set, target is not read: an aux has no run to find, the show holds it, so the fade moves it whether or not anything is sending into it. A double Esc puts every aux back where the show holds it.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="colour">
           <a:documentation>A #RRGGBB decoration. Never the sole carrier of information.</a:documentation>
           <data type="string"/>
@@ -3965,7 +3971,7 @@
       </attribute>
       <optional>
         <attribute name="access">
-          <a:documentation>Whether a cue holds this channel alone. A per-source insert is exclusive and is allocated; a reverb many cues send into is SHARED, which PRD 3.9e says is a bus with a chain rather than a slot - declared and published here, and never claimed.</a:documentation>
+          <a:documentation>Whether a cue holds this channel alone. A per-source insert is exclusive and is allocated - a mic cue&apos;s channel. A SHARED channel is an AUX (namespace draft §93): a reverb or a delay many cues send into, a bus with a chain (PRD 3.9e) that nobody claims. Its input is the sum of the sends aimed at it, its own sound - level, direct out, EQ, sends, routes and inserts - is held on the channel and moved by fades for the night.</a:documentation>
           <choice>
             <value>exclusive</value>
             <value>shared</value>
@@ -3983,6 +3989,225 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="dca">
+          <a:documentation>The DCA this cue is assigned to, by identifier, or empty. A mark on the member and never a list on the DCA (PRD 3.28), so assigning eight cues is a multi-select edit and nothing flows downward (4.12). Adds that DCA&apos;s trim, and the trim of every DCA it sits inside, to the level of every run of this cue - level only, one to one in dB, and the mark&apos;s own dcaOffset beside them (namespace draft 50), which never lifts a DCA at the bottom.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="directOut">
+          <a:documentation>The direct out this cue-s channels land on, by identifier; empty routes it nowhere by this road and is what every cue starts as. A mono cue feeds every channel of a stereo out; a stereo cue onto a mono out is folded, each side at half (2026-10-08); any other cue wider than its out fails the run as bad-route, because which side a third channel belongs to is a layout somebody has to say. Chosen among the outputs whose kind is direct - a mix channel is reached through a Send, at a level, which is the whole difference between the two.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB1Freq">
+          <a:documentation>The centre of band one, or the corner of its shelf.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">20</param>
+            <param name="maxInclusive">20000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB1Gain">
+          <a:documentation>The gain of band one. Nought is the band out of the signal, which is what every band starts at and rests at (PRD 4.6): a peak at nought is no peak.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-24</param>
+            <param name="maxInclusive">24</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB1On">
+          <a:documentation>Whether band one is in the signal. Off takes the band out and keeps its shape, frequency, gain and width, so switching it back on brings back the same band - the press of its gain rotary on a surface page (author, 2026-09-25). A switch rather than the gain parked at nought, for the reason eqHpf gives: a press that moved a number would move it somewhere, and the number is what somebody decided.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB1Q">
+          <a:documentation>The width of band one: higher is narrower. 0.7 is a gentle bell, 5 is a notch. On a shelf it sets how steep the corner is.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0.1</param>
+            <param name="maxInclusive">10</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB1Shape">
+          <a:documentation>What band one is: a peak, or a shelf that lifts or drops everything below its frequency. The low band is the one that wants to be a shelf.</a:documentation>
+          <choice>
+            <value>peak</value>
+            <value>lowShelf</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB2Freq">
+          <a:documentation>The centre of band two. Always a peak.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">20</param>
+            <param name="maxInclusive">20000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB2Gain">
+          <a:documentation>The gain of band two; nought is out.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-24</param>
+            <param name="maxInclusive">24</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB2On">
+          <a:documentation>Whether band two is in the signal. Off takes the band out and keeps its shape, frequency, gain and width, so switching it back on brings back the same band - the press of its gain rotary on a surface page (author, 2026-09-25).</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB2Q">
+          <a:documentation>The width of band two.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0.1</param>
+            <param name="maxInclusive">10</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB3Freq">
+          <a:documentation>The centre of band three. Always a peak.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">20</param>
+            <param name="maxInclusive">20000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB3Gain">
+          <a:documentation>The gain of band three; nought is out.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-24</param>
+            <param name="maxInclusive">24</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB3On">
+          <a:documentation>Whether band three is in the signal. Off takes the band out and keeps its shape, frequency, gain and width, so switching it back on brings back the same band - the press of its gain rotary on a surface page (author, 2026-09-25).</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB3Q">
+          <a:documentation>The width of band three.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0.1</param>
+            <param name="maxInclusive">10</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB4Freq">
+          <a:documentation>The centre of band four, or the corner of its shelf.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">20</param>
+            <param name="maxInclusive">20000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB4Gain">
+          <a:documentation>The gain of band four; nought is out.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-24</param>
+            <param name="maxInclusive">24</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB4On">
+          <a:documentation>Whether band four is in the signal. Off takes the band out and keeps its shape, frequency, gain and width, so switching it back on brings back the same band - the press of its gain rotary on a surface page (author, 2026-09-25).</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB4Q">
+          <a:documentation>The width of band four, or the steepness of its shelf.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0.1</param>
+            <param name="maxInclusive">10</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB4Shape">
+          <a:documentation>What band four is: a peak, or a shelf over everything above its frequency. The high band is the one that wants to be a shelf.</a:documentation>
+          <choice>
+            <value>peak</value>
+            <value>highShelf</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqHpf">
+          <a:documentation>Whether the high-pass is in. A flag rather than a frequency parked at the band edge, because the click of a rotary switches a filter in and out, and a click that moved a frequency would move it somewhere.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqHpfFreq">
+          <a:documentation>Where the high-pass turns over: second-order Butterworth, -3 dB here and 12 dB an octave below. 80 Hz takes the rumble out of a voice.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">20</param>
+            <param name="maxInclusive">2000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqLpf">
+          <a:documentation>Whether the low-pass is in. As eqHpf.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqLpfFreq">
+          <a:documentation>Where the low-pass turns over, second-order. 12 kHz takes the hiss off a recording without dulling it.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">1000</param>
+            <param name="maxInclusive">20000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqOn">
+          <a:documentation>Whether the EQ of this cue is in the signal at all. Off, every band is skipped and the audio passes untouched - the A/B a designer reaches for. On with every band flat is the same sound and the same bytes, by construction.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="layers">
           <a:documentation>How many passes the recorder keeps on top of the take, each undoable one at a time (decision CA). A channel that has used them all refuses another pass, in words, until one is undone or the take cleared. Part of the memory the take sets aside; a change takes effect at Load now.</a:documentation>
           <data type="integer">
@@ -3992,9 +4217,36 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="level">
+          <a:documentation>The level the cue plays at, as decided. Not what it is doing: a fade writes run/&lt;id&gt;/level and leaves this alone, so the document keeps saying what somebody chose while the run says what is happening. -120 dB is silence rather than a very small number.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-120</param>
+            <param name="maxInclusive">12</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="name">
           <a:documentation>What the designer called it. PRD 3.9b: the names appear in the dropdown and on the OLED, and the channel numbers do not - -Voix solo- is what somebody wrote down and -input 3- is a fact about a patch that will change.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="sharedOut">
+          <a:documentation>This cue is MEANT to share its direct out with another. PRD 3.9c-s -allow marking deliberate sharing-, as feed/shared already gives a processor slot: the live-range analysis is conservative by design and reports overlaps it cannot prove impossible, so this is how a designer says of one pair that they considered it. It silences that pair-s warning and NOTHING ELSE - the menu still marks the out as taken, because which outs carry sound is a fact and the warning is a complaint, and only a complaint can be answered.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="stereoToMono">
+          <a:documentation>Retired 2026-10-08 and read by nothing: it asked for a two-channel file to be folded onto a mono output, each side at half, and without it the run failed. The routing now folds a stereo cue onto any one-channel output by itself (namespace draft 42), so the switch had only an error left to choose. Kept so a show that set it still opens; no window offers it.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
         </attribute>
       </optional>
       <optional>
@@ -4007,7 +4259,12 @@
         </attribute>
       </optional>
       <zeroOrMore>
-        <ref name="Plugin"/>
+        <choice>
+          <ref name="Plugin"/>
+          <ref name="Route"/>
+          <ref name="Send"/>
+          <ref name="Fx"/>
+        </choice>
       </zeroOrMore>
     </element>
   </define>

@@ -78,6 +78,16 @@ namespace wfg::client::model
         return text (snapshot, base + "autoName");
     }
 
+    bool isAux (const tree::TreeSnapshot& snapshot, std::string_view id)
+    {
+        return ! id.empty() && text (snapshot, "/godot/slot/" + std::string (id) + "/access") == "shared";
+    }
+
+    std::string soundBase (const tree::TreeSnapshot& snapshot, std::string_view id)
+    {
+        return (isAux (snapshot, id) ? "/godot/slot/" : "/godot/cue/") + std::string (id) + "/";
+    }
+
     Flag flag (const tree::TreeSnapshot& snapshot, std::string_view address)
     {
         const auto* node = snapshot.find (address);

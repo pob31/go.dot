@@ -97,10 +97,25 @@ namespace wfg::import::als
         `track` the track's name. The hands table's rows are `info`. */
     using Note = import::Note;
 
+    struct SendOut
+    {
+        std::string mix;            ///< the `Mix::key`
+        double levelDb = 0.0;
+        std::vector<CurvePoint> lane;   ///< over the FILE, an offset on `levelDb`; empty for none
+        bool on = true;
+    };
+
     /*  A MIX: a return, or the master, that reaches the interface - what a send
         is aimed at. `pair` is the interface's stereo pair from nought (or the
-        mono channel with `mono`), `effects` the devices on it, and `parked`
-        whether those effects make it a return Go.dot cannot hear (QE). */
+        mono channel with `mono`) and `effects` every device on it, by name.
+
+        AN AUX (namespace draft §93, answering QE): a return that carries
+        devices, or sends into another return, is a shared rack channel in
+        Go.dot rather than a mix - its level its own, its EQ Eight its EQ when
+        one fits, a third-party plugin carried onto its chain, Live's own
+        devices noted, and its sends into the other returns its own sends. Its
+        sends come over switched on. A return with none of that stays a mix, its
+        fader folded into every send to it. */
     struct Mix
     {
         std::string key;            ///< "return:<index>" or "master"
@@ -108,16 +123,12 @@ namespace wfg::import::als
         int pair = -1;
         bool mono = false;
         std::vector<std::string> effects;
-        bool parked = false;
-        double levelDb = 0.0;       ///< the return's own fader, folded into every send to it
-    };
-
-    struct SendOut
-    {
-        std::string mix;            ///< the `Mix::key`
-        double levelDb = 0.0;
-        std::vector<CurvePoint> lane;   ///< over the FILE, an offset on `levelDb`; empty for none
-        bool on = true;
+        bool aux = false;
+        std::vector<const Device*> eqs;          ///< an aux's EQ Eights
+        std::vector<const Device*> plugins;      ///< an aux's third-party plugins, in chain order
+        std::vector<std::string> liveDevices;    ///< an aux's devices Go.dot has no equivalent for
+        std::vector<SendOut> sends;              ///< an aux's own sends into the other returns
+        double levelDb = 0.0;       ///< the return's own fader: an aux's level, or folded into every send to a mix
     };
 
     /*  ONE SOUND: what a media cue is made of. Seconds are the FILE's. */

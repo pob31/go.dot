@@ -443,3 +443,95 @@ TEST_CASE ("als: what is not a Live set says so")
     REQUIRE (empty.set.has_value());
     CHECK_FALSE (empty.set->problems.empty());
 }
+
+TEST_CASE ("als: a third-party plugin is read with what names it and the state Live saved (namespace draft §93)")
+{
+    /*  Three devices put before the fixture's Reverb, in the shape Live writes
+        them: a VST3, a VST2 and an AU, each with its state as hex broken over
+        lines. Live's own field names; the values made up. */
+    auto xml = fixture ("session.als.xml").loadFileAsString().toStdString();
+
+    const std::string plugins = R"(<PluginDevice Id="7">
+        <On><Manual Value="true" /></On>
+        <PluginDesc>
+            <Vst3PluginInfo Id="0">
+                <Preset>
+                    <Vst3Preset Id="1">
+                        <ProcessorState>
+                            0A0B0C
+                            0D
+                        </ProcessorState>
+                        <ControllerState>FF01</ControllerState>
+                    </Vst3Preset>
+                </Preset>
+                <Name Value="Pro-R" />
+                <Uid>
+                    <Fields.0 Value="1447773007" />
+                    <Fields.1 Value="-1" />
+                    <Fields.2 Value="0" />
+                    <Fields.3 Value="16" />
+                </Uid>
+            </Vst3PluginInfo>
+        </PluginDesc>
+    </PluginDevice>
+    <PluginDevice Id="8">
+        <PluginDesc>
+            <VstPluginInfo Id="0">
+                <Path Value="C:/VST/ValhallaRoom_x64.dll" />
+                <PlugName Value="ValhallaRoom_x64" />
+                <UniqueId Value="1919251788" />
+                <Preset><VstPreset Id="1"><Buffer>CAFE</Buffer></VstPreset></Preset>
+            </VstPluginInfo>
+        </PluginDesc>
+    </PluginDevice>
+    <AuPluginDevice Id="9">
+        <PluginDesc>
+            <AuPluginInfo Id="0">
+                <ComponentType Value="1635083896" />
+                <ComponentSubType Value="1953653099" />
+                <ComponentManufacturer Value="1634758764" />
+                <Name Value="AUMatrixReverb" />
+                <Preset><AuPreset Id="1"><Buffer>3C3F</Buffer></AuPreset></Preset>
+            </AuPluginInfo>
+        </PluginDesc>
+    </AuPluginDevice>
+    )";
+
+    const auto at = xml.find ("<Reverb Id=\"1\">");
+    REQUIRE (at != std::string::npos);
+    xml.insert (at, plugins);
+
+    const auto read = readSetXml (xml);
+    INFO ("error: " << read.error);
+    REQUIRE (read.set.has_value());
+
+    const auto& one = trackNamed (*read.set, "1");
+    REQUIRE (one.devices.size() == 5u);
+
+    const auto& vst3 = one.devices[1];
+    CHECK (vst3.kind == "PluginDevice");
+    CHECK (vst3.name == "Pro-R");
+    REQUIRE (vst3.plugin.has_value());
+    CHECK (vst3.plugin->format == "VST3");
+    CHECK (vst3.plugin->uid == "564B434FFFFFFFFF0000000000000010");
+    CHECK (vst3.plugin->state == std::vector<std::uint8_t> { 0x0a, 0x0b, 0x0c, 0x0d });
+    CHECK (vst3.plugin->controllerState == std::vector<std::uint8_t> { 0xff, 0x01 });
+
+    const auto& vst2 = one.devices[2];
+    REQUIRE (vst2.plugin.has_value());
+    CHECK (vst2.plugin->format == "VST");
+    CHECK (vst2.plugin->name == "ValhallaRoom_x64");
+    CHECK (vst2.plugin->path == "C:/VST/ValhallaRoom_x64.dll");
+    CHECK (vst2.plugin->uid == "1919251788");
+    CHECK (vst2.plugin->state == std::vector<std::uint8_t> { 0xca, 0xfe });
+
+    const auto& au = one.devices[3];
+    CHECK (au.kind == "AuPluginDevice");
+    REQUIRE (au.plugin.has_value());
+    CHECK (au.plugin->format == "AudioUnit");
+    CHECK (au.plugin->uid == "aufx/trak/appl");
+    CHECK (au.plugin->state == std::vector<std::uint8_t> { 0x3c, 0x3f });
+
+    //  Live's own Reverb has none.
+    CHECK_FALSE (one.devices[4].plugin.has_value());
+}

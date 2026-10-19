@@ -6037,6 +6037,24 @@ namespace wfg::cue
             return bus;
         };
 
+        /*  WHAT A SEND MAY NAME: a mix channel, or an aux (namespace draft
+            §93) - a shared rack channel, which takes the send into its input
+            past the rig's outputs. An exclusive channel is a mic cue's, and
+            nothing sends into it. */
+        const auto sendTargetNamed = [&] (const std::string& id)
+        {
+            if (const auto bus = busNamed (id); bus.isValid())
+                return bus;
+
+            const auto channel = document.findById (id);
+
+            if (channel.isValid() && channel.hasType ("Channel") && channel.getParent().hasType ("Rack")
+                  && schema.text (channel, "rackChannel", "access") == "shared")
+                return channel;
+
+            return juce::ValueTree {};
+        };
+
         /*  HOW A CUE'S CHANNELS SPREAD ACROSS A DESTINATION, for the two
             places that do not carry a written matrix: the direct out and every
             send. A Route and a Feed say it themselves, coefficient by
@@ -6149,8 +6167,33 @@ namespace wfg::cue
                 return true;
 
             std::string why;
-            const auto width = schema.integer (bus, "bus", "width");
             const auto gain = juce::Decibels::decibelsToGain (level, -120.0);
+
+            /*  INTO AN AUX (namespace draft §93): its input columns, which the
+                graph places past the rig's outputs. An aux the graph was built
+                without - one declared since, or no audio side at all - takes
+                nothing, and the cue sounds everywhere else (AVV): its problem
+                mark is where that is said, never a failed run. */
+            if (bus.hasType ("Channel"))
+            {
+                const auto column = audio != nullptr ? audio->auxColumnOf (bus.getProperty ("id").toString().toStdString()) : -1;
+
+                if (column < 0)
+                    return true;
+
+                const auto auxWidth = sourceChannelsOf (bus);
+                const auto auxGains = spreadOf (cue, auxWidth, gain, "aux", why);
+
+                if (! why.empty())
+                {
+                    problem = why;
+                    return false;
+                }
+
+                return emit (column, auxWidth, auxGains);
+            }
+
+            const auto width = schema.integer (bus, "bus", "width");
             const auto gains = spreadOf (cue, width, gain, "mix channel", why);
 
             /*  ASKED HERE rather than left to `emit`, which cannot always
@@ -6239,8 +6282,8 @@ namespace wfg::cue
                     together, which is what a designer means by fading a cue
                     and what a console calls a DCA. Nothing here arranges that;
                     it falls out of where the level is applied. */
-                const auto bus = busNamed (destination[juce::Identifier ("bus")]
-                                             .toString().toStdString());
+                const auto bus = sendTargetNamed (destination[juce::Identifier ("bus")]
+                                                    .toString().toStdString());
 
                 if (! bus.isValid())
                 {
@@ -6346,7 +6389,7 @@ namespace wfg::cue
             for (const auto& sendId : liveLayer->createdSendsOf (cueId))
             {
                 const auto* send = liveLayer->sendOf (sendId);
-                const auto bus = send != nullptr ? busNamed (send->bus) : juce::ValueTree {};
+                const auto bus = send != nullptr ? sendTargetNamed (send->bus) : juce::ValueTree {};
 
                 if (! bus.isValid())
                     continue;
@@ -6375,7 +6418,7 @@ namespace wfg::cue
                 if (std::find (sentTo.begin(), sentTo.end(), busId) != sentTo.end())
                     continue;
 
-                const auto bus = busNamed (busId);
+                const auto bus = sendTargetNamed (busId);
 
                 if (! bus.isValid())
                     continue;
@@ -6401,7 +6444,7 @@ namespace wfg::cue
                 if (std::find (sentTo.begin(), sentTo.end(), busId) != sentTo.end())
                     continue;
 
-                const auto bus = busNamed (busId);
+                const auto bus = sendTargetNamed (busId);
 
                 if (bus.isValid() && ! sendInto (bus, level, true))
                     return {};
@@ -6448,7 +6491,8 @@ namespace wfg::cue
                              ? readFadeMoves (textOf (cue, "sends"), textOf (cue, "eq"), textOf (cue, "fx"))
                              : std::vector<FadeMove> {};
 
-        if (! levelOn && ((! rateOn && moves.empty()) || ! textOf (cue, "dca").empty()))
+        if (! levelOn && textOf (cue, "aux").empty()
+              && ((! rateOn && moves.empty()) || ! textOf (cue, "dca").empty()))
         {
             if (auto* selfRun = runs.find (runId))
                 selfRun->state = runState::playing;
@@ -6456,6 +6500,19 @@ namespace wfg::cue
             FadeJob nothing;
             nothing.self = runId;
             running.push_back (nothing);
+            return;
+        }
+
+        /*  A FADE THAT NAMES AN AUX MOVES THE AUX (namespace draft §93, AVU):
+            its level and what the fade lists of its sends, EQ and plugin
+            values, for tonight. `target` is not read - an aux has no run - and
+            neither is a speed, which an aux has none of. */
+        if (const auto auxId = textOf (cue, "aux"); ! auxId.empty())
+        {
+            beginAuxFade (tick, auxId, runId, levelOn, toDb,
+                          readFadeMoves (textOf (cue, "sends"), textOf (cue, "eq"), textOf (cue, "fx")),
+                          numberOf (cue, "duration"), fadeCurveFrom (textOf (cue, "curve")),
+                          std::move (drawn.points));
             return;
         }
 
@@ -7203,6 +7260,121 @@ namespace wfg::cue
         running.push_back (job);
     }
 
+    void Runner::beginAuxFade (std::int64_t tick, const std::string& auxId, const std::string& selfRunId,
+                               bool levelOn, double toDb, const std::vector<FadeMove>& moves,
+                               double seconds, FadeCurve curve, std::vector<doc::FadePoint> points)
+    {
+        auto* selfRun = runs.find (selfRunId);
+
+        if (selfRun == nullptr)
+            return;
+
+        selfRun->state = runState::playing;
+
+        static const Reader schema;
+
+        /*  AN AUX THIS SHOW DOES NOT DECLARE - or a channel that is not one -
+            is a pointer at nothing, the `bad-target` a DCA fade gives. */
+        const auto declared = document.findById (auxId);
+
+        if (! declared.isValid() || ! declared.hasType ("Channel")
+              || schema.text (declared, "rackChannel", "access") != "shared")
+        {
+            FadeJob orphan;
+            orphan.self = selfRunId;
+            orphan.failure = runError::badTarget;
+            running.push_back (orphan);
+            return;
+        }
+
+        struct Want
+        {
+            std::string entry;
+            MoveDomain domain = MoveDomain::linear;
+            double to = 0.0;
+        };
+
+        std::vector<Want> wants;
+
+        if (levelOn)
+            wants.push_back ({ "level", MoveDomain::linear, toDb });
+
+        for (const auto& move : moves)
+            wants.push_back ({ move.entry, move.domain, move.value });
+
+        //  Nothing to move: its run ends at once, as any such fade's does.
+        if (wants.empty())
+        {
+            FadeJob nothing;
+            nothing.self = selfRunId;
+            running.push_back (nothing);
+            return;
+        }
+
+        const auto touched = ofTheOpenGo (selfRunId);
+        const auto ticks = std::max (0, static_cast<int> (std::lround (seconds * 50.0)));
+
+        for (const auto& want : wants)
+        {
+            const auto key = "aux:" + auxId + ":" + want.entry;
+            std::optional<FadeJob> movingBefore;
+
+            if (touched)
+                for (const auto& before : running)
+                    if (before.target == key && ! before.retired && goOfRun (before.self) != goRecord.serial)
+                        movingBefore = before;
+
+            //  FROM WHERE IT HAS GOT TO TONIGHT, read before a takeover.
+            const auto standing = movedValueOf (auxId, auxes[auxId].moved, want.entry);
+            const auto from = std::isfinite (standing) ? standing : want.to;
+            resolveTakeover (key);
+
+            FadeJob job;
+            job.target = key;
+            job.aux = auxId;
+            job.self = selfRunId;
+            job.move = want.entry;
+            job.moveDomain = want.domain;
+            job.fromValue = from;
+            job.toValue = want.to;
+            job.fromDb = from;
+            job.toDb = want.to;
+            job.ticksTotal = ticks;
+            job.curve = curve;
+
+            if (want.entry == "level")
+                job.points = points;
+
+            if (touched && goChanges.levels.size() < changesKept)
+            {
+                auto known = false;
+
+                for (auto& touch : goChanges.levels)
+                    if (touch.key == key)
+                    {
+                        touch.goTo = want.to;
+                        known = true;
+                    }
+
+                if (! known)
+                {
+                    LevelTouch touch;
+                    touch.key = key;
+                    touch.aux = auxId;
+                    touch.move = want.entry;
+                    touch.moveDomain = want.domain;
+                    touch.from = from;
+                    touch.goTo = want.to;
+                    touch.atTick = tick;
+                    touch.superseded = movingBefore;
+                    goChanges.levels.push_back (touch);
+                }
+            }
+
+            running.push_back (job);
+        }
+    }
+
     bool Runner::beginMoveFades (std::int64_t tick,
                                  const std::string& targetCueId, const std::string& selfRunId,
                                  const std::vector<FadeMove>& moves, double seconds, FadeCurve curve,
@@ -7322,12 +7494,21 @@ namespace wfg::cue
 
     double Runner::movedValueNow (const Run& run, const std::string& entry) const
     {
-        if (const auto held = run.moved.find (entry); held != run.moved.end())
+        return movedValueOf (run.cue, run.moved, entry);
+    }
+
+    double Runner::movedValueOf (const std::string& cueId, const std::map<std::string, double>& moved,
+                                 const std::string& entry) const
+    {
+        if (const auto held = moved.find (entry); held != moved.end())
             return held->second;
 
         static const Reader schema;
-        const auto cue = document.findById (run.cue);
-        const auto cueId = run.cue;
+        const auto cue = document.findById (cueId);
+
+        //  An aux's own level (namespace draft §93): the show's.
+        if (entry == "level")
+            return cue.isValid() ? schema.number (cue, "sound", "level") : std::numeric_limits<double>::quiet_NaN();
 
         std::string kind, name;
         int index = -1;
@@ -8317,6 +8498,22 @@ namespace wfg::cue
                 ready.push_back (run.track);
 
         audio->resetEffects (ready);
+
+        /*  AND EVERY AUX (namespace draft §93, AWA): the sweep has shut each
+            one; what fades moved of it tonight goes, and the next GO opens it
+            at the show's values. A fade still moving one is dropped with it. */
+        for (auto& [auxId, state] : auxes)
+        {
+            state.moved.clear();
+            state.shut = true;
+            state.shutUnderGo = goRecord.serial;
+        }
+
+        ++auxMovedRevision;
+
+        for (auto& job : running)
+            if (! job.aux.empty())
+                job.retired = true;
     }
 
     void Runner::dropOutputs (std::int64_t tick)
@@ -12167,7 +12364,7 @@ namespace wfg::cue
                     continue;
             }
 
-            if (touch.dca.empty() && held == nullptr)
+            if (touch.dca.empty() && touch.aux.empty() && held == nullptr)
                 continue;
 
             const auto writtenBy = [this, &back] (const FadeJob& job, bool ours)
@@ -12182,6 +12379,7 @@ namespace wfg::cue
 
             const auto moved = ! touch.move.empty();
             const auto now = ! touch.dca.empty() ? (dcas != nullptr ? dcas->trimOf (touch.dca) : touch.goTo)
+                           : ! touch.aux.empty() ? movedValueOf (touch.aux, auxes[touch.aux].moved, touch.move)
                            : moved ? movedValueNow (*held, touch.move)
                            : touch.movesRate ? held->ownRate : held->ownLevel;
 
@@ -12194,9 +12392,10 @@ namespace wfg::cue
             if (otherHolds || (! goHolds && std::abs (now - touch.goTo) > tolerance))
             {
                 const auto what = ! touch.dca.empty() ? deviceLabel ("dca", touch.dca)
+                                : ! touch.aux.empty() ? deviceLabel ("slot", touch.aux)
                                                       : cueLabel (held->cue);
 
-                back.items.push_back (what + (moved ? ": its " + moveWords (touch.move)
+                back.items.push_back (what + (moved && touch.move != "level" ? ": its " + moveWords (touch.move)
                                                     : std::string (touch.movesRate ? ": its speed" : ": its level"))
                                         + " moved by another hand since the GO - left where it is");
                 continue;
@@ -12255,6 +12454,16 @@ namespace wfg::cue
                     job.toRate = touch.from;
                 else
                     job.toDb = touch.from;
+            }
+
+            /*  AN AUX'S, which travels as its own (namespace draft §93): its
+                level in decibels, the rest in their domains. */
+            if (! touch.aux.empty())
+            {
+                job.aux = touch.aux;
+                job.moveRun.clear();
+                job.fromDb = job.fromValue;
+                job.toDb = job.toValue;
             }
 
             running.push_back (job);
@@ -16480,6 +16689,32 @@ namespace wfg::cue
                 continue;
             }
 
+            /*  AN AUX'S OWN NUMBER (namespace draft §93): tonight's value,
+                beside the aux, which `applyAuxes` sends on. Nothing to have
+                gone and nothing to stop - the show holds an aux. */
+            if (! job.aux.empty())
+            {
+                const auto value = job.move == "level" ? job.currentDb() : job.currentValue();
+                auto& held = auxes[job.aux].moved;
+                const auto was = held.find (job.move);
+
+                if (was == held.end()
+                      || std::bit_cast<std::uint64_t> (was->second) != std::bit_cast<std::uint64_t> (value))
+                {
+                    held[job.move] = value;
+                    ++auxMovedRevision;
+                }
+
+                if (! job.isFinished())
+                    continue;
+
+                if (job.reportsSelf && lastOfItsCue (job))
+                    engine.submit (origin::engine, "run.ended", one (job.self));
+
+                job.retired = true;
+                continue;
+            }
+
             auto* target = runs.find (job.heldRun());
 
             /*  What was being faded has gone - it ended on its own, or somebody
@@ -19468,6 +19703,7 @@ namespace wfg::cue
         applyRouting();
         applyEq();
         applyFx();
+        applyAuxes();
         recordCurves (engine, tick);
         advanceCurves (engine, tick);
         advanceProcesses (engine, tick);
@@ -23764,11 +24000,13 @@ namespace wfg::cue
         std::vector<std::string> inSet;
         std::vector<std::string> slots;
 
-        if (cue.hasType ("Mic"))
+        if (cue.hasType ("Mic") || cue.hasType ("Channel"))
         {
             /*  A MIC CUE'S ARE ITS CHANNEL'S (Phase 9b): the channel's track as
-                the graph built it, its declared chain with no graph. */
-            const auto channelId = textOf (cue, "channel");
+                the graph built it, its declared chain with no graph. An aux's
+                are its own (namespace draft §93). */
+            const auto channelId = cue.hasType ("Channel") ? cue.getProperty ("id").toString().toStdString()
+                                                           : textOf (cue, "channel");
 
             for (const auto rack : document.root().getChildWithName ("Audio"))
                 if (rack.hasType ("Rack"))
@@ -23860,7 +24098,147 @@ namespace wfg::cue
 
     int Runner::chainChannelsOf (const juce::ValueTree& cue) const
     {
+        /*  An aux's chain is on its rack track, two channels wide (§93). */
+        if (cue.hasType ("Channel"))
+            return chainOfCue (cue, pluginTable, rackTrackChannels).channels;
+
         return chainOfCue (cue, pluginTable, audio != nullptr ? audio->channelsPerTrack() : 2).channels;
+    }
+
+    void Runner::applyAuxes()
+    {
+        /*  THE SHOW HOLDS AN AUX (namespace draft §93, AVU), so nothing arms
+            it: this is its arm and its edits at once. Levels every tick - a DCA
+            ridden moves one - and the rest gated as the runs' passes are, on
+            the show's revision, the lock's, the plugin table's and tonight's
+            moves, and sent again whole to an audio side that has not had them. */
+        if (audio == nullptr)
+            return;
+
+        static const Reader schema;
+
+        const auto revision = document.showRevision()
+                                + (liveLayer != nullptr ? liveLayer->revision() : 0) * 0x9E3779B97F4A7C15ull
+                                + (pluginTable != nullptr ? pluginTable->revision() : 0) * 0xC2B2AE3D27D4EB4Full
+                                + auxMovedRevision * 0x165667B19E3779F9ull;
+
+        for (const auto rack : document.root().getChildWithName ("Audio"))
+        {
+            if (! rack.hasType ("Rack"))
+                continue;
+
+            for (const auto channel : rack)
+            {
+                if (! channel.hasType ("Channel") || schema.text (channel, "rackChannel", "access") != "shared")
+                    continue;
+
+                const auto auxId = channel.getProperty ("id").toString().toStdString();
+                const auto track = audio->rackTrackOf (auxId);
+
+                if (track < 0)
+                    continue;
+
+                auto& state = auxes[auxId];
+
+                //  A NEW AUDIO SIDE, or a graph that built it elsewhere: all again.
+                if (state.epoch != playerEpoch || state.track != track)
+                {
+                    state.epoch = playerEpoch;
+                    state.track = track;
+                    state.levelSent = false;
+                    state.fxSent = false;
+                    state.fx.clear();
+                    state.routingAt = state.eqAt = state.fxAt = 0;
+                }
+
+                /*  SHUT BY A DOUBLE ESC, until the next GO (AWA): opened then,
+                    emptied first by the host, at the show's values. */
+                if (state.shut)
+                {
+                    if (goRecord.serial == state.shutUnderGo)
+                        continue;
+
+                    audio->openAux (track);
+                    state.shut = false;
+                    state.levelSent = false;
+                    state.routingAt = state.eqAt = 0;
+                }
+
+                //  THE LEVEL: tonight's or the show's, and its DCAs' terms.
+                const auto own = state.moved.count ("level") > 0 ? state.moved.at ("level")
+                                                                 : schema.number (channel, "sound", "level");
+                const auto level = std::clamp (own + dcaTermsOf (auxId), silenceDb, 12.0);
+
+                if (! state.levelSent || ! juce::approximatelyEqual (level, state.level))
+                {
+                    audio->setLevelDb (track, level);
+                    state.level = level;
+                    state.levelSent = true;
+                }
+
+                if (state.routingAt != revision)
+                {
+                    state.routingAt = revision;
+
+                    std::string problem;
+                    const auto routing = resolveRouting (channel, rackTrackChannels, problem, chainChannelsOf (channel),
+                                                         &state.moved, nullptr);
+
+                    if (problem.empty())
+                        audio->setRouting (track, routing);
+                }
+
+                if (state.eqAt != revision)
+                {
+                    state.eqAt = revision;
+                    audio->setEq (track, eqOf (channel, &state.moved));
+                }
+
+                if (state.fxAt != revision)
+                {
+                    state.fxAt = revision;
+
+                    auto wanted = fxOf (channel, &state.moved);
+
+                    for (std::size_t k = 0; k < wanted.size(); ++k)
+                    {
+                        const auto& next = wanted[k];
+                        const auto* last = state.fxSent && k < state.fx.size() ? &state.fx[k] : nullptr;
+
+                        if (last != nullptr && next.sameAs (*last))
+                            continue;
+
+                        if (last == nullptr || next.enabled != last->enabled)
+                            audio->setFxEnabled (track, next.slot, next.enabled);
+
+                        if (last == nullptr || next.feed != last->feed || next.back != last->back)
+                            audio->setFxShape (track, next.slot, next.feed, next.back);
+
+                        //  Its state, the first time and when the file changed.
+                        if (next.enabled && (last == nullptr || ! last->enabled || next.stateFile != last->stateFile))
+                            audio->requestFxState (track, next.slot, next.statePath);
+
+                        for (const auto& [index, value] : next.values)
+                            if (last == nullptr
+                                  || std::none_of (last->values.begin(), last->values.end(),
+                                                   [&] (const auto& old) { return old.first == index
+                                                                                    && std::bit_cast<std::uint32_t> (old.second)
+                                                                                         == std::bit_cast<std::uint32_t> (value); }))
+                                audio->setFxParameter (track, next.slot, index, value);
+
+                        //  A value withdrawn rests at the preset again.
+                        if (last != nullptr)
+                            for (const auto& [index, value] : last->values)
+                                if (std::none_of (next.values.begin(), next.values.end(),
+                                                  [&] (const auto& now) { return now.first == index; }))
+                                    audio->setFxParameter (track, next.slot, index, -1.0f);
+                    }
+
+                    state.fx = std::move (wanted);
+                    state.fxSent = true;
+                }
+            }
+        }
     }
 
     void Runner::applyFx()

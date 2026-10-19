@@ -1673,6 +1673,17 @@ output stage, and Go.dot's rack channels are plain tracks with a plugin list,
 Each channel is declared **shared** or **exclusive** (§3.9e): a reverb is a bus
 with a chain, a per-source insert is a slot.
 
+*Added in 0.8, at the author's direction (2026-10-19); the mechanics are the namespace draft's §93.*
+**A shared channel is an aux.** Its input is the sum of the sends aimed at it - by media cues, mic
+cues and other auxes - rather than a microphone, and it holds a sound of its own: a level, a direct
+out, sends and routes, an EQ and its chain's plugin values, the rows a mic cue carries. **The show
+holds them, and fades move them for the night** (`fade/aux`); no cue has to run for an aux to sound.
+Any aux may send into any aux: a path down the rack's list is heard in the same audio block, a path
+back up it - a loop - one block later. A send into an aux that cannot take it is silent and says so;
+the cue plays everywhere else. Esc lets the tails ring out through an aux; a double Esc shuts every
+aux and lets tonight's values go, and the next GO opens them at the show's values. The import of a
+Live set makes each FX return an aux, its third-party plugins carried with their state.
+
 **Bypass does not rebuild the graph, and the price of a stack is latency, not
 CPU.** Verified against the pinned engine, 2026-09-07:
 
@@ -4287,8 +4298,8 @@ Added 2026-09-26 *(proposed)*, with §3.18 and §3.31:
   WX), with a **ping-pong** Range that bounces between its points (the author's "ping-pong type of
   loop that goes back and forth"); the live looper's own reverse is still this proposal.
 - **A mic cue as a sampler member**: fader-start for a microphone.
-- **The shared rack channel** — a reverb return cues send into, §3.9e's *"bus with a chain"* — and a
-  media cue's `Insert` made to sound, both still Phase 9b's.
+- ~~**The shared rack channel**~~ — *decided 2026-10-19*: an aux, fed by the cues' sends and held by the
+  show (§3.18, namespace draft §93). A media cue's `Insert` made to sound is still Phase 9b's.
 
 Added 2026-09-27 *(proposed)*, with §3.10's level lane:
 

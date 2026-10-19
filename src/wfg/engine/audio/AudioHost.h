@@ -106,6 +106,13 @@ namespace wfg::audio
             on top of it. */
         double takeSeconds = 0.0;
         int layers = 4;
+
+        /*  AN AUX (namespace draft §93): a shared channel, whose input is the
+            sum of what the tracks send it rather than a live input - one
+            channel for a mono aux, two for a stereo one. Its chain, EQ and
+            output stage are a rack channel's; its take is always none. */
+        bool aux = false;
+        int auxWidth = 2;
     };
 
     /*  What the proxies need from outside the host (Phase 9a, §17.6): the
@@ -276,8 +283,37 @@ namespace wfg::audio
         int allTrackCount() const noexcept;
 
         /*  The track a rack channel was built as, or -1 for one the graph was
-            built without (declared since, until Load now). */
+            built without (declared since, until Load now). An aux's too. */
         int rackTrackOf (const std::string& channelId) const noexcept;
+
+        /*  THE AUXES (namespace draft §93). Where an aux's input begins in a
+            track's routing: past the rig's outputs, so a coefficient aimed at
+            `auxColumnOf (id) + c` is a send into channel c of that aux. -1 for
+            an aux the graph was built without, or no aux. Any thread. */
+        int auxColumnOf (const std::string& channelId) const noexcept;
+
+        /** How many aux input channels the graph was built with, in all. */
+        int auxColumnCount() const noexcept;
+
+        /** Whether this track is an aux's. Any thread. */
+        bool isAuxTrack (int trackIndex) const noexcept;
+
+        /*  AN AUX'S INPUT (AWA): shut at a double Esc - in a millisecond, its
+            level to silence behind its ramp - and opened again at the next GO,
+            its EQ cleared and its plugins reset first so nothing of the old
+            tail is there. Tick thread; atomics. Nothing on a track that is not
+            an aux's. */
+        void shutAux (int trackIndex) noexcept;
+        void openAux (int trackIndex) noexcept;
+
+        /** Open, or still ramping shut. False for a track that is not an aux's. */
+        bool isAuxOpen (int trackIndex) const noexcept;
+
+        /*  A track's sends into the auxes - the matrix its aux tap holds, from
+            its channels to every aux input channel, below the level its output
+            stage is told. Null for an index no track answers to, and on a graph
+            with no aux. */
+        CueMatrix* trackAuxMatrix (int trackIndex) noexcept;
 
         /*  A SAMPLING CHANNEL'S TAKE (Phase 9c, namespace draft §19.2): its
             recorder, which the host keeps beside the Edit so that a rebuilt

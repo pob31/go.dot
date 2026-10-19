@@ -183,6 +183,19 @@ namespace wfg::client::model
 
         std::string cueName;     ///< what the title says it is showing
         std::string cueKind;
+
+        /*  WHERE THE SUBJECT'S ROWS ARE, with the slash at the end: a cue's
+            /godot/cue/<id>/, or an aux's /godot/slot/<id>/ (namespace draft
+            §93) - whose `cueKind` reads "aux". A row the panel writes is this
+            and the row's name. */
+        std::string base;
+
+        /*  One of the subject's rows, by name: `base` and the name - or, for a
+            reading made without one, the cue's address. */
+        std::string rowAt (const std::string& row) const
+        {
+            return (base.empty() ? "/godot/cue/" + subject.objectId + "/" : base) + row;
+        }
         std::string file;        ///< the media the cue names, for the analyser's table
 
         /*  A MOVIE'S STRIP (namespace draft §47, AAC): whether the cue is a

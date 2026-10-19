@@ -725,6 +725,10 @@ namespace wfg::tree
         {
             const auto audio = cue.getRoot().getChildWithName ("Audio");
 
+            //  An aux's are its own chain (namespace draft §93).
+            if (cue.hasType ("Channel"))
+                return cue;
+
             if (! cue.hasType ("Mic"))
                 return audio.getChildWithName ("Plugins");
 
@@ -877,6 +881,71 @@ namespace wfg::tree
 
                 out.push_back (makeLeaf (base + "/" + std::string (row->name),
                                          *row, storedText (attribute, node)));
+            }
+        }
+
+        /*  AN AUX'S OWN SOUND (namespace draft §93): the `sound` rows at its slot
+            address - its level, direct out, DCA and EQ as the show holds them,
+            and the ids of its sends and inserts - and those sends, inserts and
+            routes at their own addresses, as a cue's are. */
+        void collectAux (const juce::ValueTree& channel, std::vector<Node>& out, const cue::LiveEdits* live)
+        {
+            const auto id = channel[idProperty].toString().toStdString();
+
+            if (id.empty())
+                return;
+
+            const auto base = std::string (godot) + "/slot/" + id + "/";
+            std::string sendIds, fxIds;
+
+            for (const auto& child : channel)
+            {
+                const auto childId = child[idProperty].toString().toStdString();
+
+                if (child.hasType ("Send"))
+                    sendIds += (sendIds.empty() ? "" : " ") + childId;
+                else if (child.hasType ("Fx"))
+                    fxIds += (fxIds.empty() ? "" : " ") + childId;
+            }
+
+            for (const auto* row : doc::Schema::rowsForOwner ("sound"))
+            {
+                const doc::Attribute attribute { "Channel", row };
+                const auto name = std::string (row->name);
+                std::string text;
+
+                if (name == "sends")                                   text = sendIds;
+                else if (name == "fx")                                 text = fxIds;
+                else if (row->persist == doc::Persist::none)           text = std::string (row->defaultText);
+                else                                                   text = storedText (attribute, channel);
+
+                out.push_back (makeLeaf (base + name, *row, text));
+            }
+
+            for (const auto& child : channel)
+            {
+                if (child.hasType ("Route"))
+                    collectRoute (child, out);
+                else if (child.hasType ("Fx"))
+                    collectFx (child, id, out, live);
+                else if (child.hasType ("Send"))
+                {
+                    const auto childId = child[idProperty].toString().toStdString();
+
+                    if (childId.empty())
+                        continue;
+
+                    for (const auto* row : doc::Schema::rowsForOwner ("send"))
+                    {
+                        const doc::Attribute attribute { "Send", row };
+                        const auto name = std::string (row->name);
+                        const auto text = name == "cue"  ? id
+                                        : name == "live" ? std::string ("false")
+                                                         : storedText (attribute, child);
+
+                        out.push_back (makeLeaf (std::string (godot) + "/send/" + childId + "/" + name, *row, text));
+                    }
+                }
             }
         }
 
@@ -3322,6 +3391,9 @@ namespace wfg::tree
 
                         collectSlot (channel, "Channel", "rackChannel", "rackChannel",
                                      analysis, nodes, &chain);
+
+                        if (channel["access"].toString() == "shared")
+                            collectAux (channel, nodes, liveEdits);
 
                         if (const auto channelId = channel[idProperty].toString().toStdString();
                             ! channelId.empty())

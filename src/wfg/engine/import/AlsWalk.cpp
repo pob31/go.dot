@@ -186,7 +186,8 @@ namespace wfg::import::als
 
             /*  THE MIXES: each return that reaches the interface, and the master
                 when anything is sent to it, in the order of their pairs. A
-                return carrying effects Go.dot does not have is parked (QE). */
+                return carrying devices or sending into another is an aux
+                (namespace draft §93, answering QE). */
             void buildMixes()
             {
                 const auto pairOf = [this] (const Routing& output, bool& mono) -> int
@@ -219,36 +220,97 @@ namespace wfg::import::als
                     mix.pair = pairOf (ret.output, mix.mono);
                     mix.levelDb = decibels (ret.volume, laws);
 
-                    bool effects = false;
-
+                    /*  ITS DEVICES SORTED: an EQ Eight is the aux's EQ, a
+                        plugin of somebody else's is carried onto its chain, and
+                        Live's own are noted. A Utility (`StereoGain`) is passed
+                        over, as it always was. */
                     for (const auto& device : ret.devices)
                     {
-                        mix.effects.push_back (device.name.empty() ? device.kind : device.name);
+                        const auto called = device.name.empty() ? device.kind : device.name;
+                        mix.effects.push_back (called);
 
-                        if (device.kind != "Eq8" && device.kind != "StereoGain")
-                            effects = true;
+                        if (device.kind == "StereoGain")
+                            continue;
+
+                        mix.aux = true;
+
+                        if (device.kind == "Eq8")
+                            mix.eqs.push_back (&device);
+                        else if (device.plugin.has_value())
+                            mix.plugins.push_back (&device);
+                        else
+                            mix.liveDevices.push_back (called);
                     }
 
-                    mix.parked = effects;
-
-                    if (mix.pair < 0)
+                    if (mix.pair < 0 && ! mix.aux)
                         notes.push_back ({ Note::Kind::dropped, -1, ret.name,
                                            "the return reaches no output of the interface, so nothing sent to it "
                                            "is heard" });
-                    else if (mix.parked)
-                        notes.push_back ({ Note::Kind::dropped, -1, ret.name,
-                                           "the return carries effects Go.dot has no equivalent for ("
-                                           + joined (mix.effects) + "): its sends are imported switched off, "
-                                           "their levels kept (namespace draft §29, QE)" });
-                    else if (! mix.effects.empty())
-                        notes.push_back ({ Note::Kind::dropped, -1, ret.name,
-                                           "the return's own " + joined (mix.effects)
-                                           + " is not imported: a mix in Go.dot carries no EQ" });
 
                     if (ret.output.kind == Routing::Kind::master)
                         mix.levelDb += set.master.has_value() ? decibels (set.master->volume, laws) : 0.0;
 
                     mixes.push_back (std::move (mix));
+                }
+
+                /*  A RETURN SENDING INTO ANOTHER (namespace draft §93, AVW): it
+                    is an aux, and the send is its own - into an aux at the
+                    send's level, into a mix with that mix's fader folded in, as
+                    a sound's sends are. Live does not send a return into itself. */
+                for (std::size_t at = 0; at < set.returns.size() && at < mixes.size(); ++at)
+                    for (std::size_t into = 0; into < set.returns[at].sends.size() && into < set.returns.size(); ++into)
+                        if (into != at && decibels (set.returns[at].sends[into], laws) > laws.floorDb + 0.01)
+                            mixes[at].aux = true;
+
+                for (std::size_t at = 0; at < set.returns.size() && at < mixes.size(); ++at)
+                {
+                    auto& mix = mixes[at];
+                    const auto& ret = set.returns[at];
+
+                    if (! mix.aux)
+                    {
+                        continue;
+                    }
+
+                    for (std::size_t into = 0; into < ret.sends.size() && into < set.returns.size(); ++into)
+                    {
+                        const auto db = decibels (ret.sends[into], laws);
+
+                        if (into == at || db <= laws.floorDb + 0.01)
+                            continue;
+
+                        const auto& target = mixes[into];
+
+                        if (! target.aux && target.pair < 0)
+                            continue;
+
+                        SendOut send;
+                        send.mix = target.key;
+                        send.levelDb = std::clamp (db + (target.aux ? 0.0 : target.levelDb), laws.silenceDb, 12.0);
+                        mix.sends.push_back (send);
+                    }
+
+                    if (! mix.liveDevices.empty())
+                        notes.push_back ({ Note::Kind::approximated, -1, ret.name,
+                                           "is an aux in Go.dot, and its " + joined (mix.liveDevices)
+                                           + (mix.liveDevices.size() == 1 ? " is" : " are")
+                                           + " Live's own: the aux's chain is left for a plugin of yours"
+                                             " (Show settings, Rack) - its sends come over on" });
+
+                    for (const auto* plugin : mix.plugins)
+                        notes.push_back ({ Note::Kind::info, -1, ret.name,
+                                           "its " + (plugin->name.empty() ? plugin->kind : plugin->name)
+                                           + " is carried onto the aux's chain, with the state Live saved" });
+
+                    if (mix.eqs.size() > 1)
+                        notes.push_back ({ Note::Kind::approximated, -1, ret.name,
+                                           std::to_string (mix.eqs.size()) + " EQ Eights on the return; the aux's "
+                                           "EQ takes the first" });
+
+                    if (mix.pair < 0)
+                        notes.push_back ({ Note::Kind::info, -1, ret.name,
+                                           "the aux reaches no output of the interface itself: only what it sends "
+                                           "into another return is heard" });
                 }
 
                 if (set.master.has_value())
@@ -912,7 +974,7 @@ namespace wfg::import::als
                 {
                     const auto* mix = mixNamed (mixKey);
 
-                    if (mix == nullptr || mix->pair < 0)
+                    if (mix == nullptr || (mix->pair < 0 && ! mix->aux))
                         continue;
 
                     /*  Each path's own terms, the shared ones taken off. */
@@ -952,7 +1014,8 @@ namespace wfg::import::als
                             if (const auto db = sumDb (sources, beat); db > laws.floorDb + 0.01)
                                 gain += gainOfDb (db);
 
-                        sendByBeat.emplace_back (beat, gain > 0.0 ? decibels (gain, laws) + mix->levelDb
+                        /*  AN AUX'S FADER IS ITS OWN LEVEL (§93), not folded in. */
+                        sendByBeat.emplace_back (beat, gain > 0.0 ? decibels (gain, laws) + (mix->aux ? 0.0 : mix->levelDb)
                                                                   : laws.floorDb);
                     }
 
@@ -982,7 +1045,7 @@ namespace wfg::import::als
 
                     SendOut send;
                     send.mix = mixKey;
-                    send.on = ! mix->parked;
+                    send.on = true;
                     lane = finished (lane);
 
                     if (flat (lane))
@@ -1202,10 +1265,6 @@ namespace wfg::import::als
                     const auto key = "return:" + std::to_string (send);
                     const auto from = decibels (held.sends[send], laws);
                     const auto to = decibels (lastValue (*moved), laws);
-
-                    if (const auto* mix = mixNamed (key); mix != nullptr && mix->parked && moves (*moved))
-                        note (Note::Kind::dropped, "the carrier moves its send to \"" + mix->name + "\", a return "
-                                                   "whose effects are parked: that movement is not heard");
 
                     if (same (from, to, 0.05))
                         continue;
@@ -1457,10 +1516,9 @@ namespace wfg::import::als
                             const auto key = "return:" + std::to_string (target.sendIndex);
                             const auto* mix = mixNamed (key);
                             hand.moved = "the send from \"" + trackName + "\" to \"" + mixNameOf (key) + "\"";
-                            hand.goDot = mix != nullptr && mix->parked
-                                           ? "nothing yet: \"" + mix->name + "\" carries effects Go.dot does not have"
-                                           : "the D700's Send page on the aimed cue, the \"" + mixNameOf (key)
-                                               + "\" rotary - under the lock a ride heard and not saved";
+                            hand.goDot = "the D700's Send page on the aimed cue, the \"" + mixNameOf (key)
+                                           + "\" rotary - under the lock a ride heard and not saved"
+                                           + (mix != nullptr && mix->aux ? std::string (" (an aux)") : std::string());
                             break;
                         }
 

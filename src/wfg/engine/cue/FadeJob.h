@@ -156,6 +156,15 @@ namespace wfg::cue
         double fromValue = 0.0;
         double toValue = 0.0;
 
+        /*  OR AN AUX'S OWN NUMBER (namespace draft §93, AVU): the aux, and
+            `move` the entry - `level`, or a send, an EQ number or a plugin
+            value as on a run. The key is `aux:`, the aux and the entry. An aux
+            has no run: the show holds it, and the job writes tonight's value
+            beside the Runner's aux. A level entry travels in decibels along
+            the level's curve, drawn points and all; the others in their own
+            domain, as a run's do. */
+        std::string aux;
+
         /*  A DCA FADE A HAND TOOK OVER (PI): the hand serial of the DCA when
             the job began, so a write of the trim by a hand since is seen. */
         std::uint64_t handSerial = 0;
@@ -165,7 +174,7 @@ namespace wfg::cue
             entry's run, nothing for a DCA, which has no run. */
         std::string heldRun() const
         {
-            if (! dca.empty())
+            if (! dca.empty() || ! aux.empty())
                 return {};
 
             if (! move.empty())

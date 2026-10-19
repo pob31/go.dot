@@ -18870,7 +18870,8 @@ The author's, 2026-10-05, each picked from options the implementer wrote and wor
 - **QD - Send lanes first** (§28): Live's moving sends come over one to one.
 - **QE - The shared effects are parked.** A send to a return that carries effects is written with
   `on="false"`, its level kept, into a mix of its own; Live's own devices are reported and noted on
-  their cue. A bus that carries a plugin chain is a separate, later feature.
+  their cue. A bus that carries a plugin chain is a separate, later feature. *Answered 2026-10-19 by §93:
+  a return is an aux, its sends come over on and its third-party plugins with their state.*
 - **QF - A tour is a show with performances** (§25): the newest set the template, each venue a
   performance in the show's folder, the media copied once into the show's `media/`.
 
@@ -32431,3 +32432,170 @@ not have. `ClientTests` - cues copied name their show, and a paste reads back th
 
 Owed: the author's try of all four in the window; the drag's feel (the edge, the speed); a second launch on
 his machine with the MADIface held by the first; a paste of cues with a movie between two shows.
+
+## 93. Aux channels: a shared rack channel fed by the cues' sends, with a chain of its own
+
+Asked by the author on 2026-10-19: *"I think for a complete transcription of Ableton Live projects we need
+to have aux channels for audio effects. Or am I missing how to set them up?"* - then *"They have the same
+sends as the outputs, but are then fed to the sends. These send levels can change during the show. It's like
+a mic cue but available as an aux output to the media and mic cues."*, and *"The Ableton Live import will need
+to parse the aux sends to effects of an ALS file."*
+
+What was found: nothing of the kind could be set up. A `Send` reached a `Bus` only - a block of hardware
+outputs - and every track went straight to the one wide device, so no track's sound could reach another's.
+§29's import parked Live's FX returns on purpose (QE): their sends came over switched off. PRD §3.9e and
+§3.18 had drawn the piece - a rack channel of the **shared** kind, "a bus with a chain" - and parts of it
+stood: `access="shared"` was in the schema and the claim checks, and a shared channel was built as a track
+with its plugins' children running. But its gate never opened, nothing fed it, and nothing owned its values:
+a rack channel's routing, EQ and inserts had only ever come from the mic cue that armed it.
+
+### 93.1 Decisions
+
+The author's, asked 2026-10-19 (the options and their wording mine):
+
+- **AVU** **The show holds an aux's values, and fades move them.** Its sends, level, EQ and plugin values
+  stand on the channel in the show; a fade aimed at the aux moves them for tonight. No cue has to run for an
+  aux to sound. *(Against my recommendation, a return cue that opens it the way a mic cue opens a channel.)*
+- **AVV** **A send into an aux that cannot take it is silent, and says so in words.** Since the show keeps
+  an aux open, that is an aux the graph was built without (declared since), one deleted, or one whose plugin
+  cannot play - which leaves the aux silent, as a plugin that cannot play leaves a cue (§18.13). The cue
+  plays everywhere else; it never fails its run for it.
+- **AVW** **Any aux may send into any aux, loops allowed.** *(Against my recommendation, only to a later
+  aux.)* A path down the list is heard in the same audio block; a path back up it, or into itself, one block
+  later.
+- **AVX** **The import carries a return's plugins and notes Live's own devices.** A VST3 or AU on a Live
+  return becomes that plugin on the aux's chain with its saved state; Live's Reverb, Delay and the rest cannot
+  be loaded outside Live, so they leave the chain empty and a note names them. The sends come over on.
+
+Mine *(proposed)*, the author's to overrule:
+
+- **AVY** **An aux is a shared `Rack/Channel`**, the form §3.18 already drew, so old shows load unchanged and
+  the rack's chain editor, its plugin children and its built-chain table serve it as they are. The channel
+  gains the owner `sound` - exactly the rows a mic cue carries: level, direct out, DCA, the EQ - and `Route`,
+  `Send` and `Fx` children. On an exclusive channel nothing reads them: its sound is the mic cue's. The word
+  in the windows is "Aux" ("Auxiliaire" in fr_FR), owed his before it ships.
+- **AVZ** **Tonight and the show (PRD §4.10).** A fade moves tonight's values beside the Runner, never the
+  document; they stay until another fade, a Doh! of that GO, a double Esc or a reload. An edit or a hand on
+  an aux value writes the show, undoable, as a cue's EQ and inserts are written (9a's rule).
+- **AWA** **Stops.** Esc leaves an aux alone, so the stopped cues' tails ring out through it. A double Esc
+  shuts it - its input in a millisecond, its level to silence behind its ramp - lets tonight's values go and
+  drops any fade moving it; the next GO opens it again, its EQ cleared and its plugins reset first, at the
+  show's values. Doh! takes a GO's fade on an aux back as it does a cue's. Panic values (§73) stay parked.
+- **AWB** **Widths.** An aux takes one channel (`mono`, `monoToStereo`) or two (`stereo`) in; a cue's send
+  is spread or folded onto it by the rules of a direct out (§42: stereo onto mono, half each).
+- **AWC** **The budget.** An aux's plugins count toward the show's 5 ms `rackBudget` as a rack channel's do,
+  said and never refused; a loop's block is said in words beside it.
+- **AWD** **No lanes on an aux.** An aux has no file to draw a lane on; send lanes stay a cue's.
+
+### 93.2 The engine
+
+- **The bus (`audio/AuxBus`).** Every track has a slot of its own: one row of samples for each aux input
+  channel, the *columns*, laid out aux after aux in the rack's order. One writer a slot, so nothing is shared
+  while it is written; a writer that sends nothing marks its slot silent and no aux reads it.
+- **The tap (`AuxTapPlugin`)** sits just before every track's output stage - every voice, every rack
+  channel, every aux - and writes the track's sends into its slot through a matrix of its own, from the
+  track's channels to every column. It copies the level the output stage is told each block and ramps it
+  over the same slew, so a send into an aux is below the cue's level, as every send is, and nothing that
+  writes a level knows the tap is there.
+- **The aux input (`AuxInputPlugin`)** takes a live input's place at the head of an aux's track: it clears
+  what arrived and adds its columns across every writer's slot. Open unless a double Esc shut it.
+- **The order is Tracktion's.** A silent Tracktion aux send - a fader position of nought, a gain of exactly
+  nought - follows every tap, and an aux return precedes every aux input. Tracktion's return waits for every
+  send on its bus before it runs; the voices and rack channels send on bus 0, which the first aux returns,
+  and each aux sends on the bus the next one returns. So the graph renders every voice and rack channel
+  before the first aux and each aux before the next, and the loop rule of AVW falls out of it: an aux reads
+  what a track wrote in this block when the track runs before it, and in the block before when it runs after
+  it - an aux below it, or itself. Tracktion's own sends do not loop, so the graph has no cycle.
+- **A track's routing has columns past the rig's outputs.** `AudioHost::auxColumnOf` answers where an aux's
+  input begins: the output count plus its first column. A coefficient aimed there is a send into the aux;
+  `setTrackRouting` and the Player's `setRouting` hand it to the tap's matrix and the rest to the output
+  stage. The cue layer stays vendor-free: it asks the Player for a column, as it asks for a track.
+- **A show with no aux builds none of this** - no bus, no tap, no aux send - and its graph is the one it had.
+
+### 93.3 The Runner and the document
+
+- **A send may name an aux.** `resolveRouting` takes a shared channel where a mix channel stood, spreads the
+  cue onto the aux's input width and aims it at the aux's columns. An aux the Player has no column for
+  contributes nothing (AVV).
+- **`applyAuxes`, every tick, after the cues' passes.** For every aux the graph has: its level - tonight's
+  or the show's, with its DCA's terms - where it changed; its routing, EQ and inserts when the show, the
+  lock, the plugin table or tonight's values moved, and all of it again for a new audio side. This is the
+  aux's arm and its edits at once.
+- **`fade/aux`** names the aux a fade moves, instead of a target: its level when `levelOn`, and the sends, EQ
+  numbers and plugin values its lists name, one job each under the fade's one report, keyed `aux:<id>:<entry>`
+  so a fade over a fade takes over from where the first had got to. An aux that is not one is `bad-target`.
+- **A double Esc** (`Runner::resetEffects`) shuts every aux through the host's sweep, lets tonight go and
+  retires every aux job; the first GO after it opens them again.
+- **The document.** A shared channel is a sounding thing to `send.create`, `fx.create` and the direct-out
+  menus; a send naming one passes the `refers` check; deleting an aux takes every send into it away in the
+  same step, as deleting an output takes its routes and sends.
+
+### 93.4 Rows
+
+| row | type, default | meaning |
+|---|---|---|
+| `rackChannel/access` | `s`, `exclusive` | `shared` is an aux (the description now says so) |
+| `/godot/slot/<aux>/level`, `directOut`, `dca`, `eq*` | the `sound` rows | the aux's own sound, the show's |
+| `fade/aux` | `s`, `refers=rackChannel` | the aux whose own sound this fade moves, instead of a cue's |
+
+An aux's sends and inserts are `Send` and `Fx` children of its channel, at `/godot/send/<id>` and
+`/godot/fx/<id>` as a cue's are.
+
+### 93.5 M83
+
+`M83: what four stereo auxes cost a block of a 64-voice graph` (AuxTests), Release, this laptop, buffer 128 at
+48 kHz, 64 voices and four rack channels: **180 µs a block without auxes, 235 µs with four stereo auxes**
+carrying a send - 55 µs, two per cent of the block's 2,667 µs. Voices that send nothing cost an aux nothing
+but the silent send's copy of two channels.
+
+### 93.6 The windows
+
+- **Show settings, Rack**: "+ Mono aux" and "+ Stereo aux" (`aux.create`, one step to undo - `channel.create`
+  with the access set in the same object). An aux's row says "Aux" before its class and, where a channel has
+  its recorder, "fed by the cues' sends"; its chain is edited as any channel's.
+- **A cue's sends panel** carries a strip for every aux after the mixes, its second line "Aux". A click on an
+  aux's name moves the panel onto that aux: its own level ("Aux level"), its sends into the mixes and the
+  other auxes, itself among them. The EQ and FX panels stand on an aux the same way: `FootReading::base` is
+  where the subject's rows are, `/godot/cue/<id>/` or `/godot/slot/<id>/` (`model::soundBase`).
+- **A fade's inspector** has an Aux menu after its DCA's; a fade aimed at an aux draws the aux's level ("the
+  aux's level, tonight"), its sends, EQ and inserts in the fade's own panels.
+- **A mic cue's channel menu** leaves the auxes out: a mic cue is refused on one (`bad-channel`).
+- **The tree** publishes an aux's `sound` rows at its slot address, and its sends and inserts at
+  `/godot/send/<id>` and `/godot/fx/<id>`, their `cue` the aux.
+
+### 93.7 The import (answering QE)
+
+- **A return that carries devices, or sends into another return, is an aux**: a direct out on the pair Live
+  patched it to, the aux's level its fader (its master's folded in when it goes through the master), its EQ
+  Eight as its EQ by QL's fit, and its sends into the other returns its own sends - into an aux at the send's
+  level, into a mix with that mix's fader folded in. A return with none of that stays a mix (QK). The sends
+  into an aux come over on, and its fader is no longer folded into them: it is the aux's level.
+- **Pre-fader sends are exact, not approximated**: the walk already left the fader out of a pre-fader path
+  (QH), and what every path to every mix shares is the cue's level, so nothing about it needs saying.
+- **A third-party plugin** (`PluginDevice`, `AuPluginDevice`) is read with what names it - a VST3's class id,
+  a VST2's unique id and file, an AU's three codes - and the state Live saved (`PluginInfo`). A VST3 or an AU
+  found in this machine's scan by its format and name goes on the aux's chain, its state written beside the
+  show as `plugins/aux-<plugin>.state`: a VST3's two states in the form JUCE saves one in, an AU's class
+  info as it is, both of which the loader's `setStateInformation` takes (a `.vstpreset` would need the
+  class id spelt the SDK's way, which Live's four numbers do not settle). One the scan does not know is
+  said, with where to scan. **A VST2 is said and not carried: Go.dot hosts VST3, AU and LV2.**
+- **Live's own devices** - Reverb, Delay, Grain Delay, Cathedral - leave the aux's chain empty and are said
+  as approximations, for a plugin of the author's.
+- **The Lazzi sets**: of the four returns only "FX delay" carries devices - Cathedral, Grain Delay and an EQ
+  Eight - so it comes over as an aux with its EQ and an empty chain; Face, Loin PS10 and Surround stay mixes.
+- **Session view has no envelope on a return**, so the plan's "envelopes on a return's level become fades on
+  the aux" has nothing to read; a hand mapped to one is the Send page, as before.
+
+### 93.8 Stages
+
+| stage | what | commit |
+|---|---|---|
+| A.0-A.4 | this section, the PRD's §3.18 answered, the schema; the bus, the tap, the aux input and the host's aux tracks (AuxTests: same block down the list, one block back up it and into itself, below the level, a double Esc, M83); sends into auxes, `applyAuxes`, `fade/aux`, Doh!, the double Esc's reset, the document's rules, the tree (AuxRunTests) | |
+| A.5 | the windows (93.6; AuxRunTests' window cases, ClientTests) | |
+| A.6 | the import (93.7; AlsReaderTests, AlsWalkTests, AlsImportTests) | |
+| A.7 | the guides, the README, the whole suite | |
+
+Owed: the author's try on the MADIface - an aux with a reverb plugin, a cue sending into it, a fade on its
+level, Esc letting the tail ring, double Esc cutting it; the word "Aux" (AVY); the probe set (§29.6) gaining
+a return with a VST3 on it, a return sending into another and a pre-fader send, to check 93.7 against a set
+Live wrote; the D700's pages on an aux (a follow-up).

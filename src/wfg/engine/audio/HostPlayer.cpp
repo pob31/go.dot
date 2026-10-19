@@ -219,6 +219,21 @@ namespace wfg::audio
         return audioHost.rackTrackOf (channelId);
     }
 
+    int HostPlayer::auxColumnOf (const std::string& channelId) const
+    {
+        return audioHost.auxColumnOf (channelId);
+    }
+
+    void HostPlayer::openAux (int track)
+    {
+        audioHost.openAux (track);
+    }
+
+    bool HostPlayer::isAuxOpen (int track) const
+    {
+        return audioHost.isAuxOpen (track);
+    }
+
     bool HostPlayer::openLive (int track, std::int64_t sample, double fadeInSeconds)
     {
         if (! audioHost.isRackTrack (track))
@@ -477,6 +492,24 @@ namespace wfg::audio
 
                 matrix->setGain (input, output, gain);
             }
+
+        /*  AND ITS SENDS INTO THE AUXES (namespace draft §93), the outputs past
+            the rig's: the same pass over the aux tap's matrix. */
+        if (auto* sends = audioHost.trackAuxMatrix (track))
+            for (int input = 0; input < sends->numInputs(); ++input)
+                for (int column = 0; column < sends->numOutputs(); ++column)
+                {
+                    auto gain = 0.0f;
+
+                    for (const auto& coefficient : coefficients)
+                        if (coefficient.input == input && coefficient.output == matrix->numOutputs() + column)
+                        {
+                            gain = coefficient.gain;
+                            break;
+                        }
+
+                    sends->setGain (input, column, gain);
+                }
     }
 
     void HostPlayer::setEq (int track, const EqSettings& settings)

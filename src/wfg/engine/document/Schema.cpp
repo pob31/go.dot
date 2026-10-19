@@ -408,8 +408,15 @@ namespace wfg::doc
                 { "Rack",    false, { "Channel" },         {} },
                 /*  A RACK CHANNEL'S CHAIN is its own `Plugin` children, in
                     order (Phase 9b, decision BX): the same element, and so the
-                    same rows, as an entry of the show's set. */
-                { "Channel", true,  { "Plugin" },          { "slot", "rackChannel" } },
+                    same rows, as an entry of the show's set.
+
+                    AND AN AUX IS A RACK CHANNEL (namespace draft §93, AVU): a
+                    shared one, holding its own sound - its level, direct out,
+                    EQ and DCA, the `sound` rows a mic cue carries - and its own
+                    sends, routes and inserts, as a mic cue does. The show holds
+                    them, and fades move them for the night. On an exclusive
+                    channel nothing reads them: its sound is the mic cue's. */
+                { "Channel", true,  { "Plugin", "Route", "Send", "Fx" }, { "slot", "rackChannel", "sound" } },
                 { "Slot",    true,  {},                    { "slot", "processorInput" } },
 
                 /*  And what a cue says about them. A `Route` sends a cue to a

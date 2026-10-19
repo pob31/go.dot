@@ -5716,9 +5716,15 @@ namespace wfg::client::ui
                 nameEditor.setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink"));
                 nameEditor.onEditorHide = [this] { commitName(); };
 
-                for (auto* button : { &addMono, &addWide, &addStereo, &addPlugin, &presetButton,
-                                      &restartButton, &loadButton })
+                for (auto* button : { &addMono, &addWide, &addStereo, &addMonoAux, &addStereoAux, &addPlugin,
+                                      &presetButton, &restartButton, &loadButton })
                     addAndMakeVisible (*button);
+
+                addMonoAux.setTooltip ("An aux the cues send into - a reverb, a delay - taking one channel in."
+                                       " Its chain, level, direct out and sends are its own, held by the show;"
+                                       " a fade moves them for the night.");
+                addStereoAux.setTooltip ("An aux the cues send into, taking two channels in - a stereo reverb"
+                                         " return. Its chain, level, direct out and sends are its own.");
 
                 addMono.setTooltip ("A channel for a microphone: mono in, mono out.");
                 addWide.setTooltip ("A channel for a microphone through a stereo effect - a reverb, a"
@@ -5745,6 +5751,20 @@ namespace wfg::client::ui
                 addMono.onClick   = [add] { add ("mono"); };
                 addWide.onClick   = [add] { add ("monoToStereo"); };
                 addStereo.onClick = [add] { add ("stereo"); };
+
+                /*  AN AUX (namespace draft §93): a shared channel, picked when
+                    it arrives as a channel is. */
+                const auto addAux = [this] (const char* channelClass)
+                {
+                    if (! send || locked)
+                        return;
+
+                    channelsWhenAdded = static_cast<int> (rack.channels.size());
+                    send (gesture::createAux (channelClass));
+                };
+
+                addMonoAux.onClick   = [addAux] { addAux ("mono"); };
+                addStereoAux.onClick = [addAux] { addAux ("stereo"); };
                 addPlugin.onClick = [this] { choosePlugin(); };
                 presetButton.onClick = [this] { choosePreset(); };
 
@@ -5792,7 +5812,8 @@ namespace wfg::client::ui
                 if (! budget.hasKeyboardFocus (true) && budget.getText() != juce::String (budgetTextNow))
                     budget.setText (juce::String (budgetTextNow), juce::dontSendNotification);
 
-                for (auto* button : { &addMono, &addWide, &addStereo, &addPlugin, &presetButton, &loadButton })
+                for (auto* button : { &addMono, &addWide, &addStereo, &addMonoAux, &addStereoAux, &addPlugin,
+                                      &presetButton, &loadButton })
                     button->setVisible (editable);
 
                 budget.setReadOnly (locked);
@@ -5848,7 +5869,7 @@ namespace wfg::client::ui
                 auto area = getLocalBounds().reduced (10);
                 auto bar = area.removeFromTop (30);
 
-                for (auto* button : { &addMono, &addWide, &addStereo })
+                for (auto* button : { &addMono, &addWide, &addStereo, &addMonoAux, &addStereoAux })
                     button->setBounds (bar.removeFromLeft (button == &addWide ? 150 : 110).reduced (3, 0));
 
                 budgetUnit.setBounds (bar.removeFromRight (30));
@@ -6065,11 +6086,16 @@ namespace wfg::client::ui
                     arrow - so that it is found by looking and not by accident. */
                 g.setFont (Look::font (theme, 12.0f));
                 g.setColour (Look::colour (theme, "ink-dim"));
-                g.drawText (juce::String (channel.classWord()) + (locked ? juce::String() : juce::String::fromUTF8 (" \xe2\x96\xbe")),
+                g.drawText ((channel.aux ? juce::String::fromUTF8 ("Aux \xc2\xb7 ") : juce::String())
+                              + juce::String (channel.classWord()) + (locked ? juce::String() : juce::String::fromUTF8 (" \xe2\x96\xbe")),
                             cells.channelClass, juce::Justification::centredLeft, true);
 
                 /*  THE RECORDER, a menu as the class is (Phase 9c): its word says
-                    whether the channel samples, and a dot marks one that does. */
+                    whether the channel samples, and a dot marks one that does.
+                    An aux has none (namespace draft §93): it says what feeds it. */
+                if (channel.aux)
+                    g.drawText ("fed by the cues' sends", cells.take, juce::Justification::centredRight, true);
+                else
                 g.drawText ((channel.samples() ? juce::String::fromUTF8 ("\xe2\x97\x8f ") : juce::String())
                               + juce::String (channel.takeWord())
                               + (locked ? juce::String() : juce::String::fromUTF8 (" \xe2\x96\xbe")),
@@ -6193,7 +6219,7 @@ namespace wfg::client::ui
 
                     if (! locked && cells.channelClass.contains (event.x, event.y))
                         chooseClass (channel);
-                    else if (! locked && cells.take.contains (event.x, event.y))
+                    else if (! locked && ! channel.aux && cells.take.contains (event.x, event.y))
                         chooseTake (channel);
 
                     updateButtons();
@@ -6527,6 +6553,7 @@ namespace wfg::client::ui
             juce::Label channelHeading, chainHeading, budgetLabel, budgetUnit, said, nameEditor;
             juce::TextEditor budget;
             juce::TextButton addMono { "+ Mono" }, addWide { "+ Mono to stereo" }, addStereo { "+ Stereo" },
+                             addMonoAux { "+ Mono aux" }, addStereoAux { "+ Stereo aux" },
                              addPlugin { "Add..." }, presetButton { "Preset file..." }, restartButton { "Restart" },
                              loadButton { "Load now" };
             std::unique_ptr<juce::FileChooser> chooser;

@@ -58,6 +58,10 @@ namespace wfg::client::model
         /** mono, monoToStereo or stereo: the row's own word. */
         std::string channelClass = "mono";
 
+        /*  AN AUX (namespace draft §93): a shared channel, fed by the cues'
+            sends, holding a sound of its own. */
+        bool aux = false;
+
         /** The chain, in the order it processes. */
         std::vector<PluginRow> chain;
 

@@ -178,6 +178,10 @@
 #include <string>
 #include <vector>
 
+/*  Where this machine's engine keeps its files, plugins/known.xml among them -
+    defined further down, and asked by the Live import above it (§93). */
+juce::File engineCacheFolder();
+
 namespace
 {
     //==============================================================================
@@ -1776,6 +1780,9 @@ namespace
 
         wfg::import::als::ImportOptions options;
         options.into = juce::File (juce::String::fromUTF8 (request.into.c_str()));
+
+        /*  A RETURN'S PLUGINS ARE LOOKED FOR IN THIS MACHINE'S SCAN (§93, AVX). */
+        options.knownPlugins = wfg::plugin::knownPlugins (engineCacheFolder().getFullPathName().toStdString());
         options.scenes = std::set<int> (request.scenes.begin(), request.scenes.end());
         options.progress = progress;
 
@@ -1938,6 +1945,7 @@ namespace
         wfg::import::als::ImportOptions options;
         options.into = cwd.getChildFile (args.getValueForOption ("--into"));
         options.copyMedia = ! args.containsOption ("--no-media");
+        options.knownPlugins = wfg::plugin::knownPlugins (engineCacheFolder().getFullPathName().toStdString());
         options.progress = [] (const std::string& sentence) { std::cout << "wfg import-als: " << sentence << std::endl; };
 
         if (args.containsOption ("--scenes"))

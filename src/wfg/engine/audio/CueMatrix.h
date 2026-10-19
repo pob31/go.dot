@@ -132,6 +132,12 @@ namespace wfg::audio
                       float* const* output, int numOutputChannels,
                       int numSamples) noexcept WFG_AUDIO_THREAD;
 
+        /*  WHETHER THE LAST process() ADDED NOTHING: every coefficient at a
+            steady nought, so every output was left cleared (namespace draft
+            §93). What an aux tap says of its slot, so an aux skips a voice
+            that sends it nothing. The audio thread's own. */
+        bool lastBlockSilent() const noexcept  { return ! wroteLastBlock; }
+
     private:
         int index (int input, int output) const noexcept { return input * outputs + output; }
 
@@ -151,6 +157,9 @@ namespace wfg::audio
             output - otherwise a smoother shared across N outputs would advance
             N times per sample and arrive N times too fast. */
         std::vector<float> levelRamp;
+
+        /** Whether the last process() added any coefficient in. Audio thread. */
+        bool wroteLastBlock = false;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CueMatrix)
     };

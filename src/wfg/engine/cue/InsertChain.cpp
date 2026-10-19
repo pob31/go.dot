@@ -139,6 +139,11 @@ namespace wfg::cue
             return input.isValid() ? std::max (1, static_cast<int> (schema.integer (input, "input", "width"))) : 1;
         }
 
+        /*  AN AUX (namespace draft §93): what it takes in - one channel for a
+            mono aux and a mono-to-stereo one, two for a stereo one. */
+        if (cue.hasType ("Channel"))
+            return schema.text (cue, "rackChannel", "class") == "stereo" ? 2 : 1;
+
         return static_cast<int> (schema.integer (cue, "media", "channels"));
     }
 
@@ -150,9 +155,13 @@ namespace wfg::cue
             graph built that channel - as declared, with no graph - its own
             inserts switched in or not, its input's width at the head, on a
             track two channels wide whatever the class. */
-        if (cue.hasType ("Mic"))
+        if (cue.hasType ("Mic") || cue.hasType ("Channel"))
         {
-            const auto channel = audioChild (cue, "Rack", "Channel", cue.getProperty ("channel").toString());
+            /*  And an aux's is its own (namespace draft §93): the channel is the
+                thing that carries the Fx. */
+            const auto channel = cue.hasType ("Channel")
+                                   ? cue
+                                   : audioChild (cue, "Rack", "Channel", cue.getProperty ("channel").toString());
             const auto channelId = channel.getProperty ("id").toString().toStdString();
 
             std::vector<std::string> declared;

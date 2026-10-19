@@ -149,7 +149,11 @@ namespace wfg::client::model
 
         const auto levelOn = text (snapshot, fade + "levelOn") != "false";
         out.dcaId = text (snapshot, fade + "dca");
-        out.targetId = text (snapshot, fade + "target");
+        /*  A FADE ON AN AUX (namespace draft §93) moves the aux's own sound,
+            read where its rows are, instead of a cue's. */
+        const auto auxTarget = text (snapshot, fade + "aux");
+        out.targetId = ! auxTarget.empty() ? auxTarget : text (snapshot, fade + "target");
+        const auto aux = ! auxTarget.empty() && isAux (snapshot, auxTarget);
 
         /*  A FADE ON A DCA moves its trim and nothing else: the DCA's own
             strip, which the motorised fader under it follows (§16.4). */
@@ -174,24 +178,26 @@ namespace wfg::client::model
             return out;
         }
 
-        if (out.targetId.empty() || text (snapshot, "/godot/cue/" + out.targetId + "/kind").empty())
+        if (out.targetId.empty() || (! aux && text (snapshot, "/godot/cue/" + out.targetId + "/kind").empty()))
         {
             out.notice = "This fade is aimed at nothing yet - pick its target, or a DCA, in the inspector.";
             return out;
         }
 
-        const auto target = "/godot/cue/" + out.targetId + "/";
+        const auto target = soundBase (snapshot, out.targetId);
         out.present = true;
-        out.targetKind = text (snapshot, target + "kind");
-        out.targetName = labelOf (snapshot, out.targetId);
-        out.hasEq = out.targetKind == "media" || out.targetKind == "mic";
+        out.targetKind = aux ? std::string ("aux") : text (snapshot, target + "kind");
+        out.targetName = aux ? text (snapshot, target + "name") : labelOf (snapshot, out.targetId);
+        out.hasEq = out.targetKind == "media" || out.targetKind == "mic" || out.targetKind == "aux";
 
         //  The level: the cue's, or a group's trim - a fader either way.
         {
             FadeStrip strip;
             strip.kind = "level";
             strip.name = "Level";
-            strip.under = out.targetKind == "group" ? "the group's trim" : "the cue's level";
+            strip.under = out.targetKind == "group" ? "the group's trim"
+                        : out.targetKind == "aux"   ? "the aux's level, tonight"
+                                                    : "the cue's level";
             strip.address = fade + "level";
             strip.switchAddress = fade + "levelOn";
             strip.moved = levelOn;

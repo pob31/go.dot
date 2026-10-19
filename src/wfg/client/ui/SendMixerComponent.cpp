@@ -216,6 +216,15 @@ namespace wfg::client::ui
 
         void mouseDown (const juce::MouseEvent& event) override
         {
+            /*  AN AUX'S NAME OPENS THE AUX (namespace draft §93): its own
+                sends, where it goes and how loud - the panel moves onto it. */
+            if (! isMaster && event.eventComponent == this && send().channelWord == "Aux" && owner.actions.openAux
+                  && event.position.y < static_cast<float> (scaled (26, owner.theme)))
+            {
+                owner.actions.openAux (send().busId);
+                return;
+            }
+
             owner.dialAt (at);
 
             if (event.eventComponent != this)
@@ -355,8 +364,9 @@ namespace wfg::client::ui
             const auto dialHere = ! owner.dialed.empty() && owner.levelAddressAt (at) == owner.dialed;
 
             g.drawFittedText ((dialHere ? juce::String (juce::CharPointer_UTF8 ("\xe2\x97\x89 ")) : juce::String())
-                                + (isMaster ? juce::String ("Cue level")
-                                            : juce::String (send().name)),
+                                + (isMaster ? juce::String (owner.reading.cueKind == "aux" ? "Aux level" : "Cue level")
+                                            : juce::String (send().name)
+                                                + (send().channelWord == "Aux" ? juce::String::fromUTF8 (" \xe2\x80\xba") : juce::String())),
                               head.removeFromTop (scaled (14, look)), juce::Justification::centred, 1);
 
             g.setColour (Look::colour (look, "ink-faint"));
@@ -482,7 +492,7 @@ namespace wfg::client::ui
             return {};
 
         if (at == 0)
-            return "/godot/cue/" + reading.subject.objectId + "/level";
+            return reading.rowAt ("level");
 
         //  A silent strip with no send behind it has no level to turn yet.
         if (at - 1 >= reading.sends.size() || reading.sends[at - 1].sendId.empty())
@@ -748,7 +758,7 @@ namespace wfg::client::ui
         if (at == 0)
         {
             if (actions.set)
-                actions.set ("/godot/cue/" + reading.subject.objectId + "/level",
+                actions.set (reading.rowAt ("level"),
                              osc::formatDouble (std::round (level * 10.0) / 10.0));
 
             return;
