@@ -22,6 +22,7 @@
 #include <wfg/client/model/Text.h>
 #include <wfg/client/model/Timecode.h>
 #include <wfg/client/model/Video.h>
+#include <wfg/engine/surface/DeckPainter.h>
 #include <wfg/engine/video/Displays.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 #include <wfg/engine/process/ScriptText.h>
@@ -35,6 +36,7 @@
 #include <functional>
 #include <initializer_list>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -3757,6 +3759,375 @@ namespace wfg::client::ui
             of the DCA - and the DCA column that hid behind it is gone; each
             DCA says which faders ride it, "no fader" in words; and a strip is
             dragged to a new place on its surface, one `object.move`. */
+        //==========================================================================
+        /*  A STREAM DECK ON THE SURFACES PAGE (namespace draft §95), where a
+            surface's strips would be - a deck has none: which deck it is, the
+            cart its keys show, whether the show's keys are on it, how bright,
+            and a picture of its keys drawn by the engine's own painter, so
+            what is here is what the deck shows. Plugged in or not: with no
+            deck found the keys are laid out as an MK.2's.
+
+            THE PICTURE PLAYS, for trying a deck with no deck: a pad pressed
+            here is pressed (`cue.press`, `cue.release` on letting go), GO is
+            GO, Esc Esc, Doh! Doh!, the arrows the standby's. A page key is the
+            deck's own and does nothing here.
+
+            ELGATO'S APP HOLDS THE DECKS while it runs: the button shows while
+            it does, and asks before anything is closed. */
+        class DeckPanel final : public juce::Component
+        {
+        public:
+            DeckPanel (const model::Theme& themeToUse, std::function<void (Event)> dispatch)
+                : theme (themeToUse), send (std::move (dispatch))
+            {
+                for (auto* box : { &deckBox, &cartBox })
+                    addAndMakeVisible (*box);
+
+                deckBox.setTooltip ("Which Stream Deck this surface is, by its serial: the first one plugged"
+                                    " in that no other surface names, or one in particular.");
+                cartBox.setTooltip ("The cart whose cues fill the keys, from the top left in the cart's order.");
+
+                deckBox.onChange = [this]
+                {
+                    const auto at = deckBox.getSelectedItemIndex();
+
+                    if (! quiet && at >= 0 && static_cast<std::size_t> (at) < deckMenu.size())
+                        write ("device", deckMenu[static_cast<std::size_t> (at)].first);
+                };
+
+                cartBox.onChange = [this]
+                {
+                    const auto at = cartBox.getSelectedItemIndex();
+
+                    if (! quiet && at >= 0 && static_cast<std::size_t> (at) < cartMenu.size())
+                        write ("cart", cartMenu[static_cast<std::size_t> (at)].first);
+                };
+
+                showKeysButton.setTooltip ("GO, Esc, Doh! and the standby's arrows at the end of the deck's"
+                                           " last row, as many as it has room for.");
+                showKeysButton.onClick = [this]
+                {
+                    if (! quiet)
+                        write ("showKeys", showKeysButton.getToggleState() ? "true" : "false");
+                };
+                addAndMakeVisible (showKeysButton);
+
+                brightnessLabel.setText ("Brightness", juce::dontSendNotification);
+                brightnessLabel.setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink-dim"));
+                addAndMakeVisible (brightnessLabel);
+
+                brightness.setRange (0.0, 100.0, 1.0);
+                brightness.setSliderStyle (juce::Slider::LinearHorizontal);
+                brightness.setTextBoxStyle (juce::Slider::TextBoxRight, false, 44, 20);
+                brightness.setTextValueSuffix (" %");
+                brightness.setTooltip ("How bright the deck's keys are.");
+                brightness.onDragEnd = [this]
+                {
+                    if (! quiet)
+                        write ("brightness", std::to_string (static_cast<int> (brightness.getValue())));
+                };
+                addAndMakeVisible (brightness);
+
+                closeAppButton.setTooltip ("Elgato's Stream Deck app is holding the decks. Close it so Go.dot"
+                                           " can drive them?");
+                closeAppButton.onClick = [this]
+                {
+                    juce::AlertWindow::showAsync (
+                        juce::MessageBoxOptions()
+                            .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                            .withTitle ("Close Elgato's Stream Deck app?")
+                            .withMessage ("Elgato's Stream Deck app holds every deck while it runs, so Go.dot"
+                                          " cannot drive this one. Close the app? Its own profiles come back"
+                                          " when it is started again.")
+                            .withButton ("Close the app")
+                            .withButton ("Leave it")
+                            .withAssociatedComponent (this),
+                        [safe = juce::Component::SafePointer<DeckPanel> (this)] (int result)
+                        {
+                            if (result == 1 && safe != nullptr && safe->send)
+                                safe->send (gesture::streamDeckCloseApp());
+                        });
+                };
+                addChildComponent (closeAppButton);
+            }
+
+            void show (const model::SurfaceRow& deck, std::vector<std::pair<std::string, std::string>> decksNow,
+                       std::vector<std::pair<std::string, std::string>> cartsNow, bool appHolds, bool editable)
+            {
+                const juce::ScopedValueSetter<bool> hush (quiet, true);
+
+                const auto picked = deck.id != surfaceId;
+                surfaceId = deck.id;
+
+                if (picked || decksNow != deckMenu)
+                {
+                    deckMenu = std::move (decksNow);
+                    fill (deckBox, deckMenu);
+                }
+
+                if (picked || cartsNow != cartMenu)
+                {
+                    cartMenu = std::move (cartsNow);
+                    fill (cartBox, cartMenu);
+                }
+
+                select (deckBox, deckMenu, deck.device);
+                select (cartBox, cartMenu, deck.cart);
+                showKeysButton.setToggleState (deck.showKeys, juce::dontSendNotification);
+
+                if (! brightness.isMouseButtonDown())
+                    brightness.setValue (deck.brightness, juce::dontSendNotification);
+
+                for (juce::Component* control : { static_cast<juce::Component*> (&deckBox),
+                                                  static_cast<juce::Component*> (&cartBox),
+                                                  static_cast<juce::Component*> (&showKeysButton),
+                                                  static_cast<juce::Component*> (&brightness) })
+                    control->setEnabled (editable);
+
+                //  A Stream Deck+ shows no cart: its keys are its pages'.
+                cartBox.setVisible (deck.model != "plus");
+
+                if (closeAppButton.isVisible() != appHolds)
+                {
+                    closeAppButton.setVisible (appHolds);
+                    resized();
+                }
+
+                const auto grid = model::deckGrid (deck.model);
+
+                if (deck.keys != keysText || grid != columnsRows || deck.problem != problem)
+                {
+                    keysText = deck.keys;
+                    keys = model::deckKeysOf (keysText);
+                    columnsRows = grid;
+                    problem = deck.connected ? std::string {} : deck.problem;
+                    drawn.clear();
+                    repaint();
+                }
+            }
+
+            void resized() override
+            {
+                auto area = getLocalBounds();
+                auto bar = area.removeFromTop (30).reduced (0, 3);
+
+                deckBox.setBounds (bar.removeFromLeft (260));
+                bar.removeFromLeft (8);
+
+                if (cartBox.isVisible())
+                {
+                    cartBox.setBounds (bar.removeFromLeft (200));
+                    bar.removeFromLeft (8);
+                }
+
+                showKeysButton.setBounds (bar.removeFromLeft (110));
+                bar.removeFromLeft (8);
+
+                if (closeAppButton.isVisible())
+                    closeAppButton.setBounds (bar.removeFromRight (170));
+
+                brightnessLabel.setBounds (bar.removeFromLeft (76));
+                brightness.setBounds (bar.removeFromLeft (juce::jmin (220, bar.getWidth())));
+
+                problemLine = area.removeFromBottom (20);
+                picture = area.reduced (0, 6);
+                drawn.clear();
+            }
+
+            void paint (juce::Graphics& g) override
+            {
+                //  Why the deck shows nothing, in the engine's sentence (§4.8: words, not a colour).
+                if (! problem.empty())
+                {
+                    g.setFont (Look::font (theme, 12.0f));
+                    g.setColour (Look::colour (theme, "failed"));
+                    g.drawText (juce::String (problem), problemLine, juce::Justification::centredLeft, true);
+                }
+
+                const auto size = keySize();
+
+                if (size <= 0 || keys.empty())
+                    return;
+
+                if (drawn.size() != keys.size())
+                {
+                    drawn.clear();
+
+                    for (const auto& key : keys)
+                        drawn.push_back (imageOf (key, size));
+                }
+
+                for (std::size_t at = 0; at < keys.size(); ++at)
+                    g.drawImageAt (drawn[at], keyBounds (static_cast<int> (at)).getX(),
+                                   keyBounds (static_cast<int> (at)).getY());
+            }
+
+            void mouseDown (const juce::MouseEvent& event) override
+            {
+                const auto at = keyAt (event.getPosition());
+
+                if (at < 0 || ! send)
+                    return;
+
+                const auto& key = keys[static_cast<std::size_t> (at)];
+
+                if (key.action == "cue" && ! key.cue.empty())
+                {
+                    send (gesture::pressCue (key.cue));
+                    pressedCue = key.cue;
+                }
+                else if (key.action == "go")          send (gesture::go());
+                else if (key.action == "esc")         send (gesture::stopAll());
+                else if (key.action == "doh")         send (gesture::doh());
+                else if (key.action == "standbyUp")   send (gesture::standbyPrevious());
+                else if (key.action == "standbyDown") send (gesture::standbyNext());
+            }
+
+            void mouseUp (const juce::MouseEvent&) override
+            {
+                if (! pressedCue.empty() && send)
+                    send (gesture::releaseCue (pressedCue));
+
+                pressedCue.clear();
+            }
+
+        private:
+            const model::Theme& theme;
+            std::function<void (Event)> send;
+
+            juce::ComboBox deckBox, cartBox;
+            juce::ToggleButton showKeysButton { "Show keys" };
+            juce::Label brightnessLabel;
+            juce::Slider brightness;
+            juce::TextButton closeAppButton { "Close Elgato's app..." };
+
+            std::string surfaceId;
+            std::vector<std::pair<std::string, std::string>> deckMenu, cartMenu;
+            std::string keysText, problem, pressedCue;
+            std::vector<model::DeckKeyRow> keys;
+            std::pair<int, int> columnsRows { 5, 3 };
+            std::vector<juce::Image> drawn;
+            juce::Rectangle<int> picture, problemLine;
+            bool quiet = false;
+
+            void write (const char* row, const std::string& value)
+            {
+                if (send && ! surfaceId.empty())
+                    send (gesture::setNode ("/godot/surface/" + surfaceId + "/" + row, value));
+            }
+
+            static void fill (juce::ComboBox& box, const std::vector<std::pair<std::string, std::string>>& menu)
+            {
+                box.clear (juce::dontSendNotification);
+
+                for (std::size_t at = 0; at < menu.size(); ++at)
+                    box.addItem (juce::String::fromUTF8 (menu[at].second.c_str()), static_cast<int> (at) + 1);
+            }
+
+            static void select (juce::ComboBox& box, const std::vector<std::pair<std::string, std::string>>& menu,
+                                const std::string& value)
+            {
+                for (std::size_t at = 0; at < menu.size(); ++at)
+                    if (menu[at].first == value)
+                    {
+                        box.setSelectedItemIndex (static_cast<int> (at), juce::dontSendNotification);
+                        return;
+                    }
+            }
+
+            /*  THE KEYS AS LARGE AS THE ROOM ALLOWS, up to a Stream Deck+'s own
+                120 pixels, a sixth of one between them. */
+            int keySize() const
+            {
+                const auto [columns, rows] = columnsRows;
+
+                if (columns <= 0 || rows <= 0 || picture.isEmpty())
+                    return 0;
+
+                const auto across = picture.getWidth() * 6 / (columns * 7 + 1);
+                const auto down = picture.getHeight() * 6 / (rows * 7 + 1);
+                return juce::jlimit (0, 120, juce::jmin (across, down));
+            }
+
+            juce::Rectangle<int> keyBounds (int index) const
+            {
+                const auto [columns, rows] = columnsRows;
+                const auto size = keySize();
+                const auto gap = size / 6;
+                const auto column = columns > 0 ? index % columns : 0;
+                const auto row = columns > 0 ? index / columns : 0;
+
+                juce::ignoreUnused (rows);
+                return { picture.getX() + gap + column * (size + gap), picture.getY() + gap + row * (size + gap),
+                         size, size };
+            }
+
+            int keyAt (juce::Point<int> where) const
+            {
+                for (std::size_t at = 0; at < keys.size(); ++at)
+                    if (keyBounds (static_cast<int> (at)).contains (where))
+                        return static_cast<int> (at);
+
+                return -1;
+            }
+
+            static wfg::surface::KeyPicture pictureOf (const model::DeckKeyRow& key)
+            {
+                using Glyph = wfg::surface::KeyPicture::Glyph;
+
+                wfg::surface::KeyPicture picture;
+                picture.top = key.top;
+                picture.label = key.label;
+                picture.bottom = key.bottom;
+                picture.lit = key.lit;
+                picture.dim = key.dim;
+
+                const auto& a = key.action;
+                picture.glyph = a == "go" ? Glyph::go
+                              : a == "esc" ? Glyph::esc
+                              : a == "doh" ? Glyph::doh
+                              : a == "standbyUp" ? Glyph::standbyUp
+                              : a == "standbyDown" ? Glyph::standbyDown
+                              : a == "cartPage" ? Glyph::pageNext
+                              : a == "aimPrevious" ? Glyph::aimPrevious
+                              : a == "aimNext" ? Glyph::aimNext
+                              : a == "controlsPrevious" ? Glyph::controlsPrevious
+                              : a == "controlsNext" ? Glyph::controlsNext
+                              : a == "send" ? Glyph::pageSend
+                              : a == "eq" ? Glyph::pageEq
+                              : a == "fx" ? Glyph::pageFx
+                              : a == "loop" ? Glyph::pageLoop
+                                            : Glyph::none;
+
+                const auto colour = juce::Colour::fromString ("ff" + juce::String (key.colour).trimCharactersAtStart ("#"));
+
+                if (key.colour.size() == 7)
+                    picture.background = { colour.getRed(), colour.getGreen(), colour.getBlue() };
+
+                return picture;
+            }
+
+            static juce::Image imageOf (const model::DeckKeyRow& key, int size)
+            {
+                const auto pixels = wfg::surface::painter::key (pictureOf (key), size);
+                juce::Image image (juce::Image::RGB, juce::jmax (1, pixels.width), juce::jmax (1, pixels.height), true);
+
+                if (pixels.rgb.size() < static_cast<std::size_t> (pixels.width * pixels.height * 3))
+                    return image;
+
+                juce::Image::BitmapData data (image, juce::Image::BitmapData::writeOnly);
+
+                for (int y = 0; y < pixels.height; ++y)
+                    for (int x = 0; x < pixels.width; ++x)
+                    {
+                        const auto at = static_cast<std::size_t> ((y * pixels.width + x) * 3);
+                        data.setPixelColour (x, y, juce::Colour (pixels.rgb[at], pixels.rgb[at + 1], pixels.rgb[at + 2]));
+                    }
+
+                return image;
+            }
+        };
+
         class SurfacesPage final : public juce::Component,
                                    public juce::DragAndDropContainer,
                                    public juce::DragAndDropTarget
@@ -3789,8 +4160,8 @@ namespace wfg::client::ui
 
                 addSurfaceButton.setTooltip ("Declare a surface: the virtual panel this client draws"
                                              " under Show > Surfaces..., a Mackie Control unit, an"
-                                             " Asparion D700 or a pad controller. Its strips come"
-                                             " with it.");
+                                             " Asparion D700, a pad controller or a Stream Deck. Its"
+                                             " strips come with it; a Stream Deck has keys instead.");
                 addStripButton.setTooltip ("One more strip at the end of the surface picked above.");
                 addDcaButton.setTooltip ("Declare a DCA: a trim that the cues and groups marked"
                                          " with it follow. A fader rides it once a strip's Role,"
@@ -3868,6 +4239,18 @@ namespace wfg::client::ui
             }
 
             const std::string& spaceMouseWord() const noexcept { return spaceMouseStatus; }
+
+            /*  WHAT A STREAM DECK'S PANEL OFFERS (namespace draft §95): the decks
+                plugged in, the show's carts, and whether Elgato's app holds
+                them - read off the snapshot every pass, after `show`. */
+            void showDecks (const tree::TreeSnapshot& snapshot)
+            {
+                const auto* surface = surfaceOf (picked);
+                deckMenu = model::deckChoices (snapshot, surface != nullptr ? surface->device : std::string {});
+                cartMenu = model::cartChoices (snapshot);
+                deckAppHolds = model::isYes (model::flag (snapshot, "/godot/engine/streamDeckApp"));
+                placeDeckPanel();
+            }
             juce::Button& closeDriver() noexcept { return closeDriverButton; }
 
             void show (std::vector<model::SurfaceRow> surfacesNow, std::vector<model::StripRow> stripsNow,
@@ -3896,6 +4279,7 @@ namespace wfg::client::ui
                     button->setVisible (editable);
 
                 addStripButton.setEnabled (! picked.empty());
+                placeDeckPanel();
 
                 /*  THE LOCK TAKES AN EDIT THAT WAS UNDER WAY WITH IT, rather
                     than letting it land a moment after the show said no. The
@@ -3948,9 +4332,11 @@ namespace wfg::client::ui
 
                 /*  THE STRIPS GET THE MOST ROOM, being the longest list: eight
                     or sixteen to a surface, against a handful of surfaces and
-                    DCAs. */
-                const int heights[] { room * 30 / 100, room * 42 / 100,
-                                      room - room * 30 / 100 - room * 42 / 100 };
+                    DCAs. A Stream Deck's keys more still, drawn as keys (§95). */
+                const auto middle = pickedIsDeck() ? 56 : 42;
+                const auto top = pickedIsDeck() ? 20 : 30;
+                const int heights[] { room * top / 100, room * middle / 100,
+                                      room - room * top / 100 - room * middle / 100 };
                 juce::ListBox* lists[] { &surfaceList, &stripList, &dcaList };
                 juce::TextButton* buttons[] { &addSurfaceButton, &addStripButton, &addDcaButton };
 
@@ -3972,6 +4358,14 @@ namespace wfg::client::ui
 
                     headings[at] = area.removeFromTop (headingHeight);
                     lists[at]->setBounds (area.removeFromTop (heights[at]));
+
+                    if (at == 1)
+                    {
+                        deckArea = headings[1].getUnion (lists[1]->getBounds());
+
+                        if (deckPanel != nullptr)
+                            deckPanel->setBounds (deckArea);
+                    }
                 }
             }
 
@@ -3982,7 +4376,8 @@ namespace wfg::client::ui
                 g.setFont (Look::font (theme, 13.0f));
                 g.setColour (Look::colour (theme, "ink"));
                 g.drawText ("Surfaces", titles[0], juce::Justification::centredLeft);
-                g.drawText (pickedSurface != nullptr ? "Strips of " + juce::String (pickedSurface->label())
+                g.drawText (pickedSurface != nullptr ? (pickedIsDeck() ? "Keys of " : "Strips of ")
+                                                         + juce::String (pickedSurface->label())
                                                      : juce::String ("Strips"),
                             titles[1], juce::Justification::centredLeft, true);
                 g.drawText ("DCAs", titles[2], juce::Justification::centredLeft);
@@ -4024,7 +4419,7 @@ namespace wfg::client::ui
                 const auto stripHeads = stripCells (headings[1].withWidth (rowWidth (stripList)));
                 const char* stripNames[] { "Strip", "Role", "State" };
 
-                for (std::size_t at = 0; at < 3; ++at)
+                for (std::size_t at = 0; at < 3 && ! pickedIsDeck(); ++at)
                     g.drawText (stripNames[at], stripHeads[at], juce::Justification::centredLeft);
 
                 const auto dcaHeads = dcaCells (headings[2].withWidth (rowWidth (dcaList)));
@@ -4686,6 +5081,7 @@ namespace wfg::client::ui
                 picked = id;
                 strips = model::stripsOf (allStrips, picked);
                 addStripButton.setEnabled (! picked.empty());
+                placeDeckPanel();
 
                 surfaceList.repaint();
                 stripList.updateContent();
@@ -5177,6 +5573,46 @@ namespace wfg::client::ui
 
             const model::Theme& theme;
             std::function<void (Event)> send;
+
+            /*  A STREAM DECK PICKED SHOWS ITS PANEL where the strips would be
+                (namespace draft §95): a deck has no strips. Made the first time
+                a deck is picked; a show with none never has one. */
+            std::unique_ptr<DeckPanel> deckPanel;
+            juce::Rectangle<int> deckArea;
+            std::vector<std::pair<std::string, std::string>> deckMenu, cartMenu;
+            bool deckAppHolds = false;
+
+            bool pickedIsDeck() const
+            {
+                const auto* surface = surfaceOf (picked);
+                return surface != nullptr && surface->profile == "streamDeck";
+            }
+
+            void placeDeckPanel()
+            {
+                const auto deck = pickedIsDeck();
+
+                if (deck && deckPanel == nullptr)
+                {
+                    deckPanel = std::make_unique<DeckPanel> (theme, send);
+                    addChildComponent (*deckPanel);
+                    deckPanel->setBounds (deckArea);
+                }
+
+                //  The room moves with it (see `resized`).
+                if (deckPanel != nullptr && deckPanel->isVisible() != deck)
+                {
+                    deckPanel->setVisible (deck);
+                    resized();
+                }
+
+                stripList.setVisible (! deck);
+                addStripButton.setVisible (! deck && ! locked);
+
+                if (deck)
+                    if (const auto* surface = surfaceOf (picked))
+                        deckPanel->show (*surface, deckMenu, cartMenu, deckAppHolds, ! locked);
+            }
 
             Lister surfaceLister { *this, Which::surfaces };
             Lister stripLister { *this, Which::strips };
@@ -9711,6 +10147,7 @@ namespace wfg::client::ui
                             ! model::isYes (model::flag (snapshot, "/godot/document/locked")));
             surfaces->showSpaceMouse (model::text (snapshot, "/godot/engine/spaceMouse"),
                                       model::text (snapshot, "/godot/engine/spaceMouseName"));
+            surfaces->showDecks (snapshot);
 
             /*  THE SET AND THE MACHINE'S LIST, re-read every pass for the same
                 reason; the state words are the sandbox's and move when a child

@@ -59,7 +59,7 @@ namespace wfg::client::model
     {
         std::string id;
         std::string name;
-        std::string profile;              // virtual | mcu | d700 | midiPads
+        std::string profile;              // virtual | mcu | d700 | midiPads | streamDeck
         std::vector<std::string> ports;   // port ids, bank order (split on spaces)
         std::string preset;
         bool enabled = true;
@@ -69,6 +69,14 @@ namespace wfg::client::model
         std::string serial;
         int channel = 0;                  // midiPads
         int firstNote = 36;               // midiPads
+
+        //  A Stream Deck's (namespace draft §95).
+        std::string device {};            // the deck's serial, or empty for the first free one
+        std::string cart {};              // the cart it shows, or empty for the show's first
+        bool showKeys = false;            // GO, Esc, Doh! and the standby's arrows on it
+        int brightness = 70;
+        std::string model {};             // the model found: mk2, plus, ... or empty
+        std::string keys {};              // what each key shows, as surface/<id>/keys publishes it
 
         /** The name, or the profile's own words when it has none ("Mackie Control", "Asparion D700", "Pads", "Virtual panel"). */
         std::string label() const;
@@ -300,8 +308,35 @@ namespace wfg::client::model
     std::vector<std::pair<std::string, std::string>> stripChoices (const tree::TreeSnapshot&,
                                                                    const std::string& cueId);
 
-    /** The four profiles, {word, label}: virtual "Virtual panel", mcu "Mackie Control", d700 "Asparion D700", midiPads "Pads". */
+    /** The five profiles, {word, label}: virtual "Virtual panel", mcu "Mackie Control", d700 "Asparion D700", midiPads "Pads", streamDeck "Stream Deck". */
     std::vector<std::pair<std::string, std::string>> profileChoices();
+
+    /*  ONE KEY OF A STREAM DECK, as `surface/<id>/keys` says it (namespace
+        draft §95): what it does - `cue` with the cue, `go`, `esc`, `doh`,
+        `standbyUp`, `standbyDown`, a page's word, or nothing - and its words,
+        its colour as #rrggbb, and whether it is lit or dim. */
+    struct DeckKeyRow
+    {
+        std::string action;
+        std::string cue;
+        std::string top;
+        std::string label;
+        std::string bottom;
+        std::string colour;
+        bool lit = false;
+        bool dim = false;
+    };
+
+    std::vector<DeckKeyRow> deckKeysOf (const std::string& keysText);
+
+    /** What a Stream Deck surface's Deck menu offers, {serial, label}: the first free deck (empty), then every deck plugged in, by model and serial ("Stream Deck MK.2 · AL12K1A00001"); a named deck not plugged in last, as "<serial> (not plugged in)". */
+    std::vector<std::pair<std::string, std::string>> deckChoices (const tree::TreeSnapshot&, const std::string& current);
+
+    /** What its Cart menu offers, {list, label}: the show's first cart (empty), then every cart by name. */
+    std::vector<std::pair<std::string, std::string>> cartChoices (const tree::TreeSnapshot&);
+
+    /** The columns and rows of a model's keys, by its word; the MK.2's five by three for a word nobody knows, or none found yet. */
+    std::pair<int, int> deckGrid (const std::string& modelWord);
 
     /*  WHAT A SURFACE'S ROTARIES ARE DOING (author, 2026-09-25): the first
         surface, in the show's order, whose EQ or Send page is up, with the

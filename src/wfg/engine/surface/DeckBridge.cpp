@@ -1576,10 +1576,11 @@ namespace wfg::surface
 
         void paint (Deck& deck)
         {
-            if (! deck.model.has_value())
-                return;
-
-            const auto& spec = *deck.model;
+            /*  NO DECK FOUND, ITS KEYS ARE STILL LAID OUT - as an MK.2's, the
+                Surfaces page's picture with nothing plugged in (S21_HiJack's
+                offline templates' reason) - and published, and sent nowhere. */
+            static const auto standIn = *deckSpecFor (std::string_view ("mk2"));
+            const auto& spec = deck.model.has_value() ? *deck.model : standIn;
             const auto going = goingCues();
 
             //  The layout: a cart on a deck of keys, pages on the Stream Deck+.
@@ -1598,7 +1599,7 @@ namespace wfg::surface
             }
 
             std::string keysText;
-            const auto send = deck.open;
+            const auto send = deck.open && deck.model.has_value();
 
             if (deck.shownKeys.size() != deck.layout.keys.size())
                 deck.shownKeys.assign (deck.layout.keys.size(), std::nullopt);

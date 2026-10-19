@@ -19,6 +19,7 @@
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/surface/DcaColour.h>
+#include <wfg/engine/surface/StreamDeckReport.h>
 #include <wfg/engine/tree/Node.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
@@ -47,7 +48,7 @@ namespace wfg::client::model
         constexpr std::string_view surfaceAimAddress = "/godot/surface/aim";
         constexpr std::string_view dcaOrderAddress = "/godot/dca/order";
 
-        /*  THE FOUR PROFILES, and the words a person reads for each. One table
+        /*  THE FIVE PROFILES, and the words a person reads for each. One table
             for the menu and for a surface nobody has named, so the two cannot
             call one box two things. The order is the menu's: the panel first,
             because it is the one that works with nothing plugged in. */
@@ -59,6 +60,7 @@ namespace wfg::client::model
                 { "mcu",      "Mackie Control" },
                 { "d700",     "Asparion D700" },
                 { "midiPads", "Pads" },
+                { "streamDeck", "Stream Deck" },
             };
 
             return table;
@@ -263,9 +265,116 @@ namespace wfg::client::model
             else if (name == "serial")       row.serial = text (node);
             else if (name == "channel")      row.channel = integerOf (node, 0);
             else if (name == "firstNote")    row.firstNote = integerOf (node, 36);
+            else if (name == "device")       row.device = text (node);
+            else if (name == "cart")         row.cart = text (node);
+            else if (name == "showKeys")     row.showKeys = isTrue (node, false);
+            else if (name == "brightness")   row.brightness = integerOf (node, 70);
+            else if (name == "model")        row.model = text (node);
+            else if (name == "keys")         row.keys = text (node);
         }
 
         return inOrder (found, words (order));
+    }
+
+    namespace
+    {
+        std::vector<std::string> splitOn (const std::string& text, char separator)
+        {
+            std::vector<std::string> out;
+            std::size_t from = 0;
+
+            for (;;)
+            {
+                const auto at = text.find (separator, from);
+                out.push_back (text.substr (from, at == std::string::npos ? std::string::npos : at - from));
+
+                if (at == std::string::npos)
+                    return out;
+
+                from = at + 1;
+            }
+        }
+    }
+
+    std::vector<DeckKeyRow> deckKeysOf (const std::string& keysText)
+    {
+        std::vector<DeckKeyRow> out;
+
+        if (keysText.empty())
+            return out;
+
+        for (const auto& line : splitOn (keysText, '\n'))
+        {
+            auto fields = splitOn (line, '\t');
+            fields.resize (6);
+
+            DeckKeyRow key;
+            const auto space = fields[0].find (' ');
+            key.action = fields[0].substr (0, space);
+            key.cue = space == std::string::npos ? std::string {} : fields[0].substr (space + 1);
+            key.top = fields[1];
+            key.label = fields[2];
+            key.bottom = fields[3];
+            key.colour = fields[4];
+            key.lit = fields[5] == "lit";
+            key.dim = fields[5] == "dim";
+            out.push_back (std::move (key));
+        }
+
+        return out;
+    }
+
+    std::vector<std::pair<std::string, std::string>> deckChoices (const tree::TreeSnapshot& snapshot,
+                                                                  const std::string& current)
+    {
+        std::vector<std::pair<std::string, std::string>> out { { std::string {}, "First free deck" } };
+        auto currentListed = current.empty();
+        const auto listing = text (snapshot.find ("/godot/engine/streamDecks"));
+
+        for (const auto& line : listing.empty() ? std::vector<std::string> {} : splitOn (listing, '\n'))
+        {
+            const auto space = line.find (' ');
+
+            if (space == std::string::npos)
+                continue;
+
+            const auto word = line.substr (0, space);
+            const auto serial = line.substr (space + 1);
+            const auto spec = surface::deckSpecFor (std::string_view (word));
+            const auto name = spec.has_value() ? std::string (spec->name) : word;
+
+            out.push_back ({ serial, name + " \xc2\xb7 " + serial });
+            currentListed = currentListed || serial == current;
+        }
+
+        if (! currentListed)
+            out.push_back ({ current, current + " (not plugged in)" });
+
+        return out;
+    }
+
+    std::vector<std::pair<std::string, std::string>> cartChoices (const tree::TreeSnapshot& snapshot)
+    {
+        std::vector<std::pair<std::string, std::string>> out { { std::string {}, "The show's first cart" } };
+
+        for (const auto& list : words (text (snapshot.find ("/godot/list/order"))))
+        {
+            if (text (snapshot.find ("/godot/list/" + list + "/kind")) != "cart")
+                continue;
+
+            const auto name = text (snapshot.find ("/godot/list/" + list + "/name"));
+            out.push_back ({ list, name.empty() ? list : name });
+        }
+
+        return out;
+    }
+
+    std::pair<int, int> deckGrid (const std::string& modelWord)
+    {
+        if (const auto spec = surface::deckSpecFor (std::string_view (modelWord)))
+            return { spec->columns, spec->rows };
+
+        return { 5, 3 };
     }
 
     bool hasMasterDial (const tree::TreeSnapshot& snapshot)

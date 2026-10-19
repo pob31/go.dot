@@ -762,6 +762,21 @@ namespace wfg::client::gesture
         return { origin::window, "spacemouse.closeDriver", {} };
     }
 
+    Event streamDeckCloseApp()
+    {
+        return { origin::window, "streamdeck.closeApp", {} };
+    }
+
+    Event pressCue (const std::string& cueId)
+    {
+        return { origin::window, "cue.press", { osc::Value::string (cueId) } };
+    }
+
+    Event releaseCue (const std::string& cueId)
+    {
+        return { origin::window, "cue.release", { osc::Value::string (cueId) } };
+    }
+
     Event identifyVideoOutput (const std::string& outputId, bool on)
     {
         return { origin::window, "videoOutput.identify", { osc::Value::string (outputId), osc::Value::boolean (on) } };

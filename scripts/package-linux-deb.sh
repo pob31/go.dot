@@ -108,15 +108,19 @@ for png in "$stage"/icons/go.dot-[0-9]*.png; do
     install -D -m 644 "$png" "$root/usr/share/icons/hicolor/${size}x${size}/apps/go.dot.png"
 done
 
-#  --- the SpaceMouse, for whoever is at the desk (namespace draft 45, O.11) ---
-# hidraw nodes are root's by default: this gives a 3Dconnexion puck to the
+#  --- the SpaceMouse and the Stream Decks, for whoever is at the desk ---------
+# hidraw nodes are root's by default: this gives a 3Dconnexion puck (namespace
+# draft 45, O.11) and an Elgato Stream Deck (§95, S21_HiJack's rule) to the
 # person logged in at the seat (uaccess) and to plugdev, WFS-DIY's rule. udev
-# reads it when the puck is next plugged in.
+# reads it when the device is next plugged in.
 install -d -m 755 "$root/usr/lib/udev/rules.d"
 cat > "$root/usr/lib/udev/rules.d/70-go.dot.rules" <<'EOF'
-# Installed by the go.dot package: a 3Dconnexion SpaceMouse, readable by the person at the seat.
+# Installed by the go.dot package: a 3Dconnexion SpaceMouse and an Elgato Stream Deck,
+# usable by the person at the seat.
 SUBSYSTEM=="usb",  ATTRS{idVendor}=="256f", MODE="0660", TAG+="uaccess", GROUP="plugdev"
 KERNEL=="hidraw*", ATTRS{idVendor}=="256f", MODE="0660", TAG+="uaccess", GROUP="plugdev"
+SUBSYSTEM=="usb",  ATTRS{idVendor}=="0fd9", MODE="0660", TAG+="uaccess", GROUP="plugdev"
+KERNEL=="hidraw*", ATTRS{idVendor}=="0fd9", MODE="0660", TAG+="uaccess", GROUP="plugdev"
 EOF
 chmod 644 "$root/usr/lib/udev/rules.d/70-go.dot.rules"
 

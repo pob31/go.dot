@@ -17,14 +17,32 @@
 #include <wfg/engine/surface/SurfaceCommands.h>
 
 #include <wfg/engine/osc/OscValue.h>
+#include <wfg/engine/surface/StreamDeck.h>
 
 #include <string>
 
 namespace wfg::surface
 {
     void registerSurfaceCommands (CommandRegistry& registry, doc::ShowDocument& document,
-                                  SurfaceTable& table)
+                                  SurfaceTable& table, DeckHost* decks)
     {
+        /*  ELGATO'S APP CLOSED, ASKED BY THE OPERATOR (namespace draft §95): the
+            host kills it on a thread of its own and looks for the decks again.
+            What the machine does, so a replay - which has no deck - does
+            nothing; and the machine's alone, never sent to a backup (§58). */
+        registry.add (machineLocal ({ "streamdeck.closeApp",
+                        "Closes Elgato's Stream Deck app, which holds every deck while it runs, so Go.dot"
+                        " can drive them.",
+                        {},
+                        true,
+                        [decks] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            if (decks != nullptr)
+                                decks->closeApp();
+
+                            return Outcome::ok (args);
+                        } }));
+
         registry.add ({ "surface.aim",
                         "Chooses the media cue a surface's rotaries edit on its EQ and Send pages,"
                         " or none with an empty argument. One cue for every surface.",

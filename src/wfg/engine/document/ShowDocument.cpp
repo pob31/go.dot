@@ -5247,11 +5247,14 @@ namespace wfg::doc
             pads loses seven with `object.delete`. The D700 is two banks of
             eight on two port pairs (docs/D700_CONTROL_GUIDE.md 1.1); a pad
             controller is most often sixteen; a virtual panel starts where a
-            Mackie unit does. */
-        if (profile == "virtual")  return 8;
-        if (profile == "mcu")      return 8;
-        if (profile == "d700")     return 16;
-        if (profile == "midiPads") return 16;
+            Mackie unit does. A Stream Deck has none (namespace draft §95):
+            its keys are a cart's and the show's, and a strip on it would take
+            a sampler bank's place from the faders that play it. */
+        if (profile == "virtual")    return 8;
+        if (profile == "mcu")        return 8;
+        if (profile == "d700")       return 16;
+        if (profile == "midiPads")   return 16;
+        if (profile == "streamDeck") return 0;
         return -1;
     }
 
@@ -5330,6 +5333,10 @@ namespace wfg::doc
             return EditResult::failed (reason::unknownId);
 
         if (surface.getType().toString() != "Surface")
+            return EditResult::failed (reason::typeMismatch);
+
+        //  A Stream Deck has no strips (§95): its keys are not faders.
+        if (surface[juce::Identifier ("profile")].toString() == "streamDeck")
             return EditResult::failed (reason::typeMismatch);
 
         return insertObject (surface, endOfSequence, "Strip", id, {});

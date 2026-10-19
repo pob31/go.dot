@@ -123,6 +123,11 @@ namespace wfg::tree
         std::string spaceMouse = "off";
         std::string spaceMouseName;
 
+        /*  THE STREAM DECKS (namespace draft §95): those plugged in, a line
+            each - model and serial - and whether Elgato's app holds them. */
+        std::string streamDecks {};
+        bool streamDeckApp = false;
+
         /*  WHAT A PROCESS CUE'S PATCH IS EDITED IN (namespace draft §51, ACN):
             plugdata, Pd, or empty; and Pd's download, as ffmpegInstall is said. */
         std::string patchEditor;

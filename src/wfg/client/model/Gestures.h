@@ -501,6 +501,16 @@ namespace wfg::client::gesture
         operator's to ask, always (O.11, ZF). */
     Event spaceMouseCloseDriver();
 
+    /*  Elgato's Stream Deck app closed so the engine can drive the decks - the
+        operator's to ask, always (namespace draft §95). */
+    Event streamDeckCloseApp();
+
+    /*  A hand on a cue that is not a strip (namespace draft §74, AQU): a key of
+        a Stream Deck's picture on the Surfaces page, pressed and let go of as
+        the deck's own key would be. */
+    Event pressCue (const std::string& cueId);
+    Event releaseCue (const std::string& cueId);
+
     /** An output's test pattern on or off, to find which projector is which: tonight's. */
     Event identifyVideoOutput (const std::string& outputId, bool on);
 

@@ -24,6 +24,7 @@
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/midi/PortTable.h>
 #include <wfg/engine/cue/Run.h>
+#include <wfg/engine/surface/SurfaceTable.h>
 #include <spatcore/ui/patch/PatchMatrixComponent.h>
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <algorithm>
@@ -940,6 +941,85 @@ TEST_CASE ("show settings UI: a page with a problem is marked, its heading too, 
     panel.showProblems ({});
     CHECK (row ("MIDI")->getTooltip().isEmpty());
     CHECK (row ("Controllers")->getTooltip().isEmpty());
+}
+
+TEST_CASE ("show settings UI: a Stream Deck picked shows its deck, its cart and a picture of its keys (§95)")
+{
+    /*  A show with a cart of three pads and a Stream Deck surface, the deck
+        found and its keys published as the deck bridge writes them: the
+        Surfaces page shows the deck's panel where the strips would be. */
+    Rig rig;
+    surface::SurfaceTable table;
+    rig.parameters.setSurfaces (&table);
+
+    REQUIRE (rig.document.createList ("Pads", "CRT00001", { { "kind", "cart" } }).ok);
+    REQUIRE (rig.document.createCue ("CRT00001", 0, "memo", "Rain", "PAD00001").ok);
+    REQUIRE (rig.document.createCue ("CRT00001", 1, "memo", "Thunder", "PAD00002").ok);
+    REQUIRE (rig.document.createCue ("CRT00001", 2, "memo", "Backup tracker", "PAD00003").ok);
+
+    std::vector<std::string> made;
+    REQUIRE (rig.document.createSurface ("streamDeck", "Desk deck", "SDK00001", {}, made).ok);
+    CHECK (made.empty());
+    REQUIRE (rig.document.setAttribute ("/godot/surface/SDK00001/showKeys", "true").ok);
+
+    surface::SurfaceTable::Status status;
+    status.connected = true;
+    status.serial = "AL12K1A00001";
+    status.model = "mk2";
+    table.set ("SDK00001", status);
+
+    std::string keys = "cue PAD00001\t1\tRain\tplaying\t#3060c0\tlit\n"
+                       "cue PAD00002\t2\tThunder\t\t#000000\t\n"
+                       "cue PAD00003\t3\tBackup tracker\t\t#a03030\t";
+
+    for (int key = 3; key < 10; ++key)
+        keys += "\n\t\t\t\t#000000\t";
+
+    keys += "\nstandbyUp\t\tStandby\t\t#000000\t\nstandbyDown\t\tStandby\t\t#000000\t"
+            "\ndoh\t\tDoh!\tnothing to undo\t#000000\tdim\nesc\t\tEsc\ttwice: all\t#000000\t"
+            "\ngo\t\tGO\tnothing next\t#000000\tdim";
+    table.setKeys ("SDK00001", keys);
+    rig.state.streamDecks = "mk2 AL12K1A00001\nplus AL12K1A00002";
+
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+    panel.setSize (1400, 740);
+    panel.showPage (client::model::settingsPages::surfaces);
+    panel.refresh (*rig.publish());
+
+    //  The deck's own, read back as a client reads it.
+    const auto rows = client::model::readSurfaces (*rig.publish());
+    REQUIRE (rows.size() == 1);
+    CHECK (rows[0].profile == "streamDeck");
+    CHECK (rows[0].showKeys);
+    CHECK (rows[0].model == "mk2");
+    CHECK (client::model::deckKeysOf (rows[0].keys).size() == 15);
+    CHECK (client::model::deckKeysOf (rows[0].keys)[0].cue == "PAD00001");
+    CHECK (client::model::deckKeysOf (rows[0].keys)[14].action == "go");
+
+    const auto decks = client::model::deckChoices (*rig.publish(), {});
+    REQUIRE (decks.size() == 3);
+    CHECK (decks[1].first == "AL12K1A00001");
+    CHECK (juce::String::fromUTF8 (decks[2].second.c_str()).startsWith ("Stream Deck+"));
+    CHECK (client::model::cartChoices (*rig.publish()).size() == 2);
+
+    //  The add-strip button stands down: a deck has keys, not strips.
+    auto* addStrip = button (panel, "ADD STRIP");
+    REQUIRE (addStrip != nullptr);
+    CHECK_FALSE (addStrip->isVisible());
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        const auto shot = panel.createComponentSnapshot (panel.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("show-settings-stream-deck.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+        CHECK (juce::PNGImageFormat().writeImageToStream (shot, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
 }
 
 TEST_CASE ("show settings UI: a page asked for from outside is shown, by the model's own names")

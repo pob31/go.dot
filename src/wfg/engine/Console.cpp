@@ -68,6 +68,7 @@
 #include <wfg/engine/mqtt/Session.h>
 #include <wfg/engine/tree/Wires.h>
 #include <wfg/engine/tree/MidiEchoes.h>
+#include <wfg/engine/surface/DeckBridge.h>
 #include <wfg/engine/surface/SurfaceBridge.h>
 #include <wfg/engine/surface/SurfaceCommands.h>
 #include <wfg/engine/plugin/Catalogue.h>
@@ -104,6 +105,7 @@
 #include <wfg/engine/document/DocumentWriter.h>
 #include <wfg/engine/document/RelaxNg.h>
 #include <wfg/engine/surface/SpaceMouse.h>
+#include <wfg/engine/surface/StreamDeck.h>
 #include <wfg/engine/tree/MountListener.h>
 #include <wfg/engine/tree/MountFetcher.h>
 #include <wfg/engine/tree/MountProbe.h>
@@ -4096,6 +4098,11 @@ namespace
             a replay has no puck, and its pushes are `curve.ride` records. */
         wfg::surface::SpaceMouse spaceMouse;
 
+        /*  THE STREAM DECKS (namespace draft §95): read and drawn by a thread of
+            their own, opened only while the show declares a surface on one.
+            Serve only: a replay has no deck, and its presses are commands. */
+        wfg::surface::StreamDecks streamDecks;
+
         /*  The touch table, for the fader edges (PRD 3.9a): a fader-start
             counts only from a fader released at the bottom, and released is
             what this table knows. Serve only - a replay runs no hooks, and the
@@ -4401,7 +4408,7 @@ namespace
             wfg::cue::liveSideFor (liveEdits));
 
         wfg::cue::registerCueCommands (engine.commands(), document, focus, &liveEdits);
-        wfg::surface::registerSurfaceCommands (engine.commands(), document, surfaceTable);
+        wfg::surface::registerSurfaceCommands (engine.commands(), document, surfaceTable, &streamDecks);
         wfg::cue::registerLiveCommands (engine.commands(), document, liveEdits);
         runner.setLiveEdits (&liveEdits);
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
@@ -5403,6 +5410,10 @@ namespace
             `arrived` touches nothing but the bridge's own inbox, so nothing it
             refers to has to outlive it. */
         const auto surfaceBridge = std::make_shared<wfg::surface::SurfaceBridge> (midiOut, surfaceTable);
+
+        /*  AND THE STREAM DECKS' (namespace draft §95): surfaces of the show,
+            driven over USB by a bridge of their own on the tick thread. */
+        const auto deckBridge = std::make_shared<wfg::surface::DeckBridge> (streamDecks, surfaceTable);
         parameters.setSurfaces (&surfaceTable);
         parameters.setLanes (&lanes);
         parameters.setCurves (&curveTable);
@@ -5604,9 +5615,10 @@ namespace
         /*  WHAT THE SHOW DECLARES ABOUT ITS SURFACES, read off the document -
             at start and whenever the show changes - and what this machine has
             behind each port they name. */
-        const auto declareSurfaces = [&document, &midiPorts, &surfaceBridge, &midiOut]
+        const auto declareSurfaces = [&document, &midiPorts, &surfaceBridge, &deckBridge, &midiOut]
         {
             std::vector<wfg::surface::SurfaceSpec> declared;
+            std::vector<wfg::surface::DeckSurfaceSpec> decks;
 
             for (const auto& surfaceNode : document.root().getChildWithName ("Surfaces"))
             {
@@ -5624,6 +5636,24 @@ namespace
 
                 surfaceSpec.profile = surfaceRow ("profile");
                 surfaceSpec.enabled = surfaceRow ("enabled") != "false";
+
+                /*  A STREAM DECK IS THE DECK BRIDGE'S (§95): no ports, no strips. */
+                if (surfaceSpec.profile == "streamDeck")
+                {
+                    wfg::surface::DeckSurfaceSpec deck;
+                    deck.id = surfaceSpec.id;
+                    deck.enabled = surfaceSpec.enabled;
+                    deck.device = surfaceRow ("device");
+                    deck.cart = surfaceRow ("cart");
+                    deck.showKeys = surfaceRow ("showKeys") == "true";
+
+                    if (const auto bright = surfaceRow ("brightness"); ! bright.empty())
+                        deck.brightness = juce::String (bright).getIntValue();
+
+                    decks.push_back (std::move (deck));
+                    continue;
+                }
+
                 surfaceSpec.channel = juce::String (surfaceRow ("channel")).getIntValue();
                 surfaceSpec.firstNote = juce::String (surfaceRow ("firstNote")).getIntValue();
 
@@ -5650,7 +5680,9 @@ namespace
 
             midiOut.setSurfacePorts (std::move (surfacePorts));
 
-            return surfaceBridge->declare (std::move (declared),
+            const auto decksMoved = deckBridge->declare (std::move (decks));
+
+            const auto surfacesMoved = surfaceBridge->declare (std::move (declared),
                                            [&document, &midiPorts] (const std::string& portId)
                                            {
                                                const auto portRow = [&document, &portId] (const char* row)
@@ -5666,6 +5698,7 @@ namespace
                                                known.name = portRow ("name");
                                                return known;
                                            });
+            return surfacesMoved || decksMoved;
         };
 
         declareSurfaces();
@@ -5719,6 +5752,7 @@ namespace
         presetScanner.start();
         listener.start();
         spaceMouse.start();
+        streamDecks.start();
 
         /*  A SAVED SHOW LOOKS LIKE ONE (app/FolderIcon.h): after a save or a
             copy lands, on the writer's thread, its folder gets the show icon.
@@ -7010,6 +7044,15 @@ namespace
                                                                 tickIndex))
                                      parameters.markStale();
 
+                                 /*  AND THE STREAM DECKS' HANDS (namespace draft
+                                     §95), beside the surfaces' and for their reason. */
+                                 if (deckBridge->beforeTick ([&engine] (wfg::Event event)
+                                                             {
+                                                                 return engine.submit (std::move (event));
+                                                             },
+                                                             tickIndex))
+                                     parameters.markStale();
+
                                  /*  AND WHAT THE BINDINGS HEARD (namespace draft
                                      §74, BD.9), one write a binding, beside the
                                      surfaces' and for the same reason. */
@@ -8219,6 +8262,8 @@ namespace
                                 state.logPending = engine.log().pending();
                                 state.spaceMouse = spaceMouse.status();
                                 state.spaceMouseName = spaceMouse.name();
+                                state.streamDecks = deckBridge->pluggedText();
+                                state.streamDeckApp = streamDecks.appRunning();
 
                                 /*  THE HOLD, AS IT IS NOW (RD.1): published, and
                                     the device connections closed or opened again
@@ -8881,6 +8926,10 @@ namespace
                                     rings and colour, the differences only. */
                                 if (current != nullptr)
                                     surfaceBridge->afterTick (current, touches, outcome.tick);
+
+                                //  And what the Stream Decks show (§95), from the same tree.
+                                if (current != nullptr)
+                                    deckBridge->afterTick (current, outcome.tick);
 
                                 //  And which runs the bindings of a cue are live for (AQY).
                                 if (current != nullptr)
@@ -9886,6 +9935,7 @@ namespace
         listener.stop();
         dialler.stop();
         spaceMouse.stop();
+        streamDecks.stop();
 
         /*  The renderer between two blocks, its part file left for the next
             open's sweep; then the analyser. */

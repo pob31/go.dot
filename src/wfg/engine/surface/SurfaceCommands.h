@@ -40,6 +40,10 @@
     `surface.dial <address>` (2026-09-26) is its twin for the master dial: the
     number last clicked or touched in the window, published at
     /godot/surface/dial, freed by an empty argument.
+
+    `streamdeck.closeApp` (namespace draft §95) closes Elgato's Stream Deck
+    app, which holds every deck while it runs - asked of the operator, as
+    `spacemouse.closeDriver` is, and the machine's alone.
 */
 
 #include <wfg/engine/command/CommandRegistry.h>
@@ -48,8 +52,12 @@
 
 namespace wfg::surface
 {
+    class DeckHost;
+
     /*  Adds surface.aim, bound to the document (to ask whether a cue is media)
-        and to a table the caller owns, which must outlive the registry. */
+        and to a table the caller owns, which must outlive the registry; and
+        streamdeck.closeApp, which does nothing where no deck host is given -
+        a replay, a check. */
     void registerSurfaceCommands (CommandRegistry& registry, doc::ShowDocument& document,
-                                  SurfaceTable& table);
+                                  SurfaceTable& table, DeckHost* decks = nullptr);
 }

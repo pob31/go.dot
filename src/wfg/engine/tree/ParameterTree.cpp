@@ -105,10 +105,13 @@ namespace wfg::tree
 
         /*  The rows a surface's page publishes (2026-09-25), which the runtime
             half carries and the document half must therefore skip: two halves
-            publishing one address is a duplicate `find` answers arbitrarily. */
+            publishing one address is a duplicate `find` answers arbitrarily.
+            And a Stream Deck's keys (namespace draft §95), which move with no
+            command for the same reason a page does. */
         bool isPageRow (const std::string& name) noexcept
         {
-            return name == "page" || name == "pageIndex" || name == "pageCount" || name == "edited";
+            return name == "page" || name == "pageIndex" || name == "pageCount" || name == "edited"
+                || name == "keys";
         }
 
         Access accessFor (doc::Access access) noexcept
@@ -2896,6 +2899,8 @@ namespace wfg::tree
                             text = isVirtual ? std::string {} : status.problem;
                         else if (name == "serial")
                             text = status.serial;
+                        else if (name == "model")
+                            text = status.model;
                         else
                             text = storedText (attribute, declared);
 
@@ -4324,6 +4329,8 @@ namespace wfg::tree
             else if (name == "logPending")     text = std::to_string (state.logPending);
             else if (name == "spaceMouse")     text = state.spaceMouse;
             else if (name == "spaceMouseName") text = state.spaceMouseName;
+            else if (name == "streamDecks")    text = state.streamDecks;
+            else if (name == "streamDeckApp")  text = state.streamDeckApp ? "true" : "false";
             else if (name == "patchEditor")    text = state.patchEditor;
             else if (name == "patchEditorInstall") text = state.patchEditorInstall;
             else if (name == "serialPorts")    text = state.serialPorts;
@@ -5066,6 +5073,8 @@ namespace wfg::tree
                 const auto text = name == "page"      ? page.word
                                 : name == "pageIndex" ? std::to_string (page.index)
                                 : name == "pageCount" ? std::to_string (page.count)
+                                : name == "keys"      ? (surfaces != nullptr ? surfaces->keysOf (surfaceId)
+                                                                             : std::string {})
                                                       : page.edited;
 
                 runtime.push_back (makeLeaf (base + name, *row, text));

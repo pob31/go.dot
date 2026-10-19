@@ -4458,12 +4458,33 @@
         <ref name="identifier"/>
       </attribute>
       <optional>
+        <attribute name="brightness">
+          <a:documentation>streamDeck: how bright its keys are, in percent.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">100</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="cart">
+          <a:documentation>streamDeck: the cart a deck of keys shows, by identifier, or empty for the show-s first (namespace draft 95). Its cues fill the keys from the top left in the cart-s order, a sampler group-s members a key each, as the tablet-s Cart tab shows them; a cart longer than the deck gives the last free key to turning its page. A Stream Deck+ shows pages on its dials and no cart.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="channel">
           <a:documentation>midiPads: the channel the pads send on, one to sixteen, or nought for any.</a:documentation>
           <data type="integer">
             <param name="minInclusive">0</param>
             <param name="maxInclusive">16</param>
           </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="device">
+          <a:documentation>streamDeck: the deck this surface is, by the serial Elgato gave it - the one identifier that survives another USB port - or empty for the first deck plugged in that no other surface names (namespace draft 95). A decision about which unit, so it is stored; whether it is plugged in tonight is connected and problem.</a:documentation>
+          <data type="string"/>
         </attribute>
       </optional>
       <optional>
@@ -4504,12 +4525,22 @@
       </optional>
       <optional>
         <attribute name="profile">
-          <a:documentation>What kind of surface this is, which decides how its strips are driven and what each one has (PRD 3.16: a device profile is topology plus protocol). virtual is the desktop client&apos;s own panel and needs no port; mcu is a Mackie Control unit, eight fader strips per port; d700 is the Asparion D700, Mackie plus its native display, colour and rings, eight strips per port; midiPads is a pad controller sending notes with velocity and pressure. Changing it changes how the strips are driven and leaves the strips as they are.</a:documentation>
+          <a:documentation>What kind of surface this is, which decides how its strips are driven and what each one has (PRD 3.16: a device profile is topology plus protocol). virtual is the desktop client&apos;s own panel and needs no port; mcu is a Mackie Control unit, eight fader strips per port; d700 is the Asparion D700, Mackie plus its native display, colour and rings, eight strips per port; midiPads is a pad controller sending notes with velocity and pressure; streamDeck is an Elgato Stream Deck of any model, over USB and no port, with no strips (namespace draft 95): a deck of keys shows a cart and the show-s keys, a Stream Deck+ the aimed cue-s pages on its dials. Changing it changes how the strips are driven and leaves the strips as they are.</a:documentation>
           <choice>
             <value>virtual</value>
             <value>mcu</value>
             <value>d700</value>
             <value>midiPads</value>
+            <value>streamDeck</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="showKeys">
+          <a:documentation>streamDeck: whether the deck carries the show-s own keys - GO, Esc (twice for the immediate stop), Doh! and the standby-s arrows - at the end of its last row, as many as it has room for (namespace draft 95; off by default, the author-s). On a Stream Deck+, Esc and GO where the page-s arrows were.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
           </choice>
         </attribute>
       </optional>

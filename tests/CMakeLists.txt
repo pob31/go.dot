@@ -1703,6 +1703,21 @@ add_test(NAME blackbox.bindings.fr_FR
 set_tests_properties(blackbox.bindings.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
+# A STREAM DECK SURFACE, SERVED (namespace draft §95, SD.8): made by command with
+# no strips, its keys laid out over the show's cart and published - as an MK.2's
+# while no deck is found, which is every runner - its status in words, the
+# show's keys arriving when switched on, a strip refused on it.
+add_test(NAME blackbox.streamdeck.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/streamdeck.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.streamdeck.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 120)
+add_test(NAME blackbox.streamdeck.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/streamdeck.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.streamdeck.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 120)
+
 # PHASE 6'S PADS, HEARD: a sampler bank armed by GO and played by hand over
 # the network, with a real Tracktion graph under it and the render read back as
 # arithmetic - a press at velocity 64 is a tenth of the constant, a hold clip is

@@ -77,7 +77,7 @@ namespace wfg::surface
 
             /** A Stream Deck's model, as the show spells one ("mk2", "plus"),
                 and empty for anything else or a deck not found (§95). */
-            std::string model;
+            std::string model {};
         };
 
         /** Replaces what is known about one surface. Answers whether anything

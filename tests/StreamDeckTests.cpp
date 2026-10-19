@@ -22,11 +22,16 @@
 
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
+#include <wfg/engine/surface/StreamDeck.h>
 #include <wfg/engine/surface/StreamDeckReport.h>
 
+#include <juce_core/juce_core.h>
+
+#include <chrono>
 #include <cstdint>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace wfg;
@@ -354,4 +359,136 @@ TEST_CASE ("stream deck: a picture is turned and mirrored the deck's way, and wr
     CHECK (DeckBytes (small.begin() + 54, small.end()) == DeckBytes { 6, 5, 4, 0, 3, 2, 1, 0 });
 
     CHECK (surface::deckBmp ({}).empty());
+}
+
+/*  A DECK ON THIS MACHINE (§95, SD.2), on the bench only: it runs when
+    WFG_STREAMDECK_REAL names one - 1 for the first plugged in, or a part of
+    its serial or its model's word - and Elgato's app is closed. Every key is
+    drawn with its number, the Stream Deck+'s strip and the Neo's screen too;
+    then for WFG_STREAMDECK_REAL_SECONDS (ten unless said) every press, turn
+    and touch is listed as it arrives; then the deck is let go of, back to
+    Elgato's picture. */
+TEST_CASE ("stream deck: a deck on this machine, found, opened, drawn, its hands heard and let go of (SD.2)")
+{
+    const auto wanted = juce::SystemStats::getEnvironmentVariable ("WFG_STREAMDECK_REAL", {}).toStdString();
+    const auto seconds = juce::SystemStats::getEnvironmentVariable ("WFG_STREAMDECK_REAL_SECONDS", "10").getIntValue();
+
+    if (wanted.empty())
+        return;
+
+    using namespace std::chrono_literals;
+    surface::StreamDecks decks;
+    REQUIRE (decks.start());
+
+    std::vector<surface::DeckHost::Plugged> plugged;
+
+    for (int wait = 0; wait < 100 && plugged.empty(); ++wait)
+    {
+        std::this_thread::sleep_for (50ms);
+        plugged = decks.plugged();
+    }
+
+    const surface::DeckHost::Plugged* chosen = nullptr;
+
+    for (const auto& deck : plugged)
+    {
+        MESSAGE ("plugged in: " << deck.spec.name << "  " << deck.serial);
+
+        if (chosen == nullptr && (wanted == "1" || deck.serial.find (wanted) != std::string::npos
+                                  || deck.spec.word == wanted))
+            chosen = &deck;
+    }
+
+    REQUIRE (chosen != nullptr);
+    const auto serial = chosen->serial;
+    const auto spec = chosen->spec;
+
+    decks.want ({ serial });
+    auto opened = false;
+
+    for (int wait = 0; wait < 100 && ! opened; ++wait)
+    {
+        std::this_thread::sleep_for (50ms);
+
+        for (const auto& event : decks.drain())
+            opened = opened || (event.kind == surface::DeckEvent::Kind::opened && event.serial == serial);
+    }
+
+    if (! opened)
+        MESSAGE ("Elgato's app running: " << (decks.appRunning() ? "yes" : "no"));
+
+    REQUIRE (opened);
+    decks.brightness (serial, 60);
+
+    for (int key = 0; key < spec.keys; ++key)
+    {
+        surface::KeyPicture picture;
+        picture.top = std::to_string (key);
+        picture.label = "Key " + std::to_string (key);
+        picture.background = { static_cast<std::uint8_t> (40 + key * 6), 80, 160 };
+        decks.key (serial, key, picture);
+    }
+
+    for (int dial = 0; dial < spec.dials; ++dial)
+    {
+        surface::ZonePicture zone;
+        zone.title = dial == 0 ? "Go.dot" : "";
+        zone.label = "Dial " + std::to_string (dial);
+        zone.value = "turn me";
+        zone.fill = 0.25 * dial;
+        decks.zone (serial, dial, zone);
+    }
+
+    if (spec.model == surface::DeckModel::neo)
+        decks.screen (serial, { "Go.dot", "Stream Deck Neo" });
+
+    MESSAGE ("press, turn and touch for " << seconds << " s");
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds (seconds);
+
+    while (std::chrono::steady_clock::now() < until)
+    {
+        std::this_thread::sleep_for (20ms);
+
+        for (const auto& event : decks.drain())
+        {
+            if (event.kind != surface::DeckEvent::Kind::input)
+            {
+                MESSAGE ((event.kind == surface::DeckEvent::Kind::closed ? "closed" : "opened"));
+                continue;
+            }
+
+            std::string down;
+
+            for (int key = 0; key < spec.keys + spec.touchKeys; ++key)
+                if (event.input.keys[static_cast<std::size_t> (key)])
+                    down += " " + std::to_string (key);
+
+            switch (event.input.kind)
+            {
+                case DeckInput::Kind::keys:        MESSAGE ("keys down:" << (down.empty() ? " none" : down)); break;
+                case DeckInput::Kind::dialTurns:   MESSAGE ("turns " << event.input.detents[0] << " " << event.input.detents[1]
+                                                            << " " << event.input.detents[2] << " " << event.input.detents[3]); break;
+                case DeckInput::Kind::dialPresses: MESSAGE ("dials down " << event.input.dialsDown[0] << event.input.dialsDown[1]
+                                                            << event.input.dialsDown[2] << event.input.dialsDown[3]); break;
+                case DeckInput::Kind::tap:         MESSAGE ("tap at " << event.input.x); break;
+                case DeckInput::Kind::longTap:     MESSAGE ("long tap at " << event.input.x); break;
+                case DeckInput::Kind::swipe:       MESSAGE ("swipe " << event.input.x << " to " << event.input.toX); break;
+                case DeckInput::Kind::none:        break;
+            }
+        }
+    }
+
+    decks.want ({});
+    auto closed = false;
+
+    for (int wait = 0; wait < 100 && ! closed; ++wait)
+    {
+        std::this_thread::sleep_for (50ms);
+
+        for (const auto& event : decks.drain())
+            closed = closed || event.kind == surface::DeckEvent::Kind::closed;
+    }
+
+    CHECK (closed);
+    decks.stop();
 }

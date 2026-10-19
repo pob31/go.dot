@@ -8255,13 +8255,14 @@ TEST_CASE ("client: the surfaces are read in the show's order, with their ports 
 
     rig.parameters.setSurfaces (nullptr);
 
-    //  The four profiles, the panel first: the one that works with nothing plugged in.
+    //  The five profiles, the panel first: the one that works with nothing plugged in.
     const auto profiles = model::profileChoices();
-    REQUIRE (profiles.size() == 4u);
+    REQUIRE (profiles.size() == 5u);
     CHECK (profiles[0] == std::pair<std::string, std::string> { "virtual", "Virtual panel" });
     CHECK (profiles[1] == std::pair<std::string, std::string> { "mcu", "Mackie Control" });
     CHECK (profiles[2] == std::pair<std::string, std::string> { "d700", "Asparion D700" });
     CHECK (profiles[3] == std::pair<std::string, std::string> { "midiPads", "Pads" });
+    CHECK (profiles[4] == std::pair<std::string, std::string> { "streamDeck", "Stream Deck" });
 }
 
 TEST_CASE ("client: every strip is read in the order a sampler group fills them, with what it rides")
