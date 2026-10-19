@@ -138,6 +138,7 @@ add_executable(wfg_tests
     QlabImportTests.cpp
     LaneRecordTests.cpp
     SpaceMouseTests.cpp
+    StreamDeckTests.cpp
     RateClockTests.cpp
     AnalysisTests.cpp
     SolverTests.cpp
