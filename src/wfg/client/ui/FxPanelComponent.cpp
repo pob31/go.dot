@@ -119,7 +119,7 @@ namespace wfg::client::ui
 
                 inSwitch.onClick = [this]
                 {
-                    if (owner.actions.set)
+                    if (owner.actions.set && ! owner.onFade())
                         owner.actions.set (owner.reading.rowAt ("eqOn"),
                                            inSwitch.getToggleState() ? "true" : "false");
                 };
@@ -167,6 +167,19 @@ namespace wfg::client::ui
                                        : "Put " + juce::String (strip.name) + " in this cue's signal "
                                          "- the first switch-in makes the insert");
                 door.setTooltip ("Open " + juce::String (strip.name) + "'s own window for this cue");
+            }
+
+            /*  ON A FADE the switch is the target's, shown and not thrown, and
+                the window is the fade's (namespace draft §94). */
+            const auto onFade = owner.onFade();
+            inSwitch.setEnabled (! onFade);
+
+            if (onFade && kind != Kind::recorder)
+            {
+                inSwitch.setTooltip ("A fade does not switch anything in or out: it moves numbers");
+                door.setTooltip (isEq ? juce::String ("The target's EQ, for the bands this fade moves")
+                                      : "Open " + juce::String (strip.name) + "'s own window on this fade: "
+                                        "what you turn there, the fade moves");
             }
 
             repaint();
@@ -218,6 +231,21 @@ namespace wfg::client::ui
                 engine string to a fixed-size control). */
             const auto line = owner.scaled (16);
             g.setFont (Look::font (owner.theme, 12.0f));
+
+            /*  WHAT THE FADE MOVES HERE, first and in words (§94): the accent
+                where it moves something, never the colour alone. */
+            if (owner.onFade() && kind != Kind::recorder)
+            {
+                const auto count = owner.reading.eq.fadeMoves.size();
+                const auto said = isEq ? (count == 0 ? std::string ("moves nothing")
+                                                     : "moves " + std::to_string (count)
+                                                         + (count == 1 ? " number" : " numbers"))
+                                       : model::fadeMoveWords (strip);
+                const auto moving = isEq ? count > 0 : ! strip.fadeMoves.empty();
+
+                g.setColour (Look::colour (owner.theme, moving ? "accent" : "ink-off"));
+                g.drawFittedText (juce::String (said), area.removeFromTop (line * 2), juce::Justification::topLeft, 2);
+            }
 
             if (isEq)
             {
@@ -519,7 +547,8 @@ namespace wfg::client::ui
     {
         const auto& cueId = reading.subject.objectId;
 
-        if (cueId.empty())
+        //  A fade's chain is shown, not switched (§94).
+        if (cueId.empty() || onFade())
             return;
 
         if (strip.present())

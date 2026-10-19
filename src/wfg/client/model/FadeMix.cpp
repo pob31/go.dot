@@ -100,6 +100,23 @@ namespace wfg::client::model
         }
     }
 
+    std::string fadeAimKind (const tree::TreeSnapshot& snapshot, const std::string& fadeId)
+    {
+        const auto fade = "/godot/cue/" + fadeId + "/";
+
+        if (fadeId.empty() || text (snapshot, fade + "kind") != "fade")
+            return {};
+
+        if (! text (snapshot, fade + "dca").empty())
+            return "dca";
+
+        if (const auto aux = text (snapshot, fade + "aux"); ! aux.empty())
+            return isAux (snapshot, aux) ? "aux" : std::string {};
+
+        const auto target = text (snapshot, fade + "target");
+        return target.empty() ? std::string {} : text (snapshot, "/godot/cue/" + target + "/kind");
+    }
+
     std::string fadeMoveAddress (const std::string& fadeId, const std::string& entry)
     {
         return "/godot/cue/" + fadeId + "/moves/" + entry;
@@ -189,6 +206,55 @@ namespace wfg::client::model
         out.targetKind = aux ? std::string ("aux") : text (snapshot, target + "kind");
         out.targetName = aux ? text (snapshot, target + "name") : labelOf (snapshot, out.targetId);
         out.hasEq = out.targetKind == "media" || out.targetKind == "mic" || out.targetKind == "aux";
+        out.hasPicture = out.targetKind == "video";
+
+        /*  A FADE ON A VIDEO CUE (namespace draft §94) moves its `video` pairs
+            and never its level (§36.5): a strip each for how solid it is, a
+            movie's speed and a blur cue's blur, through the door; its place,
+            size and turn in the Picture panel, where the frame shows them. */
+        if (out.hasPicture)
+        {
+            const auto pairs = cue::parseMoveList (text (snapshot, fade + "video"));
+            const auto source = text (snapshot, target + "source");
+
+            const auto add = [&] (const char* row, const char* kind, const char* name, const char* under,
+                                  double lowest, double highest, const char* unit, double resting)
+            {
+                FadeStrip strip;
+                strip.kind = kind;
+                strip.name = name;
+                strip.under = under;
+                strip.address = fadeMoveAddress (fadeId, std::string ("video/") + row);
+                strip.switchAddress = strip.address;
+                strip.door = true;
+                strip.lowest = lowest;
+                strip.highest = highest;
+                strip.unit = unit;
+                strip.home = resting;
+
+                if (const auto moved = pairs.find (row); moved != pairs.end())
+                {
+                    strip.moved = true;
+                    strip.value = moved->second;
+                }
+                else
+                {
+                    strip.value = number (target + row, resting);
+                }
+
+                out.strips.push_back (strip);
+            };
+
+            add ("opacity", "picture", "Opacity", "how solid, in %", 0.0, 100.0, " %", 100.0);
+
+            if (source == "movie")
+                add ("rate", "speed", "Speed", "one is the file's own", -20.0, 20.0, "", 1.0);
+
+            if (source == "blur")
+                add ("blur", "picture", "Blur", "how far, in px", 0.0, 500.0, " px", 20.0);
+
+            return out;
+        }
 
         //  The level: the cue's, or a group's trim - a fader either way.
         {

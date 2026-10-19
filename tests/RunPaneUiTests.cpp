@@ -3960,6 +3960,137 @@ TEST_CASE ("picture panel: a blur cue's amount, its whole canvas or a shape, its
     MESSAGE ("wrote " << file.getFullPathName().toStdString());
 }
 
+TEST_CASE ("picture panel: on a fade, only what a fade moves, each ticked or not, written through the fade's door (§94)")
+{
+    std::vector<std::pair<std::string, std::string>> sent;
+
+    ui::PicturePanelComponent::Actions actions;
+    actions.set = [&sent] (const std::string& address, const std::string& text) { sent.emplace_back (address, text); };
+
+    ui::PicturePanelComponent panel (model::Theme {}, actions);
+    panel.setSize (960, 230);
+
+    //  A fade on a movie that takes it to 150 %.
+    auto reading = keyedPicture ("none");
+    reading.subject = { model::Subject::Kind::picture, "FADE0001" };
+    reading.cueKind = "fade";
+    reading.picture.source = "movie";
+    reading.picture.fadeId = "FADE0001";
+    reading.picture.fadeMoves = { { "scale", 150.0 } };
+    reading.picture.scale = 150.0;
+    panel.show (reading, nullptr);
+
+    //  The cue's look is not drawn: no fit, no grade, no flips.
+    CHECK_FALSE (childSaying<juce::TextButton> (panel, "fit")->isVisible());
+    CHECK_FALSE (childSaying<juce::Label> (panel, "contrast")->isVisible());
+    CHECK_FALSE (childSaying<juce::ToggleButton> (panel, "Flip across")->isVisible());
+
+    //  What a fade moves on a movie: how solid, its place, size and turn, its speed.
+    for (const auto* words : { "opacity", "size", "across", "up", "turn", "speed" })
+    {
+        INFO (words);
+        REQUIRE (childSaying<juce::Label> (panel, words) != nullptr);
+        CHECK (childSaying<juce::Label> (panel, words)->isVisible());
+    }
+
+    CHECK_FALSE (childSaying<juce::Label> (panel, "blur")->isVisible());
+
+    //  The size moves, in words; the rest stays.
+    auto* moves = childSaying<juce::ToggleButton> (panel, "moves");
+    REQUIRE (moves != nullptr);
+    CHECK (moves->getToggleState());
+
+    //  Cleared, the pair goes from the fade.
+    moves->setToggleState (false, juce::dontSendNotification);
+    moves->onClick();
+    REQUIRE_FALSE (sent.empty());
+    CHECK (sent.back().first == "/godot/cue/FADE0001/moves/video/scale");
+    CHECK (sent.back().second.empty());
+
+    //  The first that stays is how solid: ticked, it is moved to where it stands.
+    auto* stays = childSaying<juce::ToggleButton> (panel, "stays");
+    REQUIRE (stays != nullptr);
+    stays->setToggleState (true, juce::dontSendNotification);
+    stays->onClick();
+    CHECK (sent.back().first == "/godot/cue/FADE0001/moves/video/opacity");
+    CHECK (sent.back().second == "100");
+
+    const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {});
+
+    if (dir.isEmpty())
+        return;
+
+    const auto picture = panel.createComponentSnapshot (panel.getLocalBounds());
+    const juce::File file { juce::File (dir).getChildFile ("picture-panel-fade.png") };
+    file.getParentDirectory().createDirectory();
+    file.deleteFile();
+
+    juce::FileOutputStream out { file };
+    REQUIRE (out.openedOk());
+
+    juce::PNGImageFormat png;
+    CHECK (png.writeImageToStream (picture, out));
+    MESSAGE ("wrote " << file.getFullPathName().toStdString());
+}
+
+TEST_CASE ("foot panel: the inspector's panel buttons in its head, lit on the panel open, a press asking for that panel (§94)")
+{
+    std::vector<std::pair<std::string, std::string>> asked;
+
+    ui::FootPanelComponent::Actions actions;
+    actions.openPanel = [&asked] (const std::string& cueId, const std::string& subject)
+    { asked.emplace_back (cueId, subject); };
+
+    ui::FootPanelComponent panel (model::Theme {}, actions);
+    panel.setSize (1200, 220);
+
+    panel.setPanels ({ { "fade", "Mixer, what the fade moves and where to", "FADE0001" },
+                       { "eq", "EQ, the target's bands the fade moves", "FADE0001" },
+                       { "fx", "FX, the target's plugin values the fade moves", "FADE0001" },
+                       { "curve", "Curve, the shape of the fade", "FADE0001" } });
+    panel.open ({ model::Subject::Kind::fx, "FADE0001" });
+
+    const auto button = [&panel] (const juce::String& word) -> ui::IconButton*
+    {
+        for (auto* child : panel.getChildren())
+            if (auto* found = dynamic_cast<ui::IconButton*> (child); found != nullptr && found->getButtonText() == word)
+                return found;
+
+        return nullptr;
+    };
+
+    for (const auto* word : { "Mixer", "EQ", "FX", "Curve" })
+    {
+        INFO (word);
+        REQUIRE (button (word) != nullptr);
+        CHECK (button (word)->isVisible());
+        CHECK_FALSE (button (word)->getBounds().isEmpty());
+    }
+
+    //  Lit on the panel open, and only there.
+    CHECK (button ("FX")->getToggleState());
+    CHECK_FALSE (button ("EQ")->getToggleState());
+
+    //  A press asks for its panel on its cue, as the inspector's does.
+    button ("EQ")->onClick();
+    REQUIRE (asked.size() == 1u);
+    CHECK (asked.back() == std::pair<std::string, std::string> { "FADE0001", "eq" });
+
+    panel.open ({ model::Subject::Kind::eq, "FADE0001" });
+    CHECK (button ("EQ")->getToggleState());
+    CHECK_FALSE (button ("FX")->getToggleState());
+
+    //  Narrow, the pictures alone - and every button still there.
+    panel.setSize (480, 220);
+
+    for (const auto* word : { "Mixer", "EQ", "FX", "Curve" })
+    {
+        INFO (word);
+        CHECK (button (word)->isVisible());
+        CHECK (button (word)->getWidth() > 0);
+    }
+}
+
 TEST_CASE ("eq panel: a picture of it, when somebody asks for one")
 {
     /*  NOT AN ASSERTION BUT AN EYE. With WFG_SNAPSHOT_DIR set, the panel is

@@ -41,14 +41,32 @@ namespace wfg::client::ui
 
         bool isSpeed (const model::FadeStrip& strip) { return strip.kind == "speed"; }
 
+        /*  A PICTURE'S NUMBER (namespace draft §94): a straight throw between
+            its row's ends, in its own unit. */
+        bool isPicture (const model::FadeStrip& strip) { return strip.kind == "picture"; }
+
+        double span (const model::FadeStrip& strip) { return std::max (1.0e-9, strip.highest - strip.lowest); }
+
         double fractionOf (const model::FadeStrip& strip, double value)
         {
+            if (isPicture (strip))
+                return std::clamp ((value - strip.lowest) / span (strip), 0.0, 1.0);
+
             return isSpeed (strip) ? model::fractionForSpeed (value) : model::fractionForDb (value);
         }
 
         double valueAt (const model::FadeStrip& strip, double fraction)
         {
+            if (isPicture (strip))
+                return strip.lowest + std::clamp (fraction, 0.0, 1.0) * span (strip);
+
             return isSpeed (strip) ? model::speedForFraction (fraction) : model::dbForFraction (fraction);
+        }
+
+        //  Where a double click puts it, and the line drawn across the throw.
+        double homeOf (const model::FadeStrip& strip)
+        {
+            return isPicture (strip) ? strip.home : isSpeed (strip) ? 1.0 : 0.0;
         }
 
         /** Within the row's range, and rounded as a hand's number is. */
@@ -56,6 +74,9 @@ namespace wfg::client::ui
         {
             if (isSpeed (strip))
                 return std::clamp (value, -20.0, 20.0);   // below nought, backwards (§41)
+
+            if (isPicture (strip))
+                return std::round (std::clamp (value, strip.lowest, strip.highest) * 10.0) / 10.0;
 
             return std::round (std::clamp (value, model::silenceDb, model::loudestDb) * 10.0) / 10.0;
         }
@@ -76,14 +97,15 @@ namespace wfg::client::ui
             {
                 const auto typed = value.getText().trim();
 
-                if (! isSpeed (strip()) && (typed.equalsIgnoreCase ("-inf") || typed.equalsIgnoreCase ("inf")))
+                if (! isSpeed (strip()) && ! isPicture (strip())
+                      && (typed.equalsIgnoreCase ("-inf") || typed.equalsIgnoreCase ("inf")))
                 {
                     owner.valueWanted (at, model::silenceDb);
                     return;
                 }
 
-                //  "x0.5" and "0,5" as well as "0.5" for a speed; "-6 dB" for a level.
-                const auto cleaned = typed.trimCharactersAtStart ("xX");
+                //  "x0.5" and "0,5" as well as "0.5" for a speed; "-6 dB" for a level; "50 %" for an opacity.
+                const auto cleaned = typed.trimCharactersAtStart ("xX").trimCharactersAtEnd (" %px");
 
                 if (const auto parsed = spatcore::ui::typed::number (cleaned))
                     owner.valueWanted (at, static_cast<double> (*parsed));
@@ -156,8 +178,8 @@ namespace wfg::client::ui
             if (event.eventComponent != this)
                 return;
 
-            //  Unity for a level, the file's own speed for a speed.
-            owner.valueWanted (at, isSpeed (strip()) ? 1.0 : 0.0);
+            //  Unity for a level, the file's own speed for a speed, the row's own for a picture.
+            owner.valueWanted (at, homeOf (strip()));
         }
 
         void mouseWheelMove (const juce::MouseEvent& event, const juce::MouseWheelDetails& wheel) override
@@ -170,7 +192,7 @@ namespace wfg::client::ui
             if (clicks == 0)
                 return;
 
-            if (isSpeed (strip()))
+            if (isSpeed (strip()) || isPicture (strip()))
                 owner.valueWanted (at, bounded (strip(), valueAt (strip(), fractionOf (strip(), here())
                                                                             + clicks * (event.mods.isShiftDown() ? 0.002 : 0.02))));
             else
@@ -210,7 +232,7 @@ namespace wfg::client::ui
 
             //  Unity, or the file's own speed: the one place that means something on its own.
             g.setColour (Look::colour (look, "ink-off"));
-            g.drawHorizontalLine (placeOf (isSpeed (s) ? 1.0 : 0.0), static_cast<float> (track.getX()),
+            g.drawHorizontalLine (placeOf (homeOf (s)), static_cast<float> (track.getX()),
                                   static_cast<float> (track.getRight()));
 
             /*  THE CAP: the accent where the fade moves it, dim where it stays,
@@ -323,7 +345,7 @@ namespace wfg::client::ui
             so the box somebody is typing in keeps the focus. */
         const auto& mix = reading.fadeMix;
         std::string out = reading.subject.objectId + "!" + reading.notice + "!" + mix.targetId + "!" + mix.dcaId
-                            + (mix.hasEq ? "!eq" : "");
+                            + (mix.hasEq ? "!eq" : "") + (mix.hasPicture ? "!picture" : "");
 
         for (const auto& strip : mix.strips)
             out += "|" + strip.kind + ":" + strip.busId;
@@ -394,8 +416,18 @@ namespace wfg::client::ui
         };
 
         if (mix.hasEq)
+        {
             door ("EQ...", "The target's EQ, for the bands this fade moves",
                   [this, fadeId] { if (actions.openEq) actions.openEq (fadeId); });
+
+            //  The whole chain, each plugin saying what the fade moves on it (§94).
+            door ("FX...", "The target's plugins, each saying which of its values this fade moves",
+                  [this, fadeId] { if (actions.openFx) actions.openFx (fadeId); });
+        }
+
+        if (mix.hasPicture)
+            door ("Picture...", "Where the fade takes the picture: its place, size and turn, dragged on the canvas",
+                  [this, fadeId] { if (actions.openPicture) actions.openPicture (fadeId); });
 
         for (const auto& insert : mix.inserts)
         {
@@ -405,7 +437,8 @@ namespace wfg::client::ui
                   [this, fadeId, pluginId] { if (actions.editPlugin) actions.editPlugin (fadeId, pluginId); });
         }
 
-        door ("Curve...", "The shape the fade takes - drawn points shape the level",
+        door ("Curve...", mix.hasPicture ? "The shape the fade takes - straight or S-shaped; drawn points shape a sound's level, not a picture"
+                                         : "The shape the fade takes - drawn points shape the level",
               [this, fadeId] { if (actions.openCurve) actions.openCurve (fadeId); });
 
         for (std::size_t at = 0; at < mix.moves.size(); ++at)
@@ -423,6 +456,9 @@ namespace wfg::client::ui
         //  A point and not the locale's comma: the canonical formatter, to a thousandth.
         if (isSpeed (strip))
             return "x" + osc::formatDouble (std::round (value * 1000.0) / 1000.0);
+
+        if (isPicture (strip))
+            return osc::formatDouble (std::round (value * 10.0) / 10.0) + strip.unit;
 
         return model::faderText (value);
     }
@@ -463,7 +499,7 @@ namespace wfg::client::ui
             highlights the parameter"): the switch first for the level and the
             speed, so the value never lands on a fade that is not moving it. A
             send is ticked by being in the list, which the write itself does. */
-        if (strip.kind != "send" && ! strip.moved)
+        if (! strip.door && ! strip.moved)
             actions.set (strip.switchAddress, "true");
 
         actions.set (strip.address, text);
@@ -478,7 +514,7 @@ namespace wfg::client::ui
 
         const auto& strip = mix.strips[at];
 
-        if (strip.kind == "send")
+        if (strip.door)
         {
             /*  TICKED, IT IS MOVED TO WHERE IT STANDS - nothing heard changes
                 until the strip is moved; CLEARED, the entry goes (PF). */
@@ -534,6 +570,14 @@ namespace wfg::client::ui
         {
             g.setColour (Look::colour (theme, "ink-off"));
             g.drawFittedText ("Moves no EQ number or plugin value - open EQ... or a plugin to set one.",
+                              column.withTrimmedTop (scaled (34, theme)).withHeight (scaled (36, theme)),
+                              juce::Justification::topLeft, 2);
+        }
+
+        if (mix.hasPicture)
+        {
+            g.setColour (Look::colour (theme, "ink-off"));
+            g.drawFittedText ("Its place, size and turn are moved in Picture..., where the frame shows where the fade takes it.",
                               column.withTrimmedTop (scaled (34, theme)).withHeight (scaled (36, theme)),
                               juce::Justification::topLeft, 2);
         }

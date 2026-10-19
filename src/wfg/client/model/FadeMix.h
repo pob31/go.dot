@@ -46,7 +46,7 @@ namespace wfg::client::model
     /** One strip of the fade's mixer. */
     struct FadeStrip
     {
-        /** level, dca, speed or send. */
+        /** level, dca, speed, send, or picture - a video cue's number (§94). */
         std::string kind;
 
         std::string name;
@@ -62,6 +62,18 @@ namespace wfg::client::model
 
         bool moved = false;
         double value = 0.0;     ///< where it goes when moved, where it stands when not
+
+        /*  WRITTEN THROUGH THE DOOR, ticked by being in the list: a send, and
+            each of a picture's numbers - its speed among them (§94). The
+            level and a sound's speed have a switch row instead. */
+        bool door = false;
+
+        /*  A PICTURE'S NUMBER (§94): its range and unit, a straight throw
+            between the ends. */
+        double lowest = 0.0;
+        double highest = 0.0;
+        std::string unit;
+        double home = 0.0;      ///< where a double click puts it: the row's own default
     };
 
     /** One EQ number or plugin value the fade moves, by name. */
@@ -95,9 +107,18 @@ namespace wfg::client::model
 
         /** Whether the target has an EQ to open - a media or a mic cue. */
         bool hasEq = false;
+
+        /** Whether the target is a video cue, whose picture the fade moves (§94). */
+        bool hasPicture = false;
     };
 
     FadeMixReading readFadeMix (const tree::TreeSnapshot&, const std::string& fadeId);
+
+    /*  WHAT A FADE IS AIMED AT, as a kind (namespace draft §94): "dca", "aux",
+        the target cue's kind - "media", "mic", "video", "group" - or empty for
+        a fade aimed at nothing, and for what is not a fade. Which panels a
+        fade has follows it. */
+    std::string fadeAimKind (const tree::TreeSnapshot&, const std::string& fadeId);
 
     /*  THE ADDRESS OF ONE ENTRY'S DOOR: `/godot/cue/<fade>/moves/<entry>` -
         a number sets it, an empty text takes it out (PF). */

@@ -17,6 +17,7 @@
 #include <wfg/client/model/Picture.h>
 
 #include <wfg/client/model/Text.h>
+#include <wfg/engine/cue/FadeMoves.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 #include <wfg/engine/video/Blanks.h>
@@ -279,6 +280,71 @@ namespace wfg::client::model
         out.fontsJob = text (snapshot, "/godot/engine/fontsJob");
 
         out.locked = isYes (flag (snapshot, "/godot/document/locked"));
+        out.opacity = numberAt (snapshot, base + "opacity", 100.0);
+        out.rate = numberAt (snapshot, base + "rate", 1.0);
+
+        return out;
+    }
+
+    std::vector<std::string> PictureReading::fadeRows() const
+    {
+        std::vector<std::string> out { "opacity" };
+
+        if (! blurred())
+            for (const auto* row : { "scale", "offsetX", "offsetY", "rotation" })
+                out.emplace_back (row);
+
+        if (source == "movie")
+            out.emplace_back ("rate");
+
+        if (blurred())
+            out.emplace_back ("blur");
+
+        return out;
+    }
+
+    PictureReading readFadePicture (const tree::TreeSnapshot& snapshot, const std::string& fadeId,
+                                    std::string& notice)
+    {
+        const auto fade = "/godot/cue/" + fadeId + "/";
+
+        if (text (snapshot, fade + "kind") != "fade")
+        {
+            notice = "Only a video cue, or a fade aimed at one, has a picture to place.";
+            return {};
+        }
+
+        const auto targetId = text (snapshot, fade + "target");
+
+        if (! text (snapshot, fade + "dca").empty() || ! text (snapshot, fade + "aux").empty()
+              || text (snapshot, "/godot/cue/" + targetId + "/kind") != "video")
+        {
+            notice = "This fade is not aimed at a video cue: only a fade on a video cue moves a picture.";
+            return {};
+        }
+
+        auto out = readPicture (snapshot, targetId);
+        out.fadeId = fadeId;
+
+        /*  THE FADE'S PAIRS OVER THE TARGET'S NUMBERS, those this source can
+            be moved by: where the fade arrives. */
+        const auto movable = out.fadeRows();
+
+        for (const auto& [row, value] : cue::parseMoveList (text (snapshot, fade + "video")))
+        {
+            if (std::find (movable.begin(), movable.end(), row) == movable.end())
+                continue;
+
+            out.fadeMoves[row] = value;
+
+            if (row == "opacity")        out.opacity = value;
+            else if (row == "scale")     out.scale = value;
+            else if (row == "offsetX")   out.offsetX = value;
+            else if (row == "offsetY")   out.offsetY = value;
+            else if (row == "rotation")  out.rotation = value;
+            else if (row == "rate")      out.rate = value;
+            else if (row == "blur")      out.blur = value;
+        }
 
         return out;
     }

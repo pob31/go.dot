@@ -156,6 +156,11 @@ namespace wfg::client::ui
             /** Show another subject, from a fade's mixer: its EQ, its curve (§26). */
             std::function<void (const model::Subject&)> openSubject;
 
+            /*  ONE OF THE HEAD'S PANEL BUTTONS PRESSED (namespace draft §94): the
+                inspector's own door, on the cue it names - a second press on
+                the panel open shuts it, as there. */
+            std::function<void (const std::string& cueId, const std::string& subject)> openPanel;
+
             /** Show the take a mic cue's channel records, from the chain's recorder (Phase 9c). */
             std::function<void (const std::string& cueId)> openTakeOn;
 
@@ -232,6 +237,21 @@ namespace wfg::client::ui
         /** The number the master dial turns, marked in whichever panel draws it. */
         void showDial (const std::string& address);
 
+        /*  THE INSPECTOR'S PANEL BUTTONS, AGAIN IN THE HEAD (namespace draft
+            §94; the author, 2026-10-19: "place the same foot panel buttons on
+            the foot panel to change from one set of changes to the next
+            without having to move to the top of the inspector"): the same
+            panels from the same list, each the subject's word, its label and
+            the cue it opens on - lit while its panel is the one open here. */
+        struct PanelDoor
+        {
+            std::string word, label, cueId;
+
+            bool operator== (const PanelDoor&) const = default;
+        };
+
+        void setPanels (std::vector<PanelDoor> doors);
+
         /*  WHETHER PASTE HAS ANYTHING TO PUT DOWN HERE, told by the window each
             pass, and the sentence its tooltip says - which cue's part, onto
             how many. The window knows the clipboard and the pick; the panel
@@ -290,6 +310,10 @@ namespace wfg::client::ui
         IconButton copyButton { model::Icon::copy, "Copy" };
         IconButton pasteButton { model::Icon::paste, "Paste" };
         int headButtons = 0;   ///< how much of the head they take, for `paint`
+
+        std::vector<PanelDoor> panelDoors;
+        std::vector<std::unique_ptr<IconButton>> panelButtons;
+        void lightPanels();
         int columnWidth = 0, columnGap = 0;
 
         bool dragging = false;

@@ -17,6 +17,7 @@
 #include <wfg/client/ui/PicturePanelComponent.h>
 
 #include <wfg/client/ui/Look.h>
+#include <wfg/client/model/FadeMix.h>
 #include <wfg/engine/osc/OscValue.h>
 
 #include <algorithm>
@@ -27,6 +28,10 @@ namespace wfg::client::ui
     namespace
     {
         constexpr const char* fitWords[3] { "fit", "fill", "stretch" };
+
+        /*  WHAT A FADE MOVES ON A PICTURE (namespace draft §94), by row, in the
+            order the panel lists them; `fadeTicks` follows it. */
+        constexpr const char* fadeRowNames[7] { "opacity", "scale", "offsetX", "offsetY", "rotation", "rate", "blur" };
         constexpr const char* curveRows[4] { "curveLuma", "curveRed", "curveGreen", "curveBlue" };
         constexpr const char* curveWords[4] { "L", "R", "G", "B" };
 
@@ -166,6 +171,10 @@ namespace wfg::client::ui
             grabbed = Grab::none;
             from = toCanvas (event.position);
 
+            //  A mask's outline is the cue's: a fade does not move it (§94).
+            if (r.masked() && r.onFade())
+                return;
+
             if (r.masked())
             {
                 const auto point = toMask (event.position);
@@ -215,7 +224,6 @@ namespace wfg::client::ui
 
             const auto& r = owner.reading;
             const auto to = toCanvas (event.position);
-            const auto base = "/godot/cue/" + r.cueId + "/";
 
             switch (grabbed)
             {
@@ -225,9 +233,8 @@ namespace wfg::client::ui
                     hand.offsetX = x;
                     hand.offsetY = y;
 
-                    if (owner.actions.setMany)
-                        owner.actions.setMany ({ { base + "offsetX", numberText (x) },
-                                                 { base + "offsetY", numberText (y) } });
+                    owner.writeMany ({ { owner.addressOf ("offsetX"), numberText (x) },
+                                       { owner.addressOf ("offsetY"), numberText (y) } });
                     break;
                 }
 
@@ -268,7 +275,7 @@ namespace wfg::client::ui
         {
             const auto& r = owner.reading;
 
-            if (r.cueId.empty() || r.locked || ! r.masked())
+            if (r.cueId.empty() || r.locked || ! r.masked() || r.onFade())
                 return;
 
             //  A CORNER ADDED on the edge nearest; a mask with fewer than three starts as a triangle there.
@@ -900,6 +907,24 @@ namespace wfg::client::ui
         noFields.setJustificationType (juce::Justification::topLeft);
         addAndMakeVisible (noFields);
 
+        /*  ON A FADE (namespace draft §94): how solid and a movie's speed, and
+            the tick beside each value saying whether the fade moves it. */
+        build (opacity, opacityLabel, "opacity", "opacity", 0.0, 100.0, 50.0, false, " %", 0);
+        build (speed, speedLabel, "speed", "rate", -20.0, 20.0, 1.0, true, "", 3);
+        opacity.setTooltip ("How solid the fade leaves it, in %");
+        speed.setTooltip ("The movie's speed the fade takes it to: one is the file's own");
+
+        for (int at = 0; at < 7; ++at)
+        {
+            auto& tick = fadeTicks[at];
+            tick.setWantsKeyboardFocus (false);
+            tick.onClick = [this, at] { tickFade (at, fadeTicks[at].getToggleState()); };
+            addAndMakeVisible (tick);
+        }
+
+        fadeWords.setJustificationType (juce::Justification::topLeft);
+        addAndMakeVisible (fadeWords);
+
         applyTheme (theme);
     }
 
@@ -932,12 +957,30 @@ namespace wfg::client::ui
         addAndMakeVisible (label);
     }
 
+    std::string PicturePanelComponent::addressOf (const char* row) const
+    {
+        if (reading.onFade())
+            return model::fadeMoveAddress (reading.fadeId, std::string ("video/") + row);
+
+        return "/godot/cue/" + reading.cueId + "/" + row;
+    }
+
     void PicturePanelComponent::write (const char* row, const std::string& text)
     {
         if (reading.cueId.empty() || reading.locked || actions.set == nullptr)
             return;
 
-        actions.set ("/godot/cue/" + reading.cueId + "/" + row, text);
+        /*  ON A FADE only what it moves, through its door: a number sets the
+            pair, and so ticks it (§94). */
+        if (reading.onFade())
+        {
+            const auto movable = reading.fadeRows();
+
+            if (std::find (movable.begin(), movable.end(), std::string (row)) == movable.end())
+                return;
+        }
+
+        actions.set (addressOf (row), text);
     }
 
     void PicturePanelComponent::writeMany (const std::vector<std::pair<std::string, std::string>>& rows)
@@ -945,7 +988,8 @@ namespace wfg::client::ui
         if (reading.cueId.empty() || reading.locked || rows.empty())
             return;
 
-        if (rows.size() == 1 || actions.setMany == nullptr)
+        //  A fade's door takes one pair a write.
+        if (rows.size() == 1 || actions.setMany == nullptr || reading.onFade())
         {
             if (actions.set != nullptr)
                 for (const auto& [address, text] : rows)
@@ -955,6 +999,32 @@ namespace wfg::client::ui
         }
 
         actions.setMany (rows);
+    }
+
+    juce::Slider* PicturePanelComponent::fadeSlider (int at)
+    {
+        juce::Slider* sliders[7] { &opacity, &scale, &offsetX, &offsetY, &rotation, &speed, &blurAmount };
+        return at >= 0 && at < 7 ? sliders[at] : nullptr;
+    }
+
+    juce::Label* PicturePanelComponent::fadeLabel (int at)
+    {
+        juce::Label* labels[7] { &opacityLabel, &scaleLabel, &offsetXLabel, &offsetYLabel, &rotationLabel,
+                                 &speedLabel, &blurAmountLabel };
+        return at >= 0 && at < 7 ? labels[at] : nullptr;
+    }
+
+    void PicturePanelComponent::tickFade (int at, bool moves)
+    {
+        /*  TICKED, IT IS MOVED TO WHERE IT STANDS - nothing seen changes until
+            the number is moved; CLEARED, the pair goes (§26, PF; §94). */
+        if (at < 0 || at >= 7 || ! reading.onFade() || reading.locked || actions.set == nullptr)
+            return;
+
+        if (moves)
+            write (fadeRowNames[at], numberText (fadeSlider (at)->getValue()));
+        else
+            actions.set (addressOf (fadeRowNames[at]), {});
     }
 
     /*  A FIELD'S VALUE SENT (61, AKM): at once, and under the lock too - a
@@ -1226,6 +1296,8 @@ namespace wfg::client::ui
         setValue (outlineWidth, reading.outline);
         setValue (outlineBlur, reading.outlineBlur);
         setValue (blurAmount, reading.blur);
+        setValue (opacity, reading.opacity);
+        setValue (speed, reading.rate);
         wholeCanvas.setToggleState (reading.shape.size() < 3, juce::dontSendNotification);
         aShape.setToggleState (reading.shape.size() >= 3, juce::dontSendNotification);
 
@@ -1395,6 +1467,65 @@ namespace wfg::client::ui
 
         useAlpha.setEnabled (open && ! inputSaysNone);
 
+        /*  ON A FADE (namespace draft §94): only what a fade moves, each with
+            its tick and its word - "moves" or "stays" - and the number in the
+            accent where it moves, never the colour alone (§4.8). The rest is
+            the cue's, and not drawn here. */
+        for (auto* part : std::initializer_list<juce::Component*> { &opacity, &opacityLabel, &speed, &speedLabel,
+                                                                    &fadeWords })
+            part->setVisible (false);
+
+        //  What every source has, shown again after a fade's panel hid it.
+        for (auto* part : std::initializer_list<juce::Component*> { &scale, &scaleLabel, &offsetX, &offsetXLabel,
+                                                                    &offsetY, &offsetYLabel, &rotation, &rotationLabel,
+                                                                    &flipH, &flipV })
+            part->setVisible (true);
+
+        for (auto& tick : fadeTicks)
+            tick.setVisible (false);
+
+        for (int at = 0; at < 7; ++at)
+            fadeSlider (at)->removeColour (juce::Slider::textBoxTextColourId);
+
+        if (reading.onFade())
+        {
+            for (auto* child : getChildren())
+                if (child != view.get())
+                    child->setVisible (false);
+
+            const auto movable = reading.fadeRows();
+
+            for (int at = 0; at < 7; ++at)
+            {
+                const auto row = std::string (fadeRowNames[at]);
+
+                if (std::find (movable.begin(), movable.end(), row) == movable.end())
+                    continue;
+
+                const auto moves = reading.fadeMoves.count (row) > 0;
+                auto& tick = fadeTicks[at];
+                tick.setVisible (true);
+                tick.setEnabled (open);
+                tick.setButtonText (moves ? "moves" : "stays");
+                tick.setToggleState (moves, juce::dontSendNotification);
+                tick.setTooltip (moves ? "The fade moves this - clear to leave it alone"
+                                       : "The fade leaves this alone - tick, or move it, to move it");
+
+                auto* slider = fadeSlider (at);
+                slider->setVisible (true);
+                slider->setEnabled (open);
+                slider->setColour (juce::Slider::textBoxTextColourId, Look::colour (theme, moves ? "accent" : "ink-off"));
+                fadeLabel (at)->setVisible (true);
+            }
+
+            fadeWords.setText (reading.blurred()
+                                 ? "Where the fade takes this blur. Its outline is the cue's."
+                                 : "Where the fade takes the picture: drag the frame, or the numbers. "
+                                   "Its look, key and words are the cue's.",
+                               juce::dontSendNotification);
+            fadeWords.setVisible (true);
+        }
+
         resized();
     }
 
@@ -1451,7 +1582,7 @@ namespace wfg::client::ui
                              &saturationLabel, &gammaLabel, &hueLabel, &featherLabel, &paintLabel,
                              &keyLevelLabel, &keySoftnessLabel, &keySpillLabel, &keyColourLabel,
                              &fontSizeLabel, &lineSpacingLabel, &wrapLabel, &outlineLabel, &outlineBlurLabel,
-                             &blurAmountLabel })
+                             &blurAmountLabel, &opacityLabel, &speedLabel, &fadeWords })
         {
             label->setColour (juce::Label::textColourId, Look::colour (theme, "ink-dim"));
             label->setFont (Look::font (theme, 12.0f));
@@ -1473,6 +1604,28 @@ namespace wfg::client::ui
         view->setBounds (area);
 
         const auto row = 26;
+
+        /*  ON A FADE (§94): the sentence, then a line a value - its tick, its
+            word, its number. */
+        if (reading.onFade())
+        {
+            auto column = controls.reduced (8, 6);
+            fadeWords.setBounds (column.removeFromTop (row * 2));
+
+            for (int at = 0; at < 7; ++at)
+            {
+                if (! fadeTicks[at].isVisible())
+                    continue;
+
+                auto line = column.removeFromTop (row);
+                fadeTicks[at].setBounds (line.removeFromLeft (76));
+                fadeLabel (at)->setBounds (line.removeFromLeft (64));
+                fadeSlider (at)->setBounds (line);
+            }
+
+            return;
+        }
+
         auto placeColumn = controls.removeFromLeft (reading.graded() || reading.texted() || reading.blurred()
                                                         ? controls.getWidth() / 2 : controls.getWidth())
                                    .reduced (8, 6);

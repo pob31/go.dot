@@ -363,6 +363,12 @@ namespace wfg::client::model
         if (kind == "video")
             return kind + ":" + text (snapshot, "/godot/cue/" + cue + "/source");
 
+        /*  A FADE BY WHAT IT MOVES (namespace draft §94): a fade on a picture
+            and a fade on a sound have panels of their own, and each its own
+            last one. */
+        if (kind == "fade")
+            return kind + ":" + fadeAimKind (snapshot, cue);
+
         return kind;
     }
 
@@ -375,20 +381,26 @@ namespace wfg::client::model
         const auto cueKind = text (snapshot, "/godot/cue/" + cue + "/kind");
         const auto sound = cueKind == "media" || cueKind == "mic";
 
+        /*  A FADE HAS ITS TARGET'S PANELS (namespace draft §94): the EQ and
+            the chain of what it moves when that sounds, the picture when it
+            is a video cue - each with the fade's changes over it. */
+        const auto aim = cueKind == "fade" ? fadeAimKind (snapshot, cue) : std::string {};
+        const auto fadeOnSound = aim == "media" || aim == "mic" || aim == "aux";
+
         switch (kind)
         {
             case Subject::Kind::waveform:
                 return cueKind == "media"
                     || (cueKind == "video" && text (snapshot, "/godot/cue/" + cue + "/source") == "movie");
 
-            case Subject::Kind::sends:
-            case Subject::Kind::fx:        return sound;
-            case Subject::Kind::eq:        return sound || cueKind == "fade";
+            case Subject::Kind::sends:     return sound;
+            case Subject::Kind::fx:
+            case Subject::Kind::eq:        return sound || fadeOnSound;
             case Subject::Kind::take:      return cueKind == "mic";
             case Subject::Kind::curve:
             case Subject::Kind::fade:      return cueKind == "fade";
             case Subject::Kind::messages:  return cueKind == "osc";
-            case Subject::Kind::picture:   return cueKind == "video";
+            case Subject::Kind::picture:   return cueKind == "video" || aim == "video";
             case Subject::Kind::patch:     return cueKind == "process";
             case Subject::Kind::code:      return cueKind == "script";
 
@@ -577,11 +589,14 @@ namespace wfg::client::model
             is nothing to draw for a cue that has none. */
         if (subject.kind == Subject::Kind::picture)
         {
-            out.picture = readPicture (snapshot, out.subject.objectId);
+            /*  OR A FADE'S, its pairs over its target's (namespace draft §94). */
+            std::string notice = "Only a video cue has a picture to place and colour.";
+            out.picture = out.cueKind == "fade" ? readFadePicture (snapshot, out.subject.objectId, notice)
+                                                : readPicture (snapshot, out.subject.objectId);
             out.locked = out.picture.locked;
 
             if (out.picture.cueId.empty())
-                out.notice = "Only a video cue has a picture to place and colour.";
+                out.notice = notice;
         }
 
         /*  AN OSC CUE'S MESSAGES (namespace draft 45), with the lock read
@@ -640,8 +655,11 @@ namespace wfg::client::model
 
         if (subject.kind == Subject::Kind::fx)
         {
-            out.fx = readFx (snapshot, out.subject.objectId);
-            out.eq = readEq (snapshot, out.subject.objectId);
+            /*  OR A FADE'S: its target's chain, each plugin with the values the
+                fade moves, and the EQ the fade arrives at (namespace draft §94). */
+            const auto onFade = out.cueKind == "fade";
+            out.fx = onFade ? readFadeFx (snapshot, out.subject.objectId) : readFx (snapshot, out.subject.objectId);
+            out.eq = onFade ? readFadeEq (snapshot, out.subject.objectId) : readEq (snapshot, out.subject.objectId);
 
             if (! out.fx.present)
                 out.notice = out.fx.notice;

@@ -758,6 +758,11 @@ namespace wfg::client
                     }
                 };
 
+                /*  THE INSPECTOR'S PANEL BUTTONS, AGAIN IN THE FOOT'S HEAD
+                    (namespace draft §94): the same door, so the same panel on
+                    the same line, and a second press shuts it. */
+                footActions.openPanel = inspectorActions.openPanel;
+
                 footActions.openTakeOn = [this] (const std::string& cueId)
                 {
                     if (shell != nullptr && ! cueId.empty())
@@ -3286,14 +3291,21 @@ namespace wfg::client
                 /*  AND SINCE 2026-10-03 IT OPENS ITS MIXER (namespace draft
                     §26, PG): what the fade moves and where to, as sliders, is
                     what a fade is now - the curve is a door from there. A fade
-                    whose own EQ or curve is already open keeps it. */
+                    whose own EQ or curve is already open keeps it; and since
+                    §94 a fade keeps the EQ, the chain or the picture open on a
+                    fade before it when they fit this one, which the pick then
+                    points at it. */
+                const auto footKind = shell->footSubject().kind;
+
                 if (! selection.anchor().empty()
                       && model::text (*snapshot, "/godot/cue/" + selection.anchor() + "/kind") == "fade"
                       && shutCurveFor != selection.anchor()
-                      && shell->footSubject().kind != model::Subject::Kind::fade
-                      && shell->footSubject().kind != model::Subject::Kind::curve
-                      && ! (shell->footSubject().kind == model::Subject::Kind::eq
-                              && shell->footSubject().objectId == selection.anchor()))
+                      && footKind != model::Subject::Kind::fade
+                      && footKind != model::Subject::Kind::curve
+                      && ! ((footKind == model::Subject::Kind::eq || footKind == model::Subject::Kind::fx
+                               || footKind == model::Subject::Kind::picture)
+                              && model::text (*snapshot, "/godot/cue/" + shell->footSubject().objectId + "/kind") == "fade"
+                              && model::panelFits (*snapshot, footKind, selection.anchor())))
                 {
                     shell->setFoot ({ model::Subject::Kind::fade, selection.anchor() });
                     menuItemsChanged();
@@ -3565,6 +3577,18 @@ namespace wfg::client
                     auto inspection = model::inspectMany (*snapshot, selection.ids(), selection.anchor());
                     model::addKeyLine (inspection, keyTriggers);
                     shell->inspector.show (inspection);
+
+                    /*  AND THE SAME PANEL BUTTONS IN THE FOOT'S HEAD (§94),
+                        each on the cue the inspector's opens on. */
+                    std::vector<ui::FootPanelComponent::PanelDoor> doors;
+                    const auto& onCue = inspection.panelCue.empty() ? inspection.cueId : inspection.panelCue;
+
+                    for (const auto& panel : inspection.panels)
+                        doors.push_back ({ panel.value, panel.label,
+                                           model::footCueForPick (*snapshot, model::subjectKindFor (panel.value),
+                                                                  panel.address.empty() ? onCue : panel.address) });
+
+                    shell->foot.setPanels (std::move (doors));
                 }
 
                 /*  WHICH PANEL IS OPEN AT THE FOOT, and on which cue, so the

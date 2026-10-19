@@ -49,6 +49,12 @@
 
     AND NOTHING HERE TAKES THE KEYBOARD, so the space bar still GOes while a
     hand is in the chain.
+
+    ON A FADE (namespace draft §94) it is the fade's target's chain: each box
+    says in words what the fade moves on it, Edit... opens the plugin's window
+    on the fade - what is turned there, the fade moves - and the switches are
+    shown and not thrown, since a fade moves numbers and a switch has none
+    between (§26, OY).
 */
 
 #include <wfg/client/model/Foot.h>
@@ -125,6 +131,9 @@ namespace wfg::client::ui
 
         /** Whether a first switch-in is outstanding for this entry. */
         bool pending (const std::string& pluginId) const;
+
+        /** Whether the chain is a fade's target's (namespace draft §94). */
+        bool onFade() const noexcept { return ! reading.fx.fadeId.empty(); }
 
         int scaled (int base) const;
         int wantedWidth() const;

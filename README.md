@@ -93,7 +93,8 @@ has stood in front of the thing.
   recorded from a fader. Speed from nought to twenty, as varispeed or
   timestretch, faded while it plays, backwards or bouncing between its loop
   points. A fade moves anything the cue it aims at owns: level, sends, EQ,
-  plugin values. When the interface disappears the show pauses; when its rate
+  plugin values, or a picture's opacity, place, size and turn, each shown in
+  the target's own panels with the fade's changes on them (namespace draft §94). When the interface disappears the show pauses; when its rate
   changes the show follows it and resamples.
 - **Live inputs.** Mic cues on named rack channels, through plugins; and live
   sampling — a take recorded during the show, then looped, layered or cleared.

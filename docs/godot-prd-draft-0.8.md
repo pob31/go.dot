@@ -992,6 +992,17 @@ opens the EQ panel and each insert opens its plugin's own window, all on the fad
 Changing a value marks it as moved, and clearing its tick box removes it. Switches
 are not faded, because a fade moves between two numbers. Namespace draft §26.
 
+*Added in 0.8, at the author's direction (2026-10-19).* **A fade's panels show
+what it changes on its target.** A fade gets the panels of whatever it is aimed
+at, each showing the target with the fade's changes laid over it. A fade on a
+sound or an aux gets the Mixer, the EQ and the FX chain. A fade on a video cue
+gets the video cue's own Picture panel, with the frame drawn where the fade takes
+the picture. That panel offers only what a fade can move: opacity, place, size,
+turn, a movie's speed and a blur cue's blur. Each has a tick saying whether the
+fade moves it. **Doh! puts a picture fade back** as it puts back a sound's. The
+panel buttons sit in the foot panel's own head as well as at the top of the
+inspector. Namespace draft §94.
+
 *Added in 0.8, at the author's direction (2026-09-27).* **The first lane built
 is a media cue's level lane** — a volume curve drawn over its waveform
 (`media/levelLane`, `docs/godot-namespace-draft-0.1.md` §20). It lives on the

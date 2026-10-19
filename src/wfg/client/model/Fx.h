@@ -98,6 +98,10 @@ namespace wfg::client::model
 
         std::vector<FxParameter> params;
 
+        /*  ON A FADE (namespace draft §94): the values the fade moves on this
+            plugin, by name, in the order the plugin lists them. */
+        std::vector<std::string> fadeMoves;
+
         bool present() const noexcept { return ! fxId.empty(); }
     };
 
@@ -134,6 +138,10 @@ namespace wfg::client::model
             doing, in the channel's own word. */
         bool recorder = false;
         std::string takeState;
+
+        /*  ON A FADE (namespace draft §94): the fade whose plugin values are
+            counted on each strip. Its switches are not the fade's to throw. */
+        std::string fadeId;
     };
 
     /*  "Plays as stereo through its inserts, 21 ms late." - or nothing, for a
@@ -147,6 +155,15 @@ namespace wfg::client::model
         for a cue that is not media; strips are empty, with a sentence, for a
         show that declares no set. */
     FxReading readFx (const tree::TreeSnapshot&, const std::string& cueId);
+
+    /*  A FADE'S CHAIN (namespace draft §94): its target's - the cue's, or the
+        aux's - each strip with the values the fade moves on it. `present` is
+        false, with a sentence, for a fade on anything with no chain. */
+    FxReading readFadeFx (const tree::TreeSnapshot&, const std::string& fadeId);
+
+    /*  "moves 2 values: Mix, Time", "moves nothing" - what a fade does to a
+        plugin, in words, for its box in the chain. */
+    std::string fadeMoveWords (const FxStrip&);
 
     /*  WHAT BECAME OF AN ENTRY TONIGHT, in words, for its box in the chain:
         the engine's state word, its sentence, and - only when this cue has

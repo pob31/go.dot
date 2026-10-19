@@ -322,8 +322,11 @@ namespace wfg::client::model
         it replaces, because a dead control teaches somebody the feature is
         broken rather than absent. Each is added here on the day its editor
         lands, and that one line is the whole of the change. */
+    /*  A FADE'S follow what it is aimed at (namespace draft §94): `aim` is
+        `fadeAimKind`'s word - its target's EQ and chain for a sound or an aux,
+        its picture for a video cue. */
     std::vector<Field> openersFor (const std::string& kind, const std::string& cueId,
-                                   const std::string& source = {});
+                                   const std::string& source = {}, const std::string& aim = {});
 
     /*  AND OVER SEVERAL CUES (namespace draft §30.11): the panels that edit
         every picked cue they serve at once - the EQ and the sends, for media

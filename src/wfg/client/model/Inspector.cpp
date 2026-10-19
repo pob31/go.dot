@@ -21,6 +21,7 @@
 #include <wfg/client/model/Dual.h>
 #include <wfg/client/model/MidiPorts.h>
 #include <wfg/client/model/DirectOuts.h>
+#include <wfg/client/model/FadeMix.h>
 #include <wfg/client/model/InputList.h>
 #include <wfg/client/model/OutputList.h>
 #include <wfg/client/model/Picture.h>
@@ -468,10 +469,15 @@ namespace wfg::client::model
             while `rateOn` is. Greyed and never hidden - the inspector's
             rule - so turning a switch on finds its row where it already was.
             The curve is the shape of both, and greyed only with neither on. */
-        void greyWhatAFadeLeavesAlone (std::vector<Field>& decided)
+        void greyWhatAFadeLeavesAlone (std::vector<Field>& decided, const std::string& aim)
         {
             auto levelOn = true;
             auto rateOn = false;
+
+            /*  AND WHAT ITS TARGET DOES NOT READ (namespace draft §94): a
+                picture moves by its `video` pairs alone (§36.5), so its level,
+                speed and curve rows say nothing; a sound reads no pairs. */
+            const auto picture = aim == "video";
 
             for (const auto& field : decided)
             {
@@ -484,11 +490,15 @@ namespace wfg::client::model
             for (auto& field : decided)
             {
                 if (field.name == "level" || field.name == "points")
-                    field.applies = levelOn;
+                    field.applies = levelOn && ! picture;
+                else if (field.name == "levelOn" || field.name == "rateOn")
+                    field.applies = ! picture;
                 else if (field.name == "rate")
-                    field.applies = rateOn;
+                    field.applies = rateOn && ! picture;
                 else if (field.name == "curve")
-                    field.applies = levelOn || rateOn;
+                    field.applies = levelOn || rateOn || picture;
+                else if (field.name == "video")
+                    field.applies = picture || aim.empty();
             }
         }
 
@@ -1527,7 +1537,7 @@ namespace wfg::client::model
     }
 
     std::vector<Field> openersFor (const std::string& kind, const std::string& cueId,
-                                   const std::string& source)
+                                   const std::string& source, const std::string& aim)
     {
         std::vector<Field> out;
 
@@ -1587,7 +1597,19 @@ namespace wfg::client::model
                 also how it is SHUT: a panel that opened by itself and could
                 only be closed from somewhere else would be a trap. */
             offer ("Mixer, what the fade moves and where to", "fade");
-            offer ("EQ, the target's bands the fade moves", "eq");
+
+            /*  AND ITS TARGET'S PANELS, the fade's changes over them (namespace
+                draft §94): a sound's EQ and chain, a picture's place. */
+            if (aim == "media" || aim == "mic" || aim == "aux")
+            {
+                offer ("EQ, the target's bands the fade moves", "eq");
+                offer ("FX, the target's plugin values the fade moves", "fx");
+            }
+            else if (aim == "video")
+            {
+                offer ("Picture, where the fade takes the picture", "picture");
+            }
+
             offer ("Curve, the shape of the fade", "curve");
         }
         else if (kind == "group")
@@ -1932,7 +1954,7 @@ namespace wfg::client::model
             wordTheDoh (snapshot, out.kind, decided);
 
         if (out.kind == "fade")
-            greyWhatAFadeLeavesAlone (decided);
+            greyWhatAFadeLeavesAlone (decided, fadeAimKind (snapshot, cueId));
 
         if (out.kind == "transport")
             wordTheVerb (decided);
@@ -2104,7 +2126,8 @@ namespace wfg::client::model
             scroll away on any cue with a long list of rows - a media cue in a
             sampler group most of all - and a door is quickest where the eye
             lands first. */
-        out.panels = openersFor (out.kind, cueId, text (snapshot, "/godot/cue/" + cueId + "/source"));
+        out.panels = openersFor (out.kind, cueId, text (snapshot, "/godot/cue/" + cueId + "/source"),
+                                 out.kind == "fade" ? fadeAimKind (snapshot, cueId) : std::string {});
         out.panelCue = cueId;
 
         for (auto* block : { &isBlock, &whenBlock, &doesBlock, &samplerBlock, &listBlock })

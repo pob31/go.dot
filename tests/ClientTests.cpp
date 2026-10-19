@@ -4966,15 +4966,17 @@ TEST_CASE ("client: the inspector offers the panels a kind actually has, and no 
         fade opens it by itself, because the row is also how it is SHUT - a
         panel that opened on its own and could only be closed from somewhere
         else would be a trap. */
-    const auto onFade = model::openersFor ("fade", "B3N8R5TW");
+    const auto onFade = model::openersFor ("fade", "B3N8R5TW", {}, "media");
 
     /*  AND SINCE 2026-10-03 ITS MIXER FIRST (namespace draft §26, PG): what
-        the fade moves, then the target's EQ on the fade, then the curve. */
-    REQUIRE (onFade.size() == 3);
+        the fade moves, then the target's EQ and chain on the fade (§94), then
+        the curve. */
+    REQUIRE (onFade.size() == 4);
     CHECK (onFade[0].value == "fade");
     CHECK (onFade[1].value == "eq");
-    CHECK (onFade[2].value == "curve");
-    CHECK_FALSE (onFade[2].writable);
+    CHECK (onFade[2].value == "fx");
+    CHECK (onFade[3].value == "curve");
+    CHECK_FALSE (onFade[3].writable);
 
     //  And the kinds with nothing longer to look at still offer nothing.
     for (const auto* kind : { "wait", "message" })
@@ -16331,6 +16333,7 @@ TEST_CASE ("client: a foot panel the new cue has nothing for falls back to the p
         { "/godot/cue/MED1/kind", "media" },   { "/godot/cue/MED1/parent", "LIST" },
         { "/godot/cue/MED2/kind", "media" },   { "/godot/cue/MED2/parent", "LIST" },
         { "/godot/cue/FAD1/kind", "fade" },    { "/godot/cue/FAD1/parent", "LIST" },
+        { "/godot/cue/FAD1/target", "MED1" },
         { "/godot/cue/MIC1/kind", "mic" },     { "/godot/cue/MIC1/parent", "LIST" },
         { "/godot/cue/GRP1/kind", "group" },   { "/godot/cue/GRP1/parent", "LIST" },
         { "/godot/cue/MEDG/kind", "media" },   { "/godot/cue/MEDG/parent", "GRP1" },
@@ -16367,7 +16370,7 @@ TEST_CASE ("client: a foot panel the new cue has nothing for falls back to the p
 
     //  A type never seen, or last shut: shut, for now.
     CHECK_FALSE (model::footAfterPick (snapshot, { Kind::messages, "OSC1" }, "MIC1", last, false).isOpen());
-    last["fade"] = Kind::none;
+    last["fade:media"] = Kind::none;
     CHECK_FALSE (model::footAfterPick (snapshot, { Kind::messages, "OSC1" }, "FAD1", last, false).isOpen());
 
     //  Shut for want of a fit, it comes back on the next cue whose type has a panel; shut by a hand, it does not.
@@ -16378,6 +16381,193 @@ TEST_CASE ("client: a foot panel the new cue has nothing for falls back to the p
     //  A remembered panel that does not fit this cue - a still's type left on a waveform - is not opened.
     last["video:picture"] = Kind::waveform;
     CHECK_FALSE (model::footAfterPick (snapshot, { Kind::messages, "OSC1" }, "PIC1", last, false).isOpen());
+}
+
+//==============================================================================
+//  A FADE'S PANELS SHOW WHAT IT CHANGES ON ITS TARGET (namespace draft §94).
+TEST_CASE ("client: a fade has its target's panels - a sound's EQ and chain, a picture's place - each with the fade's changes over it (§94)")
+{
+    const auto snapshotOf = [] (std::map<std::string, std::string> rows)
+    {
+        std::vector<tree::Node> nodes;
+
+        for (auto& [address, value] : rows)
+        {
+            tree::Node node;
+            node.address = address;
+            //  A switch as a switch, so it has answered.
+            node.values = { value == "true" || value == "false" ? osc::Value::boolean (value == "true")
+                                                                : osc::Value::string (value) };
+            nodes.push_back (std::move (node));
+        }
+
+        return tree::TreeSnapshot (0, nullptr, nullptr, std::move (nodes));
+    };
+
+    const auto snapshot = snapshotOf ({
+        { "/godot/plugin/order", "PLG1 PLG2" },
+        { "/godot/plugin/PLG1/name", "Reverb" },   { "/godot/plugin/PLG2/name", "Delay" },
+        { "/godot/cue/MED1/kind", "media" },       { "/godot/cue/MED1/parent", "LIST" },
+        { "/godot/cue/MED1/eqOn", "true" },
+        { "/godot/cue/MOV1/kind", "video" },       { "/godot/cue/MOV1/source", "movie" },
+        { "/godot/cue/MOV1/opacity", "80" },       { "/godot/cue/MOV1/parent", "LIST" },
+        { "/godot/cue/BLR1/kind", "video" },       { "/godot/cue/BLR1/source", "blur" },
+        { "/godot/cue/BLR1/blur", "30" },          { "/godot/cue/BLR1/parent", "LIST" },
+        { "/godot/cue/FAD1/kind", "fade" },        { "/godot/cue/FAD1/target", "MED1" },
+        { "/godot/cue/FAD1/fx", "PLG1/3:0.5 PLG1/0:0.2" },
+        { "/godot/cue/FAD1/eq", "eqB1Gain:-3" },   { "/godot/cue/FAD1/parent", "LIST" },
+        { "/godot/cue/FAD2/kind", "fade" },        { "/godot/cue/FAD2/target", "MOV1" },
+        { "/godot/cue/FAD2/video", "contrast:50 opacity:0 scale:150" },
+        { "/godot/cue/FAD2/parent", "LIST" },
+        { "/godot/cue/FAD3/kind", "fade" },        { "/godot/cue/FAD3/target", "BLR1" },
+        { "/godot/cue/FAD3/video", "blur:100 scale:200" },
+        { "/godot/cue/FAD4/kind", "fade" },        { "/godot/cue/FAD4/parent", "LIST" },
+        { "/godot/cue/FAD5/kind", "fade" },        { "/godot/cue/FAD5/dca", "DCA1" },
+    });
+
+    using Kind = model::Subject::Kind;
+
+    //  What each is aimed at, and the panels that follows.
+    CHECK (model::fadeAimKind (snapshot, "FAD1") == "media");
+    CHECK (model::fadeAimKind (snapshot, "FAD2") == "video");
+    CHECK (model::fadeAimKind (snapshot, "FAD4").empty());
+    CHECK (model::fadeAimKind (snapshot, "FAD5") == "dca");
+    CHECK (model::fadeAimKind (snapshot, "MED1").empty());
+
+    CHECK (model::panelFits (snapshot, Kind::eq, "FAD1"));
+    CHECK (model::panelFits (snapshot, Kind::fx, "FAD1"));
+    CHECK_FALSE (model::panelFits (snapshot, Kind::picture, "FAD1"));
+    CHECK (model::panelFits (snapshot, Kind::picture, "FAD2"));
+    CHECK_FALSE (model::panelFits (snapshot, Kind::eq, "FAD2"));
+    CHECK_FALSE (model::panelFits (snapshot, Kind::fx, "FAD2"));
+    CHECK_FALSE (model::panelFits (snapshot, Kind::fx, "FAD4"));
+    CHECK_FALSE (model::panelFits (snapshot, Kind::eq, "FAD5"));
+    CHECK (model::panelFits (snapshot, Kind::fade, "FAD5"));
+
+    //  A fade on a picture and a fade on a sound each remember their own last panel (§90).
+    CHECK (model::footTypeOf (snapshot, "FAD1") == "fade:media");
+    CHECK (model::footTypeOf (snapshot, "FAD2") == "fade:video");
+
+    std::map<std::string, Kind> last { { "fade:video", Kind::picture }, { "fade:media", Kind::fx } };
+    CHECK (model::footAfterPick (snapshot, { Kind::fx, "FAD1" }, "FAD2", last, false)
+             == model::Subject { Kind::picture, "FAD2" });
+    CHECK (model::footAfterPick (snapshot, { Kind::picture, "FAD2" }, "FAD1", last, false)
+             == model::Subject { Kind::fx, "FAD1" });
+
+    //  The inspector's buttons, and so the foot's head's, by what the fade is aimed at.
+    const auto words = [] (const std::vector<model::Field>& fields)
+    {
+        std::vector<std::string> out;
+
+        for (const auto& field : fields)
+            out.push_back (field.value);
+
+        return out;
+    };
+
+    CHECK (words (model::openersFor ("fade", "FAD2", {}, "video")) == std::vector<std::string> { "fade", "picture", "curve" });
+    CHECK (words (model::openersFor ("fade", "FAD1", {}, "aux")) == std::vector<std::string> { "fade", "eq", "fx", "curve" });
+    CHECK (words (model::openersFor ("fade", "FAD4")) == std::vector<std::string> { "fade", "curve" });
+
+    /*  THE MIXER ON A PICTURE: no level, which a picture does not read - how
+        solid it is and a movie's speed, through the door; a blur cue's blur. */
+    const auto movie = model::readFadeMix (snapshot, "FAD2");
+    REQUIRE (movie.present);
+    CHECK (movie.hasPicture);
+    CHECK_FALSE (movie.hasEq);
+    REQUIRE (movie.strips.size() == 2u);
+    CHECK (movie.strips[0].kind == "picture");
+    CHECK (movie.strips[0].door);
+    CHECK (movie.strips[0].moved);
+    CHECK (movie.strips[0].value == doctest::Approx (0.0));
+    CHECK (movie.strips[0].address == "/godot/cue/FAD2/moves/video/opacity");
+    CHECK (movie.strips[1].kind == "speed");
+    CHECK (movie.strips[1].door);
+    CHECK_FALSE (movie.strips[1].moved);
+    CHECK (movie.strips[1].value == doctest::Approx (1.0));
+    CHECK (movie.strips[1].address == "/godot/cue/FAD2/moves/video/rate");
+
+    const auto blur = model::readFadeMix (snapshot, "FAD3");
+    REQUIRE (blur.strips.size() == 2u);
+    CHECK_FALSE (blur.strips[0].moved);
+    CHECK (blur.strips[0].value == doctest::Approx (100.0));
+    CHECK (blur.strips[1].name == "Blur");
+    CHECK (blur.strips[1].moved);
+    CHECK (blur.strips[1].value == doctest::Approx (100.0));
+
+    /*  THE PICTURE ON A FADE: the target's, the fade's pairs over it - and
+        only those its source can be moved by (a grade cannot, a blur cue's
+        frame is the canvas). */
+    std::string notice;
+    const auto picture = model::readFadePicture (snapshot, "FAD2", notice);
+    CHECK (picture.cueId == "MOV1");
+    CHECK (picture.onFade());
+    CHECK (picture.scale == doctest::Approx (150.0));
+    CHECK (picture.opacity == doctest::Approx (0.0));
+    CHECK (picture.fadeMoves.count ("scale") == 1u);
+    CHECK (picture.fadeMoves.count ("contrast") == 0u);
+    CHECK (picture.contrast == doctest::Approx (100.0));
+    CHECK (picture.fadeRows() == std::vector<std::string> { "opacity", "scale", "offsetX", "offsetY", "rotation", "rate" });
+
+    const auto blurred = model::readFadePicture (snapshot, "FAD3", notice);
+    CHECK (blurred.fadeRows() == std::vector<std::string> { "opacity", "blur" });
+    CHECK (blurred.blur == doctest::Approx (100.0));
+    CHECK (blurred.scale == doctest::Approx (100.0));
+    CHECK (blurred.fadeMoves.count ("scale") == 0u);
+
+    notice.clear();
+    CHECK (model::readFadePicture (snapshot, "FAD1", notice).cueId.empty());
+    CHECK_FALSE (notice.empty());
+
+    //  THE CHAIN ON A FADE: each plugin says what the fade moves on it.
+    const auto chain = model::readFadeFx (snapshot, "FAD1");
+    REQUIRE (chain.present);
+    CHECK (chain.fadeId == "FAD1");
+    REQUIRE (chain.strips.size() == 2u);
+    CHECK (chain.strips[0].fadeMoves == std::vector<std::string> { "parameter 1", "parameter 4" });
+    CHECK (model::fadeMoveWords (chain.strips[0]) == "moves 2 values: parameter 1, parameter 4");
+    CHECK (model::fadeMoveWords (chain.strips[1]) == "moves nothing");
+    CHECK_FALSE (model::readFadeFx (snapshot, "FAD2").present);
+    CHECK_FALSE (model::readFadeFx (snapshot, "FAD5").present);
+
+    //  And the foot reads each on the fade.
+    const auto footPicture = model::readFoot (snapshot, { Kind::picture, "FAD2" }, {});
+    CHECK (footPicture.picture.onFade());
+    CHECK (footPicture.notice.empty());
+
+    const auto footChain = model::readFoot (snapshot, { Kind::fx, "FAD1" }, {});
+    CHECK (footChain.fx.fadeId == "FAD1");
+    CHECK (footChain.eq.fadeId == "FAD1");
+    CHECK (footChain.eq.fadeMoves.count ("eqB1Gain") == 1u);
+}
+
+TEST_CASE ("client: a fade on a picture greys the level it does not read, and one on a sound the pairs it does not (§94)")
+{
+    Rig rig;
+
+    const auto media = rig.document.createCue ("7K2QM9X4", 0, "media", "Rain");
+    REQUIRE (media.ok);
+    const auto movie = rig.document.createCue ("7K2QM9X4", 1, "video", "Clip");
+    REQUIRE (movie.ok);
+    const auto fade = rig.document.createCue ("7K2QM9X4", 2, "fade", "Away");
+    REQUIRE (fade.ok);
+
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + fade.id + "/target", movie.id).ok);
+
+    const auto onPicture = model::inspect (*rig.publish (1), fade.id);
+    REQUIRE (rowIn (onPicture, "level") != nullptr);
+    CHECK_FALSE (rowIn (onPicture, "level")->applies);
+    CHECK_FALSE (rowIn (onPicture, "levelOn")->applies);
+    REQUIRE (rowIn (onPicture, "video") != nullptr);
+    CHECK (rowIn (onPicture, "video")->applies);
+    CHECK (rowIn (onPicture, "curve")->applies);
+
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + fade.id + "/target", media.id).ok);
+    rig.parameters.markStale();
+
+    const auto onSound = model::inspect (*rig.publish (2), fade.id);
+    CHECK (rowIn (onSound, "level")->applies);
+    CHECK_FALSE (rowIn (onSound, "video")->applies);
 }
 
 TEST_CASE ("client: cues copied name their show on the clipboard, and a paste reads it back with the files they play (§92)")

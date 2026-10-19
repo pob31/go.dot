@@ -21100,7 +21100,7 @@ Owner `video`, at `/godot/cue/<id>`:
   Runner placed - along the fade's curve, straight or S-shaped, a point a tick, a horizon ahead. A
   fade's own run stopped (Esc, a kill, Doh!) leaves the values where it had taken them.
   `stopWhenDone` takes the picture away where it arrives and stops its run. The pairs are typed in the
-  inspector's "moves picture" row for now; a fade panel for pictures is owed.
+  inspector's "moves picture" row for now; a fade panel for pictures is owed - built in §94.
 - **Pictures are read by the renderer on a thread of its own** and held as software images: JUCE 8's
   own image type on Windows lives on the graphics card (Direct2D), and reading one back from another
   thread gave transparent black - found by the tests, whose own PNG came out empty that way. A picture
@@ -32599,3 +32599,108 @@ Owed: the author's try on the MADIface - an aux with a reverb plugin, a cue send
 level, Esc letting the tail ring, double Esc cutting it; the word "Aux" (AVY); the probe set (§29.6) gaining
 a return with a VST3 on it, a return sending into another and a pre-fader send, to check 93.7 against a set
 Live wrote; the D700's pages on an aux (a follow-up).
+
+## 94. A fade's panels show what it changes: a picture's place, a sound's EQ and plugins, an aux's
+
+Asked by the author on 2026-10-19: *"Can fades on Video cues also show the picture changes?"*, *"Can fades
+on Audio cues (Media and Mic) also show the EQ and effects changes? Aux sends changes too?"*, *"Aux cues need
+fades too on their parameters like the other audio cues (Media and Mic)"* - and then *"We could place the same
+foot panel buttons on the foot panel to change from one set of changes to the next without having to move to
+the top of the inspector."*
+
+What was found:
+
+- **A fade on a video cue already moved a picture.** Its `video` pairs - opacity, scale, offsets, turn, a
+  movie's speed, a blur cue's blur (§36, VS; §61, AKN) - have been played since §36. But they were typed
+  as text in the inspector's "moves picture" row; §36.5 said "a fade panel for pictures is owed". The fade's
+  mixer drew a Level strip on a picture, and a picture does not read one. And Doh! put back what a GO's
+  fade did to a sound's level, sends, EQ and plugins (§26, PE), but not what it did to a picture: the
+  picture stayed where the fade had taken it.
+- **A fade on a sound already moved its EQ and plugin values** (§26). Its mixer listed them, with EQ... and
+  a button per plugin. But the inspector offered only Mixer, EQ and Curve on a fade; the chain had no fade
+  mode; and the EQ was offered on every fade, a picture's and a DCA's among them.
+- **Fades on an aux** were §93's (AVU), built beside this in another session: `fade/aux`, tonight's
+  values, Doh!, and the fade's mixer and EQ reading the aux. A send into an aux was a strip of the fade's
+  mixer through `readSends` - but the door refused it, since it took a `Bus` only.
+
+### 94.1 Decisions
+
+The author's, asked 2026-10-19 (the options and their wording mine):
+
+- **AWE** **A fade on a video cue opens the cue's own Picture panel, with a tick on each value a fade can
+  move.** The frame is drawn where the fade takes the picture, and a drag of it moves the fade's values. The
+  fade's mixer loses its Level strip on a picture: it gets a strip for opacity, one for speed on a movie and
+  one for blur on a blur cue, and a Picture... button.
+- **AWF** **A fade gets its target's panels**: the Mixer (its sends), the EQ and the FX chain, each showing
+  the target with the fade's changes over it. Picking another fade of the same kind keeps the same panel.
+- **AWG** **Doh! puts a picture fade back**, as it puts back a sound's.
+- **AWH** **The panel buttons are in the foot's own head** as well as at the top of the inspector.
+- **AWI** **Auxes in these panels are mine to add** once §93's windows had landed. They had, so they are in
+  this push.
+
+Mine *(proposed)*, the author's to overrule:
+
+- **AWJ** **What a fade can move on a picture, by source**: opacity always; place, size and turn on all but
+  a blur cue, whose frame is the canvas; speed on a movie; blur on a blur cue. A pair the source cannot take
+  is left in the row and not drawn: the door refuses it, and the engine passes it over as it always did.
+  The grade, the key, the mask, the flips, the fit and the words are the cue's and are not drawn on a fade's
+  picture. A sentence says so; the panel does not show them disabled.
+- **AWK** **A picture's values go through the fade's door**, `/godot/cue/<fade>/moves/video/<row>`, as
+  `send/`, `eq/` and `fx/` do (§26, PF). A number sets the pair, which ticks it; empty text takes it out.
+  Each row keeps its own range and unit (opacity 0..100 %, scale 0..1000 %, offsets ±1000 %, turn ±3600°,
+  speed ±20, blur 0..500 px). A tick put on a value moves it to where it stands now, so nothing seen
+  changes until the number is moved (PF's rule).
+- **AWL** **Doh! on a picture follows L22**: each pair the GO's fade moved, on a picture the GO did not
+  start, comes back from where it is to where it stood before the GO, over the panic fade, by a fade of
+  Doh!'s own (`VideoFade::putBack`, with no run). A value a hand has moved since the GO, or another fade
+  holds, is left where it is, and the report says "its offset right moved by another hand since the GO -
+  left where it is". A picture the GO started is taken down by the pause, as before (VK).
+- **AWM** **A fade's panels follow what it is aimed at** (`fadeAimKind`): EQ and FX on a sound or an aux,
+  Picture on a video cue, the Mixer and Curve always. A fade's type for §90's "last panel of this type" is
+  `fade:<aim>`, so a fade on a picture and a fade on a sound each come back to their own panel.
+- **AWN** **The chain on a fade** says on each plugin, in words, what the fade moves ("moves 2 values: Mix,
+  Time" or "moves nothing"), and on the EQ how many numbers. Its switches are shown and cannot be thrown,
+  since a fade moves numbers and a switch has no in-between (OY). Edit... opens the plugin's window on the
+  fade, as the mixer's button did.
+- **AWO** **The inspector greys what the target does not read**: level, the level switch, points and speed
+  on a fade aimed at a picture (§36.5); the `video` pairs on a fade aimed at a sound.
+- **AWP** **The foot's head buttons are the inspector's**: the same list (`openersFor`), the same door
+  (`openPanel`, a second press shuts the panel), and each button is on the cue its panel would open on
+  (`footCueForPick`). They show on every cue's panel, not only a fade's. They are lit as the inspector's
+  are, by the button's state and frame, never colour alone (§4.8). When the head is narrow they show
+  icons only. The title is cut before a button is dropped.
+- **AWQ** **A fade keeps its EQ, chain or picture open across picks**: picking a fade no longer
+  forces its mixer open when the foot already shows a panel that fits the new fade. The pick points that
+  panel at the new fade (§90).
+
+### 94.2 Rows and doors
+
+- No new row. `fade/video` keeps its spelling; the door gains the `video/<row>` entry (`splitMoveEntry`,
+  `FadeMoveRows`, `videoRowRange`).
+- The door's `send/<id>` takes an aux - a shared `Rack/Channel` - as well as a `Bus` (§93).
+
+### 94.3 The windows
+
+- **The fade's mixer** on a picture: the Opacity strip, Speed on a movie, Blur on a blur cue, each through
+  the door (`FadeStrip::door`, a straight throw between the row's ends), then the Picture... and Curve...
+  buttons, with a sentence saying where place, size and turn are moved. On a sound, FX... joins EQ....
+- **The Picture panel on a fade** (`readFadePicture`, `PictureReading::fadeId`/`fadeMoves`/`fadeRows`): the
+  canvas with the frame where the fade arrives, then one line for each value the fade can move - its tick
+  ("moves" or "stays"), its word, its slider - with the moved number in the accent. A mask's outline is not
+  dragged on a fade.
+- **The FX chain on a fade** (`readFadeFx`, `FxReading::fadeId`, `FxStrip::fadeMoves`, `fadeMoveWords`).
+- **The foot's head**: `FootPanelComponent::setPanels`, given the inspector's openers by the window each
+  pass the inspector reads.
+
+### 94.4 Stages
+
+| stage | what | commit |
+|---|---|---|
+| F.1 | the door's `video/` entry and an aux's `send/`; Doh! puts a picture back (GoTests, VideoTests) | |
+| F.2-F.3 | the readings by aim, the mixer's picture strips, the Picture panel and the chain on a fade, the inspector's buttons and greying (ClientTests, RunPaneUiTests) | |
+| F.3b | the panel buttons in the foot's head (RunPaneUiTests) | |
+
+Owed: the author's try - a fade on a movie, its Picture panel, Scale 150 % and Opacity 0 ticked, a GO, a
+Doh!; a fade on a sound, FX, Edit... on a plugin; the head's buttons on a narrow window. The words "moves",
+"stays", "moves 2 values: ..." and the sentences on the Picture panel and the mixer are mine, for the
+author to keep or change.

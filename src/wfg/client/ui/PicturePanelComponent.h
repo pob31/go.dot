@@ -52,6 +52,13 @@
     into one undo step - the offsets one `node.setMany`, their two addresses
     together. While a hand is down the hand's numbers are drawn, the document
     catching up behind. Under the lock it shows, and changes nothing.
+
+    ON A FADE (namespace draft §94) it is the target's picture where the fade
+    takes it: the frame drawn where it arrives, and only what a fade moves -
+    how solid, the place, size and turn, a movie's speed, a blur cue's blur -
+    each with a tick saying whether the fade moves it, written through the
+    fade's door (`/godot/cue/<fade>/moves/video/<row>`). The rest is the
+    cue's, and not drawn here.
 */
 
 #include <wfg/client/model/Foot.h>
@@ -171,6 +178,19 @@ namespace wfg::client::ui
         /*  A BLUR CUE'S (61, AKN): how far, and whether an outline limits it. */
         juce::Slider blurAmount;
         juce::Label blurAmountLabel;
+
+        /*  ON A FADE (§94): how solid and a movie's speed, which the cue's own
+            panel leaves to the inspector; a tick per value a fade moves, in
+            `fadeRowNames`' order; and a sentence saying what the panel is. */
+        juce::Slider opacity, speed;
+        juce::Label opacityLabel, speedLabel, fadeWords;
+        juce::ToggleButton fadeTicks[7];
+        juce::Slider* fadeSlider (int at);
+        juce::Label* fadeLabel (int at);
+        void tickFade (int at, bool moves);
+
+        /** Where a row is written: the cue's own, or the fade's door for it. */
+        std::string addressOf (const char* row) const;
         juce::TextButton wholeCanvas { "Whole canvas" }, aShape { "A shape" };
 
         juce::TextButton fieldsPick;

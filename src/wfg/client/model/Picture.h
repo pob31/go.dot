@@ -44,6 +44,7 @@
 #include <wfg/engine/video/Geometry.h>
 
 #include <array>
+#include <map>
 #include <string>
 #include <utility>
 #include <vector>
@@ -188,6 +189,25 @@ namespace wfg::client::model
 
         bool locked = false;
 
+        /*  HOW SOLID, in % (VR), and a movie's speed: the inspector's rows,
+            read for a fade's panel, which moves them (§94). */
+        double opacity = 100.0;
+        double rate = 1.0;
+
+        /*  ON A FADE (namespace draft §94): the fade whose `video` pairs are
+            laid over the target's numbers above, and those pairs by row -
+            each a value the fade moves, and where to. Empty on a cue's own
+            panel. */
+        std::string fadeId;
+        std::map<std::string, double> fadeMoves;
+
+        bool onFade() const noexcept { return ! fadeId.empty(); }
+
+        /*  WHAT A FADE MAY MOVE ON THIS SOURCE, by row (§36, VS; AKN): the
+            opacity always; the place, size and turn on all but a blur cue,
+            whose frame is the canvas; a movie's speed; a blur cue's blur. */
+        std::vector<std::string> fadeRows() const;
+
         /*  WHAT THIS SOURCE HAS: every source a place on its canvas (VW); a
             picture, a movie and a capture a grade; a fill and a mask a colour;
             a mask an outline. */
@@ -216,6 +236,13 @@ namespace wfg::client::model
 
     /** One cue's picture, read from the tree; empty `cueId` for a cue that is not a video cue. */
     PictureReading readPicture (const tree::TreeSnapshot& snapshot, const std::string& cueId);
+
+    /*  A FADE'S PICTURE (namespace draft §94): its target's, with the fade's
+        `video` pairs laid over it - where the fade takes the picture, drawn
+        as the frame it arrives at. `cueId` is the target's, empty with a
+        `notice` for a fade aimed at no video cue. */
+    PictureReading readFadePicture (const tree::TreeSnapshot& snapshot, const std::string& fadeId,
+                                    std::string& notice);
 
     /** The projector's arithmetic, for this reading. */
     video::Placement placementOf (const PictureReading& reading);

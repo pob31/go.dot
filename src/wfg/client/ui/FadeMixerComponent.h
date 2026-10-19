@@ -68,6 +68,12 @@ namespace wfg::client::ui
             /** The drawn curve, on this fade. */
             std::function<void (const std::string& fadeId)> openCurve;
 
+            /** The target's chain, on this fade (namespace draft §94). */
+            std::function<void (const std::string& fadeId)> openFx;
+
+            /** The target's picture, on this fade (namespace draft §94). */
+            std::function<void (const std::string& fadeId)> openPicture;
+
             /** The plugin's own window, on this fade. */
             std::function<void (const std::string& fadeId, const std::string& pluginId)> editPlugin;
 

@@ -17,9 +17,11 @@
 #include <wfg/client/model/Fx.h>
 #include <wfg/client/model/Rack.h>
 #include <wfg/client/model/Text.h>
+#include <wfg/engine/cue/FadeMoves.h>
 #include <wfg/engine/osc/OscValue.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <map>
 #include <sstream>
 
@@ -503,6 +505,87 @@ namespace wfg::client::model
             row.path = text (snapshot, base + "path");
             out.push_back (std::move (row));
         }
+
+        return out;
+    }
+
+    FxReading readFadeFx (const tree::TreeSnapshot& snapshot, const std::string& fadeId)
+    {
+        const auto fade = "/godot/cue/" + fadeId + "/";
+
+        if (text (snapshot, fade + "kind") != "fade")
+            return readFx (snapshot, fadeId);
+
+        if (! text (snapshot, fade + "dca").empty())
+        {
+            FxReading out;
+            out.notice = "This fade moves a DCA, which has no plugins.";
+            return out;
+        }
+
+        //  The aux it moves (namespace draft §93), or its target cue.
+        const auto auxId = text (snapshot, fade + "aux");
+        const auto targetId = ! auxId.empty() ? auxId : text (snapshot, fade + "target");
+
+        if (targetId.empty())
+        {
+            FxReading out;
+            out.notice = "This fade is aimed at nothing yet - pick its target in the inspector.";
+            return out;
+        }
+
+        auto out = readFx (snapshot, targetId);
+        out.fadeId = fadeId;
+
+        if (! out.present)
+        {
+            out.notice = "This fade's target has no plugins: only an audio cue, a mic cue or an aux has a chain.";
+            return out;
+        }
+
+        /*  EACH PLUGIN'S VALUES THE FADE MOVES, by the plugin's own names, in
+            its order; one it does not list by its number. */
+        const auto moved = cue::parseMoveList (text (snapshot, fade + "fx"));
+
+        for (auto& strip : out.strips)
+        {
+            std::vector<int> indices;
+
+            for (const auto& [key, value] : moved)
+            {
+                const auto slash = key.rfind ('/');
+
+                if (slash != std::string::npos && key.substr (0, slash) == strip.pluginId)
+                    indices.push_back (std::atoi (key.c_str() + slash + 1));
+            }
+
+            std::sort (indices.begin(), indices.end());
+
+            for (const auto index : indices)
+            {
+                std::string name = "parameter " + std::to_string (index + 1);
+
+                for (const auto& param : strip.params)
+                    if (param.index == index && ! param.name.empty())
+                        name = param.name;
+
+                strip.fadeMoves.push_back (name);
+            }
+        }
+
+        return out;
+    }
+
+    std::string fadeMoveWords (const FxStrip& strip)
+    {
+        if (strip.fadeMoves.empty())
+            return "moves nothing";
+
+        std::string out = "moves " + std::to_string (strip.fadeMoves.size())
+                            + (strip.fadeMoves.size() == 1 ? " value: " : " values: ");
+
+        for (std::size_t at = 0; at < strip.fadeMoves.size(); ++at)
+            out += (at == 0 ? "" : ", ") + strip.fadeMoves[at];
 
         return out;
     }

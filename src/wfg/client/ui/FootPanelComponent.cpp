@@ -5,9 +5,11 @@
 
 #include <wfg/client/ui/Look.h>
 
+#include <algorithm>
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace wfg::client::ui
 {
@@ -88,6 +90,13 @@ namespace wfg::client::ui
             button->setTextHeight (Look::font (theme, 12.0f).getHeight());
         }
 
+        for (auto& button : panelButtons)
+        {
+            button->setColours (Look::colour (theme, "ink"), Look::colour (theme, "panel-high"),
+                                Look::colour (theme, cueAccent.c_str()));
+            button->setTextHeight (Look::font (theme, 12.0f).getHeight());
+        }
+
         resized();
         repaint();
     }
@@ -113,9 +122,59 @@ namespace wfg::client::ui
         const auto partShown = ! model::partForPanel (showing.kind).empty();
         copyButton.setVisible (partShown);
         pasteButton.setVisible (partShown);
+        lightPanels();
 
         resized();
         repaint();
+    }
+
+    void FootPanelComponent::setPanels (std::vector<PanelDoor> doors)
+    {
+        if (doors == panelDoors)
+            return;
+
+        panelDoors = std::move (doors);
+
+        for (auto& button : panelButtons)
+            removeChildComponent (button.get());
+
+        panelButtons.clear();
+
+        for (const auto& door : panelDoors)
+        {
+            //  The label's first word on the button, the whole of it on the tooltip - the inspector's.
+            const auto label = juce::String (door.label);
+            auto button = std::make_unique<IconButton> (model::iconForPanel (door.word),
+                                                        label.upToFirstOccurrenceOf (",", false, false).trim());
+
+            button->setTooltip ("Shows here: " + label + ". Pressed again, shuts the panel.");
+            button->setWantsKeyboardFocus (false);
+
+            /*  INSIDE THE CLICK, as the inspector's: opening another subject
+                builds the editor below again, never these buttons, which only
+                a new list replaces. */
+            button->onClick = [this, door]
+            {
+                if (actions.openPanel)
+                    actions.openPanel (door.cueId, door.word);
+            };
+
+            addAndMakeVisible (*button);
+            panelButtons.push_back (std::move (button));
+        }
+
+        lightPanels();
+        applyTheme (theme);
+    }
+
+    void FootPanelComponent::lightPanels()
+    {
+        const auto word = model::wordFor (showing.kind);
+
+        for (std::size_t at = 0; at < panelButtons.size() && at < panelDoors.size(); ++at)
+            panelButtons[at]->setToggleState (! word.empty() && panelDoors[at].word == word
+                                                && panelDoors[at].cueId == showing.objectId,
+                                              juce::dontSendNotification);
     }
 
     void FootPanelComponent::build()
@@ -260,6 +319,16 @@ namespace wfg::client::ui
                 {
                     if (actions.openSubject)
                         actions.openSubject ({ model::Subject::Kind::curve, fadeId });
+                };
+                fading.openFx = [this] (const std::string& fadeId)
+                {
+                    if (actions.openSubject)
+                        actions.openSubject ({ model::Subject::Kind::fx, fadeId });
+                };
+                fading.openPicture = [this] (const std::string& fadeId)
+                {
+                    if (actions.openSubject)
+                        actions.openSubject ({ model::Subject::Kind::picture, fadeId });
                 };
                 fading.editPlugin = actions.editPlugin;
                 fading.say = [this] (const juce::String& sentence)
@@ -570,6 +639,7 @@ namespace wfg::client::ui
             titleIcon = wantedIcon;
             cueIcon = wantedCueIcon;
             cueAccent = wantedAccent;
+            applyTheme (theme);     // the panel buttons lit in the cue's accent
             repaint();
         }
 
@@ -740,6 +810,37 @@ namespace wfg::client::ui
                 button->setBounds (head.removeFromRight (width + 4).withTrimmedLeft (4).withSizeKeepingCentre (width, height));
                 headButtons += width + 4;
             }
+        }
+
+        /*  THE PANEL BUTTONS before them, left to right as the inspector's
+            run: words while the head keeps room for the title beside them,
+            the pictures alone when it does not - never one dropped (§94). */
+        if (! panelButtons.empty())
+        {
+            const auto height = row - 6;
+            const auto room = head.getWidth() - 220;
+            auto withWords = 0;
+
+            for (auto& button : panelButtons)
+                withWords += button->idealWidth (height) + 4;
+
+            const auto roomy = withWords <= room;
+            auto widths = std::vector<int> {};
+            auto total = 0;
+
+            for (auto& button : panelButtons)
+            {
+                button->setWordShown (roomy);
+                widths.push_back (roomy ? button->idealWidth (height) : height + 6);
+                total += widths.back() + 4;
+            }
+
+            auto bar = head.removeFromRight (std::min (total, std::max (0, head.getWidth())));
+            headButtons += bar.getWidth();
+
+            for (std::size_t at = 0; at < panelButtons.size(); ++at)
+                panelButtons[at]->setBounds (bar.removeFromLeft (widths[at] + 4).withTrimmedLeft (4)
+                                                .withSizeKeepingCentre (widths[at], height));
         }
 
         if (waveform != nullptr)
