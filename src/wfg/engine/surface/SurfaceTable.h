@@ -74,6 +74,10 @@ namespace wfg::surface
 
             /** What the hardware said when it was asked who it is. */
             std::string serial;
+
+            /** A Stream Deck's model, as the show spells one ("mk2", "plus"),
+                and empty for anything else or a deck not found (§95). */
+            std::string model;
         };
 
         /** Replaces what is known about one surface. Answers whether anything
@@ -85,7 +89,8 @@ namespace wfg::surface
 
             const auto changed = held.connected != status.connected
                                    || held.problem != status.problem
-                                   || held.serial != status.serial;
+                                   || held.serial != status.serial
+                                   || held.model != status.model;
             held = status;
             return changed;
         }
@@ -94,6 +99,7 @@ namespace wfg::surface
         {
             table.erase (surfaceId);
             pages.erase (surfaceId);
+            keys.erase (surfaceId);
         }
 
         /** What is known, or a default Status - not connected, no sentence -
@@ -160,10 +166,25 @@ namespace wfg::surface
             return found != pages.end() ? found->second : Page {};
         }
 
+        //==============================================================================
+        /*  WHAT A STREAM DECK'S KEYS SAY (namespace draft §95): a line a key,
+            in the hand's order, as `DeckBridge` writes it - what the key does,
+            then its words and its colour - so a client draws the deck and a
+            test reads it with no deck in the room. Runtime, like a page: it
+            moves with no command at all. */
+        void setKeys (const std::string& surfaceId, std::string text)  { keys[surfaceId] = std::move (text); }
+
+        std::string keysOf (const std::string& surfaceId) const
+        {
+            const auto found = keys.find (surfaceId);
+            return found != keys.end() ? found->second : std::string {};
+        }
+
     private:
         Dial dialed;
         std::map<std::string, Status> table;
         std::map<std::string, Page> pages;
+        std::map<std::string, std::string> keys;
         std::string aimed;
     };
 }

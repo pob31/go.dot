@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/surface/SpaceMouse.h>
+#include <wfg/engine/surface/HidLibrary.h>
 
 #include <juce_core/juce_core.h>
 
@@ -177,7 +178,8 @@ namespace wfg::surface
 
         void run()
         {
-            hid_init();
+            //  hidapi held while this thread reads, beside the Stream Decks' (§95).
+            const HidLibrary hid;
 
             for (;;)
             {
@@ -252,7 +254,6 @@ namespace wfg::surface
 
             close();
             setStatus (spaceMouseStatus::off);
-            hid_exit();
         }
     };
 

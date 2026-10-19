@@ -139,6 +139,7 @@ add_executable(wfg_tests
     LaneRecordTests.cpp
     SpaceMouseTests.cpp
     StreamDeckTests.cpp
+    DeckBridgeTests.cpp
     RateClockTests.cpp
     AnalysisTests.cpp
     SolverTests.cpp

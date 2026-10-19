@@ -202,6 +202,17 @@ add_library(wfg_engine STATIC
     wfg/engine/surface/SpaceMouse.cpp
     wfg/engine/surface/StreamDeckReport.h
     wfg/engine/surface/StreamDeckReport.cpp
+    wfg/engine/surface/HidLibrary.h
+    wfg/engine/surface/HidLibrary.cpp
+    wfg/engine/surface/DeckPicture.h
+    wfg/engine/surface/DeckPainter.h
+    wfg/engine/surface/DeckPainter.cpp
+    wfg/engine/surface/StreamDeck.h
+    wfg/engine/surface/StreamDeck.cpp
+    wfg/engine/surface/DeckLayout.h
+    wfg/engine/surface/DeckLayout.cpp
+    wfg/engine/surface/DeckBridge.h
+    wfg/engine/surface/DeckBridge.cpp
     wfg/engine/process/PatchText.h
     wfg/engine/process/PatchText.cpp
     wfg/engine/process/ProcessInstance.h
