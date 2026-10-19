@@ -209,6 +209,13 @@ namespace wfg::client::ui
             column is where is the window's arrangement and not this one's. */
         void setRightColumn (int width, int gap);
 
+        /*  WHERE THE INSPECTOR'S COLUMN IS, across the panel, whether or not it
+            is showing: the head's panel buttons are laid there, the
+            inspector's way, so they sit under its own and never move for
+            Copy and Paste coming and going (namespace draft §96; the author,
+            2026-10-19). A width of 0 lays them from the right as before. */
+        void setMiddleColumn (int x, int width);
+
         /** What it should be showing; `Kind::none` shuts it. */
         void open (const model::Subject&);
         const model::Subject& subject() const noexcept { return showing; }
@@ -309,12 +316,15 @@ namespace wfg::client::ui
             head is narrow and stays the tooltip. */
         IconButton copyButton { model::Icon::copy, "Copy" };
         IconButton pasteButton { model::Icon::paste, "Paste" };
-        int headButtons = 0;   ///< how much of the head they take, for `paint`
+        int headButtons = 0;   ///< how much of the head's right they take, for `paint`
+        int headLeft = 0;      ///< where the panel buttons begin when they sit under the inspector, else 0
+        int headRunEnd = 0;    ///< and where they end, the note drawn after them
 
         std::vector<PanelDoor> panelDoors;
         std::vector<std::unique_ptr<IconButton>> panelButtons;
         void lightPanels();
         int columnWidth = 0, columnGap = 0;
+        int middleX = 0, middleWidth = 0;
 
         bool dragging = false;
         int dragFrom = 0;

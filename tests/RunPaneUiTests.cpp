@@ -4091,6 +4091,62 @@ TEST_CASE ("foot panel: the inspector's panel buttons in its head, lit on the pa
     }
 }
 
+TEST_CASE ("foot panel: the head's panel buttons sit under the inspector's column and stay put whether Copy and Paste show or not (§96)")
+{
+    ui::FootPanelComponent panel (model::Theme {}, {});
+    panel.setSize (1400, 220);
+    panel.setMiddleColumn (560, 380);
+
+    panel.setPanels ({ { "fade", "Mixer, what the fade moves and where to", "FADE0001" },
+                       { "eq", "EQ, the target's bands the fade moves", "FADE0001" },
+                       { "fx", "FX, the target's plugin values the fade moves", "FADE0001" },
+                       { "curve", "Curve, the shape of the fade", "FADE0001" } });
+
+    const auto button = [&panel] (const juce::String& word) -> ui::IconButton*
+    {
+        for (auto* child : panel.getChildren())
+            if (auto* found = dynamic_cast<ui::IconButton*> (child); found != nullptr && found->getButtonText() == word)
+                return found;
+
+        return nullptr;
+    };
+
+    const auto places = [&button]
+    {
+        std::vector<juce::Rectangle<int>> all;
+
+        for (const auto* word : { "Mixer", "EQ", "FX", "Curve" })
+            all.push_back (button (word)->getBounds());
+
+        return all;
+    };
+
+    //  The fade's mixer has no Copy and Paste; its EQ has.
+    panel.open ({ model::Subject::Kind::fade, "FADE0001" });
+    REQUIRE (button ("Copy") != nullptr);
+    CHECK_FALSE (button ("Copy")->isVisible());
+    const auto without = places();
+
+    panel.open ({ model::Subject::Kind::eq, "FADE0001" });
+    CHECK (button ("Copy")->isVisible());
+    CHECK (places() == without);
+
+    //  Inside the inspector's column, in its order, and clear of Copy.
+    for (const auto& place : without)
+    {
+        CHECK (place.getX() >= 560);
+        CHECK (place.getRight() <= 560 + 380);
+        CHECK (place.getRight() < button ("Copy")->getX());
+    }
+
+    for (std::size_t at = 1; at < without.size(); ++at)
+        CHECK (without[at - 1].getRight() <= without[at].getX());
+
+    //  The inspector's column moved by the window, the buttons with it.
+    panel.setMiddleColumn (600, 380);
+    CHECK (places()[0].getX() == without[0].getX() + 40);
+}
+
 TEST_CASE ("eq panel: a picture of it, when somebody asks for one")
 {
     /*  NOT AN ASSERTION BUT AN EYE. With WFG_SNAPSHOT_DIR set, the panel is

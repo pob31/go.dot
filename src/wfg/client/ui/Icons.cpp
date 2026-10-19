@@ -18,7 +18,9 @@
 
 #include <cmath>
 #include <map>
+#include <memory>
 #include <utility>
+#include <vector>
 
 namespace wfg::client::ui
 {
@@ -788,6 +790,48 @@ namespace wfg::client::ui
             width += juce::GlyphArrangement::getStringWidthInt (font, word) + height / 3;
 
         return width;
+    }
+
+    void layPanelRun (const std::vector<std::unique_ptr<IconButton>>& buttons, juce::Rectangle<int> bar,
+                      int row, int buttonHeight)
+    {
+        if (buttons.empty())
+            return;
+
+        const auto count = static_cast<int> (buttons.size());
+        const auto gap = row / 4;
+        const auto room = bar.getWidth() - gap * (count - 1);
+
+        std::vector<int> wanted;
+        auto widest = 0, total = 0;
+
+        for (const auto& button : buttons)
+        {
+            wanted.push_back (button->idealWidth (bar.getHeight()));
+            widest = juce::jmax (widest, wanted.back());
+            total += wanted.back();
+        }
+
+        std::vector<int> widths;
+        auto wordsFit = true;
+
+        if (widest * count <= room)
+            widths.assign (buttons.size(), juce::jmin (row * 4, room / juce::jmax (1, count)));
+        else if (total <= room)
+            for (const auto one : wanted)
+                widths.push_back (one + (room - total) / count);
+        else
+        {
+            wordsFit = false;
+            widths.assign (buttons.size(), juce::jmax (0, room / juce::jmax (1, count)));
+        }
+
+        for (std::size_t at = 0; at < buttons.size(); ++at)
+        {
+            buttons[at]->setWordShown (wordsFit);
+            buttons[at]->setBounds (bar.removeFromLeft (widths[at]).withSizeKeepingCentre (widths[at], buttonHeight));
+            bar.removeFromLeft (gap);
+        }
     }
 
     void IconButton::paintButton (juce::Graphics& g, bool over, bool down)

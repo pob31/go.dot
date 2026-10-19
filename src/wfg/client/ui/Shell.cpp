@@ -176,11 +176,17 @@ namespace wfg::client::ui
             newCues.setBounds (area.removeFromTop (juce::jmin (newCues.preferredHeight(),
                                                                area.getHeight())));
 
+        const auto inspectorWidth = juce::jlimit (juce::jmin (240, area.getWidth()),
+                                                  juce::jmax (240, area.getWidth() - listFloor),
+                                                  area.getWidth() / 3);
+
+        /*  AND WHERE THE INSPECTOR IS, OR WOULD BE: the foot's panel buttons
+            sit under its own, in the same place whether it shows or not
+            (§96). */
+        foot.setMiddleColumn (area.getRight() - inspectorWidth, inspectorWidth);
+
         if (shown != Panel::none)
         {
-            const auto inspectorWidth = juce::jlimit (juce::jmin (240, area.getWidth()),
-                                                      juce::jmax (240, area.getWidth() - listFloor),
-                                                      area.getWidth() / 3);
             const auto slot = area.removeFromRight (inspectorWidth);
 
             if (shown == Panel::inspector)

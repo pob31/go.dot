@@ -36,6 +36,9 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <memory>
+#include <vector>
+
 namespace wfg::client::ui
 {
     namespace icons
@@ -91,4 +94,18 @@ namespace wfg::client::ui
         float textHeight = 14.0f;
         bool wordShown = true;
     };
+
+    /*  THE INSPECTOR'S RUN OF PANEL BUTTONS, laid along `bar` (namespace draft
+        §96). Three ways, tried in order: equal widths that all carry their
+        words; each as wide as its word, the room left shared out; and, where
+        not even that fits, equal widths with the pictures alone - every button
+        dropping its word together, so the run never reads half one way and
+        half the other. Capped so a wide column does not stretch them into
+        slabs. Measured at the bar's height and drawn `buttonHeight` tall,
+        centred in it.
+
+        ONE FUNCTION FOR BOTH RUNS, the inspector's and the foot's head's, so
+        the foot's, given the inspector's column, falls exactly under it. */
+    void layPanelRun (const std::vector<std::unique_ptr<IconButton>>& buttons, juce::Rectangle<int> bar,
+                      int row, int buttonHeight);
 }

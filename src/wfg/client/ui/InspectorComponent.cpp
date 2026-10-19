@@ -1870,49 +1870,12 @@ namespace wfg::client::ui
 
         /*  THE PANEL BAR, UNDER THE NAME AND OVER THE ROWS - where the eye
             lands first, and out of the scrolling so it is there whichever
-            drawer somebody has scrolled to. Three ways to lay it, tried in
-            order: equal widths that all carry their words; each as wide as its
-            word, the room left shared out; and, where not even that fits,
-            equal widths with the pictures alone - every button dropping its
-            word together, so the bar never reads half one way and half the
-            other. Capped so a wide inspector does not stretch them into slabs. */
+            drawer somebody has scrolled to. Laid by `layPanelRun`, which the
+            foot's head lays its own run with, under this one (§96). */
         if (! panelButtons.empty())
         {
-            auto bar = area.removeFromTop (panelBarHeight()).reduced (0, row / 6);
-            const auto count = static_cast<int> (panelButtons.size());
-            const auto gap = row / 4;
-            const auto room = bar.getWidth() - gap * (count - 1);
-
-            std::vector<int> wanted;
-            auto widest = 0, total = 0;
-
-            for (auto& button : panelButtons)
-            {
-                wanted.push_back (button->idealWidth (bar.getHeight()));
-                widest = juce::jmax (widest, wanted.back());
-                total += wanted.back();
-            }
-
-            std::vector<int> widths;
-            auto wordsFit = true;
-
-            if (widest * count <= room)
-                widths.assign (panelButtons.size(), juce::jmin (row * 4, room / juce::jmax (1, count)));
-            else if (total <= room)
-                for (const auto one : wanted)
-                    widths.push_back (one + (room - total) / count);
-            else
-            {
-                wordsFit = false;
-                widths.assign (panelButtons.size(), room / juce::jmax (1, count));
-            }
-
-            for (std::size_t at = 0; at < panelButtons.size(); ++at)
-            {
-                panelButtons[at]->setWordShown (wordsFit);
-                panelButtons[at]->setBounds (bar.removeFromLeft (widths[at]));
-                bar.removeFromLeft (gap);
-            }
+            const auto bar = area.removeFromTop (panelBarHeight()).reduced (0, row / 6);
+            layPanelRun (panelButtons, bar, row, bar.getHeight());
         }
 
         viewport.setBounds (area);

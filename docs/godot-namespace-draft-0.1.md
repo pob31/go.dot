@@ -32669,6 +32669,7 @@ Mine *(proposed)*, the author's to overrule:
   (`footCueForPick`). They show on every cue's panel, not only a fade's. They are lit as the inspector's
   are, by the button's state and frame, never colour alone (§4.8). When the head is narrow they show
   icons only. The title is cut before a button is dropped.
+  *Where in the head they sit was moved by §96.*
 - **AWQ** **A fade keeps its EQ, chain or picture open across picks**: picking a fade no longer
   forces its mixer open when the foot already shows a panel that fits the new fade. The pick points that
   panel at the new fade (§90).
@@ -32850,3 +32851,31 @@ Mine *(proposed)*, the author's to overrule:
 - The words on the keys and the page - "More", "Prev cue", "Next cue", "nothing next", "twice: all",
   "nothing to undo", "Keys of", "First free deck", "The show's first cart", the status sentences - are
   mine, for the author to keep or change; so is everything marked *(proposed)* above.
+
+---
+
+## 96. The foot's panel buttons under the inspector's
+
+**Asked 2026-10-19**, for the next version, by the author: *"Some foot panels have copy/cut/paste and
+some don't. The buttons to see the different modes for the foot panel get moved around by the
+copy/cut/paste buttons. Can we have a fixed position for them? Could the foot panel mode buttons be on
+the same line as the ones in the inspector in the middle instead?"*
+
+What was found: §94 laid the head's panel buttons from the right, just before Copy and Paste. Copy and
+Paste show only on a panel that is a part of a cue (§38: time and loops, sends, EQ, FX, picture) and not
+on a timeline, a curve, a fade's mixer, a take, messages, a patch or code - so going from a fade's EQ to
+its mixer slid every button sideways by the width of the two.
+
+- **AXE** **The head's panel buttons sit under the inspector's own**, across the inspector's column, laid
+  by the one function that lays the inspector's bar (`layPanelRun`), so each falls under its twin. The
+  window tells the foot where that column is (`FootPanelComponent::setMiddleColumn`) whether the
+  inspector is showing or not, so they stand in the same place either way. Copy, Paste and the close
+  button stay at the right of the head, where they were.
+- **AXF** *(proposed)* **The title keeps to the left of the buttons and the note goes after them**, right
+  aligned before Copy. Where a narrow running pane brings Copy under the inspector's column, the buttons
+  stop short of it and take the inspector's narrow forms (pictures alone) rather than overlap.
+- With no column told (a panel made alone, as in a test) the buttons are laid from the right as §94 had
+  them.
+
+Test: `foot panel: the head's panel buttons sit under the inspector's column and stay put whether Copy
+and Paste show or not (§96)` (RunPaneUiTests). Owed: the author's look in the window.

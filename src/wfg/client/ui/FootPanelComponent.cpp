@@ -111,6 +111,17 @@ namespace wfg::client::ui
         resized();
     }
 
+    void FootPanelComponent::setMiddleColumn (int x, int width)
+    {
+        if (middleX == x && middleWidth == width)
+            return;
+
+        middleX = x;
+        middleWidth = width;
+        resized();
+        repaint();
+    }
+
     void FootPanelComponent::open (const model::Subject& wanted)
     {
         if (showing == wanted)
@@ -749,6 +760,16 @@ namespace wfg::client::ui
         head.removeFromRight (row);   // the close button's place
         head.removeFromRight (headButtons);
 
+        /*  WITH THE PANEL BUTTONS UNDER THE INSPECTOR, the title keeps to the
+            left of them and the note goes after them (§96). */
+        auto noteArea = head;
+
+        if (headLeft > 0)
+        {
+            noteArea = head.withLeft (juce::jmin (head.getRight(), headRunEnd + row / 3));
+            head = head.withRight (juce::jmax (head.getX(), headLeft - row / 3));
+        }
+
         /*  WHAT IT IS, THEN WHOSE: the panel's picture and word, and the cue's
             kind as a picture in its accent before the cue's name. */
         const auto iconSide = static_cast<float> (row) * 0.58f;
@@ -779,7 +800,7 @@ namespace wfg::client::ui
         {
             g.setColour (Look::colour (theme, "ink-off"));
             g.setFont (Look::font (theme, 12.0f));
-            g.drawText (note, head, juce::Justification::centredRight, true);
+            g.drawText (note, noteArea, juce::Justification::centredRight, true);
         }
     }
 
@@ -812,10 +833,35 @@ namespace wfg::client::ui
             }
         }
 
-        /*  THE PANEL BUTTONS before them, left to right as the inspector's
+        /*  THE PANEL BUTTONS UNDER THE INSPECTOR'S OWN (namespace draft §96;
+            the author, 2026-10-19: "a fixed position for them ... on the same
+            line as the ones in the inspector"): laid across its column by the
+            function that lays the inspector's, so each sits under its twin
+            and Copy and Paste, which some panels have and some have not,
+            never move them. Kept short of Copy where a narrow running pane
+            would bring the two together. */
+        headLeft = headRunEnd = 0;
+
+        if (! panelButtons.empty() && middleWidth > 0)
+        {
+            const auto inset = row / 3;
+            const auto barHeight = row + row / 3 - 2 * (row / 6);   // the inspector's bar, measured alike
+            auto bar = juce::Rectangle<int> (middleX + inset, head.getCentreY() - barHeight / 2,
+                                             middleWidth - 2 * inset, barHeight);
+            bar = bar.withRight (juce::jmin (bar.getRight(), head.getRight() - 4));
+
+            if (bar.getWidth() > 0)
+            {
+                layPanelRun (panelButtons, bar, row, row - 6);
+                headLeft = bar.getX();
+                headRunEnd = panelButtons.back()->getRight();
+            }
+        }
+
+        /*  WITH NO COLUMN TOLD, before them from the right as the inspector's
             run: words while the head keeps room for the title beside them,
             the pictures alone when it does not - never one dropped (§94). */
-        if (! panelButtons.empty())
+        else if (! panelButtons.empty())
         {
             const auto height = row - 6;
             const auto room = head.getWidth() - 220;
