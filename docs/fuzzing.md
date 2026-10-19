@@ -14,13 +14,14 @@ trusts (law 3).
 | `fuzz_bplist` | `Bplist` (`parse`, `Archive`) | never reads outside the file; a refusal always says why; every reference in a parsed table points inside it; a parsed archive is walked as the QLab import walks it, including archives held as data |
 
 | `fuzz_qlab` | `QlabReader`, `QlabWalk` | a workspace's bytes never read past the file; a refusal always says why; what reads is walked three ways - every list; every cue given a channel count, a picture size and a font; and with zero and negative sizes |
-| `fuzz_als` | `AlsReader`, `AlsWalk` | the set's XML never read past its text; a refusal always says why; what reads is walked whole, scene by scene, with scenes out of range, and every clip's warp asked for hostile beats and a tempo of nought |
+| `fuzz_als` | `AlsReader`, `AlsWalk` | the set's XML never read past its text; a refusal always says why; a third-party plugin's state is never longer than the text it came from; what reads is walked whole, scene by scene, with scenes out of range, and every clip's warp asked for hostile beats and a tempo of nought; every send the walk makes - a sound's, and an aux's own (namespace draft §93) - is aimed at a mix it made, at a level that is a number, along a lane whose levels are numbers |
 
 The first two are standard-library only. The QLab and Ableton targets need
 `juce_core` (they take a `juce::File` or an `XmlElement`), which the build compiles
 as one translation unit, uninstrumented, from `ThirdParty/JUCE` - checked out
 shallow, it is the only submodule needed. They are skipped with a message when it
-is absent, and for now are Linux-only. They link a copy of one two-line function
+is absent, and are built on Linux and on macOS (through `juce_core.mm` and the
+frameworks the module names); the CI job is Linux. They link a copy of one two-line function
 from `ImportCommon.cpp` (`tests/fuzz/FuzzImportShim.cpp`), which cannot be linked
 whole: change the two together. The importers above them (`QlabImport`,
 `AlsImport`) reach the document model and are not fuzzed. Not fuzzed, on purpose: the engine, the cues and the GO logic (ordering
@@ -76,3 +77,19 @@ Each is pinned by a case in the module's own tests.
     `AlsReaderTests.cpp`.
   - **`flagResting` read a slot that was not there** when a return carries a track's Id
     (the lookup by Id finds the return, which has no slots). `AlsWalkTests.cpp`.
+- The Ableton set reader and walker again, once its seeds reached the plugin readers
+  and the auxes (2026-10-19, namespace draft §93, on the Mac mini):
+  - **An output routed to `External/S1e20`** was converted to an int past its range
+    (undefined). A channel no interface could have is no channel. `AlsReaderTests.cpp`.
+  - **A warp marker at 1e308 seconds** made the warp's slope an infinity, and a
+    send's lane came out through a level that was not a number. A marker more than a
+    year either way is no marker, `sampleSecondsAt` answers a number of seconds
+    whatever it is asked, and a lane point at no second or no level is dropped.
+    `AlsWalkTests.cpp`.
+  - In the same shape, and found by reading rather than running: the QLab reader
+    converted a picture's bounds and a surface's size from doubles to ints; they
+    are saturated now.
+- The QLab walk, on a longer run (400000 mutations, seed 7): **an unnamed fade
+  aimed at itself**, or a fade and a stop aimed at each other, took its name from its
+  target's for ever - a stack overflow. A target's name is followed four deep, then
+  its type is said. `QlabWalkTests.cpp`.

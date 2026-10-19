@@ -39,11 +39,24 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <fstream>
 #include <iterator>
 #include <string>
 
 namespace als = wfg::import::als;
+
+namespace
+{
+    //  Which contract broke, said before the trap, so a failing input reads as more than a signal.
+    [[noreturn]] void broken (const char* contract)
+    {
+        std::fputs ("fuzz_als: ", stderr);
+        std::fputs (contract, stderr);
+        std::fputc ('\n', stderr);
+        __builtin_trap();
+    }
+}
 
 extern "C" int LLVMFuzzerTestOneInput (const std::uint8_t* data, std::size_t size)
 {
@@ -52,7 +65,7 @@ extern "C" int LLVMFuzzerTestOneInput (const std::uint8_t* data, std::size_t siz
     if (! read.set)
     {
         if (read.error.empty())
-            __builtin_trap();   // "why there is no set at all", or there is one
+            broken ("no set, and no word why");
         return 0;
     }
 
@@ -63,7 +76,7 @@ extern "C" int LLVMFuzzerTestOneInput (const std::uint8_t* data, std::size_t siz
     {
         for (const auto& device : track.devices)
             if (device.plugin && device.plugin->state.size() + device.plugin->controllerState.size() > size)
-                __builtin_trap();
+                broken ("a plugin's state longer than the text it came from");
     };
 
     for (const auto& t : set.tracks)  plugins (t);
@@ -79,17 +92,21 @@ extern "C" int LLVMFuzzerTestOneInput (const std::uint8_t* data, std::size_t siz
         const auto known = std::any_of (whole.mixes.begin(), whole.mixes.end(),
                                         [&send] (const als::Mix& mix) { return mix.key == send.mix; });
 
-        if (! known || ! std::isfinite (send.levelDb))
-            __builtin_trap();
+        if (! known)
+            broken ("a send aimed at a mix the walk did not make");
+
+        if (! std::isfinite (send.levelDb))
+            broken ("a send's level that is not a number");
 
         for (const auto& point : send.lane)
             if (! std::isfinite (point.db))
-                __builtin_trap();
+                broken ("a send's lane through a level that is not a number");
     };
 
-    for (const auto& sound : whole.sounds)
-        for (const auto& send : sound.sends)
-            aimed (send);
+    for (const auto& step : whole.steps)
+        for (const auto& sound : step.sounds)
+            for (const auto& send : sound.sends)
+                aimed (send);
 
     for (const auto& mix : whole.mixes)
     {
@@ -98,7 +115,7 @@ extern "C" int LLVMFuzzerTestOneInput (const std::uint8_t* data, std::size_t siz
 
         for (const auto* device : mix.plugins)
             if (device == nullptr || ! device->plugin)
-                __builtin_trap();
+                broken ("an aux's plugin that is not one");
     }
 
     for (std::size_t i = 0; i < set.scenes.size(); ++i)

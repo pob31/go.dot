@@ -232,16 +232,23 @@ namespace wfg::import::qlab
             }
 
             /*  QLAB'S DISPLAYED NAME where nobody typed one (ZY): a sound's file,
-                a fade's "fade" and its target, a message's text. */
-            std::string displayName (const Cue& cue) const
+                a fade's "fade" and its target, a message's text. A target's
+                name is followed a few deep and no further: a fade aimed at
+                itself, or two at each other, named after their targets for
+                ever (tests/fuzz). */
+            std::string displayName (const Cue& cue, int depth = 0) const
             {
                 if (! cue.name.empty())
                     return cue.name;
 
-                const auto target = [this, &cue]
+                const auto target = [this, &cue, depth]
                 {
                     const auto found = byId.find (cue.target);
-                    return found == byId.end() ? std::string {} : " " + displayName (*found->second);
+
+                    if (found == byId.end())
+                        return std::string {};
+
+                    return depth >= 4 ? " " + found->second->type : " " + displayName (*found->second, depth + 1);
                 };
 
                 if (cue.type == "Audio" || cue.type == "Video")

@@ -39,6 +39,7 @@
 #include <juce_core/juce_core.h>
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -571,6 +572,46 @@ TEST_CASE ("walk: the author's own sets, GO by GO, when WFG_ALS_CORPUS names a s
     for (const auto& note : walked.notes)
         MESSAGE (std::string (note.kind == Note::Kind::info ? "info " : note.kind == Note::Kind::approximated ? "approx " : "dropped ")
                  << note.scene << " " << note.track << ": " << note.text);
+}
+
+TEST_CASE ("walk: a warp marker at the end of time is no marker, and every lane is at a second and a level that are numbers (found by tests/fuzz)")
+{
+    /*  One marker's seconds at 1e308 made the warp's slope an infinity, and a
+        send's lane came out through a level that was not a number. The session
+        fixture with that one number changed is the input the fuzzer found. */
+    auto text = juce::File { juce::String (std::string (WFG_TEST_FIXTURES_DIR)) }
+                    .getChildFile ("als").getChildFile ("session.als.xml").loadFileAsString().toStdString();
+    const std::string marker = "SecTime=\"0.265625\"";
+    const auto at = text.find (marker);
+    REQUIRE (at != std::string::npos);
+    text.replace (at, marker.size(), "SecTime=\"1e308\"");
+
+    const auto read = readSetXml (text);
+    REQUIRE (read.set.has_value());
+
+    for (const auto& track : read.set->tracks)
+        for (const auto& slot : track.slots)
+            if (slot.clip)
+            {
+                for (const auto& point : slot.clip->warp)
+                    CHECK (std::abs (point.seconds) < 1.0e9);
+
+                for (const double beats : { -1.0e9, 0.0, 1.0e9 })
+                    CHECK (std::isfinite (sampleSecondsAt (*slot.clip, beats, read.set->tempo)));
+            }
+
+    const auto walked = walk (*read.set);
+
+    for (const auto& step : walked.steps)
+        for (const auto& sound : step.sounds)
+        {
+            for (const auto& point : sound.levelLane)
+                CHECK ((std::isfinite (point.seconds) && std::isfinite (point.db)));
+
+            for (const auto& send : sound.sends)
+                for (const auto& point : send.lane)
+                    CHECK ((std::isfinite (point.seconds) && std::isfinite (point.db)));
+        }
 }
 
 TEST_CASE ("walk: a loop that ends at the end of time still returns, and a return with a track's Id is walked (found by tests/fuzz)")

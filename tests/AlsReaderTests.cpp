@@ -536,6 +536,26 @@ TEST_CASE ("als: a third-party plugin is read with what names it and the state L
     CHECK_FALSE (one.devices[4].plugin.has_value());
 }
 
+TEST_CASE ("als: an output on a channel no interface has is no channel, never a number past an int (found by tests/fuzz)")
+{
+    auto xml = fixture ("session.als.xml").loadFileAsString().toStdString();
+    const std::string was = "<AudioOutputRouting><Target Value=\"AudioOut/External/S0\" /></AudioOutputRouting>";
+    const auto at = xml.find (was);
+    REQUIRE (at != std::string::npos);
+
+    for (const char* channel : { "S1e20", "M-3", "Snan", "S65536" })
+    {
+        auto changed = xml;
+        changed.replace (at, was.size(), std::string ("<AudioOutputRouting><Target Value=\"AudioOut/External/") + channel
+                                             + "\" /></AudioOutputRouting>");
+        const auto read = readSetXml (changed);
+        INFO (channel);
+        REQUIRE (read.set.has_value());
+        REQUIRE_FALSE (read.set->returns.empty());
+        CHECK (read.set->returns[0].output.channel == -1);
+    }
+}
+
 TEST_CASE ("als: a set cut short, or a control with a channel no desk has, is refused or left out (found by tests/fuzz)")
 {
     //  JUCE's parser reads past the end of a text that stops inside an `&#x`

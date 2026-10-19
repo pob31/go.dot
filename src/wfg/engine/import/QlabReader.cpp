@@ -21,6 +21,7 @@
 #include <juce_core/juce_core.h>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <cstring>
 #include <set>
@@ -32,6 +33,17 @@ namespace wfg::import::qlab
     {
         using plist::Archive;
         using Handle = Archive::Handle;
+
+        /*  A SIZE READ AS A NUMBER, as a whole one: saturated, not converted
+            past an int's range (undefined), and nought for what is not a
+            number - a file someone else wrote can hold 1e308 (tests/fuzz). */
+        int saturated (double value)
+        {
+            if (! std::isfinite (value))
+                return 0;
+
+            return static_cast<int> (std::clamp (value, -2147483520.0, 2147483520.0));
+        }
 
         /*  ONE ARCHIVE, AND THE PLAIN QUESTIONS THE READER ASKS OF IT: a field
             as a number, a whole number, a flag or text, with the default the
@@ -441,8 +453,8 @@ namespace wfg::import::qlab
                     const auto bounds = numbersIn (f.archive.text (f.entry (lastSeen, "boundsOnStage")).value_or (std::string {}));
                     if (bounds.size() == 4)
                     {
-                        cue.lastSeenWidth = static_cast<int> (bounds[2]);
-                        cue.lastSeenHeight = static_cast<int> (bounds[3]);
+                        cue.lastSeenWidth = saturated (bounds[2]);
+                        cue.lastSeenHeight = saturated (bounds[3]);
                     }
                 }
 
@@ -750,8 +762,8 @@ namespace wfg::import::qlab
                 Stage out;
                 out.id = f.idText (surface, "surfaceID");
                 out.name = f.text (surface, "name");
-                out.width = static_cast<int> (f.number (surface, "width"));
-                out.height = static_cast<int> (f.number (surface, "height"));
+                out.width = saturated (f.number (surface, "width"));
+                out.height = saturated (f.number (surface, "height"));
                 out.masked = f.at (surface, "maskImage") != Archive::none;
 
                 for (const auto facet : f.archive.items (f.at (surface, "facets")))

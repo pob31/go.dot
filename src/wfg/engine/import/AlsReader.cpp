@@ -247,7 +247,11 @@ namespace wfg::import::als
             {
                 out.kind = Routing::Kind::external;
                 out.stereo = rest[9] == 'S';
-                out.channel = static_cast<int> (osc::parseDouble (rest.substr (10)).value_or (-1.0));
+                /*  A CHANNEL AN INTERFACE COULD HAVE, or none: a number past an
+                    int's range was converted to one (undefined; tests/fuzz). */
+                const auto channel = osc::parseDouble (rest.substr (10)).value_or (-1.0);
+                out.channel = std::isfinite (channel) && channel >= 0.0 && channel < 65536.0
+                                ? static_cast<int> (channel) : -1;
             }
 
             return out;
@@ -548,10 +552,20 @@ namespace wfg::import::als
                 clip.pitchCoarse = integer (&element, "PitchCoarse", 0);
                 clip.pitchFine = number (&element, "PitchFine", 0.0);
 
+                /*  A MARKER A FILE COULD HAVE: a number of seconds and of beats
+                    within a year either way. One at 1e308 seconds made every
+                    second the warp gave a sum of infinities (tests/fuzz). */
                 if (const auto* markers = at (&element, "WarpMarkers"))
                     for (auto* marker : markers->getChildWithTagNameIterator ("WarpMarker"))
-                        clip.warp.push_back ({ numberAttribute (*marker, "SecTime"),
-                                               numberAttribute (*marker, "BeatTime") });
+                    {
+                        const auto seconds = numberAttribute (*marker, "SecTime");
+                        const auto beats = numberAttribute (*marker, "BeatTime");
+                        constexpr double year = 3.2e7;
+
+                        if (std::isfinite (seconds) && std::isfinite (beats)
+                              && std::abs (seconds) < year && std::abs (beats) < year)
+                            clip.warp.push_back ({ seconds, beats });
+                    }
 
                 clip.deactivated = flag (&element, "Disabled");
                 clip.legato = flag (&element, "Legato");
@@ -913,7 +927,14 @@ namespace wfg::import::als
         if (! (std::abs (spanBeats) > 0.0))
             return a.seconds;
 
-        return a.seconds + (beats - a.beats) * (b.seconds - a.seconds) / spanBeats;
+        /*  A NUMBER OF SECONDS, whatever was asked: a beat far past the
+            markers, over two markers a hair apart, is not an infinity. */
+        const auto seconds = a.seconds + (beats - a.beats) * (b.seconds - a.seconds) / spanBeats;
+
+        if (std::isnan (seconds))
+            return a.seconds;
+
+        return std::clamp (seconds, -1.0e9, 1.0e9);
     }
 
     double beatsPerSecond (const Clip& clip)

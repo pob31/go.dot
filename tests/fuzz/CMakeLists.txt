@@ -72,26 +72,36 @@ endfunction()
 # --- juce_core, for the readers and walkers that take a juce::File or XmlElement -
 # One translation unit, built on its own WITHOUT the sanitizers: what is under
 # test is Go.dot's reading of the bytes, and JUCE's own allocator-heavy XML and
-# string code would only add noise and minutes. Linux only for now - macOS
-# needs juce_core.mm and frameworks; the CI job is Linux. Skipped with a
-# message, not an error, when the JUCE submodule is not checked out.
+# string code would only add noise and minutes. Linux, and macOS through
+# juce_core.mm and the frameworks the module names (Cocoa Foundation IOKit
+# Security); the CI job is Linux. Skipped with a message, not an error, when
+# the JUCE submodule is not checked out.
 set(WFG_JUCE_MODULES "${CMAKE_CURRENT_SOURCE_DIR}/../../ThirdParty/JUCE/modules")
 set(WFG_FUZZ_HAVE_JUCE OFF)
 if(NOT EXISTS "${WFG_JUCE_MODULES}/juce_core/juce_core.cpp")
     message(STATUS "fuzz: ThirdParty/JUCE is not checked out - fuzz_qlab and fuzz_als are skipped")
-elseif(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    message(STATUS "fuzz: fuzz_qlab and fuzz_als are Linux-only for now")
+elseif(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT APPLE)
+    message(STATUS "fuzz: fuzz_qlab and fuzz_als are built on Linux and macOS only")
 else()
     set(WFG_FUZZ_HAVE_JUCE ON)
-    add_library(wfg_fuzz_juce_core STATIC "${WFG_JUCE_MODULES}/juce_core/juce_core.cpp"
+    set(WFG_FUZZ_JUCE_CORE "${WFG_JUCE_MODULES}/juce_core/juce_core.cpp")
+    if(APPLE)
+        enable_language(OBJCXX)
+        set(WFG_FUZZ_JUCE_CORE "${WFG_JUCE_MODULES}/juce_core/juce_core.mm")
+    endif()
+    add_library(wfg_fuzz_juce_core STATIC "${WFG_FUZZ_JUCE_CORE}"
                                           "${WFG_JUCE_MODULES}/juce_core/juce_core_CompilationTime.cpp")
     target_compile_features(wfg_fuzz_juce_core PRIVATE cxx_std_20)
     target_compile_definitions(wfg_fuzz_juce_core PUBLIC
-        JUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1 JUCE_STANDALONE_APPLICATION=1
+        NDEBUG=1 JUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1 JUCE_STANDALONE_APPLICATION=1
         JUCE_MODULE_AVAILABLE_juce_core=1 JUCE_USE_CURL=0 JUCE_LOAD_CURL_SYMBOLS_LAZILY=0)
     target_include_directories(wfg_fuzz_juce_core SYSTEM PUBLIC "${WFG_JUCE_MODULES}")
     target_compile_options(wfg_fuzz_juce_core PRIVATE -O1 -w)
     target_link_libraries(wfg_fuzz_juce_core PUBLIC ${CMAKE_DL_LIBS} pthread)
+    if(APPLE)
+        target_link_libraries(wfg_fuzz_juce_core PUBLIC "-framework Cocoa" "-framework Foundation"
+                                                        "-framework IOKit" "-framework Security")
+    endif()
 endif()
 
 wfg_fuzz_target(fuzz_bplist MAIN FuzzBplist.cpp SOURCES "${WFG_SRC}/wfg/engine/import/Bplist.cpp")

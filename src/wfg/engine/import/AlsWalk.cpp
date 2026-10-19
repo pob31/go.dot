@@ -720,8 +720,10 @@ namespace wfg::import::als
             {
                 std::vector<CurvePoint> points;
 
+                //  A point at no second, or at no level, is no point (tests/fuzz).
                 for (const auto& [beat, db] : byBeat)
-                    points.push_back ({ sampleSecondsAt (clip, beat, set.tempo), db });
+                    if (const auto seconds = sampleSecondsAt (clip, beat, set.tempo); std::isfinite (seconds) && std::isfinite (db))
+                        points.push_back ({ seconds, db });
 
                 std::vector<CurvePoint> kept;
 

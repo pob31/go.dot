@@ -277,6 +277,28 @@ TEST_CASE ("qlab walk: a sound's slices, an untouched matrix, a file not found")
     CHECK (said (plan, "its file was not found"));
 }
 
+TEST_CASE ("qlab walk: an unnamed fade aimed at itself, or two at each other, is named and walked (found by tests/fuzz)")
+{
+    //  Each took its name from its target's, for ever: a stack overflow.
+    auto self = cue ("Fade");
+    self.target = self.id;
+
+    auto one = cue ("Stop");
+    auto two = cue ("Fade");
+    one.target = two.id;
+    two.target = one.id;
+
+    const auto plan = walk (workspaceOf ({ self, one, two }));
+    const auto& items = top (plan);
+    REQUIRE (items.size() == 3);
+
+    for (const auto& item : items)
+    {
+        CHECK_FALSE (item.name.empty());
+        CHECK (item.name.size() < 200);
+    }
+}
+
 TEST_CASE ("qlab walk: fades - absolute, relative on a group as its trim, relative on a cue a memo (ZV)")
 {
     auto sound = cue ("Audio", "Ambience");
