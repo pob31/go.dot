@@ -474,6 +474,11 @@ namespace wfg::import::qlab
                 {
                     readMidi (handle, cue);
                 }
+                else if (type == "Devamp")
+                {
+                    cue.fireNextAtLoopEnd = f.flag (handle, "fireNextCueAtMomentLoopEnds");
+                    cue.stopTargetWhenDone = f.flag (handle, "stopTargetWhenDone");
+                }
 
                 return cue;
             }

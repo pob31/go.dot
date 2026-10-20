@@ -300,6 +300,9 @@ namespace wfg::import::qlab
         //  A camera cue: its camera patch - QLab 5's UUID, QLab 4's number as text.
         std::string cameraPatch;
 
+        //  A devamp that fires the next cue as the loop ends (§100, AYN).
+        bool fireNextAtLoopEnd = false;
+
         /*  A VIDEO, TEXT OR CAMERA CUE (namespace draft §62): the stage it is
             on - QLab 5's viewport UUID, QLab 4's surface number as text - and
             where it goes there; a video cue's file and timing are an audio

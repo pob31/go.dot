@@ -2488,7 +2488,102 @@ namespace wfg::cue
         made = fireStandby (engine, tick, list, landed, supplied);
         setFireCause (0);
 
+        /*  ON THE SAMPLE THE VAMP'S PASS ENDS (namespace draft §100, AYN): what
+            this fire made or took over, and has not launched, starts there -
+            a sound, a picture, a code; a group passes it to the members it
+            spawns with no pre-wait of their own (`spawnChild`). */
+        if (const auto floor = vampFloors.find (cause); floor != vampFloors.end())
+        {
+            std::function<void (const std::string&)> place = [&] (const std::string& id)
+            {
+                if (auto* run = runs.find (id); run != nullptr && run->launchedAtSample <= 0 && run->preWaitTicks <= 0)
+                {
+                    run->launchNotBefore = std::max (run->launchNotBefore, floor->second);
+
+                    for (const auto* child : runs.childrenOf (id))
+                        place (child->id);
+                }
+            };
+
+            for (const auto& id : made)
+                place (id);
+
+            vampFloors.erase (floor);
+        }
+
         return {};
+    }
+
+    /*  THE NEXT STOP AFTER A CUE (namespace draft §100, AYN): its next sibling,
+        when it is in a list or in a manual sequence - the places standby
+        stands - and nothing in a timeline or an automatic sequence, whose own
+        order fires what follows. */
+    std::string Runner::cueAfter (const juce::ValueTree& cue) const
+    {
+        const auto container = cue.getParent();
+
+        if (! container.isValid())
+            return {};
+
+        const auto isList = container.hasType ("List");
+
+        if (! isList && ! (container.hasType ("Group") && isManual (groupMode (container))))
+            return {};
+
+        auto past = false;
+
+        for (const auto& member : container)
+        {
+            if (member == cue)
+            {
+                past = true;
+                continue;
+            }
+
+            if (past && ! kindOfCue (member).empty())
+                return member[idProperty].toString().toStdString();
+        }
+
+        return {};
+    }
+
+    int Runner::groupsBefore (const std::string& cueId) const
+    {
+        auto depth = 0;
+
+        for (auto cue = document.findById (cueId); cue.isValid() && cue.hasType ("Group") && depth < 8; ++depth)
+        {
+            juce::ValueTree first;
+
+            for (const auto& member : cue)
+                if (! kindOfCue (member).empty())
+                {
+                    first = member;
+                    break;
+                }
+
+            cue = first;
+        }
+
+        return depth;
+    }
+
+    void Runner::followTheVamp (Run& run, std::int64_t endsAt)
+    {
+        const auto cue = run.thenNextCue;
+        const auto list = run.thenNextList;
+        const auto cause = run.thenNextCause;
+
+        run.thenNextCue.clear();
+        run.thenNextList.clear();
+        run.thenNextCause = 0;
+
+        //  A GO Doh! took back takes its vamp's follow with it.
+        if (cue.empty() || list.empty() || causeTakenBack (cause))
+            return;
+
+        vampFloors[cause] = endsAt;
+        jumpsToMake.push_back ({ list, cue, true, cause });
     }
 
     std::vector<std::string> Runner::loadToTime (Engine& engine, doc::ShowDocument& editable,
@@ -6701,6 +6796,24 @@ namespace wfg::cue
 
                         run->advanceRequested = true;
                         run->advanceTo = advanceTargetOf (cue, *run);
+
+                        /*  AND THE CUE AFTER THIS ONE, FIRED AS THE PASS ENDS
+                            (namespace draft §100, AYN), when the cue asks: the
+                            next stop of its list after it - in the list, or in
+                            the manual sequence it is a member of - under this
+                            GO, so one Doh! takes back both. */
+                        run->thenNextCue.clear();
+                        run->thenNextList.clear();
+                        run->thenNextCause = 0;
+
+                        if (textOf (cue, "thenNext") == "true")
+                            if (const auto next = cueAfter (cue); ! next.empty())
+                            {
+                                run->thenNextCue = next;
+                                run->thenNextList = listOfCue (cue[idProperty].toString().toStdString());
+                                run->thenNextCause = goOfRun (runId);
+                            }
+
                         finishing.push_back (runId);
                         return;
                     }
@@ -17641,6 +17754,13 @@ namespace wfg::cue
         run->preWaitTicks = ticksFor (numberOf (cue, "preWait"));
         run->postWaitTicks = ticksFor (numberOf (cue, "postWait"));
 
+        /*  A MEMBER OF A GROUP FIRED ON A VAMP'S END (namespace draft §100, AYN)
+            starts on that sample too, unless it waits first. */
+        if (const auto* parent = runs.find (parentRun);
+            parent != nullptr && parent->launchNotBefore > 0 && parent->launchedAtSample <= 0
+              && run->preWaitTicks <= 0 && parent->kind == "group")
+            run->launchNotBefore = std::max (run->launchNotBefore, parent->launchNotBefore);
+
         /*  SPAWNED INTO A GROUP DOH! TOOK BACK - or, by a `run.spawn` record,
             into one brought back to life in this very tick, whose job decided
             the spawn on the state the Doh has undone (2026-10-01, namespace
@@ -21880,6 +22000,18 @@ namespace wfg::cue
             //  The wraps before the end, each crossfaded, until the last pass.
             if (! run->advanceRequested)
                 placeWrap (*run, heardTo, now, lead, wanted, moved, atSpeed);
+
+            /*  THE CUE THAT FOLLOWS THE VAMP (namespace draft §100, AYN), fired
+                three ticks before the boundary comes inside the horizon: its
+                jump lands on the next tick and its sounds are placed on the
+                tick after, still ahead of the sample the pass ends on - which
+                is the sample they are given. Two ticks earlier for each group
+                its first sound is inside, each spawning its member a tick after
+                it is fired. */
+            if (run->advanceRequested && ! run->thenNextCue.empty()
+                  && endsAt - now <= lead + (3 + 2 * groupsBefore (run->thenNextCue))
+                                              * static_cast<std::int64_t> (samplesPerTick))
+                followTheVamp (*run, endsAt);
 
             /*  NOT YET. The boundary is placed when it comes inside the
                 placement horizon and not before, so that an edit made while the

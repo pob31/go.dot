@@ -1178,3 +1178,22 @@ TEST_CASE ("qlab walk: a hotkey spelled, MSC's bytes, raw hex read (§100)")
     CHECK_FALSE (hexBytes ("123").has_value());
     CHECK_FALSE (hexBytes ("G0").has_value());
 }
+
+TEST_CASE ("qlab walk: a devamp that fires the next cue as its loop ends is an advance with thenNext (§100, AYN)")
+{
+    auto bed = cue ("Audio", "Bed");
+    auto devamp = cue ("Devamp");
+    devamp.target = bed.id;
+    devamp.fireNextAtLoopEnd = true;
+    devamp.stopTargetWhenDone = true;
+    auto plain = cue ("Devamp");
+    plain.target = bed.id;
+
+    const auto plan = walk (workspaceOf ({ bed, devamp, plain }));
+    const auto& items = top (plan);
+
+    CHECK (attribute (items[1], "verb") == "advance");
+    CHECK (attribute (items[1], "thenNext") == "true");
+    CHECK (attribute (items[2], "thenNext").empty());
+    CHECK (said (plan, "QLab stopped its target as the loop ended"));
+}

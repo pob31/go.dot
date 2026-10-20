@@ -847,6 +847,16 @@ namespace wfg::cue
             the same boundary either way; only the destination differs. */
         int advanceTo = -1;
 
+        /*  AND THE CUE TO FIRE AS THE PASS ENDS (namespace draft §100, AYN; the
+            author, 2026-10-20, of a vamp: "the following cue triggered when the
+            loop completes"): the cue after the transport cue that asked, the
+            list it is in when it is a list's - fired there as GO would fire it,
+            standby moving past it - and the GO it fires under, for Doh!. Empty
+            when the advance asked for nothing more. */
+        std::string thenNextCue;
+        std::string thenNextList;
+        std::uint64_t thenNextCause = 0;
+
         /*  The last range's end has been placed, so the silence that follows is
             the cue finishing rather than a gap between two ranges.
 

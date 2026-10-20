@@ -605,7 +605,11 @@ group.
 Modes: hard stop · fade-and-stop (duration + curve) · stop after current
 iteration · stop after current member. Range-level verbs (`advance`,
 `advance at range end`) are the same targeting object with a different verb —
-see §3.24.
+see §3.24. *Added 2026-10-20, at the author's direction (namespace draft §100,
+AYN):* **an advance may fire the cue after it as the loop it leaves completes** -
+a vamp's way into the next section, as QLab's Devamp does - as GO would fire
+it, standby moving past it, under the same GO; its sounds start on the very
+sample the pass ends.
 
 Targeting a group stops it recursively by default. A stop cue whose target is
 not running is a **silent no-op, not an error** — that case is constant during

@@ -1696,3 +1696,159 @@ TEST_CASE ("range end: a sound locked to its movie takes the movie's end as its 
     REQUIRE (rig.document.setAttribute ("/godot/range/" + movieRange + "/out", "100").ok);
     CHECK_FALSE (static_cast<bool> (rig.document.findById (sound).getChildWithName ("Range").getProperty ("toEnd", false)));
 }
+
+//==============================================================================
+/*  A VAMP THAT FIRES THE NEXT CUE AS ITS LOOP COMPLETES (namespace draft §100,
+    AYN; the author, 2026-10-20, of La Clairière: "the vamp should have the
+    following cue triggered when the loop completes as an option" -
+    sample-exact, his pick). A bed looping for ever, a transport cue that
+    advances it with `thenNext`, and a song after it: the song starts on the
+    very sample the bed's pass ends, standby moves past it, and a Doh! of the
+    GO that fired the vamp takes back both. */
+namespace
+{
+    struct VampRig : SchedulerRig
+    {
+        std::string vamp, song;
+
+        VampRig()
+        {
+            REQUIRE (document.setAttribute ("/godot/list/goDebounce", "0").ok);
+            addRange (0.0, 1.0, 0);             // the vamp, for ever
+            addRange (1.0, 2.0, 1);             // its outro
+
+            vamp = document.createCue (listId, 1, "transport", "Devamp").id;
+            REQUIRE (document.setAttribute ("/godot/cue/" + vamp + "/target", cueId).ok);
+            REQUIRE (document.setAttribute ("/godot/cue/" + vamp + "/verb", "advance").ok);
+            REQUIRE (document.setAttribute ("/godot/cue/" + vamp + "/thenNext", "true").ok);
+
+            song = document.createCue (listId, 2, "media", "Song").id;
+            REQUIRE (document.setAttribute ("/godot/cue/" + song + "/file", "song.wav").ok);
+        }
+
+        //  Ticks, the disk answering every arm as it is asked.
+        void play (int howMany)
+        {
+            for (int i = 0; i < howMany; ++i)
+            {
+                audio.completeArms (engine);
+                tickOnce();
+            }
+        }
+
+        const cue::Run* songRun() const
+        {
+            for (const auto& run : runs.all())
+                if (run.cue == song)
+                    return &run;
+            return nullptr;
+        }
+    };
+}
+
+TEST_CASE ("vamp: the cue after an advance that asks for it starts on the sample the loop's pass ends, and standby moves past it (§100)")
+{
+    VampRig rig;
+
+    const auto bed = rig.goAndLaunch();
+    const auto launchedAt = rig.audio.launches.front().sample;
+
+    //  A few passes, then a fifth of a second into one: the GO comes well before its end.
+    rig.play (120);
+    while ((rig.audio.samples - launchedAt) % 48000 < 9000 || (rig.audio.samples - launchedAt) % 48000 > 11000)
+        rig.play (1);
+
+    //  GO on the vamp: standby moves to the song, which is armed ahead as any next cue is.
+    rig.submitAndTick ("go");
+    rig.play (150);
+
+    REQUIRE_FALSE (rig.audio.stops.empty());          // the vamp's boundary first, then the outro's end
+    const auto boundary = rig.audio.stops.front().sample;
+
+    const auto* song = rig.songRun();
+    REQUIRE (song != nullptr);
+    CHECK (song->launchedAtSample == boundary);
+    CHECK (rig.run (bed)->range == 1);
+
+    //  The song was fired as GO fires it: standby is past it, at the list's end.
+    CHECK (rig.document.getAttribute (cue::standbyAddressOf (rig.listId)).value_or ("?").empty());
+
+    //  And it was the vamp's GO that fired it.
+    CHECK (song->launchedAtSample > 0);
+}
+
+TEST_CASE ("vamp: without thenNext the cue after waits for GO; a Doh! of the vamp's GO takes back both (§100)")
+{
+    SUBCASE ("off")
+    {
+        VampRig rig;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.vamp + "/thenNext", "false").ok);
+
+        rig.goAndLaunch();
+        rig.play (130);
+        rig.submitAndTick ("go");
+        rig.play (150);
+
+        REQUIRE_FALSE (rig.audio.stops.empty());
+        const auto* song = rig.songRun();
+        CHECK ((song == nullptr || song->launchedAtSample <= 0));
+        CHECK (rig.document.getAttribute (cue::standbyAddressOf (rig.listId)).value_or ("") == rig.song);
+    }
+
+    SUBCASE ("Doh!")
+    {
+        VampRig rig;
+
+        const auto bed = rig.goAndLaunch();
+        rig.play (130);
+
+        REQUIRE (rig.engine.submit (origin::cli, "go", {}));
+        REQUIRE (rig.engine.submit (origin::cli, "go.doh", {}));
+        rig.tickOnce();
+
+        rig.play (150);
+
+        CHECK (rig.audio.stops.empty());
+        CHECK (rig.run (bed)->range == 0);
+
+        const auto* song = rig.songRun();
+        CHECK ((song == nullptr || song->launchedAtSample <= 0));
+    }
+}
+
+
+TEST_CASE ("vamp: a group after the vamp - La Clairière's shape - starts its first sound on the pass's last sample too (§100)")
+{
+    /*  In La Clairière every devamp is followed by a group: the next section's
+        sounds and fades together. The group is fired as GO fires it, and its
+        member with no pre-wait of its own starts where the bed's pass ends. */
+    VampRig rig;
+    REQUIRE (rig.document.remove (rig.song).ok);
+
+    const auto section = rig.document.createCue (rig.listId, 2, "group", "Section 2").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + section + "/mode", "timeline").ok);
+    const auto drums = rig.document.createCue (section, 0, "media", "Drums").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + drums + "/file", "drums.wav").ok);
+
+    const auto bed = rig.goAndLaunch();
+    const auto launchedAt = rig.audio.launches.front().sample;
+
+    rig.play (120);
+    while ((rig.audio.samples - launchedAt) % 48000 < 9000 || (rig.audio.samples - launchedAt) % 48000 > 11000)
+        rig.play (1);
+
+    rig.submitAndTick ("go");
+    rig.play (150);
+
+    REQUIRE_FALSE (rig.audio.stops.empty());
+    const auto boundary = rig.audio.stops.front().sample;
+
+    const cue::Run* member = nullptr;
+    for (const auto& run : rig.runs.all())
+        if (run.cue == drums)
+            member = &run;
+
+    REQUIRE (member != nullptr);
+    CHECK (member->launchedAtSample == boundary);
+    CHECK (rig.run (bed)->range == 1);
+}

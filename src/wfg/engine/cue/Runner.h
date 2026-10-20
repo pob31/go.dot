@@ -3221,6 +3221,20 @@ namespace wfg::cue
 
         std::vector<JumpToMake> jumpsToMake;
 
+        /*  THE SAMPLE A VAMP'S PASS ENDS ON, by the GO its follow fires under
+            (namespace draft §100, AYN): read by `jumpStandby` when that jump
+            lands, and given to what it fires. */
+        std::map<std::uint64_t, std::int64_t> vampFloors;
+
+        /*  The cue after `cue` where standby could stand next, or empty. */
+        std::string cueAfter (const juce::ValueTree& cue) const;
+
+        /*  The vamp's follow, decided: its jump-and-Go queued, its sample kept. */
+        void followTheVamp (Run& run, std::int64_t endsAt);
+
+        /*  How many groups deep a cue's first sound is: none for a cue that is not a group. */
+        int groupsBefore (const std::string& cueId) const;
+
         /*  See `setOverrideDocument`. Null in a runner nobody registered commands for,
             and then an enable or disable cue switches nothing. */
         doc::ShowDocument* overrideDocument = nullptr;

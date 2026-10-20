@@ -1977,6 +1977,14 @@ namespace wfg::import::qlab
                 {
                     item.attributes.push_back ({ "verb", "advance" });
                     note (Note::Kind::approximated, cue, "a devamp, imported as an advance out of the range that is playing");
+
+                    //  AND THE NEXT CUE FIRED AS THE LOOP ENDS (§100, AYN), as QLab fires it.
+                    if (cue.fireNextAtLoopEnd)
+                        item.attributes.push_back ({ "thenNext", "true" });
+
+                    if (cue.stopTargetWhenDone)
+                        note (Note::Kind::approximated, cue, "QLab stopped its target as the loop ended: Go.dot's advance "
+                              "goes on into the next slice - a slice of silence, or none after it, ends it");
                 }
 
                 return item;

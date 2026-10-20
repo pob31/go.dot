@@ -33147,7 +33147,24 @@ read as "command 1". An Eos or a QLab patch keeps the message it sends written o
 - **AYN** **A vamp may fire the next cue as its loop completes** (the author, 2026-10-20, of La
   Clairière, built that way in QLab: *"the vamp should have the following cue triggered when the loop
   completes as an option"*; sample-exact, his pick, offered as "Sample-exact", recommended over the
-  tick). QLab's Devamp has it as `fireNextCueAtMomentLoopEnds`. Built next; written here when it is.
+  tick). `transport/thenNext`, with the advance verb; QLab's Devamp `fireNextCueAtMomentLoopEnds` sets it
+  (La Clairière: all 14 devamps). *Mine, proposed:* the cue after it is the next of its list, or of the
+  manual sequence it is a member of (`Runner::cueAfter`) - the places standby stands; in a timeline or
+  an automatic sequence there is none. The advance notes it on the bed's run with the GO's serial
+  (`Run::thenNextCue`, `thenNextList`, `thenNextCause`). As the pass's end (`advanceRanges`' `endsAt`)
+  comes within the horizon and three ticks more - two more for each group before the next cue's first
+  sound (`groupsBefore`), each spawning its member a tick after it is fired - it is fired as a jump with
+  "and Go" fires one (§27): standby moves past it, its runs carry the vamp's GO, one Doh! takes back
+  both, and a GO Doh'd before then fires nothing (`followTheVamp`). What that fire makes or takes over
+  and has not launched, and the members its groups spawn with no pre-wait, are given the pass's last
+  sample as `launchNotBefore` (`jumpStandby`, `spawnChild`) - so a sound standby armed ahead, and a
+  group's first sounds, start on the very sample the loop ends; what is not a sound leaves when that
+  GO's would, a few ticks before its sounds are heard, as with any GO. A vamp GO'd within a tenth of a
+  second of its pass's end starts the next cue as soon as it can. QLab's "stop target when done" on a
+  devamp is said, not imported: Go.dot's advance goes on into the next slice. The window's inspector
+  shows the row as *then GO next* under the verb, for advance only; the page lists it. Not done: the
+  backup machine's seat does not carry a follow under way (`RunnerSeat`), and the solver treats the
+  advance as the end of its target as before.
 
 Results on the author's shows (2026-10-20, Debug build, media not copied): Hécube 380 memos → none (342
 MIDI cues, 21 of them fading, 38 Eos cues); La Reprise 28 → 3 (9 camera cues on two inputs); Justice-s
@@ -33174,5 +33191,10 @@ addresses without it, alone and in a bundle`, `mount: removePrefix is read from 
 device's declaration` (NetworkCueTests); `media info: a file missing when the show opened, put back and
 read, is learned` (MediaCueTests); `problems: every cue of the show whose file is missing...`
 (ProblemsTests); `import window: a QLab workspace's files counted, the missing listed, a folder offered`
-(RunPaneUiTests). Owed: the author's words for the report's and the window's sentences (AYD-AYJ), and
-his try of the window's folder and of File > Find missing files in a folder....
+(RunPaneUiTests); `vamp: the cue after an advance that asks for it starts on the sample the loop's pass
+ends, and standby moves past it`, `vamp: without thenNext the cue after waits for GO; a Doh! of the vamp's
+GO takes back both`, `vamp: a group after the vamp - La Clairière's shape - starts its first sound on the
+pass's last sample too` (RangeTests); `qlab walk: a devamp that fires the next cue as its loop ends is an
+advance with thenNext` (QlabWalkTests). Owed: the author's words for the report's and the window's
+sentences (AYD-AYJ, and *then GO next*), and his try of the window's folder, of File > Find missing files
+in a folder... and of La Clairière's vamps.

@@ -124,7 +124,7 @@ namespace wfg::client::model
                     both's shape, so it comes after both. */
                 { "fade",    { "target", "dca", "aux", "levelOn", "level", "rateOn", "rate", "curve", "points", "video",
                                "stopWhenDone" } },
-                { "transport", { "target", "verb", "andGo", "range", "curve" } },
+                { "transport", { "target", "verb", "andGo", "range", "thenNext", "curve" } },
                 { "start",   { "target" } },
                 //  A process cue (namespace draft §51): its MIDI; its patch is the canvas's (§65, AMY).
                 { "process", { "midiIn", "midiOut" } },
@@ -569,6 +569,12 @@ namespace wfg::client::model
                     field.applies = verb == "fade";
                 else if (field.name == "andGo")
                     field.applies = verb == "jump";
+                else if (field.name == "thenNext")
+                {
+                    //  The vamp's next cue as its loop ends (namespace draft §100, AYN). Words mine, owed.
+                    field.applies = verb == "advance";
+                    field.label = "then GO next";
+                }
             }
         }
 

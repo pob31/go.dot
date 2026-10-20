@@ -135,7 +135,7 @@ const KIND_ORDER = {
             "strip", "initialLevel", "release", "secondPress", "velocity", "velocityFloor", "pressure", "releaseFade"],
   // Each thing a fade moves is a switch, then where it goes: level, then speed (§22.7).
   fade:    ["target", "dca", "levelOn", "level", "rateOn", "rate", "sends", "eq", "fx", "curve", "points", "stopWhenDone"],
-  stop:    ["target", "verb", "curve"],
+  stop:    ["target", "verb", "thenNext", "curve"],
   start:   ["target"],
   // A process cue (namespace draft 51): its patch, then its MIDI.
   process: ["patch", "midiIn", "midiOut"],
