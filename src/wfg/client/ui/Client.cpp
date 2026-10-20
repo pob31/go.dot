@@ -55,6 +55,7 @@
 #include <wfg/client/model/Flags.h>
 #include <wfg/client/model/Foot.h>
 #include <wfg/client/model/Bindings.h>
+#include <wfg/client/model/ColumnWidths.h>
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/KeyTriggers.h>
@@ -620,6 +621,8 @@ namespace wfg::client
                                                                         (*addresses)[static_cast<std::size_t> (chosen) - 1]));
                                         });
                 };
+                footActions.widthOf = [this] (const std::string& column) { return keptWidths().of (column); };
+                footActions.keepWidth = [this] (const std::string& column, int width) { keepWidth (column, width); };
                 footActions.curveArm = [this] (const std::string& cueId) { send (gesture::curveArm (cueId)); };
                 footActions.curveFree = [this] { send (gesture::curveFree()); };
                 footActions.curveRec = [this] (const std::string& curveId, bool on)
@@ -2318,6 +2321,8 @@ namespace wfg::client
                             send (gesture::setNode (address, text));
                     };
                     gridActions.panic = [this] { panic(); };
+                    gridActions.widthOf = [this] (const std::string& column) { return keptWidths().of (column); };
+                    gridActions.keepWidth = [this] (const std::string& column, int width) { keepWidth (column, width); };
 
                     gridWindow = std::make_unique<ui::OscGridWindow> (theme, std::move (gridActions));
                 }
@@ -5273,6 +5278,43 @@ namespace wfg::client
                                                    .getChildFile ("last-media-folder.txt");
             }
 
+            /*  COLUMN WIDTHS A HAND DRAGGED (namespace draft §98), in
+                `<Go.dot's own folder>/column-widths.txt`: this computer's, never
+                the show's (the author, 2026-10-20: "Screen resolution might
+                change from one computer to the next"). Read once, on the first
+                table that asks; written each time a drag ends. A launch that
+                asked for nothing to be remembered keeps them until it closes. */
+            juce::File columnWidthsFile() const
+            {
+                return host.rememberIn.empty() ? juce::File()
+                                               : juce::File (juce::String::fromUTF8 (host.rememberIn.c_str()))
+                                                   .getChildFile ("column-widths.txt");
+            }
+
+            const model::ColumnWidths& keptWidths()
+            {
+                if (! columnWidths.has_value())
+                {
+                    const auto file = columnWidthsFile();
+                    columnWidths = model::ColumnWidths::read (file.existsAsFile() ? file.loadFileAsString().toStdString()
+                                                                                  : std::string {});
+                }
+
+                return *columnWidths;
+            }
+
+            void keepWidth (const std::string& column, int width)
+            {
+                keptWidths();
+                columnWidths->keep (column, width);
+
+                if (const auto file = columnWidthsFile(); file != juce::File())
+                {
+                    file.getParentDirectory().createDirectory();
+                    file.replaceWithText (juce::String::fromUTF8 (columnWidths->written().c_str()));
+                }
+            }
+
             /*  The folder a sound or a picture was just picked from - unless it
                 is inside the empty show itself, the place nobody is to be sent. */
             void rememberMediaFolder (const juce::File& picked) const
@@ -6077,6 +6119,7 @@ namespace wfg::client
             std::unique_ptr<ui::SurfaceWindow> surfaces;    // Show > Surfaces..., made on first open
             std::unique_ptr<ui::NetworkMonitorWindow> networkMonitor;   // Show > Network monitor...
             std::unique_ptr<ui::OscGridWindow> gridWindow;              // an OSC cue's messages as a grid (§80)
+            std::optional<model::ColumnWidths> columnWidths;            // dragged on this computer (§98), read when first asked
             std::unique_ptr<ui::VideoMonitorWindow> videoMonitor;       // Show > Video monitor...
             std::unique_ptr<ui::AboutWindow> about;                     // Help > About Go.dot
 

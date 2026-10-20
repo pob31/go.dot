@@ -19,6 +19,7 @@
 #include <wfg/client/ui/Look.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <cstddef>
 #include <string>
 #include <utility>
@@ -51,11 +52,25 @@ namespace wfg::client::ui
         constexpr int gap = 4;
         constexpr int numberWidth = 22, addressWidth = 210;
         constexpr int typeWidth = 70, valueWidth = 66, curveWidth = 26, dropWidth = 20;
-        constexpr int cellWidth = typeWidth + valueWidth + curveWidth + dropWidth + gap * 3;
+
+        //  How narrow and how wide a hand may drag them (§98): an address keeps its arrow, a box a digit or two.
+        constexpr int addressLeast = 80, addressMost = 800, valueLeast = 30, valueMost = 400;
+
+        //  How near an edge the pointer must be to take it, either side.
+        constexpr int edgeReach = 3;
 
         int scaled (int base, const model::Theme& theme)
         {
             return juce::roundToInt (static_cast<float> (base) * theme.type);
+        }
+
+        int kept (const OscMessagesComponent::Actions& actions, const char* column, int own, int least, int most)
+        {
+            if (actions.widthOf)
+                if (const auto width = actions.widthOf (column); width.has_value())
+                    return juce::jlimit (least, most, *width);
+
+            return own;
         }
 
         /*  THE TYPE MENU'S ITEMS, numbered from one in `argumentTypes` order. */
@@ -89,6 +104,9 @@ namespace wfg::client::ui
     OscMessagesComponent::OscMessagesComponent (const model::Theme& themeToUse, Actions actionsToUse)
         : theme (themeToUse), actions (std::move (actionsToUse))
     {
+        addressBase = kept (actions, addressColumn, addressWidth, addressLeast, addressMost);
+        valueBase = kept (actions, valueColumn, valueWidth, valueLeast, valueMost);
+
         viewport.setViewedComponent (&content, false);
         viewport.setScrollBarsShown (true, true);
         addAndMakeVisible (viewport);
@@ -97,6 +115,9 @@ namespace wfg::client::ui
             draft §88): only those have components. */
         viewport.moved = [this]
         {
+            //  The head goes across with the rows, its words and edges with it.
+            repaint (getLocalBounds().removeFromTop (juce::roundToInt (theme.row * theme.type)));
+
             if (window().first != first)
             {
                 rebuild();
@@ -508,15 +529,16 @@ namespace wfg::client::ui
         add.setBounds (head.removeFromRight (scaled (90, theme)).reduced (1, 2));
         viewport.setBounds (area);
 
-        std::size_t widest = 0;
-
         //  As wide as the widest message of the cue, in view or not, so a scroll does not move the columns.
+        widest = 0;
+
         for (const auto& message : reading().rows)
             widest = std::max (widest, message.args.size());
 
         const auto inner = std::max (viewport.getWidth() - scaled (14, theme),
-                                     scaled (numberWidth + addressWidth + gap * 3 + dropWidth * 2
-                                               + static_cast<int> (widest + 1) * cellWidth, theme));
+                                     scaled (numberWidth, theme) + scaled (addressBase, theme)
+                                       + scaled (gap, theme) * 3 + scaled (dropWidth, theme) * 2
+                                       + static_cast<int> (widest + 1) * cellPixels());
 
         content.setSize (inner, std::max (row, static_cast<int> (reading().rows.size()) * row));
 
@@ -535,14 +557,14 @@ namespace wfg::client::ui
 
             line->number.setBounds (take (numberWidth));
 
-            auto addressCell = take (addressWidth);
+            auto addressCell = take (addressBase);
             line->pick.setBounds (addressCell.removeFromRight (scaled (dropWidth, theme)).reduced (1, 2));
             line->address.setBounds (addressCell.reduced (0, 1));
 
             for (auto& cell : line->cells)
             {
                 cell->type.setBounds (take (typeWidth).reduced (0, 1));
-                cell->value.setBounds (take (valueWidth).reduced (0, 1));
+                cell->value.setBounds (take (valueBase).reduced (0, 1));
                 cell->curve.setBounds (take (curveWidth));
                 cell->drop.setBounds (take (dropWidth).reduced (1, 2));
             }
@@ -562,20 +584,141 @@ namespace wfg::client::ui
         g.setColour (Look::colour (theme, "ink-faint"));
         g.setFont (Look::font (theme, 11.0f));
 
-        auto strip = head;
-        strip.removeFromLeft (scaled (numberWidth + gap, theme));
-        g.drawText ("address", strip.removeFromLeft (scaled (addressWidth + gap, theme)),
-                    juce::Justification::centredLeft, false);
-        g.drawText ("values - type, value, curve", strip, juce::Justification::centredLeft, false);
+        //  Laid as the rows are, and moved across with them when they scroll.
+        auto strip = head.withX (head.getX() - headScroll()).withWidth (std::max (head.getWidth(), content.getWidth()));
+        strip.removeFromLeft (scaled (numberWidth, theme) + scaled (gap, theme));
+        g.drawText ("address", strip.removeFromLeft (scaled (addressBase, theme) + scaled (gap, theme)),
+                    juce::Justification::centredLeft, true);
+        g.drawText ("values - type, value, curve", strip.removeFromLeft (cellPixels() - scaled (gap, theme)),
+                    juce::Justification::centredLeft, true);
 
         g.setColour (Look::colour (theme, "rule"));
         g.fillRect (head.getX(), head.getBottom() - 1, head.getWidth(), 1);
+
+        /*  THE EDGES A HAND DRAGS (§98): after the address, and after each
+            value - a short rule in the head, the cursor saying the rest. */
+        for (std::size_t edge = 0; edge <= widest; ++edge)
+            if (const auto x = columnEdge (edge); x >= 0 && x < getWidth())
+                g.fillRect (x, head.getY() + 4, 1, head.getHeight() - 8);
 
         if (reading().rows.empty())
         {
             g.setColour (Look::colour (theme, "ink-dim"));
             g.drawText ("Not an OSC cue", getLocalBounds().withTrimmedTop (row), juce::Justification::centred, false);
         }
+    }
+
+    int OscMessagesComponent::cellPixels() const
+    {
+        return scaled (typeWidth, theme) + scaled (valueBase, theme) + scaled (curveWidth, theme)
+             + scaled (dropWidth, theme) + scaled (gap, theme) * 4;
+    }
+
+    int OscMessagesComponent::headScroll() const
+    {
+        return viewport.getViewPositionX();
+    }
+
+    int OscMessagesComponent::columnEdge (std::size_t edge) const
+    {
+        //  The address has an edge always; a value's only where some message has that many.
+        if (edge > widest)
+            return -1;
+
+        const auto pastAddress = scaled (numberWidth, theme) + scaled (gap, theme) + scaled (addressBase, theme);
+        const auto halfGap = scaled (gap, theme) / 2;
+        const auto x = edge == 0 ? pastAddress + halfGap
+                                 : pastAddress + scaled (gap, theme) + static_cast<int> (edge) * cellPixels() - halfGap;
+        return x - headScroll();
+    }
+
+    int OscMessagesComponent::edgeNear (int x) const
+    {
+        const auto reach = std::max (edgeReach, scaled (edgeReach, theme));
+
+        for (std::size_t edge = 0; edge <= widest; ++edge)
+            if (const auto at = columnEdge (edge); at >= 0 && std::abs (at - x) <= reach)
+                return static_cast<int> (edge);
+
+        return -1;
+    }
+
+    void OscMessagesComponent::mouseMove (const juce::MouseEvent& event)
+    {
+        const auto inHead = event.y < juce::roundToInt (theme.row * theme.type);
+        setMouseCursor (inHead && edgeNear (event.x) >= 0 ? juce::MouseCursor::LeftRightResizeCursor
+                                                          : juce::MouseCursor::NormalCursor);
+    }
+
+    void OscMessagesComponent::mouseExit (const juce::MouseEvent&)
+    {
+        if (dragging < 0)
+            setMouseCursor (juce::MouseCursor::NormalCursor);
+    }
+
+    void OscMessagesComponent::mouseDown (const juce::MouseEvent& event)
+    {
+        dragging = event.y < juce::roundToInt (theme.row * theme.type) ? edgeNear (event.x) : -1;
+        dragFrom = event.x;
+        dragStartBase = dragging == 0 ? addressBase : valueBase;
+    }
+
+    void OscMessagesComponent::mouseDrag (const juce::MouseEvent& event)
+    {
+        if (dragging < 0)
+            return;
+
+        /*  THE EDGE FOLLOWS THE HAND: the n-th value's edge moves n boxes' worth
+            when every box widens, so the hand's travel is shared among them. */
+        const auto travel = static_cast<float> (event.x - dragFrom) / theme.type
+                          / static_cast<float> (std::max (1, dragging));
+        const auto wanted = dragStartBase + juce::roundToInt (travel);
+
+        auto& base = dragging == 0 ? addressBase : valueBase;
+        const auto now = dragging == 0 ? juce::jlimit (addressLeast, addressMost, wanted)
+                                       : juce::jlimit (valueLeast, valueMost, wanted);
+
+        if (now == base)
+            return;
+
+        base = now;
+        layOut();
+        repaint();
+    }
+
+    void OscMessagesComponent::mouseUp (const juce::MouseEvent&)
+    {
+        if (dragging < 0)
+            return;
+
+        const auto* column = dragging == 0 ? addressColumn : valueColumn;
+        const auto now = dragging == 0 ? addressBase : valueBase;
+        dragging = -1;
+
+        if (now != dragStartBase && actions.keepWidth)
+            actions.keepWidth (column, now);
+    }
+
+    void OscMessagesComponent::mouseDoubleClick (const juce::MouseEvent& event)
+    {
+        //  A DOUBLE CLICK ON AN EDGE puts the column back to its own width, and forgets the one kept.
+        const auto edge = event.y < juce::roundToInt (theme.row * theme.type) ? edgeNear (event.x) : -1;
+
+        if (edge < 0)
+            return;
+
+        dragging = -1;
+
+        if (edge == 0)
+            addressBase = addressWidth;
+        else
+            valueBase = valueWidth;
+
+        if (actions.keepWidth)
+            actions.keepWidth (edge == 0 ? addressColumn : valueColumn, 0);
+
+        layOut();
+        repaint();
     }
 
     juce::Label* OscMessagesComponent::addressBox (std::size_t row)

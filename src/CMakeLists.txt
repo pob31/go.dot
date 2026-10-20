@@ -788,6 +788,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Lane.cpp
     wfg/client/model/Sections.h
     wfg/client/model/Sections.cpp
+    wfg/client/model/ColumnWidths.h
+    wfg/client/model/ColumnWidths.cpp
     wfg/client/model/OscGrid.h
     wfg/client/model/OscGrid.cpp
     wfg/client/model/OscMessages.h

@@ -96,6 +96,7 @@
 #include <wfg/client/model/Timeline.h>
 #include <wfg/client/model/Scrub.h>
 #include <wfg/client/model/Selection.h>
+#include <wfg/client/model/ColumnWidths.h>
 #include <wfg/client/model/OscCurves.h>
 #include <wfg/client/model/OscGrid.h>
 #include <wfg/client/model/OscMessages.h>
@@ -16647,4 +16648,44 @@ TEST_CASE ("client: cues copied name their show on the clipboard, and a paste re
     //  A numeric entity in a name reads as the character it stands for.
     CHECK (model::mediaNamesIn ("<Fragment><Media id=\"A\" file=\"caf&#233;.wav\"/></Fragment>")
            == std::vector<std::string> { "caf\xC3\xA9.wav" });
+}
+
+TEST_CASE ("column widths: kept on this computer, one line a column, a line that does not read passed over (§98)")
+{
+    /*  The author, 2026-10-20: the OSC tables' columns dragged, "local and not
+        saved with the show" - a file in Go.dot's own folder, never the document. */
+    model::ColumnWidths widths;
+    CHECK_FALSE (widths.of ("osc.address").has_value());
+
+    widths.keep ("osc.address", 260);
+    widths.keep ("osc.value", 90);
+    CHECK (widths.of ("osc.address") == 260);
+    CHECK (widths.written() == "osc.address 260\nosc.value 90\n");
+
+    //  Read back as written.
+    const auto again = model::ColumnWidths::read (widths.written());
+    CHECK (again.of ("osc.address") == 260);
+    CHECK (again.of ("osc.value") == 90);
+
+    //  Nought forgets: the column is its own again.
+    widths.keep ("osc.value", 0);
+    CHECK_FALSE (widths.of ("osc.value").has_value());
+    CHECK (widths.written() == "osc.address 260\n");
+
+    //  Kept within bounds, whatever is asked or read.
+    widths.keep ("osc.address", 1);
+    CHECK (widths.of ("osc.address") == model::ColumnWidths::least);
+    widths.keep ("osc.address", 99999);
+    CHECK (widths.of ("osc.address") == model::ColumnWidths::most);
+
+    //  Lines that do not read: a missing width, words after it, a sign, a fraction, a huge number, CRLF.
+    const auto read = model::ColumnWidths::read ("osc.address\nosc.value 80 wide\na -5\nb 1.5\nc 99999999\n"
+                                                 "osc-grid.channel 120\r\n\n  osc-grid.parameter   200  \n");
+    CHECK_FALSE (read.of ("osc.address").has_value());
+    CHECK_FALSE (read.of ("osc.value").has_value());
+    CHECK_FALSE (read.of ("a").has_value());
+    CHECK_FALSE (read.of ("b").has_value());
+    CHECK_FALSE (read.of ("c").has_value());
+    CHECK (read.of ("osc-grid.channel") == 120);
+    CHECK (read.of ("osc-grid.parameter") == 200);
 }

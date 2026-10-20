@@ -127,6 +127,11 @@ namespace wfg::client::ui
             std::function<void (const std::string& addressRow, const std::string& current,
                                 juce::Component& under)> chooseAddress;
 
+            /*  COLUMN WIDTHS KEPT ON THIS COMPUTER (namespace draft §98): the
+                messages table's, read when it is made, kept when dragged. */
+            std::function<std::optional<int> (const std::string& column)> widthOf;
+            std::function<void (const std::string& column, int width)> keepWidth;
+
             /*  RECORDING AN OSC CUE'S CURVES (O.9): the cue armed or let go of,
                 a curve armed or not, a pass from a second, the pass ended. */
             std::function<void (const std::string& cueId)> curveArm;

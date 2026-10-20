@@ -32930,3 +32930,40 @@ it is, and a hint while the standby is clear (§97)` (RunPaneUiTests; with `WFG_
 `cue-list-pointer.png` and `cue-list-pointer-parked.png`). The author looked, asked for the narrower
 grey, the air before the number and the darker ground, and passed the words (2026-10-20). Owed: the
 friend's second try.
+
+## 98. The OSC tables' columns dragged wider
+
+**Asked 2026-10-20** by the author: *"In the OSC table, could the different column width be user
+adjustable?"*
+
+What was found: two tables show an OSC cue's messages, and neither let a column be moved. The messages
+table at the foot (§45, O.5) laid its address at 210 units and each value's box at 66; the grid window
+(§80) its parameters at 190 and each channel at 76, all scaled by the type size. Nothing in the window
+kept a width: the network monitor's columns drag but are not kept, and the foot's height lasts until
+Go.dot closes.
+
+- **AXL** **Both tables** (the author's pick, 2026-10-20).
+- **AXM** **Kept on this computer, never in the show** (the author's pick; and, unasked, *"Screen
+  resolution might change from one computer to the next so this can be local and not saved with the
+  show."*). In `column-widths.txt` in Go.dot's own folder, beside `last-show.txt`, one line a column,
+  its name and its width (`model::ColumnWidths`); read when the first table asks, written each time a
+  drag ends. A launch that asked for nothing to be remembered keeps them until it closes. A line that
+  does not read is passed over.
+- **AXN** *(proposed)* **The edge is dragged in the head**, where a short rule marks it and the cursor
+  turns to the left-right arrows, as the network monitor's columns are; a double click on it puts that
+  column back to its own width and forgets the one kept. In the messages table the edges are after the
+  address and after each value; in the grid, the rules in each table's head row, the first after the
+  parameters. Inside the rows nothing is taken, so a double click on a cell still opens it.
+- **AXO** *(proposed)* **The values widen together, and so do the channels**: one width for every value's
+  box (the type menu, the curve switch and the cross keep theirs), and one for every channel. A drag on
+  the n-th edge shares the hand's travel among the n columns before it, so the edge stays under the
+  hand.
+- **AXP** *(proposed)* **A width is kept in the units the type size scales**, so a bigger type keeps the
+  words in their columns; and within bounds: an address 80 to 800, a value's box 30 to 400, the
+  parameters 60 to 800, a channel 30 to 400.
+- The messages table's head now scrolls across with its rows; it stood still while they moved.
+- The tester guides, both languages, say it in the OSC cues row.
+
+Test: `osc tables: a column dragged wider by its edge in the head, kept on this computer, a double click
+putting it back (§98)` (RunPaneUiTests, a subcase a table); `column widths: kept on this computer, one
+line a column, a line that does not read passed over (§98)` (ClientTests). Owed: the author's look.

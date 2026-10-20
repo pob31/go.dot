@@ -19,6 +19,7 @@
 #include <wfg/client/ui/Look.h>
 
 #include <algorithm>
+#include <cstdlib>
 #include <utility>
 
 namespace wfg::client::ui
@@ -31,6 +32,22 @@ namespace wfg::client::ui
             std::size_t table = 0, row = 0, column = 0;
             bool found = false;
         };
+
+        //  The columns' own widths, and how narrow and how wide a hand may drag them (§98).
+        constexpr int parameterWidth = 190, channelWidth = 76;
+        constexpr int parameterLeast = 60, parameterMost = 800, channelLeast = 30, channelMost = 400;
+
+        //  How near a rule the pointer must be to take it, either side.
+        constexpr int edgeReach = 3;
+
+        int kept (const OscGridWindow::Actions& actions, const char* column, int own, int least, int most)
+        {
+            if (actions.widthOf)
+                if (const auto width = actions.widthOf (column); width.has_value())
+                    return juce::jlimit (least, most, *width);
+
+            return own;
+        }
 
         /*  THE BOX A CELL IS TYPED IN: Enter writes, Esc takes it back - inside
             the box, so the window's Esc, which is PANIC, never hears it. */
@@ -69,6 +86,9 @@ namespace wfg::client::ui
         Content (const model::Theme& themeToUse, Actions actionsToUse)
             : theme (themeToUse), actions (std::move (actionsToUse)), grid (*this)
         {
+            parameterBase = kept (actions, parameterColumn, parameterWidth, parameterLeast, parameterMost);
+            channelBase = kept (actions, channelColumn, channelWidth, channelLeast, channelMost);
+
             status.setColour (juce::Label::textColourId, Look::colour (theme, "ink-dim"));
             status.setFont (Look::font (theme, 13.0f));
             addAndMakeVisible (status);
@@ -122,6 +142,7 @@ namespace wfg::client::ui
         }
 
         juce::String statusText() const { return status.getText(); }
+        juce::Component& gridView() { return grid; }
 
         void paint (juce::Graphics& g) override
         {
@@ -144,8 +165,8 @@ namespace wfg::client::ui
         public:
             explicit GridView (Content& ownerToUse) : owner (ownerToUse) {}
 
-            int labelWidth() const  { return juce::roundToInt (190.0 * owner.theme.type); }
-            int cellWidth() const   { return juce::roundToInt (76.0 * owner.theme.type); }
+            int labelWidth() const  { return juce::roundToInt (owner.parameterBase * owner.theme.type); }
+            int cellWidth() const   { return juce::roundToInt (owner.channelBase * owner.theme.type); }
             int rowHeight() const   { return juce::roundToInt (22.0 * owner.theme.type); }
             int titleHeight() const { return juce::roundToInt (28.0 * owner.theme.type); }
 
@@ -197,7 +218,81 @@ namespace wfg::client::ui
                                              labelWidth() + cellWidth() * widest + 8);
                 const auto height = std::max (rowHeight(), tableTop (owner.built.tables.size()));
                 setSize (width, height);
+
+                //  A cell being typed in goes with its column.
+                if (owner.editing.found)
+                    owner.box.setBounds (cellBounds (owner.editing.table, owner.editing.row, owner.editing.column));
+
                 repaint();
+            }
+
+            /*  THE RULE UNDER THE POINTER, in a table's head (§98): 0 the one
+                after the parameters, n the one after the n-th channel; or -1. */
+            int edgeAt (juce::Point<int> at) const
+            {
+                const auto reach = std::max (edgeReach, juce::roundToInt (edgeReach * owner.theme.type));
+
+                for (std::size_t t = 0; t < owner.built.tables.size(); ++t)
+                {
+                    const auto headTop = tableTop (t) + titleHeight();
+
+                    if (at.y < headTop || at.y >= headTop + rowHeight())
+                        continue;
+
+                    for (std::size_t c = 0; c <= owner.built.tables[t].columns.size(); ++c)
+                        if (std::abs (labelWidth() + cellWidth() * static_cast<int> (c) - at.x) <= reach)
+                            return static_cast<int> (c);
+                }
+
+                return -1;
+            }
+
+            void mouseMove (const juce::MouseEvent& event) override
+            {
+                setMouseCursor (edgeAt (event.getPosition()) >= 0 ? juce::MouseCursor::LeftRightResizeCursor
+                                                                  : juce::MouseCursor::NormalCursor);
+            }
+
+            void mouseDown (const juce::MouseEvent& event) override
+            {
+                dragging = edgeAt (event.getPosition());
+                dragFrom = event.x;
+                dragStartBase = dragging == 0 ? owner.parameterBase : owner.channelBase;
+            }
+
+            void mouseDrag (const juce::MouseEvent& event) override
+            {
+                if (dragging < 0)
+                    return;
+
+                /*  THE RULE FOLLOWS THE HAND: the n-th channel's rule moves n
+                    columns' worth when every channel widens. */
+                const auto travel = static_cast<float> (event.x - dragFrom) / owner.theme.type
+                                  / static_cast<float> (std::max (1, dragging));
+                const auto wanted = dragStartBase + juce::roundToInt (travel);
+
+                auto& base = dragging == 0 ? owner.parameterBase : owner.channelBase;
+                const auto now = dragging == 0 ? juce::jlimit (parameterLeast, parameterMost, wanted)
+                                               : juce::jlimit (channelLeast, channelMost, wanted);
+
+                if (now == base)
+                    return;
+
+                base = now;
+                relayout();
+            }
+
+            void mouseUp (const juce::MouseEvent&) override
+            {
+                if (dragging < 0)
+                    return;
+
+                const auto* column = dragging == 0 ? parameterColumn : channelColumn;
+                const auto now = dragging == 0 ? owner.parameterBase : owner.channelBase;
+                dragging = -1;
+
+                if (now != dragStartBase && owner.actions.keepWidth)
+                    owner.actions.keepWidth (column, now);
             }
 
             void paint (juce::Graphics& g) override
@@ -293,11 +388,32 @@ namespace wfg::client::ui
 
             void mouseDoubleClick (const juce::MouseEvent& event) override
             {
+                //  On a rule in the head: the column back to its own width, the one kept forgotten.
+                if (const auto edge = edgeAt (event.getPosition()); edge >= 0)
+                {
+                    dragging = -1;
+
+                    if (edge == 0)
+                        owner.parameterBase = parameterWidth;
+                    else
+                        owner.channelBase = channelWidth;
+
+                    if (owner.actions.keepWidth)
+                        owner.actions.keepWidth (edge == 0 ? parameterColumn : channelColumn, 0);
+
+                    relayout();
+                    return;
+                }
+
                 owner.openBox (cellAt (event.getPosition()));
             }
 
         private:
             Content& owner;
+
+            /*  A drag on a rule: which (-1 none), where the hand took it and how
+                wide the column was then. */
+            int dragging = -1, dragFrom = 0, dragStartBase = 0;
         };
 
         //======================================================================
@@ -415,6 +531,7 @@ namespace wfg::client::ui
         model::OscMessagesReading reading;
         std::string cueName;
         model::OscGrid built;
+        int parameterBase = parameterWidth, channelBase = channelWidth;
 
         juce::Label status;
         juce::Viewport viewport;
@@ -489,6 +606,11 @@ namespace wfg::client::ui
     bool OscGridWindow::typeIntoCellForTest (std::size_t table, std::size_t row, std::size_t column, const juce::String& text)
     {
         return content->typeInto (table, row, column, text);
+    }
+
+    juce::Component& OscGridWindow::gridViewForTest() const
+    {
+        return content->gridView();
     }
 
     juce::String OscGridWindow::statusForTest() const

@@ -5882,6 +5882,186 @@ TEST_CASE ("osc grid: a cue's messages in a window of their own, a value typed i
         }
 }
 
+TEST_CASE ("osc tables: a column dragged wider by its edge in the head, kept on this computer, a double click putting it back (§98)")
+{
+    /*  The author, 2026-10-20: "In the OSC table, could the different column
+        width be user adjustable?" - both tables, his pick, and "local and not
+        saved with the show". Type at 1, so a pixel dragged is a unit kept. */
+    model::Theme theme;
+    theme.type = 1.0;
+
+    std::map<std::string, int> kept;
+    const auto widthOf = [&kept] (const std::string& column) -> std::optional<int>
+    {
+        if (const auto found = kept.find (column); found != kept.end())
+            return found->second;
+
+        return std::nullopt;
+    };
+    const auto keepWidth = [&kept] (const std::string& column, int width)
+    {
+        if (width <= 0)
+            kept.erase (column);
+        else
+            kept[column] = width;
+    };
+
+    const auto source = juce::Desktop::getInstance().getMainMouseSource();
+    const juce::ModifierKeys left { juce::ModifierKeys::leftButtonModifier };
+
+    const auto mouse = [&] (juce::Component& on, juce::Point<int> at, int clicks, bool dragged)
+    {
+        const auto now = juce::Time::getCurrentTime();
+        return juce::MouseEvent (source, at.toFloat(), left, juce::MouseInputSource::defaultPressure,
+                                 0.0f, 0.0f, 0.0f, 0.0f, &on, &on, now, at.toFloat(), now, clicks, dragged);
+    };
+
+    const auto drag = [&] (juce::Component& on, juce::Point<int> from, int by)
+    {
+        on.mouseDown (mouse (on, from, 1, false));
+        on.mouseDrag (mouse (on, from.translated (by / 2, 0), 1, true));
+        on.mouseDrag (mouse (on, from.translated (by, 0), 1, true));
+        on.mouseUp (mouse (on, from.translated (by, 0), 1, true));
+    };
+
+    SUBCASE ("the messages table: the address, and the values' boxes all alike")
+    {
+        ui::OscMessagesComponent::Actions actions;
+        actions.widthOf = widthOf;
+        actions.keepWidth = keepWidth;
+
+        model::OscMessagesReading reading;
+        reading.cueId = "CUE00001";
+
+        model::OscMessageRow own;
+        own.base = "/godot/cue/CUE00001/";
+        own.address = "/wfs/input/1/position";
+        own.value = "f:0 f:1";
+        own.args = { { 'f', "0", true, {} }, { 'f', "1", true, {} } };
+        reading.rows = { own };
+
+        ui::OscMessagesComponent table (theme, actions);
+        table.setSize (1100, 160);
+        table.show (reading);
+
+        REQUIRE (table.addressBox (0) != nullptr);
+        REQUIRE (table.valueBox (0, 1) != nullptr);
+        const auto address = table.addressBox (0)->getWidth();
+        const auto value = table.valueBox (0, 0)->getWidth();
+        const auto firstValue = table.valueBox (0, 0)->getX();
+
+        //  Edges after the address and after each of the two values, none after a third.
+        CHECK (table.columnEdge (0) > 0);
+        CHECK (table.columnEdge (2) > table.columnEdge (1));
+        CHECK (table.columnEdge (3) < 0);
+
+        //  The address's edge, fifty to the right: the address fifty wider, the values moved with it.
+        drag (table, { table.columnEdge (0), 5 }, 50);
+        CHECK (table.addressBox (0)->getWidth() == address + 50);
+        CHECK (table.valueBox (0, 0)->getX() == firstValue + 50);
+        CHECK (kept[ui::OscMessagesComponent::addressColumn] == 210 + 50);
+
+        //  The second value's edge, forty: shared between the two boxes, twenty each, so the edge follows the hand.
+        const auto secondEdge = table.columnEdge (2);
+        drag (table, { secondEdge, 5 }, 40);
+        CHECK (table.valueBox (0, 0)->getWidth() == value + 20);
+        CHECK (table.valueBox (0, 1)->getWidth() == value + 20);
+        CHECK (table.columnEdge (2) == secondEdge + 40);
+        CHECK (kept[ui::OscMessagesComponent::valueColumn] == 66 + 20);
+
+        //  Below the head, the same place is a row's: no drag, nothing kept.
+        const auto before = kept;
+        drag (table, { table.columnEdge (0), 30 }, 50);
+        CHECK (table.addressBox (0)->getWidth() == address + 50);
+        CHECK (kept == before);
+
+        //  Not narrower than an address with its arrow.
+        drag (table, { table.columnEdge (0), 5 }, -1000);
+        CHECK (kept[ui::OscMessagesComponent::addressColumn] == 80);
+        drag (table, { table.columnEdge (0), 5 }, 180);
+
+        //  Made again, as the foot makes it each time messages are shown: the widths kept.
+        ui::OscMessagesComponent again (theme, actions);
+        again.setSize (1100, 160);
+        again.show (reading);
+        REQUIRE (again.addressBox (0) != nullptr);
+        CHECK (again.addressBox (0)->getWidth() == address + 50);
+        CHECK (again.valueBox (0, 0)->getWidth() == value + 20);
+
+        //  A double click on an edge: that column its own width again, and forgotten.
+        again.mouseDoubleClick (mouse (again, { again.columnEdge (0), 5 }, 2, false));
+        CHECK (again.addressBox (0)->getWidth() == address);
+        CHECK (kept.count (ui::OscMessagesComponent::addressColumn) == 0u);
+        CHECK (again.valueBox (0, 0)->getWidth() == value + 20);
+    }
+
+    SUBCASE ("the grid window: the parameters' column, and the channels' all alike")
+    {
+        std::vector<std::pair<std::string, std::string>> written;
+
+        ui::OscGridWindow::Actions actions;
+        actions.set = [&written] (const std::string& address, const std::string& text) { written.emplace_back (address, text); };
+        actions.widthOf = widthOf;
+        actions.keepWidth = keepWidth;
+
+        const auto row = [] (const std::string& id, const std::string& address)
+        {
+            model::OscMessageRow made;
+            made.id = id;
+            made.base = id.empty() ? std::string ("/godot/cue/OSC00001/") : "/godot/message/" + id + "/";
+            made.address = address;
+            made.value = "f:1";
+            made.args = { { 'f', "1", true, {} } };
+            return made;
+        };
+
+        model::OscMessagesReading reading;
+        reading.cueId = "OSC00001";
+        reading.rows = { row ({}, "/wfs/input/1/positionX"), row ("MSG00001", "/wfs/input/2/positionX"),
+                         row ("MSG00002", "/wfs/input/3/positionX") };
+
+        ui::OscGridWindow window (theme, actions);
+        window.show (reading, "Snapshot");
+        auto& grid = window.gridViewForTest();
+
+        const auto first = window.cellBoundsForTest (0, 0, 0);
+        REQUIRE (first.getWidth() == 76);
+        const auto head = first.getY() - first.getHeight() / 2;     // the head row, just above the first
+
+        //  The rule after the parameters, thirty to the right.
+        drag (grid, { first.getX(), head }, 30);
+        CHECK (window.cellBoundsForTest (0, 0, 0).getX() == first.getX() + 30);
+        CHECK (kept[ui::OscGridWindow::parameterColumn] == 190 + 30);
+
+        //  The rule after the third channel, thirty: ten more each.
+        drag (grid, { window.cellBoundsForTest (0, 0, 2).getRight(), head }, 30);
+        CHECK (window.cellBoundsForTest (0, 0, 0).getWidth() == 76 + 10);
+        CHECK (window.cellBoundsForTest (0, 0, 2).getWidth() == 76 + 10);
+        CHECK (kept[ui::OscGridWindow::channelColumn] == 76 + 10);
+
+        //  Inside the rows a rule is not taken: a drag there moves nothing.
+        const auto inside = window.cellBoundsForTest (0, 0, 1);
+        drag (grid, { inside.getX(), inside.getCentreY() }, 30);
+        CHECK (window.cellBoundsForTest (0, 0, 0).getWidth() == 76 + 10);
+
+        //  A cell still opens and writes.
+        CHECK (window.typeIntoCellForTest (0, 0, 1, "2"));
+        REQUIRE (written.size() == 1u);
+        CHECK (written[0].first == "/godot/message/MSG00001/value");
+
+        //  A window made again takes the widths kept; a double click on the first rule puts the parameters back.
+        ui::OscGridWindow again (theme, actions);
+        again.show (reading, "Snapshot");
+        CHECK (again.cellBoundsForTest (0, 0, 0).getX() == 190 + 30);
+        CHECK (again.cellBoundsForTest (0, 0, 0).getWidth() == 76 + 10);
+
+        auto& againGrid = again.gridViewForTest();
+        againGrid.mouseDoubleClick (mouse (againGrid, { again.cellBoundsForTest (0, 0, 0).getX(), head }, 2, false));
+        CHECK (again.cellBoundsForTest (0, 0, 0).getX() == 190);
+        CHECK (kept.count (ui::OscGridWindow::parameterColumn) == 0u);
+    }
+}
+
 TEST_CASE ("network monitor: opening listens, shutting stops, and the filters choose the lines")
 {
     /*  The author, 2026-09-30: a network monitor "similar to the one in

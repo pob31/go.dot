@@ -282,6 +282,8 @@ namespace wfg::client::ui
                 editing.createCurve = actions.createCurve;
                 editing.removeObject = actions.removeObject;
                 editing.chooseAddress = actions.chooseAddress;
+                editing.widthOf = actions.widthOf;
+                editing.keepWidth = actions.keepWidth;
                 editing.say = [this] (const juce::String& sentence)
                 {
                     note = sentence;

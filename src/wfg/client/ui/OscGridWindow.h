@@ -31,6 +31,11 @@
 
     It shows whichever cue it was handed, every pass; the window follows the
     pick of an OSC cue while it is open.
+
+    ITS COLUMNS ARE DRAGGED WIDER OR NARROWER (namespace draft §98) by the
+    rules in a table's head: the first widens the parameters' column, any
+    other every channel's alike. A double click on a rule there puts the
+    column back to its own width. Kept on this computer, never in the show.
 */
 
 #include <wfg/client/model/OscGrid.h>
@@ -41,6 +46,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace wfg::client::ui
@@ -55,7 +61,18 @@ namespace wfg::client::ui
 
             /** Esc, which is PANIC in every window of the show. */
             std::function<void()> panic;
+
+            /*  COLUMN WIDTHS KEPT ON THIS COMPUTER (namespace draft §98), in the
+                units the type size scales: the width a column was last dragged
+                to, or nothing; and a width just dragged to keep, nought to
+                forget it. */
+            std::function<std::optional<int> (const std::string& column)> widthOf;
+            std::function<void (const std::string& column, int width)> keepWidth;
         };
+
+        /*  The names its two columns are kept under. */
+        static constexpr const char* parameterColumn = "osc-grid.parameter";
+        static constexpr const char* channelColumn = "osc-grid.channel";
 
         OscGridWindow (const model::Theme& theme, Actions actions);
         ~OscGridWindow() override;
@@ -74,6 +91,7 @@ namespace wfg::client::ui
         //  For a test: the grid as drawn, a cell's place, a cell opened and typed into.
         const model::OscGrid& gridForTest() const;
         juce::Rectangle<int> cellBoundsForTest (std::size_t table, std::size_t row, std::size_t column) const;
+        juce::Component& gridViewForTest() const;
         bool typeIntoCellForTest (std::size_t table, std::size_t row, std::size_t column, const juce::String& text);
         juce::String statusForTest() const;
 

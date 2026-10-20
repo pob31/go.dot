@@ -28,6 +28,11 @@
     is boxes, focus and turning a press into the `node.set` or the command.
     The table is rebuilt when a message, a value or a curve comes or goes, and
     only retyped when a value moves - never under a box somebody is typing in.
+
+    ITS COLUMNS ARE DRAGGED WIDER OR NARROWER (namespace draft §98): the edge
+    after the address in the head, and the edge after each value, which widens
+    every value's box alike. A double click on an edge puts the column back to
+    its own width. Kept on this computer, never in the show.
 */
 
 #include <wfg/client/model/DeviceTree.h>
@@ -38,6 +43,7 @@
 
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -76,7 +82,18 @@ namespace wfg::client::ui
                 and writes the pick to `addressRow`, under `under`. */
             std::function<void (const std::string& addressRow, const std::string& current,
                                 juce::Component& under)> chooseAddress;
+
+            /*  COLUMN WIDTHS KEPT ON THIS COMPUTER (namespace draft §98), in the
+                units the type size scales: the width a column was last dragged
+                to, or nothing; and a width just dragged to keep, nought to
+                forget it. */
+            std::function<std::optional<int> (const std::string& column)> widthOf;
+            std::function<void (const std::string& column, int width)> keepWidth;
         };
+
+        /*  The names its two columns are kept under. */
+        static constexpr const char* addressColumn = "osc.address";
+        static constexpr const char* valueColumn = "osc.value";
 
         OscMessagesComponent (const model::Theme&, Actions);
         ~OscMessagesComponent() override;
@@ -94,6 +111,17 @@ namespace wfg::client::ui
 
         void paint (juce::Graphics&) override;
         void resized() override;
+
+        void mouseMove (const juce::MouseEvent&) override;
+        void mouseExit (const juce::MouseEvent&) override;
+        void mouseDown (const juce::MouseEvent&) override;
+        void mouseDrag (const juce::MouseEvent&) override;
+        void mouseUp (const juce::MouseEvent&) override;
+        void mouseDoubleClick (const juce::MouseEvent&) override;
+
+        /*  For a test: where the edge after the address (0) or after the n-th
+            value (n) is in the head, as the component sees it, or -1. */
+        int columnEdge (std::size_t edge) const;
 
         /*  For a test: the row of a message (its own first) and a value's
             controls in it, or nullptr. */
@@ -129,6 +157,13 @@ namespace wfg::client::ui
         void wire (Row&);
         void wireCell (Row&, Cell&, std::size_t arg);
 
+        /*  The column widths, as drawn: the parts of a value scaled one by one,
+            as the rows take them. */
+        int cellPixels() const;
+        std::size_t widest = 0;  // values in the cue's widest message, as last laid out
+        int edgeNear (int x) const;
+        int headScroll() const;
+
         model::Theme theme;
         Actions actions;
         std::shared_ptr<const model::OscMessagesReading> shown = std::make_shared<const model::OscMessagesReading>();
@@ -147,6 +182,12 @@ namespace wfg::client::ui
         juce::Component content;
         juce::TextButton add { "+ message" };
         std::vector<std::unique_ptr<Row>> rows;
+
+        int addressBase = 0, valueBase = 0;
+
+        /*  A drag on an edge: which (-1 none, 0 the address, n the n-th value),
+            where the hand took it and how wide the column was then. */
+        int dragging = -1, dragFrom = 0, dragStartBase = 0;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (OscMessagesComponent)
     };
