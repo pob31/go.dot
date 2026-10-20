@@ -2318,6 +2318,16 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="compare">
+          <a:documentation>midi: how the event&apos;s velocity or value is held against data (namespace draft 100, AYO; the author, 2026-10-20, of velocity-sensitive pads: You never know exactly what the level will be). equal, the default, that value and no other; atLeast, that value or more - a pad hit at all, with data 1; atMost, that value or less - with data 0 on a note-on, the release many pads send. Not read when data is -1, which is any value.</a:documentation>
+          <choice>
+            <value>equal</value>
+            <value>atLeast</value>
+            <value>atMost</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="data">
           <a:documentation>midi: the velocity or value that must match, or -1 for any. A note-on with velocity nought is a note-off on a great many devices, so matching on it is a thing somebody will need to do deliberately.</a:documentation>
           <data type="integer">

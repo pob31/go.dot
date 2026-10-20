@@ -97,6 +97,7 @@ namespace wfg::cue
         std::string type;
         int number = 0;
         int data = -1;              ///< velocity or value, or -1 for any
+        std::string compare;        ///< "equal", "atLeast" or "atMost": how `data` is matched (§100)
 
         //  clock
         int secondOfDay = -1;       ///< parsed from `at`; -1 when it is unusable

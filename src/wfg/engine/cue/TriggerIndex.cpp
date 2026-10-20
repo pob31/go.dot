@@ -85,6 +85,7 @@ namespace wfg::cue
                     trigger.type = textOf (document, id, "type");
                     trigger.number = numberOf (document, id, "number", 0);
                     trigger.data = numberOf (document, id, "data", -1);
+                    trigger.compare = textOf (document, id, "compare");
                     trigger.secondOfDay = secondOfDayFor (textOf (document, id, "at"));
 
                     out.push_back (std::move (trigger));
@@ -228,8 +229,17 @@ namespace wfg::cue
                 rather than nought: a note-on with velocity nought is a note-off
                 on a great many devices, so matching on it is a thing somebody
                 will one day need to do deliberately. */
-            if (trigger.data >= 0 && trigger.data != event.data)
-                continue;
+            /*  OR AT LEAST, OR AT MOST, IT (namespace draft §100, AYO; the
+                author, 2026-10-20, of velocity-sensitive pads: "You never know
+                exactly what the level will be"). */
+            if (trigger.data >= 0)
+            {
+                const auto matches = trigger.compare == "atLeast" ? event.data >= trigger.data
+                                   : trigger.compare == "atMost"  ? event.data <= trigger.data
+                                                                  : event.data == trigger.data;
+                if (! matches)
+                    continue;
+            }
 
             fired.push_back (trigger.id);
         }

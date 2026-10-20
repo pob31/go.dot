@@ -54,6 +54,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_mic_onGo[] = { "wait", "loop", "clear" };
     inline constexpr std::string_view enum_trigger_kind[] = { "osc", "midi", "clock", "key" };
     inline constexpr std::string_view enum_trigger_type[] = { "noteOn", "noteOff", "programChange", "controlChange" };
+    inline constexpr std::string_view enum_trigger_compare[] = { "equal", "atLeast", "atMost" };
     inline constexpr std::string_view enum_binding_source[] = { "midi", "osc" };
     inline constexpr std::string_view enum_binding_type[] = { "controlChange", "controlChange14", "noteVelocity", "pitchBend", "channelPressure" };
     inline constexpr std::string_view enum_binding_control[] = { "absolute", "relative", "rate" };
@@ -1966,6 +1967,14 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "",
           "midi: the velocity or value that must match, or -1 for any. A note-on with velocity nought is a note-off on a great many devices, so matching on it is a thing somebody will need to do deliberately." },
+        { "trigger", "compare",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "equal",
+          false, 0.0, false, 0.0,
+          enum_trigger_compare, 3,
+          "", 50.0, false, "park",
+          "",
+          "midi: how the event's velocity or value is held against data (namespace draft 100, AYO; the author, 2026-10-20, of velocity-sensitive pads: You never know exactly what the level will be). equal, the default, that value and no other; atLeast, that value or more - a pad hit at all, with data 1; atMost, that value or less - with data 0 on a note-on, the release many pads send. Not read when data is -1, which is any value." },
         { "trigger", "at",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           false, "",

@@ -1055,6 +1055,17 @@ TEST_CASE ("qlab walk: a hotkey, a MIDI trigger and a wall clock become Go.dot's
     anyVelocity.midiTrigger = true;
     anyVelocity.midiTriggerSpec = { 0x91, 2, 60, 0, 0, 0 };
 
+    //  P.U.N.K's pad: a hit above 20, a release below it; and a comparison not read.
+    auto hit = cue ("Memo", "Hit");
+    hit.midiTrigger = true;
+    hit.midiTriggerSpec = { 144, 0, 32, 20, 0, 3 };
+    auto release = cue ("Memo", "Release");
+    release.midiTrigger = true;
+    release.midiTriggerSpec = { 144, 0, 32, 20, 0, 2 };
+    auto unread = cue ("Memo", "Unread");
+    unread.midiTrigger = true;
+    unread.midiTriggerSpec = { 144, 0, 33, 20, 0, 1 };
+
     auto clock = cue ("Memo", "Clock");
     clock.wallClockTrigger = true;
     clock.wallHours = 19;
@@ -1062,7 +1073,7 @@ TEST_CASE ("qlab walk: a hotkey, a MIDI trigger and a wall clock become Go.dot's
     clock.wallSeconds = 5;
     clock.wallDays = 0x7E;
 
-    auto w = workspaceOf ({ keyed, kept, function, heard, anyVelocity, clock });
+    auto w = workspaceOf ({ keyed, kept, function, heard, anyVelocity, clock, hit, release, unread });
     w.lists[0].midiTrigger = true;
 
     const auto plan = walk (w);
@@ -1096,6 +1107,16 @@ TEST_CASE ("qlab walk: a hotkey, a MIDI trigger and a wall clock become Go.dot's
     CHECK (said (plan, "on some days of the week only"));
 
     CHECK (said (plan, "QLab fired the cue list itself by a trigger"));
+
+    REQUIRE (items[6].triggers.size() == 1);
+    CHECK (has (items[6].triggers[0], "data", "21"));
+    CHECK (has (items[6].triggers[0], "compare", "atLeast"));
+    REQUIRE (items[7].triggers.size() == 1);
+    CHECK (has (items[7].triggers[0], "data", "19"));
+    CHECK (has (items[7].triggers[0], "compare", "atMost"));
+    REQUIRE (items[8].triggers.size() == 1);
+    CHECK (has (items[8].triggers[0], "data", "-1"));
+    CHECK (said (plan, "compared its value in a way Go.dot does not read (1)"));
 }
 
 TEST_CASE ("qlab walk: an Eos and QLab machines are OSC devices; each QLab named under its own prefix (§100, AYK)")

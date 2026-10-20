@@ -476,16 +476,42 @@ namespace wfg::import::qlab
 
                         trigger.attributes.push_back ({ "number", std::to_string (std::clamp (m.byte1, 0, 127)) });
 
-                        //  A note on of velocity nought is a note off by MIDI's own rule: nobody waits for one.
-                        const auto any = m.byte2Operator != 0 || (type->second == "noteOn" && m.byte2 == 0);
+                        /*  ITS VALUE AS QLAB COMPARED IT (§100, AYO), the codes read off the
+                            author's shows: 0 equal (Hécube's console button, always one
+                            level), 2 less than and 3 more than (P.U.N.K's pads, a hit
+                            above 20 playing, a release below it fading). A note on of
+                            velocity nought "equal" is a note off by MIDI's own rule:
+                            nobody waits for one. */
+                        const auto value = std::clamp (m.byte2, 0, 127);
+                        std::string data = "-1", compare;
+
+                        if (m.byte2Operator == 0 && ! (type->second == "noteOn" && value == 0))
+                            data = std::to_string (value);
+                        else if (m.byte2Operator == 2 && value > 0)
+                        {
+                            data = std::to_string (value - 1);
+                            compare = "atMost";
+                        }
+                        else if (m.byte2Operator == 3 && value < 127)
+                        {
+                            data = std::to_string (value + 1);
+                            compare = "atLeast";
+                        }
+                        else if (m.byte2Operator != 0)
+                            note (Note::Kind::approximated, cue, "QLab's MIDI trigger compared its value in a way Go.dot does "
+                                  "not read (" + std::to_string (m.byte2Operator) + "): it fires at any value");
 
                         if (type->second != "programChange")
-                            trigger.attributes.push_back ({ "data", any ? std::string ("-1")
-                                                                        : std::to_string (std::clamp (m.byte2, 0, 127)) });
+                        {
+                            trigger.attributes.push_back ({ "data", data });
 
-                        if (m.byte1Operator != 0 || m.byte2Operator != 0)
-                            note (Note::Kind::approximated, cue, "QLab's MIDI trigger compared a byte by more or less than: "
-                                  "Go.dot's matches the number as it is and any value");
+                            if (! compare.empty())
+                                trigger.attributes.push_back ({ "compare", compare });
+                        }
+
+                        if (m.byte1Operator != 0)
+                            note (Note::Kind::approximated, cue, "QLab's MIDI trigger compared its note or controller by more "
+                                  "or less than: Go.dot's matches the number as it is");
 
                         out.push_back (std::move (trigger));
                     }

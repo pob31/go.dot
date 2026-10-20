@@ -150,7 +150,7 @@ const KIND_ORDER = {
             "seed", "dca", "dcaCurve", "dcaOffset"],
   range:   ["name", "in", "out", "loops"],
   trigger: ["kind", "enabled", "address", "value", "port", "channel",
-            "type", "number", "data", "at"],
+            "type", "number", "data", "compare", "at"],
   // A cue's insert and an entry of the show's plugin set (Phase 9a): the row a hand
   // reads first is the one that says which plugin, then the switch, then the values -
   // one sparse row here; the p<n> nodes beneath it are the door a rotary takes.

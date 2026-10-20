@@ -1017,3 +1017,31 @@ TEST_CASE ("key trigger: trigger.create makes one with its key, and trigger.fire
     //  Its key let go: nothing to release on a memo, and no mistake.
     CHECK (rig.tick ("trigger.release", { osc::Value::string (id) }).rejected == 0);
 }
+
+TEST_CASE ("matchMidi: a value may be at least or at most data, for a velocity-sensitive pad (§100)")
+{
+    /*  The author, 2026-10-20: "This is for velocity sensitive pads. You never
+        know exactly what the level will be." P.U.N.K's pads, each note two
+        cues: a hit above 20 plays, a release below it - the note-on of
+        velocity nought many pads send - fades. */
+    TriggerRig rig;
+    const auto hit = rig.add (triggerKind::midi);
+    rig.set (hit, "type", "noteOn");
+    rig.set (hit, "number", "32");
+    rig.set (hit, "data", "21");
+    rig.set (hit, "compare", "atLeast");
+
+    const auto release = rig.add (triggerKind::midi, rig.other);
+    rig.set (release, "type", "noteOn");
+    rig.set (release, "number", "32");
+    rig.set (release, "data", "19");
+    rig.set (release, "compare", "atMost");
+
+    const auto index = rig.index();
+
+    CHECK (matchMidi (*index, { "", "noteOn", 1, 32, 127 }) == std::vector<std::string> { hit });
+    CHECK (matchMidi (*index, { "", "noteOn", 1, 32, 21 }) == std::vector<std::string> { hit });
+    CHECK (matchMidi (*index, { "", "noteOn", 1, 32, 20 }).empty());
+    CHECK (matchMidi (*index, { "", "noteOn", 1, 32, 19 }) == std::vector<std::string> { release });
+    CHECK (matchMidi (*index, { "", "noteOn", 1, 32, 0 }) == std::vector<std::string> { release });
+}

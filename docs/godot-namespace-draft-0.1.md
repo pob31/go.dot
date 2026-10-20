@@ -33112,9 +33112,8 @@ read as "command 1". An Eos or a QLab patch keeps the message it sends written o
   Control+A Z E R T Y U I keeps E R U I and loses five.
 - **AYE** *(proposed)* **A MIDI trigger on any input**: QLab's status as note on, note off, control change
   or program change (any other is said), its channel (nought any), its first byte the number, its second
-  the value - QLab's comparison 0 read as "equal", any other as "any value" and said (the order of QLab's
-  comparisons is not in its documents; a probe workspace would settle it); a note on of velocity nought
-  is any velocity, since by MIDI's rule it is a note off.
+  the value as QLab compared it (AYO); a note on of velocity nought "equal" is any velocity, since by
+  MIDI's rule it is a note off. *Amended the same day:* the comparison was read as "equal" or "any".
 - **AYF** *(proposed)* **A wall clock a clock trigger** at its time of day; one that fired on some days
   only fires every day here, and is said.
 - **AYG** *(proposed)* **An Eos or a QLab machine an OSC device at the patch's first destination** - QLab 5
@@ -33144,6 +33143,16 @@ read as "command 1". An Eos or a QLab patch keeps the message it sends written o
   `media.cleanCache`) queues again every file the analyser was asked for that has no length.
 - **AYM** *(proposed)* **A cart a cart**: a QLab cart (group mode 5) is a Go.dot cart, `list/kind` cart,
   with no standby; its grid is not imported (said).
+- **AYO** **A MIDI trigger's value may be at least or at most** (the author, 2026-10-20, of the
+  comparison QLab keeps beside a trigger's value: *"This is for velocity sensitive pads. You never know
+  exactly what the level will be."*; offered as "Add at least / at most", recommended over importing every
+  comparison as any): `trigger/compare`, `equal` (the default), `atLeast`, `atMost`, read against `data`
+  when it is not -1 (`matchMidi`); the page lists it. QLab's codes, read off his shows: 0 equal (Hécube's
+  main list, fired by a console button "at a set level ... always the same"), 2 less than and 3 more than
+  (P.U.N.K's pads, each note two cues at velocity 20: the hit above it plays a sound, the release below it -
+  the note on of velocity nought the pad sends, which Go.dot hears as a note on - fades it). So 3 at 20 is
+  `atLeast` 21 and 2 at 20 `atMost` 19; any other code is any value, said. A comparison on the first byte
+  is said; the number is matched as it is.
 - **AYN** **A vamp may fire the next cue as its loop completes** (the author, 2026-10-20, of La
   Clairière, built that way in QLab: *"the vamp should have the following cue triggered when the loop
   completes as an option"*; sample-exact, his pick, offered as "Sample-exact", recommended over the
@@ -33195,6 +33204,7 @@ read, is learned` (MediaCueTests); `problems: every cue of the show whose file i
 ends, and standby moves past it`, `vamp: without thenNext the cue after waits for GO; a Doh! of the vamp's
 GO takes back both`, `vamp: a group after the vamp - La Clairière's shape - starts its first sound on the
 pass's last sample too` (RangeTests); `qlab walk: a devamp that fires the next cue as its loop ends is an
-advance with thenNext` (QlabWalkTests). Owed: the author's words for the report's and the window's
+advance with thenNext` (QlabWalkTests); `matchMidi: a value may be at least or at most data, for a
+velocity-sensitive pad` (TriggerTests), and the walk's triggers case with P.U.N.K's pad. Owed: the author's words for the report's and the window's
 sentences (AYD-AYJ, and *then GO next*), and his try of the window's folder, of File > Find missing files
 in a folder... and of La Clairière's vamps.
