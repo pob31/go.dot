@@ -12112,6 +12112,43 @@ TEST_CASE ("client: a picture's frame is where the projector draws it, and a dra
     CHECK (model::nudged (1.0, -1, true) == doctest::Approx (0.0));
 }
 
+TEST_CASE ("client: an arrow on a number steps on its grid, and what a hand sent is held until the document has it (2026-10-20)")
+{
+    //  A step, ten with Shift, on the step's grid: tenths do not drift.
+    CHECK (model::stepped (100.0, 0.1, 1, false, 0.0, 1000.0) == doctest::Approx (100.1));
+    CHECK (model::stepped (100.0, 1.0, 1, true, 0.0, 400.0) == doctest::Approx (110.0));
+    CHECK (model::stepped (1.0, 0.01, -1, false, 0.1, 10.0) == doctest::Approx (0.99));
+    CHECK (model::stepped (0.04, 0.1, 1, false, -10.0, 10.0) == doctest::Approx (0.1));
+
+    auto value = 0.0;
+    for (int press = 0; press < 30; ++press)
+        value = model::stepped (value, 0.1, 1, false, -1000.0, 1000.0);
+    CHECK (value == doctest::Approx (3.0).epsilon (1.0e-12));
+
+    //  Held to its range at both ends.
+    CHECK (model::stepped (999.95, 0.1, 1, true, 0.0, 1000.0) == doctest::Approx (1000.0));
+    CHECK (model::stepped (0.0, 1.0, -1, false, 0.0, 400.0) == doctest::Approx (0.0));
+
+    //  Held until the document has it; then the document's again.
+    model::HeldNumbers held;
+    CHECK (held.valueOf ("scale", 100.0, 0.0) == doctest::Approx (100.0));
+    held.send ("scale", 100.3, 0.0);
+    CHECK (held.valueOf ("scale", 100.1, 50.0) == doctest::Approx (100.3));
+    CHECK (held.valueOf ("offsetX", 2.0, 50.0) == doctest::Approx (2.0));
+    CHECK (held.valueOf ("scale", 100.3, 60.0) == doctest::Approx (100.3));
+    CHECK (held.valueOf ("scale", 120.0, 70.0) == doctest::Approx (120.0));
+
+    //  Given up after a while: an edit from elsewhere wins.
+    held.send ("scale", 100.3, 0.0);
+    CHECK (held.valueOf ("scale", 90.0, model::HeldNumbers::patienceMs + 1.0) == doctest::Approx (90.0));
+    CHECK (held.valueOf ("scale", 95.0, model::HeldNumbers::patienceMs + 2.0) == doctest::Approx (95.0));
+
+    //  Cleared, for another cue.
+    held.send ("scale", 100.3, 0.0);
+    held.clear();
+    CHECK (held.valueOf ("scale", 90.0, 1.0) == doctest::Approx (90.0));
+}
+
 TEST_CASE ("client: a mask's outline and a picture's curves are edited as points, written as their rows are (§47, AAG)")
 {
     //  A triangle; a corner added on the edge nearest the press, moved, taken away.

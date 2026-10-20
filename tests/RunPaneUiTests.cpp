@@ -4033,6 +4033,206 @@ TEST_CASE ("picture panel: on a fade, only what a fade moves, each ticked or not
     MESSAGE ("wrote " << file.getFullPathName().toStdString());
 }
 
+namespace
+{
+    /*  THE SLIDER ON THE SAME LINE AS ITS WORDS, the way an eye finds it. */
+    juce::Slider* sliderBeside (juce::Component& panel, const juce::String& words)
+    {
+        const auto* label = childSaying<juce::Label> (panel, words);
+
+        if (label == nullptr)
+            return nullptr;
+
+        for (auto* child : panel.getChildren())
+            if (auto* slider = dynamic_cast<juce::Slider*> (child))
+                if (slider->getX() >= label->getRight() && slider->getBounds().contains (slider->getX(), label->getBounds().getCentreY()))
+                    return slider;
+
+        return nullptr;
+    }
+
+    std::vector<std::string> valuesSentTo (const std::vector<std::pair<std::string, std::string>>& sent,
+                                           const std::string& address)
+    {
+        std::vector<std::string> out;
+
+        for (const auto& [to, text] : sent)
+            if (to == address)
+                out.push_back (text);
+
+        return out;
+    }
+}
+
+TEST_CASE ("picture panel: the arrow keys step the number clicked, a step that suits it, from what the hand last sent (2026-10-20)")
+{
+    std::vector<std::pair<std::string, std::string>> sent;
+
+    ui::PicturePanelComponent::Actions actions;
+    actions.set = [&sent] (const std::string& address, const std::string& text) { sent.emplace_back (address, text); };
+
+    ui::PicturePanelComponent panel (model::Theme {}, actions);
+    panel.setSize (960, 230);
+    panel.show (keyedPicture ("none"), nullptr);
+
+    const juce::KeyPress right { juce::KeyPress::rightKey };
+    const juce::KeyPress left { juce::KeyPress::leftKey };
+    const juce::KeyPress shiftRight { juce::KeyPress::rightKey, juce::ModifierKeys::shiftModifier, 0 };
+
+    //  THE SIZE CLICKED, → three times before the document answers: a tenth each, never the same twice.
+    auto* size = sliderBeside (panel, "size");
+    REQUIRE (size != nullptr);
+    CHECK (size->getWantsKeyboardFocus());
+
+    for (int press = 0; press < 3; ++press)
+        CHECK (size->keyPressed (right));
+
+    CHECK (valuesSentTo (sent, "/godot/cue/CUE00001/scale") == std::vector<std::string> { "100.1", "100.2", "100.3" });
+    CHECK (valuesSentTo (sent, "/godot/cue/CUE00001/offsetX").empty());
+
+    //  The document catching up with the first: the slider is not pulled back.
+    auto stale = keyedPicture ("none");
+    stale.picture.scale = 100.1;
+    panel.show (stale, nullptr);
+    CHECK (size->getValue() == doctest::Approx (100.3));
+
+    //  CONTRAST: a percent a step, ten with Shift; GAMMA a hundredth.
+    sent.clear();
+    auto* contrast = sliderBeside (panel, "contrast");
+    REQUIRE (contrast != nullptr);
+    CHECK (contrast->keyPressed (shiftRight));
+    CHECK (contrast->keyPressed (left));
+    CHECK (valuesSentTo (sent, "/godot/cue/CUE00001/contrast") == std::vector<std::string> { "110", "109" });
+
+    auto* gamma = sliderBeside (panel, "gamma");
+    REQUIRE (gamma != nullptr);
+    CHECK (gamma->keyPressed (right));
+    CHECK (valuesSentTo (sent, "/godot/cue/CUE00001/gamma") == std::vector<std::string> { "1.01" });
+
+    //  ANY OTHER KEY goes on to the window: Space is GO there, Esc a stop.
+    CHECK_FALSE (contrast->keyPressed (juce::KeyPress (juce::KeyPress::spaceKey)));
+    CHECK_FALSE (contrast->keyPressed (juce::KeyPress (juce::KeyPress::escapeKey)));
+
+    //  THE CANVAS CLICKED: the arrows move the picture, a tenth of a percent, steadily.
+    sent.clear();
+    auto* canvas = panel.getChildComponent (0);
+    REQUIRE (canvas != nullptr);
+    CHECK (canvas->getWantsKeyboardFocus());
+
+    for (int press = 0; press < 3; ++press)
+        CHECK (canvas->keyPressed (right));
+
+    CHECK (valuesSentTo (sent, "/godot/cue/CUE00001/offsetX") == std::vector<std::string> { "0.1", "0.2", "0.3" });
+
+    auto* across = sliderBeside (panel, "across");
+    REQUIRE (across != nullptr);
+    CHECK (across->getValue() == doctest::Approx (0.3));
+
+    //  And the document arriving there lets the hold go: what it says next is shown.
+    auto arrived = keyedPicture ("none");
+    arrived.picture.offsetX = 0.3;
+    panel.show (arrived, nullptr);
+    arrived.picture.offsetX = 5.0;
+    panel.show (arrived, nullptr);
+    CHECK (across->getValue() == doctest::Approx (5.0));
+}
+
+TEST_CASE ("picture panel: on a fade an arrow steps only what the fade moves; under the lock, nothing (2026-10-20)")
+{
+    std::vector<std::pair<std::string, std::string>> sent;
+
+    ui::PicturePanelComponent::Actions actions;
+    actions.set = [&sent] (const std::string& address, const std::string& text) { sent.emplace_back (address, text); };
+
+    ui::PicturePanelComponent panel (model::Theme {}, actions);
+    panel.setSize (960, 230);
+
+    //  The grade's contrast, found where a picture shows it: a fade hides it.
+    panel.show (keyedPicture ("none"), nullptr);
+    auto* contrast = sliderBeside (panel, "contrast");
+    REQUIRE (contrast != nullptr);
+
+    auto reading = keyedPicture ("none");
+    reading.subject = { model::Subject::Kind::picture, "FADE0001" };
+    reading.cueKind = "fade";
+    reading.picture.source = "movie";
+    reading.picture.fadeId = "FADE0001";
+    reading.picture.fadeMoves = { { "scale", 150.0 } };
+    reading.picture.scale = 150.0;
+    panel.show (reading, nullptr);
+
+    const juce::KeyPress right { juce::KeyPress::rightKey };
+
+    auto* size = sliderBeside (panel, "size");
+    REQUIRE (size != nullptr);
+    CHECK (size->keyPressed (right));
+    REQUIRE (sent.size() == 1u);
+    CHECK (sent.back() == std::pair<std::string, std::string> { "/godot/cue/FADE0001/moves/video/scale", "150.1" });
+
+    //  The grade is the cue's, not the fade's: a step there sends nothing.
+    contrast->keyPressed (right);
+    CHECK (sent.size() == 1u);
+
+    //  Under the lock: nothing, and the arrows go on to the window.
+    auto locked = keyedPicture ("none");
+    locked.picture.locked = true;
+    panel.show (locked, nullptr);
+    CHECK_FALSE (size->keyPressed (right));
+    CHECK (sent.size() == 1u);
+}
+
+TEST_CASE ("picture panel: a drag moves the picture as far as the hand, the document catching up on the way (2026-10-20)")
+{
+    std::vector<std::pair<std::string, std::string>> sent;
+
+    ui::PicturePanelComponent::Actions actions;
+    actions.set = [&sent] (const std::string& address, const std::string& text) { sent.emplace_back (address, text); };
+
+    ui::PicturePanelComponent panel (model::Theme {}, actions);
+    panel.setSize (960, 230);
+
+    auto reading = keyedPicture ("none");
+    reading.picture.pictureWidth = 1920.0;
+    reading.picture.pictureHeight = 1080.0;
+    panel.show (reading, nullptr);
+
+    auto* canvas = panel.getChildComponent (0);
+    REQUIRE (canvas != nullptr);
+
+    //  The canvas as the view draws it: 16:9 inside the view less 24 each side.
+    const auto area = canvas->getLocalBounds().toFloat().reduced (24.0f);
+    auto width = area.getWidth();
+    if (width / (16.0f / 9.0f) > area.getHeight())
+        width = area.getHeight() * 16.0f / 9.0f;
+
+    const auto middle = area.getCentre();
+    const auto source = juce::Desktop::getInstance().getMainMouseSource();
+    const juce::ModifierKeys button { juce::ModifierKeys::leftButtonModifier };
+
+    const auto mouse = [&] (juce::Point<float> at, bool dragged)
+    {
+        const auto now = juce::Time::getCurrentTime();
+        return juce::MouseEvent (source, at, button, juce::MouseInputSource::defaultPressure,
+                                 0.0f, 0.0f, 0.0f, 0.0f, canvas, canvas, now, middle, now, 1, dragged);
+    };
+
+    //  Half a tenth of the canvas, the document answering, then the other half: ten percent, not fifteen.
+    canvas->mouseDown (mouse (middle, false));
+    canvas->mouseDrag (mouse (middle.translated (width * 0.05f, 0.0f), true));
+
+    auto halfway = reading;
+    halfway.picture.offsetX = 5.0;
+    panel.show (halfway, nullptr);
+
+    canvas->mouseDrag (mouse (middle.translated (width * 0.1f, 0.0f), true));
+    canvas->mouseUp (mouse (middle.translated (width * 0.1f, 0.0f), true));
+
+    const auto across = valuesSentTo (sent, "/godot/cue/CUE00001/offsetX");
+    REQUIRE (across.size() == 2u);
+    CHECK (juce::String (across.front()).getDoubleValue() == doctest::Approx (5.0).epsilon (0.01));
+    CHECK (juce::String (across.back()).getDoubleValue() == doctest::Approx (10.0).epsilon (0.01));
+}
+
 TEST_CASE ("foot panel: the inspector's panel buttons in its head, lit on the panel open, a press asking for that panel (§94)")
 {
     std::vector<std::pair<std::string, std::string>> asked;

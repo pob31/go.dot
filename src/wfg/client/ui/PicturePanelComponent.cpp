@@ -105,6 +105,13 @@ namespace wfg::client::ui
             g.setColour (Look::colour (owner.theme, "rule"));
             g.drawRect (canvas, 1.0f);
 
+            //  Holding the arrow keys: an outline round the whole view, a shape and not a colour alone (§4.8).
+            if (hasKeyboardFocus (false))
+            {
+                g.setColour (Look::colour (owner.theme, "accent"));
+                g.drawRect (getLocalBounds().toFloat().reduced (1.0f), 1.0f);
+            }
+
             if (r.cueId.empty())
                 return;
 
@@ -168,6 +175,7 @@ namespace wfg::client::ui
                 return;
 
             hand = r;
+            start = r;
             grabbed = Grab::none;
             from = toCanvas (event.position);
 
@@ -222,7 +230,9 @@ namespace wfg::client::ui
             if (grabbed == Grab::none)
                 return;
 
-            const auto& r = owner.reading;
+            /*  FROM WHERE THE HAND TOOK IT: the document catching up mid-drag
+                must not count the travel so far a second time. */
+            const auto& r = start;
             const auto to = toCanvas (event.position);
 
             switch (grabbed)
@@ -232,6 +242,8 @@ namespace wfg::client::ui
                     const auto [x, y] = model::offsetsMoved (r, r.offsetX, r.offsetY, from, to);
                     hand.offsetX = x;
                     hand.offsetY = y;
+                    owner.hold ("offsetX", x);
+                    owner.hold ("offsetY", y);
 
                     owner.writeMany ({ { owner.addressOf ("offsetX"), numberText (x) },
                                        { owner.addressOf ("offsetY"), numberText (y) } });
@@ -240,11 +252,13 @@ namespace wfg::client::ui
 
                 case Grab::corner:
                     hand.scale = model::scaleDragged (r, r.scale, from, to);
+                    owner.hold ("scale", hand.scale);
                     owner.write ("scale", numberText (hand.scale));
                     break;
 
                 case Grab::turn:
                     hand.rotation = model::rotationDragged (r, r.rotation, from, to, event.mods.isShiftDown());
+                    owner.hold ("rotation", hand.rotation);
                     owner.write ("rotation", numberText (hand.rotation));
                     break;
 
@@ -297,23 +311,44 @@ namespace wfg::client::ui
             if (r.cueId.empty() || r.locked || r.masked())
                 return false;
 
-            const auto coarse = key.getModifiers().isShiftDown();
+            const auto mods = key.getModifiers();
             const auto code = key.getKeyCode();
+
+            if (mods.isCommandDown() || mods.isCtrlDown() || mods.isAltDown())
+                return false;
+
+            /*  FROM WHAT THE HAND LAST SENT (2026-10-20), not from the document
+                still catching up: a key held down moves steadily. */
+            const auto nudge = [this, &mods] (const char* row, PicturePanelComponent::NumberSlider& slider,
+                                              double documentValue, int direction)
+            {
+                if (! owner.writable (row))
+                    return;
+
+                const auto next = model::nudged (owner.shown (row, documentValue), direction, mods.isShiftDown());
+                owner.hold (row, next);
+                slider.setValue (next, juce::dontSendNotification);
+                owner.write (row, numberText (next));
+            };
 
             if (code == juce::KeyPress::leftKey || code == juce::KeyPress::rightKey)
             {
-                owner.write ("offsetX", numberText (model::nudged (r.offsetX, code == juce::KeyPress::leftKey ? -1 : 1, coarse)));
+                nudge ("offsetX", owner.offsetX, r.offsetX, code == juce::KeyPress::leftKey ? -1 : 1);
                 return true;
             }
 
             if (code == juce::KeyPress::upKey || code == juce::KeyPress::downKey)
             {
-                owner.write ("offsetY", numberText (model::nudged (r.offsetY, code == juce::KeyPress::upKey ? 1 : -1, coarse)));
+                nudge ("offsetY", owner.offsetY, r.offsetY, code == juce::KeyPress::upKey ? 1 : -1);
                 return true;
             }
 
             return false;
         }
+
+        //  Which of the canvas and the numbers holds the arrow keys is drawn (2026-10-20).
+        void focusGained (FocusChangeType) override { repaint(); }
+        void focusLost (FocusChangeType) override { repaint(); }
 
         void readingChanged()
         {
@@ -327,7 +362,7 @@ namespace wfg::client::ui
         enum class Grab { none, move, corner, turn, maskPoint };
 
         PicturePanelComponent& owner;
-        model::PictureReading hand;
+        model::PictureReading hand, start;
         Grab grabbed = Grab::none;
         model::CanvasPoint from;
         int maskIndex = -1;
@@ -670,15 +705,15 @@ namespace wfg::client::ui
         flipV.onClick = [this] { write ("flipV", flipV.getToggleState() ? "true" : "false"); };
         invert.onClick = [this] { write ("invert", invert.getToggleState() ? "true" : "false"); };
 
-        build (scale, scaleLabel, "size", "scale", 0.0, 1000.0, 100.0, false, " %", 1);
-        build (offsetX, offsetXLabel, "across", "offsetX", -1000.0, 1000.0, 0.0, true, " %", 1);
-        build (offsetY, offsetYLabel, "up", "offsetY", -1000.0, 1000.0, 0.0, true, " %", 1);
-        build (rotation, rotationLabel, "turn", "rotation", -3600.0, 3600.0, 0.0, true, " deg", 1);
-        build (contrast, contrastLabel, "contrast", "contrast", 0.0, 400.0, 100.0, false, " %", 0);
-        build (saturation, saturationLabel, "saturation", "saturation", 0.0, 400.0, 100.0, false, " %", 0);
-        build (gamma, gammaLabel, "gamma", "gamma", 0.1, 10.0, 1.0, false, "", 2);
-        build (hue, hueLabel, "hue", "hue", -180.0, 180.0, 0.0, true, " deg", 0);
-        build (feather, featherLabel, "feather", "feather", 0.0, 400.0, 20.0, false, " px", 0);
+        build (scale, scaleLabel, "size", "scale", 0.0, 1000.0, 100.0, false, " %", 1, 0.1);
+        build (offsetX, offsetXLabel, "across", "offsetX", -1000.0, 1000.0, 0.0, true, " %", 1, 0.1);
+        build (offsetY, offsetYLabel, "up", "offsetY", -1000.0, 1000.0, 0.0, true, " %", 1, 0.1);
+        build (rotation, rotationLabel, "turn", "rotation", -3600.0, 3600.0, 0.0, true, " deg", 1, 0.1);
+        build (contrast, contrastLabel, "contrast", "contrast", 0.0, 400.0, 100.0, false, " %", 0, 1.0);
+        build (saturation, saturationLabel, "saturation", "saturation", 0.0, 400.0, 100.0, false, " %", 0, 1.0);
+        build (gamma, gammaLabel, "gamma", "gamma", 0.1, 10.0, 1.0, false, "", 2, 0.01);
+        build (hue, hueLabel, "hue", "hue", -180.0, 180.0, 0.0, true, " deg", 0, 1.0);
+        build (feather, featherLabel, "feather", "feather", 0.0, 400.0, 20.0, false, " px", 0, 1.0);
 
         for (int at = 0; at < 4; ++at)
         {
@@ -742,9 +777,9 @@ namespace wfg::client::ui
         };
         addAndMakeVisible (keyMode);
 
-        build (keyLevel, keyLevelLabel, "cut at", "keyLevel", 0.0, 100.0, 50.0, false, " %", 0);
-        build (keySoftness, keySoftnessLabel, "softness", "keySoftness", 0.0, 100.0, 50.0, false, " %", 0);
-        build (keySpill, keySpillLabel, "spill", "keySpill", 0.0, 100.0, 50.0, false, " %", 0);
+        build (keyLevel, keyLevelLabel, "cut at", "keyLevel", 0.0, 100.0, 50.0, false, " %", 0, 1.0);
+        build (keySoftness, keySoftnessLabel, "softness", "keySoftness", 0.0, 100.0, 50.0, false, " %", 0, 1.0);
+        build (keySpill, keySpillLabel, "spill", "keySpill", 0.0, 100.0, 50.0, false, " %", 0, 1.0);
         keyLevel.setTooltip ("Where the cut falls: the brightness, or how far from the screen's colour, at which a point is half solid");
         keySoftness.setTooltip ("How gradual the cut is: nought a hard edge");
         keySpill.setTooltip ("How much of the screen's colour is taken off what is kept - the green on hair and shoulders");
@@ -858,11 +893,11 @@ namespace wfg::client::ui
         };
         addAndMakeVisible (alignVMenu);
 
-        build (fontSize, fontSizeLabel, "letters", "fontSize", 0.1, 100.0, 8.0, false, " %", 1);
-        build (lineSpacing, lineSpacingLabel, "spacing", "lineSpacing", 50.0, 400.0, 100.0, false, " %", 0);
-        build (wrap, wrapLabel, "wrap at", "wrap", 0.0, 100.0, 50.0, false, " %", 0);
-        build (outlineWidth, outlineLabel, "outline", "outline", 0.0, 200.0, 8.0, false, " px", 1);
-        build (outlineBlur, outlineBlurLabel, "glow", "outlineBlur", 0.0, 200.0, 20.0, false, " px", 1);
+        build (fontSize, fontSizeLabel, "letters", "fontSize", 0.1, 100.0, 8.0, false, " %", 1, 0.1);
+        build (lineSpacing, lineSpacingLabel, "spacing", "lineSpacing", 50.0, 400.0, 100.0, false, " %", 0, 1.0);
+        build (wrap, wrapLabel, "wrap at", "wrap", 0.0, 100.0, 50.0, false, " %", 0, 1.0);
+        build (outlineWidth, outlineLabel, "outline", "outline", 0.0, 200.0, 8.0, false, " px", 1, 0.1);
+        build (outlineBlur, outlineBlurLabel, "glow", "outlineBlur", 0.0, 200.0, 20.0, false, " px", 1, 0.1);
         fontSize.setTooltip ("How tall the letters are, in % of the canvas's height");
         wrap.setTooltip ("How wide the box the words wrap in is, in % of the canvas's width; nought never wraps");
         outlineBlur.setTooltip ("How far the outline is blurred into a glow");
@@ -878,7 +913,7 @@ namespace wfg::client::ui
         addAndMakeVisible (outlineSwatch);
 
         /*  A BLUR CUE'S AMOUNT AND ITS OUTLINE OR NONE (61, AKN). */
-        build (blurAmount, blurAmountLabel, "blur", "blur", 0.0, 500.0, 40.0, false, " px", 0);
+        build (blurAmount, blurAmountLabel, "blur", "blur", 0.0, 500.0, 40.0, false, " px", 0, 1.0);
         blurAmount.setTooltip ("How far it blurs, a radius in canvas pixels; a fade moves it");
 
         for (auto* button : { &wholeCanvas, &aShape })
@@ -909,8 +944,8 @@ namespace wfg::client::ui
 
         /*  ON A FADE (namespace draft §94): how solid and a movie's speed, and
             the tick beside each value saying whether the fade moves it. */
-        build (opacity, opacityLabel, "opacity", "opacity", 0.0, 100.0, 50.0, false, " %", 0);
-        build (speed, speedLabel, "speed", "rate", -20.0, 20.0, 1.0, true, "", 3);
+        build (opacity, opacityLabel, "opacity", "opacity", 0.0, 100.0, 50.0, false, " %", 0, 1.0);
+        build (speed, speedLabel, "speed", "rate", -20.0, 20.0, 1.0, true, "", 3, 0.01);
         opacity.setTooltip ("How solid the fade leaves it, in %");
         speed.setTooltip ("The movie's speed the fade takes it to: one is the file's own");
 
@@ -930,16 +965,45 @@ namespace wfg::client::ui
 
     PicturePanelComponent::~PicturePanelComponent() = default;
 
-    void PicturePanelComponent::build (juce::Slider& slider, juce::Label& label, const char* words, const char* row,
+    void PicturePanelComponent::build (NumberSlider& slider, juce::Label& label, const char* words, const char* row,
                                        double low, double high, double mid, bool symmetric, const char* suffix,
-                                       int decimals)
+                                       int decimals, double step)
     {
         slider.setSliderStyle (juce::Slider::LinearHorizontal);
         slider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 80, 22);
         slider.setRange (low, high, 0.0);
         slider.setNumDecimalPlacesToDisplay (decimals);
         slider.setTextValueSuffix (suffix);
-        slider.setWantsKeyboardFocus (false);
+
+        /*  THE ARROW KEYS STEP THE NUMBER CLICKED (2026-10-20): from what the
+            hand last sent, not from the document still catching up, so a key
+            held down climbs steadily. */
+        slider.setWantsKeyboardFocus (true);
+        slider.onFocusChange = [this] { repaint(); };
+        slider.onArrow = [this, &slider, row, step, low, high] (const juce::KeyPress& key)
+        {
+            const auto code = key.getKeyCode();
+            const auto up = code == juce::KeyPress::rightKey || code == juce::KeyPress::upKey;
+            const auto down = code == juce::KeyPress::leftKey || code == juce::KeyPress::downKey;
+            const auto mods = key.getModifiers();
+
+            if (! (up || down) || mods.isCommandDown() || mods.isCtrlDown() || mods.isAltDown())
+                return false;
+
+            //  No cue, or under the lock: the arrows go on to the window, as from the canvas.
+            if (reading.cueId.empty() || reading.locked)
+                return false;
+
+            if (! writable (row))
+                return true;
+
+            const auto next = model::stepped (slider.getValue(), step, up ? 1 : -1, mods.isShiftDown(), low, high);
+            hold (row, next);
+            slider.setValue (next, juce::dontSendNotification);
+            write (row, numberText (next));
+            return true;
+        };
+        numbers.emplace_back (&slider, &label);
 
         //  FINE WHERE IT MATTERS: about the middle for an offset and a turn, low down for a size.
         if (symmetric)
@@ -949,7 +1013,13 @@ namespace wfg::client::ui
 
         slider.setDoubleClickReturnValue (true, mid);
         //  A hand's change only: the document's own is set without a notification.
-        slider.onValueChange = [this, &slider, row] { write (row, numberText (slider.getValue())); };
+        slider.onValueChange = [this, &slider, row]
+        {
+            if (writable (row))
+                hold (row, slider.getValue());
+
+            write (row, numberText (slider.getValue()));
+        };
 
         label.setText (words, juce::dontSendNotification);
         label.setJustificationType (juce::Justification::centredLeft);
@@ -965,22 +1035,36 @@ namespace wfg::client::ui
         return "/godot/cue/" + reading.cueId + "/" + row;
     }
 
-    void PicturePanelComponent::write (const char* row, const std::string& text)
+    bool PicturePanelComponent::writable (const char* row) const
     {
         if (reading.cueId.empty() || reading.locked || actions.set == nullptr)
-            return;
+            return false;
 
         /*  ON A FADE only what it moves, through its door: a number sets the
             pair, and so ticks it (§94). */
         if (reading.onFade())
         {
             const auto movable = reading.fadeRows();
-
-            if (std::find (movable.begin(), movable.end(), std::string (row)) == movable.end())
-                return;
+            return std::find (movable.begin(), movable.end(), std::string (row)) != movable.end();
         }
 
-        actions.set (addressOf (row), text);
+        return true;
+    }
+
+    void PicturePanelComponent::write (const char* row, const std::string& text)
+    {
+        if (writable (row))
+            actions.set (addressOf (row), text);
+    }
+
+    void PicturePanelComponent::hold (const char* row, double value)
+    {
+        heldNumbers.send (row, value, juce::Time::getMillisecondCounterHiRes());
+    }
+
+    double PicturePanelComponent::shown (const char* row, double documentValue)
+    {
+        return heldNumbers.valueOf (row, documentValue, juce::Time::getMillisecondCounterHiRes());
     }
 
     void PicturePanelComponent::writeMany (const std::vector<std::pair<std::string, std::string>>& rows)
@@ -1256,6 +1340,13 @@ namespace wfg::client::ui
                 next.pictureHeight = static_cast<double> (found->second.height);
             }
 
+        //  Another cue, or the same through another fade: nothing the hand sent is held for it.
+        if (const auto whose = next.cueId + "/" + next.fadeId; whose != heldFor)
+        {
+            heldNumbers.clear();
+            heldFor = whose;
+        }
+
         reading = std::move (next);
         refresh();
         view->readingChanged();
@@ -1272,32 +1363,35 @@ namespace wfg::client::ui
     {
         /*  A NUMBER UNDER A HAND IS THE HAND'S: the document's catches up
             behind it, and is not pushed back into a slider being dragged. */
-        const auto setValue = [] (juce::Slider& slider, double value)
+        const auto setValue = [this] (juce::Slider& slider, const char* row, double value)
         {
+            //  And a number the hand has sent is the hand's until the document has it.
+            value = shown (row, value);
+
             if (! slider.isMouseButtonDown() && ! juce::exactlyEqual (slider.getValue(), value))
                 slider.setValue (value, juce::dontSendNotification);
         };
 
-        setValue (scale, reading.scale);
-        setValue (offsetX, reading.offsetX);
-        setValue (offsetY, reading.offsetY);
-        setValue (rotation, reading.rotation);
-        setValue (contrast, reading.contrast);
-        setValue (saturation, reading.saturation);
-        setValue (gamma, reading.gamma);
-        setValue (hue, reading.hue);
-        setValue (feather, reading.feather);
-        setValue (keyLevel, reading.keyLevel);
-        setValue (keySoftness, reading.keySoftness);
-        setValue (keySpill, reading.keySpill);
-        setValue (fontSize, reading.fontSize);
-        setValue (lineSpacing, reading.lineSpacing);
-        setValue (wrap, reading.wrap);
-        setValue (outlineWidth, reading.outline);
-        setValue (outlineBlur, reading.outlineBlur);
-        setValue (blurAmount, reading.blur);
-        setValue (opacity, reading.opacity);
-        setValue (speed, reading.rate);
+        setValue (scale, "scale", reading.scale);
+        setValue (offsetX, "offsetX", reading.offsetX);
+        setValue (offsetY, "offsetY", reading.offsetY);
+        setValue (rotation, "rotation", reading.rotation);
+        setValue (contrast, "contrast", reading.contrast);
+        setValue (saturation, "saturation", reading.saturation);
+        setValue (gamma, "gamma", reading.gamma);
+        setValue (hue, "hue", reading.hue);
+        setValue (feather, "feather", reading.feather);
+        setValue (keyLevel, "keyLevel", reading.keyLevel);
+        setValue (keySoftness, "keySoftness", reading.keySoftness);
+        setValue (keySpill, "keySpill", reading.keySpill);
+        setValue (fontSize, "fontSize", reading.fontSize);
+        setValue (lineSpacing, "lineSpacing", reading.lineSpacing);
+        setValue (wrap, "wrap", reading.wrap);
+        setValue (outlineWidth, "outline", reading.outline);
+        setValue (outlineBlur, "outlineBlur", reading.outlineBlur);
+        setValue (blurAmount, "blur", reading.blur);
+        setValue (opacity, "opacity", reading.opacity);
+        setValue (speed, "rate", reading.rate);
         wholeCanvas.setToggleState (reading.shape.size() < 3, juce::dontSendNotification);
         aShape.setToggleState (reading.shape.size() >= 3, juce::dontSendNotification);
 
@@ -1824,5 +1918,17 @@ namespace wfg::client::ui
         g.fillAll (Look::colour (theme, "panel-runs"));
         g.setColour (Look::colour (theme, "rule"));
         g.drawVerticalLine (controlsArea().getX(), 0.0f, static_cast<float> (getHeight()));
+    }
+
+    void PicturePanelComponent::paintOverChildren (juce::Graphics& g)
+    {
+        //  THE NUMBER HOLDING THE ARROW KEYS, outlined with its words (2026-10-20; a shape, §4.8).
+        for (const auto& [slider, label] : numbers)
+            if (slider->isVisible() && slider->hasKeyboardFocus (true))
+            {
+                g.setColour (Look::colour (theme, "accent"));
+                g.drawRoundedRectangle (slider->getBounds().getUnion (label->getBounds()).toFloat().expanded (1.0f),
+                                        3.0f, 1.0f);
+            }
     }
 }

@@ -32,7 +32,9 @@
     corner, a right click on a corner takes it away.
 
     ON THE RIGHT, THE NUMBERS: the fit, the flips, the scale, offsets and
-    turn; for a picture, a movie or a capture the grade - contrast,
+    turn - a number clicked takes the arrow keys, a step that suits it and ten
+    with Shift, until the canvas is clicked (the author, 2026-10-20: "strange
+    increments with the arrow keys"); for a picture, a movie or a capture the grade - contrast,
     saturation, gamma, hue - and its four curves, drawn, one picked by its
     letter; for a fill or a mask its colour, from a swatch; for a mask its
     feather and whether it is turned inside out. A picture's, a movie's or a
@@ -111,10 +113,27 @@ namespace wfg::client::ui
 
         void resized() override;
         void paint (juce::Graphics&) override;
+        void paintOverChildren (juce::Graphics&) override;
 
     private:
         class View;
         class Curves;
+
+        /*  A NUMBER THE ARROW KEYS STEP (2026-10-20): a click gives it the
+            keys, as a click on the canvas gives them to the frame; the arrows
+            step it, Shift ten steps, and every other key goes on to the
+            window - GO and Esc as anywhere. JUCE's own step, a hundredth of
+            the range, is not used: on an offset that is twenty percent. */
+        class NumberSlider final : public juce::Slider
+        {
+        public:
+            std::function<bool (const juce::KeyPress&)> onArrow;
+            std::function<void()> onFocusChange;
+
+            bool keyPressed (const juce::KeyPress& key) override { return onArrow != nullptr && onArrow (key); }
+            void focusGained (FocusChangeType) override { if (onFocusChange != nullptr) onFocusChange(); }
+            void focusLost (FocusChangeType) override { if (onFocusChange != nullptr) onFocusChange(); }
+        };
 
         model::Theme theme;
         Actions actions;
@@ -125,7 +144,7 @@ namespace wfg::client::ui
 
         juce::TextButton fitButtons[3];
         juce::ToggleButton flipH { "Flip across" }, flipV { "Flip up and down" }, invert { "Inside out" };
-        juce::Slider scale, offsetX, offsetY, rotation, contrast, saturation, gamma, hue, feather;
+        NumberSlider scale, offsetX, offsetY, rotation, contrast, saturation, gamma, hue, feather;
         juce::Label scaleLabel, offsetXLabel, offsetYLabel, rotationLabel,
                     contrastLabel, saturationLabel, gammaLabel, hueLabel, featherLabel, paintLabel;
         juce::TextButton paintSwatch;
@@ -138,7 +157,7 @@ namespace wfg::client::ui
         int colourPage = 0;
         juce::ToggleButton useAlpha { "Use its alpha" }, keyInvert { "Turned round" };
         juce::ComboBox keyMode;
-        juce::Slider keyLevel, keySoftness, keySpill;
+        NumberSlider keyLevel, keySoftness, keySpill;
         juce::Label keyLevelLabel, keySoftnessLabel, keySpillLabel, keyColourLabel;
         juce::TextButton keyColourSwatch;
 
@@ -149,7 +168,7 @@ namespace wfg::client::ui
         juce::ToggleButton bold { "Bold" }, italic { "Italic" };
         juce::TextButton alignButtons[3];
         juce::ComboBox alignVMenu;
-        juce::Slider fontSize, lineSpacing, wrap, outlineWidth, outlineBlur;
+        NumberSlider fontSize, lineSpacing, wrap, outlineWidth, outlineBlur;
         juce::Label fontSizeLabel, lineSpacingLabel, wrapLabel, outlineLabel, outlineBlurLabel;
         juce::TextButton letterSwatch, outlineSwatch;
         bool fontsFilled = false;
@@ -176,13 +195,13 @@ namespace wfg::client::ui
         };
 
         /*  A BLUR CUE'S (61, AKN): how far, and whether an outline limits it. */
-        juce::Slider blurAmount;
+        NumberSlider blurAmount;
         juce::Label blurAmountLabel;
 
         /*  ON A FADE (§94): how solid and a movie's speed, which the cue's own
             panel leaves to the inspector; a tick per value a fade moves, in
             `fadeRowNames`' order; and a sentence saying what the panel is. */
-        juce::Slider opacity, speed;
+        NumberSlider opacity, speed;
         juce::Label opacityLabel, speedLabel, fadeWords;
         juce::ToggleButton fadeTicks[7];
         juce::Slider* fadeSlider (int at);
@@ -200,8 +219,19 @@ namespace wfg::client::ui
         void refreshFields();
         void sendField (FieldRow& row);
 
-        void build (juce::Slider& slider, juce::Label& label, const char* words, const char* row,
-                    double low, double high, double mid, bool symmetric, const char* suffix, int decimals);
+        void build (NumberSlider& slider, juce::Label& label, const char* words, const char* row,
+                    double low, double high, double mid, bool symmetric, const char* suffix, int decimals,
+                    double step);
+
+        /*  WHAT A HAND SENT, shown until the document has it (2026-10-20), and
+            each number with its label, to outline the one holding the keys. */
+        model::HeldNumbers heldNumbers;
+        std::vector<std::pair<NumberSlider*, juce::Label*>> numbers;
+        std::string heldFor;
+        double shown (const char* row, double documentValue);
+        void hold (const char* row, double value);
+
+        bool writable (const char* row) const;
         void write (const char* row, const std::string& text);
         void writeMany (const std::vector<std::pair<std::string, std::string>>& rows);
         void writeCurve (int which, const model::CurvePoints& points);

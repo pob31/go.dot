@@ -452,8 +452,43 @@ namespace wfg::client::model
 
     double nudged (double value, int direction, bool coarse)
     {
-        const auto step = coarse ? 1.0 : 0.1;
-        return std::clamp (std::round ((value + step * static_cast<double> (direction)) * 10.0) / 10.0, -1000.0, 1000.0);
+        return stepped (value, 0.1, direction, coarse, -1000.0, 1000.0);
+    }
+
+    double stepped (double value, double step, int direction, bool coarse, double low, double high)
+    {
+        if (! (step > 0.0))
+            return std::clamp (value, low, high);
+
+        const auto moved = value + step * (coarse ? 10.0 : 1.0) * static_cast<double> (direction);
+
+        //  On the step's grid, by its whole inverse when it is a fraction: 0.1 is not exact, 10 is.
+        const auto onGrid = step < 1.0 ? std::round (moved * std::round (1.0 / step)) / std::round (1.0 / step)
+                                       : std::round (moved / step) * step;
+
+        return std::clamp (onGrid, low, high);
+    }
+
+    void HeldNumbers::send (const std::string& row, double value, double nowMs)
+    {
+        held[row] = { value, nowMs };
+    }
+
+    double HeldNumbers::valueOf (const std::string& row, double documentValue, double nowMs)
+    {
+        const auto found = held.find (row);
+
+        if (found == held.end())
+            return documentValue;
+
+        //  Caught up (a row is written to four decimals), or given up waiting.
+        if (std::abs (documentValue - found->second.value) < 1.0e-4 || nowMs - found->second.atMs > patienceMs)
+        {
+            held.erase (found);
+            return documentValue;
+        }
+
+        return found->second.value;
     }
 
     int maskPointNear (const std::vector<MaskPoint>& shape, double x, double y, double radius)

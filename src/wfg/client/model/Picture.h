@@ -269,6 +269,39 @@ namespace wfg::client::model
     /*  AN ARROW KEY ON THE FRAME: a tenth of a percent, or one with Shift. */
     double nudged (double value, int direction, bool coarse);
 
+    /*  AN ARROW KEY ON A NUMBER (2026-10-20): one `step` in `direction`, ten
+        with Shift, on the step's grid so tenths do not drift, held to
+        low..high. */
+    double stepped (double value, double step, int direction, bool coarse, double low, double high);
+
+    /*  WHAT A HAND SENT, UNTIL THE DOCUMENT HAS IT (2026-10-20). A number
+        written comes back only after the tick and the next reading, so a key
+        held down would step from the old value again and again, and the
+        slider be pulled back between presses. Each row keeps what was sent
+        until the document reads the same, or for a second - an edit from
+        elsewhere then winning - as PatchCanvas keeps its text. */
+    class HeldNumbers
+    {
+    public:
+        void send (const std::string& row, double value, double nowMs);
+
+        /** The value held for `row` while the document has not caught up, else the document's. */
+        double valueOf (const std::string& row, double documentValue, double nowMs);
+
+        void clear() { held.clear(); }
+
+        static constexpr double patienceMs = 1000.0;
+
+    private:
+        struct Held
+        {
+            double value = 0.0;
+            double atMs = 0.0;
+        };
+
+        std::map<std::string, Held> held;
+    };
+
     /*  A MASK'S OUTLINE: the point within `radius` of (x, y), or -1; one added
         on the edge nearest (x, y); one moved, held to -1..2 as the engine
         holds it; one taken away, never below three. */
