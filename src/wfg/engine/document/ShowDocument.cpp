@@ -7945,6 +7945,19 @@ namespace wfg::doc
                            .value_or (std::string {}) == "sysex")
                     sysexOnMtc = true;
 
+                /*  A FADE ON A MESSAGE WHOSE SECOND BYTE IS NO VALUE (namespace
+                    draft §100): a note, a program, a sysex is sent once, and
+                    its fade does nothing. */
+                if (node.hasType ("Midi") && node.hasProperty ("fadeTo") && node["fadeTo"].toString().getIntValue() >= 0)
+                {
+                    const auto type = getAttribute ("/godot/cue/" + node[idProperty].toString().toStdString() + "/type")
+                                        .value_or (std::string ("noteOn"));
+
+                    if (type != "controlChange" && type != "aftertouch" && type != "channelPressure" && type != "pitchBend")
+                        problems.push_back (here() + "/@fadeTo: a " + type + " has no value to fade - it is sent once, "
+                                                     "and the fade does nothing");
+                }
+
                 if (node.hasType ("Timecode"))
                     if (const auto label = timecode::parseLabel (node["from"].toString().toStdString());
                         label.has_value() && timecode::normalise (*label, rate) != *label)

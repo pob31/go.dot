@@ -552,6 +552,34 @@ namespace wfg::client::model
         return out;
     }
 
+    std::vector<std::pair<std::string, std::string>> missingFilesOf (const tree::TreeSnapshot& snapshot)
+    {
+        static const std::string cuePrefix = "/godot/cue/";
+        static const std::string missingRow = "/missing";
+
+        std::vector<std::pair<std::string, std::string>> out;
+
+        for (const auto* node : snapshot.all())
+        {
+            const auto& address = node->address;
+
+            if (address.size() <= cuePrefix.size() + missingRow.size()
+                  || address.compare (0, cuePrefix.size(), cuePrefix) != 0
+                  || address.compare (address.size() - missingRow.size(), missingRow.size(), missingRow) != 0)
+                continue;
+
+            const auto cue = address.substr (cuePrefix.size(), address.size() - cuePrefix.size() - missingRow.size());
+
+            if (cue.find ('/') != std::string::npos || ! yes (snapshot, address))
+                continue;
+
+            if (const auto file = text (snapshot, cuePrefix + cue + "/file"); ! file.empty())
+                out.push_back ({ cue, file });
+        }
+
+        return out;
+    }
+
     std::vector<Problem> fileProblems (const tree::TreeSnapshot& snapshot, const CueNeeds& needs)
     {
         std::vector<Problem> out;

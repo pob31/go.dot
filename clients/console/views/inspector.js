@@ -143,7 +143,7 @@ const KIND_ORDER = {
   // the desktop shows only in its editor at the foot (AMO); the page has no such editor.
   script:  ["language", "midiIn", "midiOut", "source"],
   osc:     ["address", "value", "wait", "timeout"],
-  midi:    ["port", "channel", "type", "data1", "data2", "sysex", "wait"],
+  midi:    ["port", "channel", "type", "data1", "data2", "fadeTo", "fadeTime", "fadeCurve", "sysex", "wait"],
   // The join after `advance` (namespace draft 69): what happens between two members follows
   // how the next one is started.
   group:   ["mode", "takeover", "advance", "join", "joinLength", "joinCurve", "selection", "play", "loops",

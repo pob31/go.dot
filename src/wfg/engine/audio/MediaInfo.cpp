@@ -321,7 +321,10 @@ namespace wfg::audio
             from now on rather than from the next open. */
         auto learned = false;
 
-        if (const auto frozen = frozenDurations.find (path); frozen != frozenDurations.end())
+        /*  AND A FILE MISSING WHEN THE SHOW OPENED (namespace draft §100, AXX),
+            found since - put back in the media folder and looked for again -
+            is learned as an imported one is: nought was never its length. */
+        if (const auto frozen = frozenDurations.find (path); frozen != frozenDurations.end() && frozen->second > 0.0)
             record.seconds = frozen->second;
         else
             learned = record.seconds > 0.0;

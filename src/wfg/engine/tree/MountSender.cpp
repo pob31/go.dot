@@ -120,6 +120,24 @@ namespace wfg::tree
         }
     }
 
+    /*  THE ADDRESS AS IT LEAVES (namespace draft 100, AYK): without the
+        device's own prefix when it is one Go.dot named it under - `/go` for
+        a cue aimed at `/MacMini_Justice1/go` - and as written otherwise. */
+    std::string MountSender::onTheWire (const Message& message)
+    {
+        const auto& prefix = message.destination.removedPrefix;
+
+        if (prefix.empty() || message.address.rfind (prefix, 0) != 0)
+            return message.address;
+
+        const auto rest = message.address.substr (prefix.size());
+
+        if (rest.empty())
+            return "/";
+
+        return rest.front() == '/' ? rest : message.address;
+    }
+
     void MountSender::flush()
     {
         ++flushes;
@@ -450,7 +468,7 @@ namespace wfg::tree
                     ok = deliver (message.destination, *bytes);
             }
         }
-        else if (const auto bytes = osc::encode (osc::Packet::message (message.address, message.values), error))
+        else if (const auto bytes = osc::encode (osc::Packet::message (onTheWire (message), message.values), error))
         {
             ok = deliver (message.destination, *bytes);
         }
@@ -510,7 +528,7 @@ namespace wfg::tree
 
         for (const auto* message : messages)
         {
-            auto element = osc::Packet::message (message->address, message->values);
+            auto element = osc::Packet::message (onTheWire (*message), message->values);
             std::string error;
             const auto bytes = osc::encode (element, error);
             const auto length = bytes.has_value() ? bytes->size() : 0u;
@@ -684,6 +702,13 @@ namespace wfg::tree
         destination.midiChannel = declaration.midiChannel;
         destination.mscDevice = declaration.mscDevice;
         destination.mscFormat = declaration.mscFormat;
+
+        if (declaration.removePrefix)
+        {
+            const auto prefixes = prefixesOf (declaration.prefix);
+            destination.removedPrefix = prefixes.empty() ? std::string {} : prefixes.front();
+        }
+
         return destination;
     }
 

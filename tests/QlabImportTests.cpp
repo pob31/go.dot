@@ -41,6 +41,7 @@
 #include <memory>
 #include <string>
 #include <utility>
+#include <vector>
 
 using namespace wfg;
 using namespace wfg::import::qlab;
@@ -441,4 +442,163 @@ TEST_CASE ("qlab import: a whole workspace from a folder - a still's own size re
     CHECK (report.find ("a movie in avc1, which Go.dot shows as a preview until it is converted to HAP") != std::string::npos);
 
     folder.deleteRecursively();
+}
+
+//==============================================================================
+TEST_CASE ("qlab import: a file not where the workspace says is found in a folder pointed at, by name, the nearest path winning (§100, AXX)")
+{
+    const auto room = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                        .getChildFile ("wfg-qlab-search-" + juce::Uuid().toDashedString());
+    const auto workspaceFolder = room.getChildFile ("Show");
+    const auto elsewhere = room.getChildFile ("Elsewhere");
+
+    REQUIRE (workspaceFolder.createDirectory());
+
+    const auto write = [] (const juce::File& file)
+    {
+        REQUIRE (file.getParentDirectory().createDirectory());
+        REQUIRE (file.replaceWithText (file.getFullPathName()));
+        return file;
+    };
+
+    const auto bank = write (elsewhere.getChildFile ("Soundbank/rain.wav"));
+    write (elsewhere.getChildFile ("Other/rain.wav"));
+    write (elsewhere.getChildFile ("Backup/rain.wav"));
+    const auto accented = write (elsewhere.getChildFile ("old/ENTRADA PUBLICO.WAV"));
+
+    std::vector<wfg::import::FolderIndex> folders;
+    folders.emplace_back (elsewhere);
+    CHECK (folders.front().files() == 3u);         // the Backup folder is never a sound's
+
+    //  QLab remembered it in a folder called Soundbank: that copy, not the other.
+    FileRef rain;
+    rain.relativePath = "audio/Soundbank/rain.wav";
+    CHECK (findMedia (rain, workspaceFolder) == juce::File());
+    CHECK (findMedia (rain, workspaceFolder, folders) == bank);
+
+    //  Accents folded and case ignored, as a Mac's name and this disk's differ.
+    FileRef entrada;
+    entrada.absolutePath = "/Volumes/Show/Entrada pu\xcc\x81" "blico.wav";
+    CHECK (findMedia (entrada, workspaceFolder, folders) == accented);
+
+    //  Not anywhere: not found, whatever was pointed at.
+    FileRef gone;
+    gone.relativePath = "audio/gone.wav";
+    CHECK (findMedia (gone, workspaceFolder, folders) == juce::File());
+
+    room.deleteRecursively();
+}
+
+TEST_CASE ("qlab import: a workspace's files counted and looked for, then imported with the folder pointed at (§100, AXX)")
+{
+    const auto room = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                        .getChildFile ("wfg-qlab-found-" + juce::Uuid().toDashedString());
+    const auto workspaceFolder = room.getChildFile ("Show");
+    REQUIRE (workspaceFolder.getChildFile ("audio").createDirectory());
+    REQUIRE (room.getChildFile ("Soundbank").createDirectory());
+
+    //  Found and copied by name: what is in them is not read here.
+    const auto silence = [] (const juce::File& file) { REQUIRE (file.replaceWithText ("a sound")); };
+
+    silence (workspaceFolder.getChildFile ("audio/here.wav"));
+    silence (room.getChildFile ("Soundbank/there.wav"));
+
+    fixture::Workspace w (5);
+    const auto here = w.audio ("Here", "audio/here.wav", { { 0, 0, 0.0 }, { 0, 1, 0.0 } });
+    const auto there = w.audio ("There", "audio/there.wav", { { 0, 0, 0.0 }, { 0, 1, 0.0 } });
+    const auto gone = w.audio ("Gone", "audio/gone.wav", { { 0, 0, 0.0 }, { 0, 1, 0.0 } });
+    const auto bytes = w.bytes ({ w.group ("Main", 0, { here, there, gone }) });
+    const auto workspaceFile = workspaceFolder.getChildFile ("Show.qlab5");
+    REQUIRE (workspaceFile.replaceWithData (bytes.data(), bytes.size()));
+
+    const auto read = readWorkspace (workspaceFile);
+    REQUIRE (read.workspace.has_value());
+
+    const auto missingOf = [] (const std::vector<MediaFound>& found)
+    {
+        std::vector<std::string> out;
+        for (const auto& each : found)
+            if (each.found == juce::File())
+                out.push_back (each.name);
+        return out;
+    };
+
+    CHECK (missingOf (scanMedia (*read.workspace, workspaceFile, {}, {}))
+             == std::vector<std::string> { "audio/there.wav", "audio/gone.wav" });
+
+    std::vector<wfg::import::FolderIndex> folders;
+    folders.emplace_back (room.getChildFile ("Soundbank"));
+    CHECK (missingOf (scanMedia (*read.workspace, workspaceFile, {}, folders)) == std::vector<std::string> { "audio/gone.wav" });
+
+    ImportOptions options;
+    options.into = room.getChildFile ("Imported");
+    options.searchFolders = { room.getChildFile ("Soundbank") };
+    const auto outcome = importWorkspace (workspaceFile, options);
+    REQUIRE_MESSAGE (outcome.ok, outcome.error);
+
+    CHECK (outcome.missingMedia == std::vector<std::string> { "audio/gone.wav" });
+    CHECK (options.into.getChildFile ("media/there.wav").existsAsFile());
+
+    room.deleteRecursively();
+}
+
+TEST_CASE ("qlab import: MIDI cues on their port, triggers, devices under their own prefix, a camera's input, a cart - written (§100)")
+{
+    fixture::Workspace w (5);
+    w.remotePatches = true;
+
+    const auto fader = w.cue ("MIDICue", "Elsa", { { "messageType", Value::integer (1) }, { "status", Value::integer (3) },
+                                                    { "channel", Value::integer (1) }, { "byte1", Value::integer (14) },
+                                                    { "byte2", Value::integer (0) }, { "doFade", Value::boolean (true) },
+                                                    { "endValue", Value::integer (102) }, { "duration", Value::number (0.9) },
+                                                    { "midiPatchID", Value::string ("PATCH-MIDI") } });
+    const auto key = w.cues.object ("F53HotKey", { { "QLActionKeyKeyCharacter", Value::integer ('e') },
+                                                   { "QLActionKeyControl", Value::boolean (true) } });
+    w.set (fader, "useHotKey", Value::boolean (true));
+    w.set (fader, "hotKey", Value::uid (key));
+
+    const auto go1 = w.network ("Go 1", "/go", "PATCH-MAC1");
+    const auto go2 = w.network ("Go 2", "/go", "PATCH-MAC2");
+    const auto eos = w.network ("Lights", "/eos/cue/11/fire", "PATCH-EOS");
+    const auto camera = w.cue ("CameraCue", "Cam", { { "cameraPatchID", Value::string ("PATCH-CAM") } });
+    const auto pad = w.memo ("Pad");
+
+    const auto bytes = w.bytes ({ w.group ("Main", 0, { fader, go1, go2, eos, camera }), w.group ("Pads", 5, { pad }) });
+    const auto read = readWorkspaceBytes (bytes.data(), bytes.size());
+    REQUIRE (read.workspace.has_value());
+
+    const auto plan = walk (*read.workspace);
+    doc::ShowDocument document;
+    const auto built = build (*read.workspace, plan, {}, document);
+
+    for (const auto& note : built.notes)
+        CHECK_MESSAGE (note.text.find ("could not") == std::string::npos, note.text);
+
+    //  The MIDI cue on the port made for its patch, its fade and its key.
+    const auto elsa = idFor ("cue:" + w.idOf (fader));
+    CHECK (elementOf (document, elsa) == "Midi");
+    const auto port = idFor ("midi:PATCH-MIDI");
+    CHECK (at (document, "/godot/cue/" + elsa + "/port") == port);
+    CHECK (at (document, "/godot/port/" + port + "/name") == "Desk MIDI");
+    CHECK (at (document, "/godot/cue/" + elsa + "/fadeTo") == "102");
+    CHECK (at (document, "/godot/cue/" + elsa + "/fadeTime") == "0.9");
+    CHECK (at (document, "/godot/trigger/" + idFor ("cue:" + w.idOf (fader) + ":trigger:0") + "/key") == "Mod+E");
+
+    //  Each QLab machine its own device, its prefix taken off as it sends.
+    const auto mac1 = idFor ("patch:PATCH-MAC1");
+    CHECK (at (document, "/godot/mount/" + mac1 + "/prefix") == "/Mac_mini_1");
+    CHECK (at (document, "/godot/mount/" + mac1 + "/removePrefix") == "true");
+    CHECK (at (document, "/godot/cue/" + idFor ("cue:" + w.idOf (go2)) + "/address") == "/Mac_mini_2/go");
+    CHECK (at (document, "/godot/cue/" + idFor ("cue:" + w.idOf (eos)) + "/address") == "/eos/cue/11/fire");
+
+    //  The camera a capture cue on a video input with none chosen.
+    const auto cam = idFor ("cue:" + w.idOf (camera));
+    CHECK (at (document, "/godot/cue/" + cam + "/source") == "capture");
+    const auto input = idFor ("camera:PATCH-CAM");
+    CHECK (at (document, "/godot/cue/" + cam + "/videoInput") == input);
+    CHECK (at (document, "/godot/videoInput/" + input + "/name") == "Camera 1");
+
+    //  The cart a cart, with no standby.
+    const auto pads = idFor ("list:" + read.workspace->lists[1].id);
+    CHECK (at (document, "/godot/list/" + pads + "/kind") == "cart");
 }

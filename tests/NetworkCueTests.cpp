@@ -5087,3 +5087,71 @@ TEST_CASE ("network cue: a cue aimed at a device on an MQTT broker leaves as a p
     CHECK (rig.runOf (held)->state == cue::runState::done);
     CHECK (rig.runOf (held)->error.empty());
 }
+
+//==============================================================================
+/*  A DEVICE'S PREFIX GO.DOT'S OWN (namespace draft §100, AYK; the author's
+    pick): three QLab machines each take /go, so each is named under a prefix
+    of its own - /MacMini_Justice1 - taken off before the message leaves. */
+TEST_CASE ("mount sender: a device whose prefix is Go.dot's own is sent its addresses without it, alone and in a bundle (§100)")
+{
+    Listener listener;
+    tree::MountSender sender { listener.endpoint };
+
+    tree::MountDeclaration mac;
+    mac.id = "MACMINI1";
+    mac.prefix = "/MacMini_Justice1";
+    mac.host = "127.0.0.1";
+    mac.port = listener.port();
+    mac.removePrefix = true;
+
+    SUBCASE ("alone")
+    {
+        sender.queue (mac.id, tree::MountSender::destinationFor (mac), "/MacMini_Justice1/go", osc::Values {});
+        sender.queue (mac.id, tree::MountSender::destinationFor (mac), "/MacMini_Justice1/select/1.5", osc::Values {});
+        sender.queue (mac.id, tree::MountSender::destinationFor (mac), "/MacMini_Justice1", osc::Values {});
+        sender.flush();
+
+        REQUIRE (listener.waitFor (3));
+        const auto addresses = addressesIn (listener.all());
+        CHECK (addresses == std::vector<std::string> { "/go", "/select/1.5", "/" });
+    }
+
+    SUBCASE ("in a bundle")
+    {
+        mac.bundles = true;
+        sender.queue (mac.id, tree::MountSender::destinationFor (mac), "/MacMini_Justice1/go", osc::Values {});
+        sender.queue (mac.id, tree::MountSender::destinationFor (mac), "/MacMini_Justice1/panic", osc::Values {});
+        sender.flush();
+
+        REQUIRE (listener.waitFor (1));
+        CHECK (addressesIn (listener.all()) == std::vector<std::string> { "/go", "/panic" });
+    }
+
+    SUBCASE ("off, the address is sent as it is written")
+    {
+        mac.removePrefix = false;
+        sender.queue (mac.id, tree::MountSender::destinationFor (mac), "/MacMini_Justice1/go", osc::Values {});
+        sender.flush();
+
+        REQUIRE (listener.waitFor (1));
+        CHECK (addressesIn (listener.all()) == std::vector<std::string> { "/MacMini_Justice1/go" });
+    }
+}
+
+TEST_CASE ("mount: removePrefix is read from the show into the device's declaration (§100)")
+{
+    doc::ShowDocument document;
+    const auto made = document.createMount ("/MacMini_Justice1", {});
+    REQUIRE (made.ok);
+    REQUIRE (document.setAttribute ("/godot/mount/" + made.id + "/port", "53000").ok);
+    REQUIRE (document.setAttribute ("/godot/mount/" + made.id + "/removePrefix", "true").ok);
+
+    tree::MountTable mounts;
+    const auto problems = tree::loadAllMountsFromBundle (document, mounts, juce::File());
+    INFO (problems.size());
+
+    const auto* declaration = mounts.declarationOf (made.id);
+    REQUIRE (declaration != nullptr);
+    CHECK (declaration->removePrefix);
+    CHECK (tree::MountSender::destinationFor (*declaration).removedPrefix == "/MacMini_Justice1");
+}

@@ -4438,3 +4438,175 @@ TEST_CASE ("mtc in: --midi-play plays a render file into a port's input, in orde
 
     file.deleteFile();
 }
+
+//==============================================================================
+/*  A MIDI CUE'S FADE (namespace draft §100, AXY; the author's pick: QLab's MIDI
+    fades come over as they are). Hécube's desk faders: a control change from
+    data2 to fadeTo over fadeTime, sent each tick its value changes, the cue
+    done as the last value leaves; Esc ends it where it is. */
+namespace
+{
+    struct FadeRig
+    {
+        Engine engine;
+        doc::ShowDocument document;
+        cue::RunTable runs;
+        cue::Focus focus;
+        doc::IdRegistry runIds = doc::IdRegistry::withSeed (41);
+        cue::Runner runner { document, runs, runIds, focus };
+        RecordingSink sink;
+        std::int64_t tick = 0;
+        std::string cueId;
+
+        FadeRig (const std::string& type, int from, int to, const std::string& seconds, const std::string& curve = "linear")
+        {
+            runner.setMidiSink (&sink);
+            doc::registerDocumentCommands (engine.commands(), document);
+            cue::registerCueCommands (engine.commands(), document, focus);
+            cue::registerRunCommands (engine.commands(), runs);
+            cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+
+            const auto listId = document.createList ("Show").id;
+            cueId = document.createCue (listId, 0, "midi", "Elsa fader").id;
+            const auto base = "/godot/cue/" + cueId + "/";
+            const auto portId = declarePort (document, "Desk");
+
+            REQUIRE (document.setAttribute (base + "port", portId).ok);
+            REQUIRE (document.setAttribute (base + "type", type).ok);
+            REQUIRE (document.setAttribute (base + "channel", "1").ok);
+            REQUIRE (document.setAttribute (base + "data1", "14").ok);
+            REQUIRE (document.setAttribute (base + "data2", std::to_string (from)).ok);
+            REQUIRE (document.setAttribute (base + "fadeTo", std::to_string (to)).ok);
+            REQUIRE (document.setAttribute (base + "fadeTime", seconds).ok);      // text: std::to_string writes 1,000000 in fr_FR
+            REQUIRE (document.setAttribute (base + "fadeCurve", curve).ok);
+        }
+
+        void tickOnce()
+        {
+            runner.beforeTick (engine, tick);
+            engine.processTick (tick++);
+        }
+
+        void fire()
+        {
+            REQUIRE (engine.submit (origin::cli, "cue.fire", { osc::Value::string (cueId) }));
+            tickOnce();
+        }
+
+        const cue::Run* run() const
+        {
+            return runs.all().empty() ? nullptr : &runs.all().front();
+        }
+
+        std::vector<int> values() const
+        {
+            std::vector<int> out;
+            for (const auto& message : sink.sent)
+                out.push_back (message.bytes.back());
+            return out;
+        }
+    };
+}
+
+TEST_CASE ("midi cue: a fade sends its value from data2 to fadeTo over fadeTime, as it changes, and is done at the end (§100)")
+{
+    FadeRig rig ("controlChange", 0, 100, "1");
+    rig.fire();
+
+    REQUIRE_FALSE (rig.sink.sent.empty());
+    CHECK (rig.sink.sent.front().bytes == midi::Bytes { 0xB0, 14, 0 });
+
+    for (int n = 0; n < 24; ++n)
+        rig.tickOnce();
+
+    //  Half a second in: half way, and still playing.
+    REQUIRE (rig.run() != nullptr);
+    CHECK (rig.run()->state == cue::runState::playing);
+    CHECK (rig.values().back() == doctest::Approx (50).epsilon (0.05));
+
+    for (int n = 0; n < 40; ++n)
+        rig.tickOnce();
+
+    const auto values = rig.values();
+    CHECK (values.back() == 100);
+    CHECK (std::is_sorted (values.begin(), values.end()));
+    CHECK (std::adjacent_find (values.begin(), values.end()) == values.end());   // never the same value twice
+    CHECK (values.size() <= 51u);
+    CHECK (rig.run()->isFinished());
+
+    //  And nothing once it holds.
+    const auto sent = rig.sink.sent.size();
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+    CHECK (rig.sink.sent.size() == sent);
+}
+
+TEST_CASE ("midi cue: an S-curve eases out of the start; a pitch bend fades its fourteen bits (§100)")
+{
+    FadeRig eased ("controlChange", 0, 100, "1", "sCurve");
+    eased.fire();
+
+    for (int n = 0; n < 10; ++n)
+        eased.tickOnce();
+
+    //  A fifth of the way in, an S-curve has gone about a tenth of the way.
+    CHECK (eased.values().back() < 15);
+
+    FadeRig bend ("pitchBend", 8192, 16383, "0.5");
+    bend.fire();
+
+    for (int n = 0; n < 40; ++n)
+        bend.tickOnce();
+
+    const auto& last = bend.sink.sent.back().bytes;
+    CHECK (last == midi::Bytes { 0xE0, 0x7F, 0x7F });
+}
+
+TEST_CASE ("midi cue: Esc ends a fade where it is; no time sends the end at once; a note does not fade (§100)")
+{
+    SUBCASE ("Esc")
+    {
+        FadeRig rig ("controlChange", 0, 100, "4");
+        rig.fire();
+
+        for (int n = 0; n < 50; ++n)
+            rig.tickOnce();
+
+        REQUIRE (rig.engine.submit ("cli", "run.stopAll", {}));
+
+        for (int n = 0; n < 6; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.run()->isFinished());
+        const auto held = rig.values().back();
+        CHECK (held > 0);
+        CHECK (held < 50);
+
+        const auto sent = rig.sink.sent.size();
+        for (int n = 0; n < 20; ++n)
+            rig.tickOnce();
+        CHECK (rig.sink.sent.size() == sent);
+    }
+
+    SUBCASE ("no time")
+    {
+        FadeRig rig ("controlChange", 0, 100, "0");
+        rig.fire();
+        rig.tickOnce();
+
+        REQUIRE (rig.sink.sent.size() == 1u);
+        CHECK (rig.sink.sent.front().bytes == midi::Bytes { 0xB0, 14, 100 });
+    }
+
+    SUBCASE ("a note")
+    {
+        FadeRig rig ("noteOn", 60, 100, "1");
+        rig.fire();
+
+        for (int n = 0; n < 60; ++n)
+            rig.tickOnce();
+
+        REQUIRE (rig.sink.sent.size() == 1u);
+        CHECK (rig.sink.sent.front().bytes == midi::Bytes { 0x90, 14, 60 });
+    }
+}

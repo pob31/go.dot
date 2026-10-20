@@ -22903,7 +22903,8 @@ that could not be read - a version neither 4 nor 5 among them - or a folder that
 - **Video geometry, surfaces and effects**, camera cues and text cues: PRD §3.19's equivalents are not one to
   one; a camera or a text cue is a memo. *Amended 2026-10-13, at the author's direction (§62, AKT):* text
   and video cues come over, with their stages as canvases and the fades that move them; a camera cue
-  stays a memo.
+  stays a memo. *Amended 2026-10-20 (§100, AXZ):* a camera cue is a capture cue, and MIDI cues - which
+  this list never named, and which the walk made memos as "a kind Go.dot has not got" - are MIDI cues.
 - **Light cues** are a memo: Go.dot drives a desk over OSC or MIDI and has no lighting model.
 - **Script cues are never run** (PRD §3.20): a memo holding the source.
 - **Audio effects on a cue and QLab 5's audio maps** are reported.
@@ -33037,3 +33038,141 @@ why (§99)` (AudioTests, heard on a ramp); `problems: a range beginning past wha
 one ending past it says it plays to the end (§99)` (ProblemsTests); `client: a range's end is drawn as it
 plays, sent as the end when it reaches it, and its refusals said apart (§99)` (ClientTests). Owed: the
 author's words for AXT and AXU, and his look at the two cues in 0.1.9.
+
+## 100. The QLab importer caught up, and missing files found in a folder
+
+**Asked 2026-10-20** by the author, importing his own QLab shows (Hécube pas Hécube at the Comédie-Française,
+La Reprise, P.U.N.K, Justice-s, LoveDoll - all under `E:\Régie`): *"Is the QLab importer up to date? It says
+there are no MIDI cues in Go.dot."* and *"It seems it couldn't find the audio files either which were in a
+different location since it's not on the original computer and the cue list uses absolute locations. Could
+we have a stage where we can point to a folder if there are missing files?"* - then *"Memos are the missing
+MIDI cues"* and *"As long as the user can point the parser to the right folder(s)..."*.
+
+What was found. The walk's last line made every kind it did not name a memo, saying "Go.dot has no MIDI
+cue (§46.4)": 342 of Hécube's 593 cues - a desk driven by seven actors' channels, controller 1-7 at 0 or
+127 switching each, controller 9-15 its fader faded 0 to 102 over 0.9 s. §46's plan had said a MIDI cue
+would be a `<Midi>`; the build never did it. Beside it, five more parts had fallen behind what Go.dot has
+since built: QLab's hotkeys, MIDI triggers and wall clocks were dropped though Go.dot has key, MIDI and
+clock triggers (§74); a camera cue was a memo though Go.dot captures (§72); a network cue sent to an Eos
+or to another QLab was a memo though both are OSC at an address; a cart was a list fired in order though
+Go.dot has carts (§74); a TCP destination was said to be sent over UDP though devices speak TCP (§57).
+Hécube's "missing" sounds were §99's ranges past the end, mended in 0.1.9; its 25 files were all found
+here. LoveDoll's were not: two of the eight sat in sibling folders, `Soundbank` and `original`, which the
+name search under the workspace's own folder never reaches.
+
+QLab's own numbers, read from the author's 130 workspaces and QLab's OSC dictionary: a MIDI cue's
+`messageType` is 1 a voice message, 2 MIDI Show Control, 3 bytes typed raw - "SysEx" in QLab's menu,
+though any bytes may be typed (an Allen & Heath GLD file holds `90 20 7F`, a plain note on); its voice
+command is `status` - 0 note off, 1 note on, 2 key pressure, 3 control change, 4 program change, 5
+channel pressure, 6 pitch bend - and `command` is the MSC command, 1 GO, which is why every cue first
+read as "command 1". An Eos or a QLab patch keeps the message it sends written out in `oscString`.
+
+- **AXX** **Folders to look in, at the import and on an open show** (the author's pick, offered as
+  "Import + open show", recommended). The import window counts the workspace's files as it opens, off
+  the message thread, says how many were found, lists the rest, and offers *Add a folder to search...* -
+  as many as it takes, each walked once, the count said again after each; Import hands the folders to
+  the importer. `wfg import-qlab --search=<folder>`, repeated for several. A file is looked for where the
+  workspace says first, then in each folder in the order picked, by name - accents folded and case
+  ignored - the copy whose path ends most like the one QLab remembered winning a tie, a folder named
+  Backup never searched (`import::FolderIndex`, `FileSearch.h`, juce_core only so the window shares it).
+  On an open show, **File > Find missing files in a folder...**: every cue of the show whose file is
+  missing (`model::missingFilesOf`, every list and depth), each file looked for in the folder picked,
+  each found copied into the show's media folder under the name its cues already give it, through a
+  sibling and a rename - so the document is not touched and there is nothing to undo - then
+  `media.lookAgain`.
+- **AXY** **MIDI fades are built** (the author's pick, offered as "Build MIDI fades", recommended over
+  sending the end value). A MIDI cue's value fades from `data2` to `fadeTo` over `fadeTime` with
+  `fadeCurve`, and QLab's fades come over as they are.
+- **AXZ** **The other parts brought up to date** (the author's pick, all four): triggers, the Eos and
+  QLab patches, cameras, MIDI Show Control and raw bytes.
+- **AYA** *(proposed)* **QLab's MIDI numbers as above**, a voice message as the Go.dot type of that
+  name; a channel pressure's value is its one byte, a pitch bend's its fourteen (`byteCombo`).
+- **AYB** *(proposed)* **MSC and raw bytes spelled out**: MIDI Show Control as the sysex it is - `F0 7F`,
+  device, `02`, format, command, then what the command carries (a cue number, list and path in ASCII
+  with a nought between; a time with its rate in the hours' top bits; SET's control and value, low
+  seven bits first; FIRE's macro), `F7`. Raw bytes starting `F0` are a sysex, given its `F7` where QLab's
+  had none (said); any others are the messages they spell, running status kept - one cue, or a timeline
+  group of one cue each; bytes that are neither stay a memo.
+- **AYC** *(proposed)* **A MIDI fade is three rows and a job.** `midi/fadeTo` (-1, the default, no fade;
+  127 at most, 16383 for a pitch bend), `midi/fadeTime` (seconds; nought sends `fadeTo` at once),
+  `midi/fadeCurve` (`linear`, the default as a fade's is, or `sCurve`). GO sends the start; each tick
+  after it the value where the fade has reached is sent when it is not the value last sent - so no
+  more than the tick rate, and only as it moves - and the cue is done, by its wait, as the last value
+  leaves (`Runner::advanceMidiFades`, the GO's job handed over as a curve's is, §45). Esc ends it where
+  it is and puts nothing back, as an OSC curve; a double Esc drops what is queued. A control change, an
+  aftertouch, a channel pressure and a pitch bend fade; any other type is sent once and `wfg validate`
+  says so. A fade on a port switched off, or left by a Doh!, still times its cue and sends nothing. The
+  window's inspector and the page show the three rows under the value, greyed for a type that does not
+  fade.
+- **AYD** *(proposed)* **A hotkey as Go.dot spells a key**: the character it types, else the Mac's key
+  code for a key that types none (function keys, arrows, Return...), a digit of the number pad `Num`;
+  ⌘ and Control both `Mod` - Ctrl here, ⌘ on a Mac - Option `Alt`. A key Go.dot keeps for itself (Space,
+  Esc, F9, the shared shortcuts: Ctrl+A, Ctrl+Z, Ctrl+T...) is not imported and said, with "give it
+  another in the inspector"; a character that is no key here (`#`, `'`) is said too. LoveDoll's row
+  Control+A Z E R T Y U I keeps E R U I and loses five.
+- **AYE** *(proposed)* **A MIDI trigger on any input**: QLab's status as note on, note off, control change
+  or program change (any other is said), its channel (nought any), its first byte the number, its second
+  the value - QLab's comparison 0 read as "equal", any other as "any value" and said (the order of QLab's
+  comparisons is not in its documents; a probe workspace would settle it); a note on of velocity nought
+  is any velocity, since by MIDI's rule it is a note off.
+- **AYF** *(proposed)* **A wall clock a clock trigger** at its time of day; one that fired on some days
+  only fires every day here, and is said.
+- **AYG** *(proposed)* **An Eos or a QLab machine an OSC device at the patch's first destination** - QLab 5
+  sends to every destination of a patch, and Hécube's Eos had a main and a backup: the others are said.
+  A QLab patch's passcode is said, not sent. A TCP destination is a TCP device framed as SLIP, OSC 1.1,
+  which QLab speaks.
+- **AYH** *(proposed)* **A camera cue a capture cue** (`video/source` capture), placed as a picture
+  filling its canvas, on a video input of kind `device` made for its camera patch, named as QLab named
+  it, with no camera or card chosen - which the report and the input say, naming the device QLab last
+  saw (La Reprise: an UltraStudio Express, an Intensity Shuttle).
+- **AYI** *(proposed)* **A MIDI port per QLab MIDI patch**, named as QLab named it, bound to no output
+  here; the report names the device QLab last sent on.
+- **AYJ** *(proposed)* **A trigger on a cue list itself** - Hécube's main list had one - is not imported:
+  a Go.dot list has none; the report says to put it on the first cue, or a start cue in a cart.
+- **AYK** **A device's prefix may be Go.dot's own** (the author's pick, offered as "Device-side prefix",
+  recommended over the first device keeping the address): `mount/removePrefix`, off by default; on, the
+  prefix is taken off every address before it leaves (`MountSender::onTheWire`, alone and in a bundle),
+  so a cue aimed at `/MacMini_Justice1/go` sends `/go`. The importer turns it on for every QLab machine -
+  its addresses are QLab's own, from the root - and for every patch sent a first segment another patch is
+  sent too, each named under its name made an address (`/MacMini_Justice1`, a space an underscore, unique).
+  Justice-s's three Mac minis come over as three devices. What a device sends back is not heard under
+  the prefix (not built).
+- **AYL** *(proposed)* **A file missing at open is learned once found.** `MediaInfo` keeps a length the
+  show opened with whatever the analyser says, and kept nought for a missing file for the session, so a
+  file put back still read as missing. A length of nought is no length: found and read, it is learned
+  as an imported file's is (§14.12's amendment of 2026-09-22). `media.lookAgain` (machine-local, as
+  `media.cleanCache`) queues again every file the analyser was asked for that has no length.
+- **AYM** *(proposed)* **A cart a cart**: a QLab cart (group mode 5) is a Go.dot cart, `list/kind` cart,
+  with no standby; its grid is not imported (said).
+- **AYN** **A vamp may fire the next cue as its loop completes** (the author, 2026-10-20, of La
+  Clairière, built that way in QLab: *"the vamp should have the following cue triggered when the loop
+  completes as an option"*; sample-exact, his pick, offered as "Sample-exact", recommended over the
+  tick). QLab's Devamp has it as `fireNextCueAtMomentLoopEnds`. Built next; written here when it is.
+
+Results on the author's shows (2026-10-20, Debug build, media not copied): Hécube 380 memos → none (342
+MIDI cues, 21 of them fading, 38 Eos cues); La Reprise 28 → 3 (9 camera cues on two inputs); Justice-s
+58 → 1 (three QLab machines under their own prefixes); LoveDoll with `--search` at its show folder, 8
+files not found → 2, which are not on the drive. What is left: a relative fade on one cue (nine across
+the shows, §46's named limit), a fade of output or crosspoint levels only, a script, QLab's video effects.
+
+Not done: QLab's MIDI Controls (GO by a note) and its timecode triggers - a time group chasing timecode is
+Go.dot's way (§60), said; the order of QLab's MIDI-trigger comparisons (AYE), unproven.
+
+Tests: `qlab reader: MIDI cues, their patches, triggers, camera patches and the remote network patches
+(§100)`, `qlab reader: QLab 4's MIDI and camera patches by number...` (QlabReaderTests); `qlab walk: MIDI
+cues - each voice type, a fade, MIDI Show Control, raw bytes; a port per patch`, `... a hotkey, a MIDI
+trigger and a wall clock become Go.dot's triggers`, `... an Eos and QLab machines are OSC devices; each
+QLab named under its own prefix`, `... a cart is a Go.dot cart`, `... a hotkey spelled, MSC's bytes, raw
+hex read`, `... devices that share no address keep their roots as prefixes`, and the start/stop and
+messages cases turned (QlabWalkTests); `qlab import: a file not where the workspace says is found in a
+folder pointed at...`, `... counted and looked for, then imported with the folder pointed at`, `... MIDI
+cues on their port, triggers, devices under their own prefix, a camera's input, a cart - written`
+(QlabImportTests); `midi cue: a fade sends its value from data2 to fadeTo...`, `... an S-curve eases...;
+a pitch bend fades its fourteen bits`, `... Esc ends a fade where it is; no time sends the end at once; a
+note does not fade` (MidiTests); `mount sender: a device whose prefix is Go.dot's own is sent its
+addresses without it, alone and in a bundle`, `mount: removePrefix is read from the show into the
+device's declaration` (NetworkCueTests); `media info: a file missing when the show opened, put back and
+read, is learned` (MediaCueTests); `problems: every cue of the show whose file is missing...`
+(ProblemsTests); `import window: a QLab workspace's files counted, the missing listed, a folder offered`
+(RunPaneUiTests). Owed: the author's words for the report's and the window's sentences (AYD-AYJ), and
+his try of the window's folder and of File > Find missing files in a folder....

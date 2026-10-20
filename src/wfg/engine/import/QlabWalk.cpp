@@ -16,6 +16,7 @@
 
 #include <wfg/engine/import/QlabWalk.h>
 
+#include <wfg/engine/cue/KeyChord.h>
 #include <wfg/engine/osc/OscValue.h>
 
 #include <algorithm>
@@ -216,6 +217,10 @@ namespace wfg::import::qlab
             std::map<std::string, std::string> kindOf;     ///< what each imported cue becomes
             std::map<std::string, double> trims;           ///< a group's trim, summed in show order (ZV)
             std::map<std::string, std::string> segmentOwner;
+            std::map<std::string, std::set<std::string>> segmentsOf;   ///< by network patch id
+            std::set<std::string> ownPrefix;                          ///< patches named under a prefix of their own
+            std::set<std::string> prefixesTaken;
+            std::set<std::string> passcodesSaid;
             std::map<int, std::string> channelOwner;
             int list = -1;
 
@@ -268,7 +273,35 @@ namespace wfg::import::qlab
                 if (cue.type == "OSC" && ! cue.message.empty())
                     return cue.message;
 
+                if (cue.type == "MIDI")
+                    return midiWords (cue.midi);
+
                 return cue.type;
+            }
+
+            /*  A MIDI CUE'S MESSAGE IN WORDS, its name where nobody typed one:
+                "CC 9 = 0 ch 1", "MSC GO 11", "SysEx F0 7F ...". */
+            static std::string midiWords (const MidiMessage& m)
+            {
+                const auto ch = " ch " + std::to_string (m.channel);
+
+                if (m.messageType == 2)
+                    return "MSC " + std::to_string (m.command) + (m.qNumber.empty() ? std::string {} : " " + m.qNumber);
+
+                if (m.messageType == 3)
+                    return "MIDI " + m.raw.substr (0, 24);
+
+                switch (m.status)
+                {
+                    case 0:  return "Note off " + std::to_string (m.byte1) + ch;
+                    case 1:  return "Note on " + std::to_string (m.byte1) + " = " + std::to_string (m.byte2) + ch;
+                    case 2:  return "Key pressure " + std::to_string (m.byte1) + " = " + std::to_string (m.byte2) + ch;
+                    case 3:  return "CC " + std::to_string (m.byte1) + " = " + std::to_string (m.byte2) + ch;
+                    case 4:  return "Program " + std::to_string (m.byte1) + ch;
+                    case 5:  return "Channel pressure " + std::to_string (m.byte1) + ch;
+                    case 6:  return "Pitch bend " + std::to_string (m.byteCombo) + ch;
+                    default: return "MIDI";
+                }
             }
 
             //  --- Pass one: what each cue becomes --------------------------------
@@ -285,7 +318,7 @@ namespace wfg::import::qlab
             {
                 static const std::map<std::string, std::string> kinds {
                     { "Group", "group" }, { "Audio", "media" }, { "Mic", "mic" }, { "Fade", "fade" },
-                    { "Video", "video" }, { "Titles", "video" },
+                    { "Video", "video" }, { "Titles", "video" }, { "Camera", "video" }, { "MIDI", "midi" },
                     { "OSC", "osc" }, { "Start", "start" }, { "Stop", "transport" }, { "Goto", "transport" },
                     { "Arm", "transport" }, { "Disarm", "transport" }, { "Devamp", "transport" },
                     { "Memo", "memo" }, { "Wait", "memo" } };
@@ -298,8 +331,47 @@ namespace wfg::import::qlab
             {
                 kindOf[cue.id] = kindFor (cue);
 
+                //  Which first segments each network patch is sent, for the prefixes (§100, AYK).
+                if (cue.type == "OSC")
+                {
+                    const auto parts = splitMessage (cue.message);
+
+                    if (! parts.empty() && ! parts.front().empty() && parts.front()[0] == '/')
+                    {
+                        const auto slash = parts.front().find ('/', 1);
+                        segmentsOf[cue.networkPatch].insert (slash == std::string::npos ? parts.front()
+                                                                                         : parts.front().substr (0, slash));
+                    }
+                }
+
                 for (const auto& child : cue.children)
                     classify (child);
+            }
+
+            /*  THE PATCHES THAT NEED A PREFIX OF THEIR OWN (§100, AYK): every QLab
+                machine - its addresses are QLab's own, from the root - and every
+                patch sent a first segment another patch is sent too. */
+            void ownPrefixes()
+            {
+                for (const auto& [id, segments] : segmentsOf)
+                {
+                    const auto* patch = networkPatch (id);
+
+                    if (patch == nullptr)
+                        continue;
+
+                    if (patch->kind.rfind ("com.figure53.qlab", 0) == 0)
+                    {
+                        ownPrefix.insert (id);
+                        continue;
+                    }
+
+                    for (const auto& [other, theirs] : segmentsOf)
+                        if (other != id && networkPatch (other) != nullptr)
+                            for (const auto& segment : segments)
+                                if (theirs.count (segment) != 0)
+                                    ownPrefix.insert (id);
+                }
             }
 
             /*  WHAT A TARGET IS IN THE SHOW: its kind, empty when it is not
@@ -358,32 +430,101 @@ namespace wfg::import::qlab
                 return item;
             }
 
-            void triggers (const Cue& cue)
+            /*  WHAT FIRED IT IN QLAB BESIDES GO (§100, AXZ): a hotkey a key
+                trigger, a MIDI trigger a MIDI one on any input, a wall clock a
+                clock one. What Go.dot cannot hear as QLab heard it is said. */
+            std::vector<Trigger> triggers (const Cue& cue)
             {
-                std::vector<std::string> had;
+                std::vector<Trigger> out;
 
-                if (cue.hotkeyTrigger)     had.push_back ("a hotkey");
-                if (cue.midiTrigger)       had.push_back ("a MIDI trigger");
-                if (cue.wallClockTrigger)  had.push_back ("a wall-clock trigger");
-                if (cue.timecodeTrigger)   had.push_back ("a timecode trigger");
+                if (cue.hotkeyTrigger)
+                {
+                    const auto key = keyFor (cue.hotkey);
 
-                if (had.empty())
-                    return;
+                    if (key.empty())
+                        note (Note::Kind::dropped, cue, "QLab fired it by a key Go.dot has no name for: its hotkey is not imported");
+                    else if (cue::isReservedChord (key))
+                        note (Note::Kind::dropped, cue, "QLab fired it by " + key + ", a key Go.dot keeps for itself: its hotkey "
+                              "is not imported - give it another in the inspector");
+                    else
+                    {
+                        out.push_back ({ "key", { { "key", key } } });
 
-                std::string words;
+                        if (cue.hotkey.control && cue.hotkey.command)
+                            note (Note::Kind::approximated, cue, "QLab's hotkey held both Control and Command: Go.dot's " + key
+                                  + " holds Ctrl, or Command on a Mac");
+                        else if (cue.hotkey.control)
+                            note (Note::Kind::info, cue, "QLab's Control is Go.dot's Mod - Ctrl here, Command on a Mac: " + key);
+                    }
+                }
 
-                for (std::size_t at = 0; at < had.size(); ++at)
-                    words += (at == 0 ? "" : at + 1 == had.size() ? " and " : ", ") + had[at];
+                if (cue.midiTrigger)
+                {
+                    const auto& m = cue.midiTriggerSpec;
+                    static const std::map<int, std::string> types {
+                        { 0x90, "noteOn" }, { 0x80, "noteOff" }, { 0xB0, "controlChange" }, { 0xC0, "programChange" } };
 
-                note (Note::Kind::dropped, cue, "QLab fired it by " + words + ": not imported (§46.2, ZY)");
+                    if (const auto type = types.find (m.status & 0xF0); type == types.end())
+                        note (Note::Kind::dropped, cue, "QLab fired it by a MIDI message of status " + std::to_string (m.status)
+                              + ", which a Go.dot trigger does not listen for: not imported");
+                    else
+                    {
+                        Trigger trigger { "midi", { { "type", type->second } } };
+
+                        if (m.channel >= 1 && m.channel <= 16)
+                            trigger.attributes.push_back ({ "channel", std::to_string (m.channel) });
+
+                        trigger.attributes.push_back ({ "number", std::to_string (std::clamp (m.byte1, 0, 127)) });
+
+                        //  A note on of velocity nought is a note off by MIDI's own rule: nobody waits for one.
+                        const auto any = m.byte2Operator != 0 || (type->second == "noteOn" && m.byte2 == 0);
+
+                        if (type->second != "programChange")
+                            trigger.attributes.push_back ({ "data", any ? std::string ("-1")
+                                                                        : std::to_string (std::clamp (m.byte2, 0, 127)) });
+
+                        if (m.byte1Operator != 0 || m.byte2Operator != 0)
+                            note (Note::Kind::approximated, cue, "QLab's MIDI trigger compared a byte by more or less than: "
+                                  "Go.dot's matches the number as it is and any value");
+
+                        out.push_back (std::move (trigger));
+                    }
+                }
+
+                if (cue.wallClockTrigger)
+                {
+                    const auto two = [] (int n) { return (n < 10 ? "0" : "") + std::to_string (std::clamp (n, 0, 59)); };
+                    const auto at = two (std::clamp (cue.wallHours, 0, 23)) + ":" + two (cue.wallMinutes) + ":" + two (cue.wallSeconds);
+                    out.push_back ({ "clock", { { "at", at } } });
+
+                    if ((cue.wallDays & 0x7F) != 0x7F)
+                        note (Note::Kind::approximated, cue, "QLab fired it at " + at + " on some days of the week only: Go.dot's "
+                              "clock trigger fires every day");
+
+                    if (cue.wallClockMode != 0)
+                        note (Note::Kind::approximated, cue, "QLab's wall clock was in mode " + std::to_string (cue.wallClockMode)
+                              + ", read as the hours of a 24-hour clock");
+                }
+
+                if (cue.timecodeTrigger)
+                    note (Note::Kind::dropped, cue, "QLab fired it by timecode: not imported - a time group chasing timecode "
+                          "is Go.dot's way (§60)");
+
+                return out;
             }
 
             Item build (const Cue& cue)
             {
                 ++plan.cues;
-                triggers (cue);
+                auto item = buildKind (cue);
+                item.triggers = triggers (cue);
+                return item;
+            }
 
+            Item buildKind (const Cue& cue)
+            {
                 if (cue.type == "Group")   return group (cue);
+                if (cue.type == "MIDI")    return midiCue (cue);
                 if (cue.type == "Audio")   return media (cue);
                 if (cue.type == "Fade")    return fade (cue);
                 if (cue.type == "OSC")     return message (cue);
@@ -399,7 +540,7 @@ namespace wfg::import::qlab
 
                 if (cue.type == "Video")   return picture (cue);
                 if (cue.type == "Titles")  return text (cue);
-                if (cue.type == "Camera")  return placeholder (cue, "a camera cue stays a memo (§62, AKT)", {});
+                if (cue.type == "Camera")  return camera (cue);
 
                 return placeholder (cue, "Go.dot has no " + cue.type + " cue (§46.4)", {});
             }
@@ -588,6 +729,282 @@ namespace wfg::import::qlab
 
                 place (cue, on, item, 1.0);
                 kindOf[cue.id] = "video";
+                return item;
+            }
+
+            /*  A CAMERA CUE (§100, amending AKT): a capture cue on its canvas,
+                placed as a picture is, showing the video input made for its
+                camera patch - with no camera or card chosen, which somebody
+                picks on this machine. */
+            Item camera (const Cue& cue)
+            {
+                Item item;
+                item.kind = "video";
+                item.key = "cue:" + cue.id;
+                item.name = displayName (cue);
+                item.attributes = common (cue);
+
+                const auto on = canvasFor (cue);
+                item.canvas = on.key;
+                item.attributes.push_back ({ "source", "capture" });
+                item.videoInput = cameraFor (cue.cameraPatch);
+
+                //  A camera's picture fills its canvas unless QLab drew it smaller: its own size is the camera's.
+                auto placed = cue;
+                placed.placement.fullScreen = true;
+                place (placed, on, item, 1.0);
+
+                kindOf[cue.id] = "video";
+                return item;
+            }
+
+            /*  THE VIDEO INPUT FOR A CAMERA PATCH, made the first time a cue shows
+                it, named as QLab named the patch. */
+            std::string cameraFor (const std::string& id)
+            {
+                const auto key = "camera:" + (id.empty() ? std::string ("default") : id);
+
+                if (std::none_of (plan.cameras.begin(), plan.cameras.end(), [&key] (const Camera& c) { return c.key == key; }))
+                {
+                    Camera camera;
+                    camera.key = key;
+
+                    for (const auto& patch : workspace.cameraPatches)
+                        if (patch.id == id)
+                        {
+                            camera.name = patch.name;
+                            camera.device = patch.device + (patch.displayMode.empty() ? std::string {} : ", " + patch.displayMode)
+                                          + (patch.deviceType == "Blackmagic-DeckLink" ? " (DeckLink)" : "");
+                        }
+
+                    if (camera.name.empty())
+                        camera.name = id.empty() ? std::string ("Camera") : "Camera " + id;
+
+                    plan.cameras.push_back (std::move (camera));
+                }
+
+                return key;
+            }
+
+            /*  THE PORT FOR A MIDI PATCH, made the first time a cue sends on it,
+                named as QLab named the patch. */
+            std::string portFor (const std::string& id)
+            {
+                const auto key = "midi:" + (id.empty() ? std::string ("default") : id);
+
+                if (std::none_of (plan.ports.begin(), plan.ports.end(), [&key] (const Port& p) { return p.key == key; }))
+                {
+                    Port port;
+                    port.key = key;
+
+                    for (const auto& patch : workspace.midiPatches)
+                        if (patch.id == id)
+                        {
+                            port.name = patch.name;
+                            port.device = patch.device;
+                        }
+
+                    if (port.name.empty())
+                        port.name = id.empty() ? std::string ("MIDI") : "MIDI " + id;
+
+                    plan.ports.push_back (std::move (port));
+                }
+
+                return key;
+            }
+
+            /*  ONE MIDI MESSAGE AS A GO.DOT CUE'S ROWS: its type, channel, bytes. */
+            struct Spoken
+            {
+                std::string type;
+                int channel = 1;
+                int data1 = 0;
+                int data2 = 0;
+            };
+
+            static void speak (const Spoken& s, Attributes& rows)
+            {
+                rows.push_back ({ "type", s.type });
+                rows.push_back ({ "channel", std::to_string (std::clamp (s.channel, 1, 16)) });
+
+                if (s.data1 != 0)
+                    rows.push_back ({ "data1", std::to_string (std::clamp (s.data1, 0, 127)) });
+
+                if (s.data2 != 0)
+                    rows.push_back ({ "data2", std::to_string (std::clamp (s.data2, 0, s.type == "pitchBend" ? 16383 : 127)) });
+            }
+
+            /*  RAW BYTES AS THE MESSAGES THEY ARE (§100, AYB): each status byte
+                and its data bytes, running status kept; nullopt for bytes that
+                are not channel messages Go.dot sends. */
+            static std::optional<std::vector<Spoken>> voiceMessages (const std::vector<int>& bytes)
+            {
+                std::vector<Spoken> out;
+                int status = -1;
+                std::size_t at = 0;
+
+                while (at < bytes.size())
+                {
+                    if (bytes[at] >= 0x80)
+                        status = bytes[at++];
+
+                    if (status < 0x80 || status >= 0xF0)
+                        return std::nullopt;
+
+                    const auto high = status & 0xF0;
+                    const auto size = high == 0xC0 || high == 0xD0 ? 1u : 2u;
+
+                    if (at + size > bytes.size())
+                        return std::nullopt;
+
+                    for (std::size_t k = 0; k < size; ++k)
+                        if (bytes[at + k] >= 0x80)
+                            return std::nullopt;
+
+                    Spoken s;
+                    s.channel = (status & 0x0F) + 1;
+                    const auto a = bytes[at];
+                    const auto b = size == 2 ? bytes[at + 1] : 0;
+
+                    switch (high)
+                    {
+                        case 0x80: s.type = "noteOff";         s.data1 = a; s.data2 = b; break;
+                        case 0x90: s.type = "noteOn";          s.data1 = a; s.data2 = b; break;
+                        case 0xA0: s.type = "aftertouch";      s.data1 = a; s.data2 = b; break;
+                        case 0xB0: s.type = "controlChange";   s.data1 = a; s.data2 = b; break;
+                        case 0xC0: s.type = "programChange";   s.data1 = a; break;
+                        case 0xD0: s.type = "channelPressure"; s.data2 = a; break;
+                        default:   s.type = "pitchBend";       s.data2 = a | (b << 7); break;
+                    }
+
+                    out.push_back (s);
+                    at += size;
+                }
+
+                if (out.empty())
+                    return std::nullopt;
+
+                return out;
+            }
+
+            /*  A MIDI CUE (§100): a voice message as Go.dot's MIDI cue of that
+                type, its fade the cue's fade (AXY); MIDI Show Control spelled as
+                its sysex; raw bytes a sysex when they are one, else the messages
+                they spell - one cue, or a timeline of them. */
+            Item midiCue (const Cue& cue)
+            {
+                const auto& m = cue.midi;
+
+                Item item;
+                item.kind = "midi";
+                item.key = "cue:" + cue.id;
+                item.name = displayName (cue);
+                item.attributes = common (cue);
+                item.port = portFor (m.patch);
+                kindOf[cue.id] = "midi";
+
+                if (m.messageType == 2)
+                {
+                    item.attributes.push_back ({ "type", "sysex" });
+                    item.attributes.push_back ({ "sysex", mscBytes (m) });
+                    return item;
+                }
+
+                if (m.messageType == 3)
+                {
+                    const auto bytes = hexBytes (m.raw);
+
+                    if (! bytes.has_value() || bytes->empty())
+                        return placeholder (cue, "its bytes are not hex Go.dot can read", m.raw);
+
+                    if (bytes->front() == 0xF0)
+                    {
+                        auto hex = m.raw;
+
+                        if (bytes->back() != 0xF7)
+                        {
+                            hex += " F7";
+                            note (Note::Kind::approximated, cue, "its system-exclusive bytes did not end with F7: one is added");
+                        }
+
+                        item.attributes.push_back ({ "type", "sysex" });
+                        item.attributes.push_back ({ "sysex", hex });
+                        return item;
+                    }
+
+                    const auto messages = voiceMessages (*bytes);
+
+                    if (! messages.has_value())
+                        return placeholder (cue, "its bytes are not MIDI messages Go.dot sends", m.raw);
+
+                    if (messages->size() == 1)
+                    {
+                        speak (messages->front(), item.attributes);
+                        return item;
+                    }
+
+                    //  Several messages: a timeline of one cue each, all sent at its GO.
+                    item.kind = "group";
+                    item.attributes.push_back ({ "mode", "timeline" });
+
+                    for (std::size_t at = 0; at < messages->size(); ++at)
+                    {
+                        Item each;
+                        each.kind = "midi";
+                        each.key = item.key + ":" + std::to_string (at);
+                        each.name = item.name + " " + std::to_string (at + 1);
+                        each.port = item.port;
+                        speak ((*messages)[at], each.attributes);
+                        item.children.push_back (std::move (each));
+                    }
+
+                    item.port.clear();
+                    kindOf[cue.id] = "group";
+                    return item;
+                }
+
+                //  A voice message, by QLab's `status`.
+                static const char* const types[] { "noteOff", "noteOn", "aftertouch", "controlChange", "programChange",
+                                                   "channelPressure", "pitchBend" };
+
+                if (m.status < 0 || m.status > 6)
+                    return placeholder (cue, "QLab's MIDI command " + std::to_string (m.status) + " is not one Go.dot knows",
+                                        displayName (cue));
+
+                Spoken s;
+                s.type = types[m.status];
+                s.channel = m.channel;
+                s.data1 = m.status <= 4 ? m.byte1 : 0;
+                s.data2 = m.status <= 3 ? m.byte2 : m.status == 5 ? m.byte1 : m.status == 6 ? m.byteCombo : 0;
+
+                if (m.fade)
+                {
+                    const auto fadeable = m.status == 2 || m.status == 3 || m.status == 5 || m.status == 6;
+                    const auto top = m.status == 6 ? 16383 : 127;
+                    const auto to = std::clamp (m.endValue, 0, top);
+
+                    if (! fadeable)
+                        note (Note::Kind::approximated, cue, "QLab faded a " + std::string (s.type) + "'s value: Go.dot sends "
+                              "its first value");
+                    else if (cue.duration <= tiny)
+                    {
+                        s.data2 = to;
+                        note (Note::Kind::approximated, cue, "a fade of no duration: its end value is sent");
+                    }
+                    else
+                    {
+                        item.attributes.push_back ({ "fadeTo", std::to_string (to) });
+                        item.attributes.push_back ({ "fadeTime", number (cue.duration, 4) });
+
+                        if (cue.shape.type != 3)
+                            item.attributes.push_back ({ "fadeCurve", "sCurve" });
+
+                        if (cue.shape.type != 1 && cue.shape.type != 3)
+                            note (Note::Kind::approximated, cue, "QLab's fade shape taken as Go.dot's S-curve");
+                    }
+                }
+
+                speak (s, item.attributes);
                 return item;
             }
 
@@ -1311,8 +1728,10 @@ namespace wfg::import::qlab
 
             /*  THE DEVICE FOR A PATCH, made the first time a cue sends through it,
                 each address's first segment one of its prefixes - unless another
-                device claimed it first, which is said. */
-            void deviceFor (const NetworkPatch& patch, const std::string& address, const Cue& cue)
+                device claimed it first, which is said. A patch that needs a
+                prefix of its own (AYK) is named under it, and the address the cue
+                is written with returned. */
+            std::string deviceFor (const NetworkPatch& patch, const std::string& address, const Cue& cue)
             {
                 const auto key = "patch:" + patch.id;
                 auto found = std::find_if (plan.devices.begin(), plan.devices.end(), [&key] (const Device& d) { return d.key == key; });
@@ -1325,9 +1744,25 @@ namespace wfg::import::qlab
                     device.host = patch.host.empty() || patch.host == "localhost" ? "127.0.0.1" : patch.host;
                     device.port = patch.port;
                     device.tcp = patch.tcp;
+
+                    if (ownPrefix.count (patch.id) != 0)
+                    {
+                        device.removePrefix = true;
+                        device.prefix = prefixFor (patch);
+                        segmentOwner[device.prefix] = key;
+                    }
+
+                    if (patch.otherDestinations > 0)
+                        note (Note::Kind::approximated, cue, "QLab sent the patch " + patch.name + " to "
+                              + std::to_string (patch.otherDestinations + 1) + " destinations: the first, " + device.host
+                              + ", is its device here");
+
                     plan.devices.push_back (std::move (device));
                     found = plan.devices.end() - 1;
                 }
+
+                if (found->removePrefix)
+                    return found->prefix + address;
 
                 const auto slash = address.find ('/', 1);
                 const auto segment = slash == std::string::npos ? address : address.substr (0, slash);
@@ -1337,11 +1772,40 @@ namespace wfg::import::qlab
                     if (owner->second != key)
                         note (Note::Kind::approximated, cue, "two network patches send under " + segment + ": its messages "
                               "go to the device that claimed it first");
-                    return;
+                    return address;
                 }
 
                 segmentOwner[segment] = key;
                 found->prefix += (found->prefix.empty() ? "" : " ") + segment;
+                return address;
+            }
+
+            /*  A PREFIX OF ITS OWN (AYK): its name in letters, digits, `_` and
+                `-`, a space an underscore, made unique - `/MacMini_Justice1`. */
+            std::string prefixFor (const NetworkPatch& patch)
+            {
+                std::string slug;
+
+                for (const auto c : patch.name)
+                {
+                    const auto u = static_cast<unsigned char> (c);
+
+                    if (std::isalnum (u) != 0 && u < 0x80)
+                        slug += c;
+                    else if (c == ' ' || c == '_' || c == '-')
+                        slug += c == '-' ? '-' : '_';
+                }
+
+                if (slug.empty())
+                    slug = "patch" + patch.id.substr (0, 8);
+
+                auto prefix = "/" + slug;
+
+                for (int n = 2; prefixesTaken.count (prefix) != 0 || segmentOwner.count (prefix) != 0; ++n)
+                    prefix = "/" + slug + "_" + std::to_string (n);
+
+                prefixesTaken.insert (prefix);
+                return prefix;
             }
 
             Item message (const Cue& cue)
@@ -1352,7 +1816,12 @@ namespace wfg::import::qlab
                 if (patch == nullptr)
                     return placeholder (cue, "its network patch is not in the workspace", words);
 
-                if (patch->kind != "osc")
+                /*  AN EOS OR A QLAB PATCH (§100, AXZ) is OSC too: QLab keeps the message
+                    it sends there written out, at the patch's address and port. */
+                const auto eos = patch->kind.rfind ("com.etc.eos", 0) == 0;
+                const auto qlab = patch->kind.rfind ("com.figure53.qlab", 0) == 0;
+
+                if (patch->kind != "osc" && ! eos && ! qlab)
                     return placeholder (cue, "its patch is not an OSC message patch (" + patch->kind + ")", words);
 
                 if (workspace.major < 5 && cue.messageType != 2)
@@ -1422,7 +1891,11 @@ namespace wfg::import::qlab
                     atoms.push_back (atom);
                 }
 
-                item.attributes.push_back ({ "address", parts.front() });
+                item.attributes.push_back ({ "address", deviceFor (*patch, parts.front(), cue) });
+
+                if (qlab && ! patch->passcode.empty() && passcodesSaid.insert (patch->id).second)
+                    note (Note::Kind::approximated, cue, "QLab sent to " + patch->name + " with its passcode, which Go.dot "
+                          "does not send: let that workspace take OSC without a passcode");
 
                 if (! atoms.empty())
                     item.attributes.push_back ({ "value", joined() });
@@ -1460,7 +1933,6 @@ namespace wfg::import::qlab
                     note (Note::Kind::approximated, cue, "a #v# in a message that is not a fade: its start value is sent");
                 }
 
-                deviceFor (*patch, parts.front(), cue);
                 return item;
             }
 
@@ -1522,6 +1994,8 @@ namespace wfg::import::qlab
                         for (const auto& child : workspace.lists[at].children)
                             classify (child);
 
+                ownPrefixes();
+
                 /*  EVERY STAGE A CANVAS (ALF), in the workspace's order, whether a
                     cue of the lists ticked is on it or not: the rig, as QLab had it. */
                 for (const auto& stage : workspace.stages)
@@ -1544,11 +2018,20 @@ namespace wfg::import::qlab
                     list = static_cast<int> (at);
                     const auto& source = workspace.lists[at];
 
-                    if (source.groupMode == 5)
-                        note (Note::Kind::approximated, source, "a cart: its grid is not imported, and its cues are a cue "
-                              "list fired in order");
-
                     List out;
+
+                    if (source.hotkeyTrigger || source.midiTrigger || source.wallClockTrigger || source.timecodeTrigger)
+                        note (Note::Kind::dropped, source, "QLab fired the cue list itself by a trigger: a Go.dot list has "
+                              "none - put the trigger on its first cue, or on a start cue in a cart");
+
+                    //  A CART A CART (§100, AYM): a list GO never meets, each cue fired by its trigger or a pad (§74).
+                    if (source.groupMode == 5)
+                    {
+                        out.cart = true;
+                        note (Note::Kind::approximated, source, "a cart: a Go.dot cart, its cues fired by their keys and "
+                              "triggers and from the tablet's Cart tab; its grid is not imported");
+                    }
+
                     out.key = "list:" + source.id;
                     out.name = source.name.empty() ? "Cue List" : source.name;
                     out.items = members (source);
@@ -1704,9 +2187,192 @@ namespace wfg::import::qlab
         return osc::Value::string (words).toAtom();
     }
 
+    std::string keyFor (const HotKey& key)
+    {
+        /*  THE KEYS THAT TYPE NO CHARACTER, by the Mac's virtual key code
+            (Events.h), and by the private-use character Cocoa gives them. */
+        static const std::map<int, std::string> codes {
+            { 122, "F1" }, { 120, "F2" }, { 99, "F3" }, { 118, "F4" }, { 96, "F5" }, { 97, "F6" }, { 98, "F7" },
+            { 100, "F8" }, { 101, "F9" }, { 109, "F10" }, { 103, "F11" }, { 111, "F12" }, { 105, "F13" },
+            { 107, "F14" }, { 113, "F15" }, { 106, "F16" }, { 64, "F17" }, { 79, "F18" }, { 80, "F19" }, { 90, "F20" },
+            { 123, "ArrowLeft" }, { 124, "ArrowRight" }, { 125, "ArrowDown" }, { 126, "ArrowUp" },
+            { 36, "Enter" }, { 76, "Enter" }, { 48, "Tab" }, { 49, "Space" }, { 51, "Backspace" }, { 53, "Escape" },
+            { 117, "Delete" }, { 115, "Home" }, { 119, "End" }, { 116, "PageUp" }, { 121, "PageDown" }, { 114, "Insert" } };
+
+        std::string name;
+        const auto c = key.character;
+
+        if (c >= 0xF704 && c <= 0xF717)
+            name = "F" + std::to_string (c - 0xF704 + 1);
+        else if (c == 0xF700) name = "ArrowUp";
+        else if (c == 0xF701) name = "ArrowDown";
+        else if (c == 0xF702) name = "ArrowLeft";
+        else if (c == 0xF703) name = "ArrowRight";
+        else if (c >= '0' && c <= '9')
+            name = (key.numericPad ? "Num" : "") + std::string (1, static_cast<char> (c));
+        else if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'))
+            name = std::string (1, static_cast<char> (std::toupper (c)));
+        else if (const auto found = codes.find (key.keyCode); found != codes.end() && (c == 0 || c < 0x20 || c >= 0xF700 || c == 0x7F))
+            name = found->second;
+
+        if (name.empty())
+            return {};
+
+        return cue::chordOf (key.command || key.control, key.option, key.shift, name).value_or (std::string {});
+    }
+
+    std::string mscBytes (const MidiMessage& m)
+    {
+        std::vector<int> bytes { 0xF0, 0x7F, std::clamp (m.deviceId, 0, 127), 0x02,
+                                 std::clamp (m.commandFormat, 0, 127), std::clamp (m.command, 0, 127) };
+
+        //  A cue number, list or path: its characters, digits and points, with a nought between.
+        const auto ascii = [&bytes] (const std::string& text)
+        {
+            for (const auto c : text)
+                if ((c >= '0' && c <= '9') || c == '.')
+                    bytes.push_back (c);
+        };
+
+        const auto cueOf = [&] (bool list, bool path)
+        {
+            if (m.qNumber.empty())
+                return;
+
+            ascii (m.qNumber);
+
+            if (list && ! m.qList.empty())
+            {
+                bytes.push_back (0x00);
+                ascii (m.qList);
+
+                if (path && ! m.qPath.empty())
+                {
+                    bytes.push_back (0x00);
+                    ascii (m.qPath);
+                }
+            }
+        };
+
+        //  The time: hours carry the frame rate in their top bits, as MTC's do.
+        const auto time = [&]
+        {
+            bytes.push_back (((std::clamp (m.timecodeFormat, 0, 3) & 0x03) << 5) | std::clamp (m.hours, 0, 23));
+            bytes.push_back (std::clamp (m.minutes, 0, 59));
+            bytes.push_back (std::clamp (m.seconds, 0, 59));
+            bytes.push_back (std::clamp (m.frames, 0, 29));
+            bytes.push_back (std::clamp (m.subframes, 0, 99));
+        };
+
+        switch (m.command)
+        {
+            case 1: case 2: case 3: case 5: case 11: case 16:   // GO STOP RESUME LOAD GO_OFF GO/JAM_CLOCK
+                cueOf (true, true);
+                break;
+
+            case 4:                                             // TIMED_GO
+                time();
+                cueOf (true, true);
+                break;
+
+            case 6:                                             // SET
+                bytes.push_back (m.controlNumber & 0x7F);
+                bytes.push_back ((m.controlNumber >> 7) & 0x7F);
+                bytes.push_back (m.controlValue & 0x7F);
+                bytes.push_back ((m.controlValue >> 7) & 0x7F);
+
+                if (m.sendTime)
+                    time();
+                break;
+
+            case 7:                                             // FIRE
+                bytes.push_back (std::clamp (m.macro, 0, 127));
+                break;
+
+            case 24:                                            // SET_CLOCK
+                time();
+                ascii (m.qList);
+                break;
+
+            case 17: case 18: case 19: case 20: case 21: case 22: case 23: case 25: case 26: case 27: case 28:
+                ascii (m.qList);
+                break;
+
+            case 29: case 30:                                   // OPEN_CUE_PATH CLOSE_CUE_PATH
+                ascii (m.qPath);
+                break;
+
+            default:                                            // ALL_OFF RESTORE RESET, and anything else
+                break;
+        }
+
+        bytes.push_back (0xF7);
+
+        std::string out;
+        static constexpr const char* digits = "0123456789ABCDEF";
+
+        for (const auto b : bytes)
+        {
+            if (! out.empty())
+                out += ' ';
+            out += digits[(b >> 4) & 0x0F];
+            out += digits[b & 0x0F];
+        }
+
+        return out;
+    }
+
+    std::optional<std::vector<int>> hexBytes (const std::string& text)
+    {
+        std::vector<int> out;
+        std::string token;
+
+        const auto flush = [&out, &token]
+        {
+            if (token.empty())
+                return true;
+
+            if (token.size() > 2)
+                return false;
+
+            int value = 0;
+
+            for (const auto c : token)
+            {
+                const auto d = std::isdigit (static_cast<unsigned char> (c)) ? c - '0'
+                             : (c >= 'a' && c <= 'f') ? c - 'a' + 10
+                             : (c >= 'A' && c <= 'F') ? c - 'A' + 10 : -1;
+                if (d < 0)
+                    return false;
+                value = value * 16 + d;
+            }
+
+            out.push_back (value);
+            token.clear();
+            return true;
+        };
+
+        for (const auto c : text)
+        {
+            if (c == ' ' || c == ',' || c == '\t' || c == '\n' || c == '\r')
+            {
+                if (! flush())
+                    return std::nullopt;
+                continue;
+            }
+
+            token += c;
+        }
+
+        if (! flush())
+            return std::nullopt;
+
+        return out;
+    }
+
     Plan walk (const Workspace& workspace, const WalkOptions& options)
     {
-        Walker walker { workspace, options, {}, {}, {}, {}, {}, {}, -1, {}, {} };
+        Walker walker { workspace, options, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, -1, {}, {} };
         walker.run();
         return std::move (walker.plan);
     }

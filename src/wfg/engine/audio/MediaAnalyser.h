@@ -219,6 +219,13 @@ namespace wfg::audio
             ones are dropped here, under one short lock each. */
         bool queue (const std::string& named);
 
+        /*  ANY THREAD: every file asked for this session that has no length -
+            missing when it was looked for - looked for again (namespace draft
+            §100, AXX), once somebody has put it where the show looks: File >
+            Find missing files in a folder... copies it in and asks this.
+            Answers how many were queued again. */
+        int lookAgain();
+
         /*  Files waiting or being analysed. It falls only AFTER a file's
             record is published, so a caller that sees nought and then reads
             the snapshot sees every record it waited for. */
@@ -283,8 +290,9 @@ namespace wfg::audio
         std::thread thread;
     };
 
-    /*  `media.cleanCache` (namespace draft §52): the sweep, asked for. Taken
+    /*  `media.cleanCache` (namespace draft §52): the sweep, asked for; and
+        `media.lookAgain` (§100): the missing files looked for again. Taken
         and ignored where there is no analyser - a replay, a test rig - so a
-        log that holds it replays. */
+        log that holds them replays. */
     void registerAnalyserCommands (CommandRegistry&, MediaAnalyser*);
 }

@@ -6513,7 +6513,7 @@ TEST_CASE ("import window: the named scenes that do something are ticked, and Im
     juce::File into;
 
     ui::ImportWindow::Actions actions;
-    actions.import = [&] (const std::vector<int>& ticked, const juce::File& where)
+    actions.import = [&] (const std::vector<int>& ticked, const juce::File& where, const std::vector<std::string>&)
     {
         handed = ticked;
         into = where;
@@ -6558,6 +6558,93 @@ TEST_CASE ("import window: the named scenes that do something are ticked, and Im
 
     CHECK (handed == std::vector<int> { 0, 1 });
     CHECK (into == parent.getChildFile ("Lazzi"));
+}
+
+TEST_CASE ("import window: a QLab workspace's files counted, the missing listed, a folder offered; a Live set's window has none of it (§100)")
+{
+    /*  The author, 2026-10-20: "Could we have a stage where we can point to a
+        folder if there are missing files?" The window asks for the files as
+        it opens, says how many were found, lists the rest, and offers a
+        folder to look in - and Import hands back the folders added. */
+    wfg::ImportScenes lists;
+    lists.title = "Import QLab workspace";
+    lists.scenes = { { 0, "Main Cue List", "593 cue(s)", true, true } };
+
+    std::vector<std::vector<std::string>> asked;
+    std::vector<std::string> foldersHanded { "something" };
+
+    ui::ImportWindow::Actions actions;
+    actions.import = [&] (const std::vector<int>&, const juce::File&, const std::vector<std::string>& folders)
+    {
+        foldersHanded = folders;
+    };
+    actions.findFiles = [&] (const std::vector<std::string>& folders, std::function<void (const wfg::ImportFiles&)> answer)
+    {
+        asked.push_back (folders);
+        wfg::ImportFiles files;
+        files.total = 25;
+        files.missing = { "audio/ambiances_19.WAV", "audio/AmIHuman.wav" };
+        answer (files);
+    };
+
+    const auto parent = juce::File::getSpecialLocation (juce::File::tempDirectory);
+    ui::ImportWindow window (model::Theme {}, juce::StringArray { "LoveDoll_Siegen" }, lists, parent, "LoveDoll", actions);
+
+    juce::TextButton* importButton = nullptr;
+    juce::TextButton* addFolder = nullptr;
+    juce::TextEditor* missing = nullptr;
+    std::vector<juce::Label*> labels;
+
+    std::function<void (juce::Component&)> find = [&] (juce::Component& component)
+    {
+        for (auto* child : component.getChildren())
+        {
+            if (auto* button = dynamic_cast<juce::TextButton*> (child))
+            {
+                if (button->getButtonText() == "Import")
+                    importButton = button;
+                else if (button->getButtonText() == "Add a folder to search...")
+                    addFolder = button;
+            }
+
+            if (auto* editor = dynamic_cast<juce::TextEditor*> (child); editor != nullptr && editor->isReadOnly())
+                missing = editor;
+
+            if (auto* label = dynamic_cast<juce::Label*> (child))
+                labels.push_back (label);
+
+            find (*child);
+        }
+    };
+
+    find (window);
+
+    REQUIRE (asked.size() == 1u);
+    CHECK (asked.front().empty());
+    REQUIRE (addFolder != nullptr);
+    CHECK (addFolder->isEnabled());
+
+    CHECK (std::any_of (labels.begin(), labels.end(), [] (const juce::Label* label)
+                        { return label->getText() == "2 of its 25 files were not found - imported, they play nothing:"; }));
+
+    REQUIRE (missing != nullptr);
+    CHECK (missing->isVisible());
+    CHECK (missing->getText() == "audio/ambiances_19.WAV\naudio/AmIHuman.wav");
+
+    REQUIRE (importButton != nullptr);
+    importButton->onClick();
+    CHECK (foldersHanded.empty());
+
+    //  A Live set's window: no files asked, no folder offered.
+    wfg::ImportScenes scenes;
+    scenes.scenes = { { 0, "one", "", true, true } };
+    ui::ImportWindow::Actions live;
+    live.import = [] (const std::vector<int>&, const juce::File&, const std::vector<std::string>&) {};
+    ui::ImportWindow liveWindow (model::Theme {}, juce::StringArray { "set" }, scenes, parent, "set", live);
+
+    addFolder = nullptr;
+    find (liveWindow);
+    CHECK ((addFolder == nullptr || ! addFolder->isVisible()));
 }
 
 //==============================================================================

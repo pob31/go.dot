@@ -253,6 +253,12 @@ namespace wfg::tree
         int mscDevice = 127;
         int mscFormat = 127;
 
+        /*  WHETHER THE PREFIX IS GO.DOT'S OWN NAME FOR IT (namespace draft 100,
+            AYK, `mount/removePrefix`): taken off every address before it
+            leaves, so devices that answer at the same addresses can be told
+            apart. */
+        bool removePrefix = false;
+
         /*  WHETHER IT CAN BE ASKED, and where.
 
             `transport` says how to send and says nothing about the other

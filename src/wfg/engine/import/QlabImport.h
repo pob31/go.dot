@@ -36,6 +36,7 @@
     workspace imported twice writes the same show byte for byte.
 */
 
+#include <wfg/engine/import/FileSearch.h>
 #include <wfg/engine/import/ImportCommon.h>
 #include <wfg/engine/import/QlabReader.h>
 #include <wfg/engine/import/QlabWalk.h>
@@ -66,11 +67,33 @@ namespace wfg::import::qlab
         absolute path, then by name under the workspace's folder. */
     juce::File findMedia (const FileRef&, const juce::File& workspaceFolder);
 
+    /*  AND THEN IN THE FOLDERS SOMEBODY POINTED AT (namespace draft §100, AXX),
+        each walked once, in the order they were given: by name, a tie broken
+        by the path QLab remembered. */
+    juce::File findMedia (const FileRef&, const juce::File& workspaceFolder, const std::vector<FolderIndex>& folders);
+
+    /*  EVERY FILE THE LISTS TICKED PLAY, and where it was found (§100): what the
+        import window shows before the import, so the missing can be looked for
+        in a folder. Each file once, in show order; `found` empty where it was
+        not. */
+    struct MediaFound
+    {
+        std::string name;               ///< as the report names it: its relative path, else its name
+        juce::File found;
+    };
+
+    std::vector<MediaFound> scanMedia (const Workspace&, const juce::File& workspaceFile, const std::set<int>& lists,
+                                       const std::vector<FolderIndex>& folders);
+
     struct ImportOptions
     {
         juce::File into;                ///< the show folder to write; refused when it holds a show
         std::set<int> lists;            ///< empty: every list
         bool copyMedia = true;
+
+        /*  FOLDERS TO LOOK IN for a file not found where the workspace says
+            (§100, AXX), in the order they were picked. */
+        std::vector<juce::File> searchFolders;
 
         /*  A sentence at each step, from whichever thread runs the import. */
         std::function<void (const std::string&)> progress;

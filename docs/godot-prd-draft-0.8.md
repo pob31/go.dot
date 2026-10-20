@@ -2255,6 +2255,18 @@ as a picture or a movie, its file, timing, place and opacity; the fades that mov
 picture; each stage as a canvas. A text cue mixing styles takes its first look, and the report says so.
 A camera cue stays a memo.
 
+*Amended 2026-10-20, at the author's direction* (namespace draft §100, AXX-AXZ, AYK): **the importer
+catches up with what Go.dot has since become.** A MIDI cue comes over as a MIDI cue on a port per QLab
+patch - every voice type, its fade as the cue's own fade of its value, MIDI Show Control and raw bytes
+spelled out; a hotkey, a MIDI trigger and a wall clock as Go.dot's triggers; a network cue sent to an Eos
+or to another QLab as an OSC cue on a device at that address; a camera cue as a capture cue on a camera
+chosen on the night; a cart as a cart. Devices that answer at the same addresses - several QLab machines
+each taking `/go` - are each named under a prefix of Go.dot's own, taken off before the message leaves.
+**A file not where the workspace says is looked for in folders somebody points at**, in the import window
+before the import and with `--search` on the command line; and an open show's missing files are found
+the same way, File > Find missing files in a folder..., copied into its media folder under the names its
+cues already give them.
+
 ### 3.21 Control-rate dataflow graph
 
 Sources (tree nodes, incoming OSC/MIDI/serial/sACN/PSN) → processors (scaling,

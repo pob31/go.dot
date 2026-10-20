@@ -146,8 +146,10 @@ namespace wfg::client::model
                 { "osc",     { "device", "path1", "path2", "path3", "path4", "path5", "path6", "path7",
                                "path8", "role", "address", "value", "wait", "timeout", "duration", "loop", "doh",
                                "dohRollback" } },
-                { "midi",    { "port", "channel", "type", "data1", "data2", "sysex", "wait", "doh",
-                               "dohRollback" } },
+                /*  ITS FADE BESIDE THE VALUE IT FADES (namespace draft §100): from data2
+                    to fadeTo, over fadeTime, with its shape. */
+                { "midi",    { "port", "channel", "type", "data1", "data2", "fadeTo", "fadeTime", "fadeCurve", "sysex",
+                               "wait", "doh", "dohRollback" } },
 
                 /*  `takeover` BESIDE `mode`, because it is a question only a
                     sampler group is asked and the answer to `mode` is what
@@ -456,6 +458,18 @@ namespace wfg::client::model
                 else if (field.name == "sysex")
                 {
                     field.applies = system;
+                }
+                else if (field.name == "fadeTo" || field.name == "fadeTime" || field.name == "fadeCurve")
+                {
+                    //  A value that is a value fades (§100): a controller, a pressure, a bend.
+                    field.applies = control || pressure || bend || type == "aftertouch";
+
+                    if (field.name == "fadeTo")
+                        field.label = "fade to";
+                    else if (field.name == "fadeTime")
+                        field.label = "fade time";
+                    else
+                        field.label = "fade curve";
                 }
                 else if (field.name == "channel")
                 {

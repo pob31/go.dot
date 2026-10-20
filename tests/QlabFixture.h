@@ -472,9 +472,38 @@ namespace wfg::test::qlab
                     return outer.dictionary ({ { key ("data"), data } });
                 };
 
-                network.push_back ({ key ("networkPatches"),
-                                     outer.array ({ destination ("PATCH-WFS", "WFS", "192.168.1.32", 8051),
-                                                    destination ("PATCH-S21", "S21", "192.168.1.221", 8024) }) });
+                std::vector<std::int64_t> destinations { destination ("PATCH-WFS", "WFS", "192.168.1.32", 8051),
+                                                         destination ("PATCH-S21", "S21", "192.168.1.221", 8024) };
+
+                /*  AN EOS AND A QLAB MACHINE (namespace draft §100), when the case
+                    asks: the Eos sent to its main and its backup, the QLab with
+                    its passcode as QLab keeps it, in `userData`. */
+                if (remotePatches)
+                {
+                    const auto state = [&] (const std::string& host, int port, const std::string& user)
+                    {
+                        return outer.dictionary ({ { key ("host"), text (host) }, { key ("port"), whole (port) },
+                                                   { key ("useTcp"), outer.add (Value::boolean (false)) },
+                                                   { key ("userData"), text (user) } });
+                    };
+                    const auto remote = [&] (const std::string& id, const std::string& name, const std::string& device,
+                                             std::vector<std::int64_t> states)
+                    {
+                        const auto data = outer.dictionary ({ { key ("uniqueID"), text (id) }, { key ("name"), text (name) },
+                                                              { key ("deviceIdentifier"), text (device) },
+                                                              { key ("clientStates"), outer.array (std::move (states)) } });
+                        return outer.dictionary ({ { key ("data"), data } });
+                    };
+
+                    destinations.push_back (remote ("PATCH-EOS", "EOS", "com.etc.eos.2",
+                                                    { state ("192.168.6.101", 5000, ""), state ("192.168.6.102", 5000, "") }));
+                    destinations.push_back (remote ("PATCH-MAC1", "Mac mini 1", "com.figure53.qlab.5",
+                                                    { state ("192.168.1.211", 53000, "2001") }));
+                    destinations.push_back (remote ("PATCH-MAC2", "Mac mini 2", "com.figure53.qlab.5",
+                                                    { state ("192.168.1.212", 53000, "") }));
+                }
+
+                network.push_back ({ key ("networkPatches"), outer.array (destinations) });
             }
             else
             {
@@ -547,9 +576,40 @@ namespace wfg::test::qlab
                     video.push_back ({ key ("defaultSurfaceID"), whole (std::stoll (stages.front().id)) });
             }
 
+            /*  A MIDI PATCH AND A CAMERA PATCH (namespace draft §100): QLab 5's lists
+                of patches with UUIDs, QLab 4's dictionaries by number. */
+            std::vector<std::pair<std::int64_t, std::int64_t>> midi, camera;
+
+            if (major >= 5)
+            {
+                const auto device = outer.dictionary ({ { key ("name"), text ("USB MIDI Interface") } });
+                midi.push_back ({ key ("midiPatches"),
+                                  outer.array ({ outer.object ("MIDIPatch", { { "uniqueID", Value::string ("PATCH-MIDI") },
+                                                                              { "name", Value::string ("Desk MIDI") },
+                                                                              { "deviceDescription", Value::uid (device) } }) }) });
+
+                const auto seen = outer.dictionary ({ { key ("name"), text ("FaceTime HD Camera") },
+                                                      { key ("type"), text ("AVCaptureDevice") } });
+                camera.push_back ({ key ("cameraPatches"),
+                                    outer.array ({ outer.object ("CameraPatch", { { "uniqueID", Value::string ("PATCH-CAM") },
+                                                                                  { "name", Value::string ("Camera 1") },
+                                                                                  { "serializedDescription", Value::uid (seen) } }) }) });
+            }
+            else
+            {
+                midi.push_back ({ key ("patches"),
+                                  outer.dictionary ({ { key ("1"), outer.dictionary ({ { key ("name"), text ("Scarlett 6i6 USB") } }) } }) });
+                camera.push_back ({ key ("patches"),
+                                    outer.dictionary ({ { key ("4"), outer.dictionary ({ { key ("name"), text ("UltraStudio Express") },
+                                                                                         { key ("type"), text ("Blackmagic-DeckLink") },
+                                                                                         { key ("displayMode"), text ("1080i50") } }) } }) });
+            }
+
             const auto settings = outer.dictionary ({ { key ("Audio"), outer.dictionary (audio) },
                                                       { key (major >= 5 ? "Network" : "OSC"), outer.dictionary (network) },
-                                                      { key ("Video"), outer.dictionary (video) } });
+                                                      { key ("Video"), outer.dictionary (video) },
+                                                      { key ("MIDI"), outer.dictionary (midi) },
+                                                      { key ("Camera"), outer.dictionary (camera) } });
 
             const auto top = outer.dictionary ({
                 { key ("QLabShortVersionString"), text (major >= 5 ? "5.6.3" : "4.4.5") },
@@ -562,6 +622,9 @@ namespace wfg::test::qlab
         }
 
         Keyed cues;
+
+        /*  Whether the network settings hold an Eos and two QLab machines (§100). */
+        bool remotePatches = false;
 
     private:
         int major = 5;

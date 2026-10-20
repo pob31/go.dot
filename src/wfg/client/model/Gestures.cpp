@@ -810,6 +810,11 @@ namespace wfg::client::gesture
         return { origin::window, "media.cleanCache", {} };
     }
 
+    Event lookForMissingAgain()
+    {
+        return { origin::window, "media.lookAgain", {} };
+    }
+
     Event convertMovie (const std::string& file, const std::string& scope, const std::string& format, bool sound)
     {
         return { origin::window, "media.convert", { osc::Value::string (file), osc::Value::string (scope),

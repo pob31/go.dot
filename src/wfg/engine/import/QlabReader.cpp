@@ -405,6 +405,46 @@ namespace wfg::import::qlab
                 cue.wallClockTrigger = f.flag (handle, "useWallClock");
                 cue.timecodeTrigger = f.flag (handle, "useTimecode");
 
+                if (cue.hotkeyTrigger)
+                {
+                    const auto key = f.at (handle, "hotKey");
+                    cue.hotkey.character = f.whole (key, "QLActionKeyKeyCharacter");
+                    cue.hotkey.keyCode = f.whole (key, "QLActionKeyKeyCode");
+                    cue.hotkey.command = f.flag (key, "QLActionKeyCommand");
+                    cue.hotkey.control = f.flag (key, "QLActionKeyControl");
+                    cue.hotkey.option = f.flag (key, "QLActionKeyOption");
+                    cue.hotkey.shift = f.flag (key, "QLActionKeyShift");
+                    cue.hotkey.function = f.flag (key, "QLActionKeyFunction");
+                    cue.hotkey.numericPad = f.flag (key, "QLActionKeyNumericPad");
+                }
+
+                if (cue.midiTrigger)
+                {
+                    const auto trigger = f.at (handle, "midiTrigger");
+                    cue.midiTriggerSpec.status = f.whole (trigger, "status", 144);
+                    cue.midiTriggerSpec.channel = f.whole (trigger, "channel");
+                    cue.midiTriggerSpec.byte1 = f.whole (trigger, "byte1");
+                    cue.midiTriggerSpec.byte2 = f.whole (trigger, "byte2");
+                    cue.midiTriggerSpec.byte1Operator = f.whole (trigger, "byte1Operator");
+                    cue.midiTriggerSpec.byte2Operator = f.whole (trigger, "byte2Operator");
+                }
+
+                if (cue.wallClockTrigger)
+                {
+                    cue.wallHours = f.whole (handle, "wallHours");
+                    cue.wallMinutes = f.whole (handle, "wallMinutes");
+                    cue.wallSeconds = f.whole (handle, "wallSeconds");
+                    cue.wallClockMode = f.whole (handle, "wallClockMode");
+
+                    static constexpr const char* days[] { "wallSunday", "wallMonday", "wallTuesday", "wallWednesday",
+                                                          "wallThursday", "wallFriday", "wallSaturday" };
+                    cue.wallDays = 0;
+
+                    for (int day = 0; day < 7; ++day)
+                        if (f.flag (handle, days[day], true))
+                            cue.wallDays |= 1 << day;
+                }
+
                 if (type == "Group")
                     readGroup (handle, cue, depth);
                 else if (type == "Audio")
@@ -426,9 +466,51 @@ namespace wfg::import::qlab
                 else if (type == "Video" || type == "Titles" || type == "Camera")
                 {
                     readPicture (handle, cue);
+
+                    if (type == "Camera")
+                        cue.cameraPatch = f.idText (handle, major >= 5 ? "cameraPatchID" : "cameraPatch");
+                }
+                else if (type == "MIDI")
+                {
+                    readMidi (handle, cue);
                 }
 
                 return cue;
+            }
+
+            /*  A MIDI CUE (namespace draft §100): every field of its message, by
+                the names QLab archives them under. */
+            void readMidi (Handle handle, Cue& cue)
+            {
+                auto& midi = cue.midi;
+                midi.patch = f.idText (handle, major >= 5 ? "midiPatchID" : "patch");
+                midi.messageType = f.whole (handle, "messageType", 1);
+                midi.status = f.whole (handle, "status");
+                midi.channel = f.whole (handle, "channel", 1);
+                midi.byte1 = f.whole (handle, "byte1");
+                midi.byte2 = f.whole (handle, "byte2");
+                midi.byteCombo = f.whole (handle, "byteCombo", 8192);
+                midi.fade = f.flag (handle, "doFade");
+                midi.endValue = f.whole (handle, "endValue");
+                midi.raw = f.text (handle, "rawString");
+                cue.shape = shapeOf (f, upShape (f.at (handle, "fade")));
+
+                midi.deviceId = f.whole (handle, "deviceID");
+                midi.commandFormat = f.whole (handle, "commandFormat", 127);
+                midi.command = f.whole (handle, "command", 1);
+                midi.qNumber = f.text (handle, "qNumber");
+                midi.qList = f.text (handle, "qList");
+                midi.qPath = f.text (handle, "qPath");
+                midi.macro = f.whole (handle, "macro");
+                midi.controlNumber = f.whole (handle, "controlNumber");
+                midi.controlValue = f.whole (handle, "controlValue");
+                midi.sendTime = f.flag (handle, "sendTimeFlag");
+                midi.hours = f.whole (handle, "hours");
+                midi.minutes = f.whole (handle, "minutes");
+                midi.seconds = f.whole (handle, "seconds");
+                midi.frames = f.whole (handle, "frames");
+                midi.subframes = f.whole (handle, "subframes");
+                midi.timecodeFormat = f.whole (handle, "timecodeFormat", 3);
             }
 
             /*  A VIDEO, TEXT OR CAMERA CUE (namespace draft §62): its stage, its
@@ -707,6 +789,8 @@ namespace wfg::import::qlab
                     out.host = f.archive.text (f.entry (states.front(), "host")).value_or (std::string {});
                     out.port = static_cast<int> (f.archive.integer (f.entry (states.front(), "port")).value_or (0));
                     out.tcp = f.archive.boolean (f.entry (states.front(), "useTcp")).value_or (false);
+                    out.otherDestinations = static_cast<int> (states.size()) - 1;
+                    out.passcode = f.archive.text (f.entry (states.front(), "userData")).value_or (std::string {});
                 }
 
                 workspace.networkPatches.push_back (std::move (out));
@@ -729,6 +813,73 @@ namespace wfg::import::qlab
                 if (! out.host.empty() || ! out.name.empty())
                     workspace.networkPatches.push_back (std::move (out));
             }
+        }
+
+        /*  THE MIDI PATCHES (namespace draft §100): QLab 5's list, each with its
+            UUID; QLab 4's dictionary by patch number. Sorted by number in QLab 4,
+            as its menu shows them. */
+        void readMidiSettings (const Fields& f, Handle midi, Workspace& workspace)
+        {
+            for (const auto patch : f.archive.items (f.entry (midi, "midiPatches")))
+            {
+                MidiPatch out;
+                out.id = f.text (patch, "uniqueID");
+                out.name = f.text (patch, "name");
+                out.device = f.archive.text (f.entry (f.at (patch, "deviceDescription"), "name")).value_or (std::string {});
+                workspace.midiPatches.push_back (std::move (out));
+            }
+
+            for (const auto& [number, patch] : f.archive.entries (f.entry (midi, "patches")))
+            {
+                MidiPatch out;
+                out.id = number;
+                out.name = f.archive.text (f.entry (patch, "name")).value_or (std::string {});
+                out.device = out.name;
+                workspace.midiPatches.push_back (std::move (out));
+            }
+
+            std::stable_sort (workspace.midiPatches.begin(), workspace.midiPatches.end(),
+                              [] (const MidiPatch& a, const MidiPatch& b)
+                              {
+                                  return std::atoi (a.id.c_str()) < std::atoi (b.id.c_str());
+                              });
+        }
+
+        /*  THE CAMERA PATCHES (§100): QLab 5's list, each describing its camera
+            under `serializedDescription`; QLab 4's dictionary by number, each the
+            description itself. */
+        void readCameraSettings (const Fields& f, Handle camera, Workspace& workspace)
+        {
+            const auto described = [&f] (Handle description, CameraPatch& out)
+            {
+                out.device = f.archive.text (f.entry (description, "name")).value_or (std::string {});
+                out.deviceType = f.archive.text (f.entry (description, "type")).value_or (std::string {});
+                out.displayMode = f.archive.text (f.entry (description, "displayMode")).value_or (std::string {});
+            };
+
+            for (const auto patch : f.archive.items (f.entry (camera, "cameraPatches")))
+            {
+                CameraPatch out;
+                out.id = f.text (patch, "uniqueID");
+                out.name = f.text (patch, "name");
+                described (f.at (patch, "serializedDescription"), out);
+                workspace.cameraPatches.push_back (std::move (out));
+            }
+
+            for (const auto& [number, patch] : f.archive.entries (f.entry (camera, "patches")))
+            {
+                CameraPatch out;
+                out.id = number;
+                described (patch, out);
+                out.name = out.device;
+                workspace.cameraPatches.push_back (std::move (out));
+            }
+
+            std::stable_sort (workspace.cameraPatches.begin(), workspace.cameraPatches.end(),
+                              [] (const CameraPatch& a, const CameraPatch& b)
+                              {
+                                  return std::atoi (a.id.c_str()) < std::atoi (b.id.c_str());
+                              });
         }
 
         /*  THE STAGES (namespace draft §62.5): QLab 5's, each its viewport's UUID
@@ -856,6 +1007,8 @@ namespace wfg::import::qlab
         readAudioSettings (f, f.entry (settings, "Audio"), workspace);
         readNetworkSettings (f, f.entry (settings, "Network"), f.entry (settings, "OSC"), workspace);
         readVideoSettings (f, f.entry (settings, "Video"), workspace);
+        readMidiSettings (f, f.entry (settings, "MIDI"), workspace);
+        readCameraSettings (f, f.entry (settings, "Camera"), workspace);
 
         //  --- The cues: an archive held as data inside this one ----------------
         const auto* held = f.archive.bytes (f.entry (root, "cueLists"));

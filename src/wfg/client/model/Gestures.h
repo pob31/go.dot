@@ -539,6 +539,9 @@ namespace wfg::client::gesture
     /** The analysis of files no longer in the media folder taken away, now (namespace draft §52). */
     Event cleanAnalysisCache();
 
+    /** The files that were missing looked for again, once put in the media folder (namespace draft §100). */
+    Event lookForMissingAgain();
+
     /*  FFmpeg downloaded into Go.dot's own folder (namespace draft 37.5, WN). */
     Event installFfmpeg();
 

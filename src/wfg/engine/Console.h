@@ -206,6 +206,11 @@ namespace wfg
             neither touches this window's show, and the import is asked off the
             message thread. */
         std::function<ImportScenes (const std::string& workspace)> readQlabLists {};
+
+        /*  ITS FILES LOOKED FOR (namespace draft §100, AXX), in the folders given
+            too: each folder walked once, so asked off the message thread. */
+        std::function<ImportFiles (const std::string& workspace, const std::vector<std::string>& folders)>
+            findQlabFiles {};
         std::function<ImportResult (const ImportRequest&, const std::function<void (const std::string&)>& progress)>
             importQlab {};
 

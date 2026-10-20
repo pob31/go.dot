@@ -136,6 +136,8 @@ namespace wfg::tree
             document.getAttribute (base + "tx").value_or (std::string ("true")) == "true";
         declaration.bundles =
             document.getAttribute (base + "bundles").value_or (std::string ("false")) == "true";
+        declaration.removePrefix =
+            document.getAttribute (base + "removePrefix").value_or (std::string ("false")) == "true";
 
         /*  WHERE IT SENDS. `transport` was declared in Phase 1 and read by
             nobody; from Phase 2 it decides whether anything can be sent at all,

@@ -257,7 +257,16 @@ namespace wfg::import::qlab
                         const auto named = media.find (item.cueId);
                         attributes.push_back ({ "file", named != media.end() ? named->second.first : item.file.name() });
                     }
+
+                    //  A camera (§100): the video input made for its patch.
+                    if (const auto input = made.find (item.videoInput); ! item.videoInput.empty() && input != made.end())
+                        attributes.push_back ({ "videoInput", input->second });
                 }
+
+                //  A MIDI CUE (§100): the port made for its patch.
+                if (item.kind == "midi")
+                    if (const auto port = made.find (item.port); port != made.end())
+                        attributes.push_back ({ "port", port->second });
 
                 const auto created = document.createCue (parent, doc::endOfSequence, item.kind, item.name, id, attributes);
 
@@ -272,6 +281,17 @@ namespace wfg::import::qlab
 
                 if (! item.target.empty())
                     targets.push_back ({ id, item.target });
+
+                //  --- What fires it besides GO (§100, AXZ) ---------------------------
+                for (std::size_t at = 0; at < item.triggers.size(); ++at)
+                {
+                    const auto& trigger = item.triggers[at];
+                    doc::ShowDocument::Attributes rows (trigger.attributes.begin(), trigger.attributes.end());
+
+                    if (const auto made2 = document.createTrigger (id, trigger.kind, ids.of (item.key + ":trigger:" + std::to_string (at)),
+                                                                   rows); ! made2.ok)
+                        said (Note::Kind::dropped, item.name, "its " + trigger.kind + " trigger could not be made (" + made2.reason + ")");
+                }
 
                 //  --- A sound's ranges and routes ------------------------------------
                 for (std::size_t at = 0; at < item.ranges.size(); ++at)
@@ -408,8 +428,52 @@ namespace wfg::import::qlab
                     if (device.port > 0)
                         write ("/godot/mount/" + id + "/port", std::to_string (device.port), device.name);
 
+                    //  Over TCP as QLab sent it (§57's transport), framed as OSC 1.1 - SLIP - which QLab speaks.
                     if (device.tcp)
-                        said (Note::Kind::approximated, device.name, "QLab sent to it over TCP; Go.dot sends OSC over UDP");
+                    {
+                        write ("/godot/mount/" + id + "/transport", "tcp", device.name);
+                        write ("/godot/mount/" + id + "/framing", "slip", device.name);
+                    }
+
+                    if (device.removePrefix)
+                    {
+                        write ("/godot/mount/" + id + "/removePrefix", "true", device.name);
+                        said (Note::Kind::info, device.name, "named under " + device.prefix + " in its cues' addresses, "
+                              "removed before each message is sent: another patch was sent the same addresses, or it is a "
+                              "QLab machine, whose addresses start at the root");
+                    }
+                }
+
+                //  --- The MIDI ports: one per QLab MIDI patch, bound here to nothing (§100) ---
+                for (const auto& port : plan.ports)
+                {
+                    const auto id = ids.of (port.key);
+
+                    if (! document.createPort (port.name, id).ok)
+                    {
+                        said (Note::Kind::dropped, port.name, "its MIDI port could not be made");
+                        continue;
+                    }
+
+                    made[port.key] = id;
+                    said (Note::Kind::info, port.name, "a MIDI port bound to no output here: bind it in Show settings, MIDI"
+                          + (port.device.empty() ? std::string {} : " - QLab last sent on " + port.device));
+                }
+
+                //  --- The cameras: a video input per QLab camera patch, none chosen (§100) ---
+                for (const auto& camera : plan.cameras)
+                {
+                    const auto id = ids.of (camera.key);
+
+                    if (! document.createVideoInput (camera.name, "device", {}, id).ok)
+                    {
+                        said (Note::Kind::dropped, camera.name, "its video input could not be made");
+                        continue;
+                    }
+
+                    made[camera.key] = id;
+                    said (Note::Kind::info, camera.name, "a camera with none chosen: pick the camera or the card in Show "
+                          "settings, Video inputs" + (camera.device.empty() ? std::string {} : " - QLab last saw " + camera.device));
                 }
 
                 //  --- The canvases, and their outputs with no display chosen (§62, ALF) ---
@@ -450,12 +514,15 @@ namespace wfg::import::qlab
 
                     ++built.lists;
 
+                    if (list.cart)
+                        write ("/godot/list/" + id + "/kind", "cart", list.name);
+
                     for (const auto& each : list.items)
                         item (each, id);
 
                     /*  STANDBY ON THE FIRST CUE, where a show made by hand has it:
-                        with no standby, GO has nothing to fire. */
-                    if (! list.items.empty())
+                        with no standby, GO has nothing to fire. A cart has none. */
+                    if (! list.items.empty() && ! list.cart)
                         if (const auto first = made.find (list.items.front().key); first != made.end())
                             write ("/godot/list/" + id + "/standby", first->second, list.name);
                 }
@@ -643,6 +710,47 @@ namespace wfg::import::qlab
         return found;
     }
 
+    juce::File findMedia (const FileRef& file, const juce::File& workspaceFolder, const std::vector<FolderIndex>& folders)
+    {
+        if (const auto found = findMedia (file, workspaceFolder); found != juce::File())
+            return found;
+
+        return findInFolders (folders, file.name(), file.relativePath.empty() ? file.absolutePath : file.relativePath);
+    }
+
+    namespace
+    {
+        std::string reportedName (const FileRef& file)
+        {
+            return file.relativePath.empty() ? file.name() : file.relativePath;
+        }
+    }
+
+    std::vector<MediaFound> scanMedia (const Workspace& workspace, const juce::File& workspaceFile, const std::set<int>& lists,
+                                       const std::vector<FolderIndex>& folders)
+    {
+        std::vector<const Cue*> audio;
+
+        for (std::size_t at = 0; at < workspace.lists.size(); ++at)
+            if (lists.empty() || lists.count (static_cast<int> (at)) != 0)
+                sounds (workspace.lists[at], audio);
+
+        std::vector<MediaFound> out;
+        std::set<std::string> seen;
+
+        for (const auto* sound : audio)
+        {
+            const auto named = reportedName (sound->file);
+
+            if (! seen.insert (named).second)
+                continue;
+
+            out.push_back ({ named, findMedia (sound->file, workspaceFile.getParentDirectory(), folders) });
+        }
+
+        return out;
+    }
+
     BuiltShow build (const Workspace& workspace, const Plan& plan,
                      const std::map<std::string, std::pair<std::string, int>>& media, doc::ShowDocument& document)
     {
@@ -714,13 +822,34 @@ namespace wfg::import::qlab
         WalkOptions walkOptions;
         walkOptions.lists = options.lists;
 
+        /*  THE FOLDERS SOMEBODY POINTED AT (§100, AXX), each walked once - and
+            only when a file is not where the workspace says. */
+        std::vector<FolderIndex> folders;
+        auto walked = false;
+
         for (const auto* sound : audio)
         {
-            const auto source = findMedia (sound->file, file.getParentDirectory());
+            auto source = findMedia (sound->file, file.getParentDirectory());
+
+            if (source == juce::File() && ! options.searchFolders.empty())
+            {
+                if (! walked)
+                {
+                    for (const auto& folder : options.searchFolders)
+                    {
+                        say ("looking in " + folder.getFullPathName().toStdString());
+                        folders.emplace_back (folder);
+                    }
+
+                    walked = true;
+                }
+
+                source = findMedia (sound->file, file.getParentDirectory(), folders);
+            }
 
             if (source == juce::File())
             {
-                const auto named = sound->file.relativePath.empty() ? sound->file.name() : sound->file.relativePath;
+                const auto named = reportedName (sound->file);
 
                 if (std::find (outcome.missingMedia.begin(), outcome.missingMedia.end(), named) == outcome.missingMedia.end())
                     outcome.missingMedia.push_back (named);

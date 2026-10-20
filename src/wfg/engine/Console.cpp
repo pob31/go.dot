@@ -1883,6 +1883,37 @@ namespace
         return out;
     }
 
+    /*  A WORKSPACE'S FILES LOOKED FOR (namespace draft §100, AXX): where it
+        says, then in each folder given, walked once. Every list's files, so
+        the count does not move as lists are ticked. */
+    wfg::ImportFiles findQlabFiles (const std::string& path, const std::vector<std::string>& folders)
+    {
+        wfg::ImportFiles out;
+        const juce::File file { juce::String::fromUTF8 (path.c_str()) };
+        const auto read = wfg::import::qlab::readWorkspace (file);
+
+        if (! read.workspace.has_value())
+        {
+            out.error = read.error;
+            return out;
+        }
+
+        std::vector<wfg::import::FolderIndex> indexes;
+
+        for (const auto& folder : folders)
+            indexes.emplace_back (juce::File (juce::String::fromUTF8 (folder.c_str())));
+
+        for (const auto& each : wfg::import::qlab::scanMedia (*read.workspace, file, {}, indexes))
+        {
+            ++out.total;
+
+            if (each.found == juce::File())
+                out.missing.push_back (each.name);
+        }
+
+        return out;
+    }
+
     wfg::ImportResult importQlab (const wfg::ImportRequest& request,
                                   const std::function<void (const std::string&)>& progress)
     {
@@ -1906,6 +1937,9 @@ namespace
         options.into = juce::File (juce::String::fromUTF8 (request.into.c_str()));
         options.lists = std::set<int> (request.scenes.begin(), request.scenes.end());
         options.progress = progress;
+
+        for (const auto& folder : request.searchFolders)
+            options.searchFolders.push_back (juce::File (juce::String::fromUTF8 (folder.c_str())));
 
         const auto outcome = wfg::import::qlab::importWorkspace (juce::File (juce::String::fromUTF8 (request.sets.front().c_str())),
                                                                  options);
@@ -2034,7 +2068,8 @@ namespace
 
         if (workspace == juce::File() || ! args.containsOption ("--into"))
         {
-            std::cerr << "wfg import-qlab: <workspace.qlab4|.qlab5> --into=<folder> [--lists=1-2,4] [--no-media]" << std::endl;
+            std::cerr << "wfg import-qlab: <workspace.qlab4|.qlab5> --into=<folder> [--lists=1-2,4] [--no-media]"
+                         " [--search=<folder>]..." << std::endl;
             return 2;
         }
 
@@ -2042,6 +2077,12 @@ namespace
         options.into = cwd.getChildFile (args.getValueForOption ("--into"));
         options.copyMedia = ! args.containsOption ("--no-media");
         options.progress = [] (const std::string& sentence) { std::cout << "wfg import-qlab: " << sentence << std::endl; };
+
+        /*  EACH FOLDER TO LOOK IN for a file not where the workspace says
+            (namespace draft §100, AXX), as many as given, in their order. */
+        for (int at = 1; at < args.size(); ++at)
+            if (const auto& text = args.arguments[at].text; text.startsWith ("--search="))
+                options.searchFolders.push_back (cwd.getChildFile (text.fromFirstOccurrenceOf ("=", false, false).unquoted()));
 
         if (args.containsOption ("--lists"))
         {
@@ -9798,6 +9839,10 @@ namespace
 
                 //  A QLab workspace, imported into a new show (§46).
                 clientHost.readQlabLists = [] (const std::string& workspace) { return readQlabLists (workspace); };
+                clientHost.findQlabFiles = [] (const std::string& workspace, const std::vector<std::string>& folders)
+                {
+                    return findQlabFiles (workspace, folders);
+                };
                 clientHost.importQlab = [] (const wfg::ImportRequest& request,
                                             const std::function<void (const std::string&)>& progress)
                 {

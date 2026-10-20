@@ -165,6 +165,11 @@ namespace wfg::client::model
         a sound locked to its movie, a few frames shorter by nature. */
     std::vector<Problem> fileProblems (const tree::TreeSnapshot&, const CueNeeds&);
 
+    /*  EVERY CUE OF THE SHOW WHOSE FILE IS MISSING, every list and every depth
+        (namespace draft §100, AXX): the cue and the file it names, for File >
+        Find missing files in a folder..., in the tree's order. */
+    std::vector<std::pair<std::string, std::string>> missingFilesOf (const tree::TreeSnapshot&);
+
     /*  EVERY CUE THAT NEEDS SOMETHING MISSING, marked: the warning shape, the
         first problem's word ("inside" on a shut group whose hidden members
         need one), and every sentence for the tooltip. */

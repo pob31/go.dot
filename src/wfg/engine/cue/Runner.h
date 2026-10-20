@@ -59,6 +59,7 @@
 #include <wfg/engine/cue/ListState.h>
 #include <wfg/engine/cue/CurveJob.h>
 #include <wfg/engine/cue/CurveTable.h>
+#include <wfg/engine/midi/MidiMessages.h>
 #include <wfg/engine/tree/MountListener.h>
 #include <wfg/engine/cue/OscJob.h>
 #include <wfg/engine/cue/Run.h>
@@ -1548,6 +1549,10 @@ namespace wfg::cue
             and what keeps the voiceless playhead from overwriting its clock. */
         bool isCurving (const std::string& runId) const;
 
+        /*  Whether a MIDI cue's fade is playing (namespace draft 100): the run is
+            the fade's to end, as a curve's is. */
+        bool isMidiFading (const std::string& runId) const;
+
         /*  A SEEK OF A CURVE RUN: its clock reads `seconds` from this tick,
             within its duration, and the next tick writes what the curves say
             there. Handler-safe: it moves state a replay rebuilds the same way. */
@@ -2577,7 +2582,7 @@ namespace wfg::cue
         /*  A network cue firing: one write to a mounted node, queued for the
             end of this tick. No Engine here either, and for the same reason. */
         void fireOsc (const juce::ValueTree& cue, const std::string& runId, std::int64_t tick);
-        void fireMidi (const juce::ValueTree& cue, const std::string& runId);
+        void fireMidi (const juce::ValueTree& cue, const std::string& runId, std::int64_t tick);
 
         /*  A TIMECODE CUE FIRING (namespace draft §59): `playing` from its GO,
             and a job built that says what the code is - its format, the rate
@@ -2734,6 +2739,12 @@ namespace wfg::cue
             and a cue at the end of its duration is handed to `advanceSends` to
             be done by its wait. A hook, before `advanceSends`. */
         void advanceCurves (Engine& engine, std::int64_t tick);
+
+        /*  THE MIDI FADES, ONE TICK (namespace draft 100, AXY): each fading
+            cue's value where its fade has reached, sent when it is not the value
+            last sent; a fade at its end handed to `advanceSends` to be done by
+            its wait; Esc ends one where it is. A hook, before `advanceSends`. */
+        void advanceMidiFades (Engine& engine, std::int64_t tick);
 
         /*  THE PROCESS CUES, ONE TICK (namespace draft §51): a run stopping is
             ended, and every running one's patch is handed what arrived - what
@@ -3301,6 +3312,30 @@ namespace wfg::cue
 
         /*  The OSC cues whose curves are playing (namespace draft 45). */
         std::vector<CurveJob> curving;
+
+        /*  A MIDI CUE'S FADE PLAYING (namespace draft 100, AXY): its message,
+            where its value goes from and to and how, and what was last sent. The
+            send job of its GO is handed over to it, as a curve's is; `quiet` is a
+            fade that times the cue and sends nothing - its port off, a Doh!
+            leaving it, a replay with no cable - and `done` the job it hands back. */
+        struct MidiFadeJob
+        {
+            std::string self;
+            std::string cue;
+            std::string port;
+            midi::MessageSpec spec;
+            int from = 0;
+            int to = 0;
+            double seconds = 0.0;
+            bool sCurve = false;
+            std::int64_t originTick = 0;
+            int last = 0;
+            bool quiet = false;
+            bool finished = false;
+            OscJob done;
+        };
+
+        std::vector<MidiFadeJob> midiFading;
 
         /*  THE PROCESS CUES RUNNING (namespace draft §51): which run, which cue,
             and its patch as of which document revision. */

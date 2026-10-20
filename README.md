@@ -206,7 +206,10 @@ has stood in front of the thing.
 - **Importing.** Ableton Live sets (`wfg import-als`, several sets making a tour
   with a performance for each venue) and QLab 4 and 5 workspaces
   (`wfg import-qlab`), their text and video cues on canvases made from QLab's
-  stages, both also in the window's File menu.
+  stages, their MIDI cues, triggers, cameras and carts, both also in the
+  window's File menu; a file not where the workspace says is looked for in
+  folders you point at (`--search`), and an open show's missing files with
+  File > Find missing files in a folder....
 - **Two computers, a main and a backup** (namespace draft §58). Each plays the
   show from its own copy of the folder through its own interface, the sound and
   pictures changed over on a console or a matrix. The backup follows the main a
@@ -297,7 +300,7 @@ and says afterwards what was built against what was drawn.
 | Lanes and speed | Level and send lanes, recorded from faders; varispeed and timestretch; fades on what a cue owns | §20, §22, §26, §28, §34 |
 | Phase 10, in part | The stop levels held to PRD §4.4, the panic fade and GO debounce, Doh! - a sampler bank a GO's stop cue disarmed brought back with its clips; panic values settled as `park` | §21, §23, §24, §73, §77 |
 | Shows | Shows and performances, Enable/Disable/Jump, Save as | §25, §27, §32 |
-| Imports | Ableton Live and QLab, QLab's text and video cues included | §29, §46, §62 |
+| Imports | Ableton Live and QLab, QLab's text, video and MIDI cues included; missing files found in a folder | §29, §46, §62, §100 |
 | Phase 8 | Video: stills, movies, the native renderer, NDI/Spout/Syphon, read-ahead, pictures in sampler groups, the DCA knob; keys, text cues and blur; fonts carried by the show | §35–§37, §40, §44, §47–§50, §61, §62 |
 | OSC cues | Several messages, bundles, recorded curves | §45 |
 | Process cues | Pure Data inside a cue, serial ports; a patch's ways in and out, Pd as its editor | §51, §65 |

@@ -18,6 +18,7 @@
 
 #include <wfg/client/ui/Look.h>
 
+#include <algorithm>
 #include <utility>
 #include <vector>
 
@@ -34,9 +35,10 @@ namespace wfg::client::ui
     public:
         Content (const model::Theme& themeToUse, const juce::StringArray& sets, const ImportScenes& scenes,
                  const juce::File& parentToUse, const juce::String& name,
-                 std::function<void (const std::vector<int>&, const juce::File&)> onImport,
-                 std::function<void()> onCancel)
-            : theme (themeToUse), parent (parentToUse)
+                 std::function<void (const std::vector<int>&, const juce::File&, const std::vector<std::string>&)> onImport,
+                 std::function<void()> onCancel,
+                 std::function<void (const std::vector<std::string>&, std::function<void (const ImportFiles&)>)> findFilesToUse)
+            : theme (themeToUse), parent (parentToUse), findFiles (std::move (findFilesToUse))
         {
             const auto what = sets.size() == 1
                                 ? "One set becomes one show: " + sets[0] + "."
@@ -98,6 +100,31 @@ namespace wfg::client::ui
             chooseButton.onClick = [this] { chooseFolder(); };
             addAndMakeVisible (chooseButton);
 
+            /*  THE FILES (namespace draft §100, AXX): how many were found, the
+                ones that were not, and a folder to look in - as many as it
+                takes, each looked through once. */
+            if (findFiles)
+            {
+                filesSaid.setFont (Look::font (theme, 14.0f));
+                filesSaid.setColour (juce::Label::textColourId, Look::colour (theme, "ink"));
+                addAndMakeVisible (filesSaid);
+
+                missingList.setMultiLine (true, false);
+                missingList.setReadOnly (true);
+                missingList.setScrollbarsShown (true);
+                missingList.setCaretVisible (false);
+                missingList.setFont (Look::font (theme, 13.0f));
+                addChildComponent (missingList);
+
+                addFolderButton.setButtonText ("Add a folder to search...");
+                addFolderButton.setTooltip ("Look for the files not found in a folder of this computer, and every folder "
+                                            "inside it - by their names. Add as many as it takes.");
+                addFolderButton.onClick = [this] { chooseSearchFolder(); };
+                addAndMakeVisible (addFolderButton);
+
+                lookAgain();
+            }
+
             importButton.setButtonText ("Import");
             importButton.onClick = [this, onImport]
             {
@@ -110,7 +137,7 @@ namespace wfg::client::ui
                 const auto named = juce::File::createLegalFileName (nameBox.getText().trim());
 
                 if (onImport && ! named.isEmpty())
-                    onImport (ticked, parent.getChildFile (named));
+                    onImport (ticked, parent.getChildFile (named), searchFolders);
             };
             cancelButton.setButtonText ("Cancel");
             cancelButton.onClick = [onCancel] { if (onCancel) onCancel(); };
@@ -143,6 +170,21 @@ namespace wfg::client::ui
             folderLabel.setBounds (destination);
             area.removeFromBottom (10);
 
+            if (findFiles)
+            {
+                if (missingList.isVisible())
+                {
+                    missingList.setBounds (area.removeFromBottom (juce::jmin (110, area.getHeight() / 3)));
+                    area.removeFromBottom (6);
+                }
+
+                auto files = area.removeFromBottom (28);
+                addFolderButton.setBounds (files.removeFromRight (200));
+                files.removeFromRight (8);
+                filesSaid.setBounds (files);
+                area.removeFromBottom (10);
+            }
+
             viewport.setBounds (area);
             rows.setSize (viewport.getMaximumVisibleWidth(), rows.getHeight());
 
@@ -156,6 +198,80 @@ namespace wfg::client::ui
         }
 
     private:
+        /*  THE FILES LOOKED FOR AGAIN, in every folder added so far; what is
+            said meanwhile, and the answer when it comes. */
+        void lookAgain()
+        {
+            filesSaid.setText (searchFolders.empty() ? "Looking for the workspace's sounds and pictures..."
+                                                     : "Looking in " + juce::String (searchFolders.size())
+                                                       + (searchFolders.size() == 1 ? " folder..." : " folders..."),
+                               juce::dontSendNotification);
+            addFolderButton.setEnabled (false);
+
+            findFiles (searchFolders, [safe = juce::Component::SafePointer<Content> (this)] (const ImportFiles& files)
+            {
+                if (safe != nullptr)
+                    safe->showFiles (files);
+            });
+        }
+
+        void showFiles (const ImportFiles& files)
+        {
+            addFolderButton.setEnabled (true);
+
+            if (! files.error.empty())
+            {
+                filesSaid.setText (juce::String::fromUTF8 (files.error.c_str()), juce::dontSendNotification);
+                return;
+            }
+
+            const auto missing = static_cast<int> (files.missing.size());
+
+            if (files.total == 0)
+                filesSaid.setText ("The workspace plays no file.", juce::dontSendNotification);
+            else if (missing == 0)
+                filesSaid.setText (files.total == 1 ? "Its one file was found." : "All " + juce::String (files.total)
+                                                                                    + " of its files were found.",
+                                   juce::dontSendNotification);
+            else
+                filesSaid.setText (juce::String (missing) + " of its " + juce::String (files.total) + " files "
+                                   + (missing == 1 ? "was" : "were") + " not found - imported, they play nothing:",
+                                   juce::dontSendNotification);
+
+            filesSaid.setColour (juce::Label::textColourId, Look::colour (theme, missing > 0 ? "standby" : "ink"));
+
+            juce::String lines;
+
+            for (const auto& name : files.missing)
+                lines << juce::String::fromUTF8 (name.c_str()) << "\n";
+
+            for (const auto& folder : searchFolders)
+                lines << "\n" << "Also looked in " << juce::String::fromUTF8 (folder.c_str());
+
+            missingList.setText (lines.trimEnd(), false);
+            missingList.setVisible (missing > 0 || ! searchFolders.empty());
+            resized();
+        }
+
+        void chooseSearchFolder()
+        {
+            chooser = std::make_unique<juce::FileChooser> ("Choose a folder the missing files may be in", parent);
+            chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
+                                  [safe = juce::Component::SafePointer<Content> (this)] (const juce::FileChooser& answered)
+                                  {
+                                      if (safe == nullptr || answered.getResult() == juce::File())
+                                          return;
+
+                                      const auto picked = answered.getResult().getFullPathName().toStdString();
+
+                                      if (std::find (safe->searchFolders.begin(), safe->searchFolders.end(), picked)
+                                            == safe->searchFolders.end())
+                                          safe->searchFolders.push_back (picked);
+
+                                      safe->lookAgain();
+                                  });
+        }
+
         void sayWhere()
         {
             folderLabel.setText (parent.getFullPathName() + juce::File::getSeparatorString(), juce::dontSendNotification);
@@ -191,6 +307,12 @@ namespace wfg::client::ui
         juce::TextEditor nameBox;
         juce::TextButton chooseButton, importButton, cancelButton;
         std::unique_ptr<juce::FileChooser> chooser;
+
+        std::function<void (const std::vector<std::string>&, std::function<void (const ImportFiles&)>)> findFiles;
+        std::vector<std::string> searchFolders;
+        juce::Label filesSaid;
+        juce::TextEditor missingList;
+        juce::TextButton addFolderButton;
     };
 
     //==========================================================================
@@ -201,9 +323,11 @@ namespace wfg::client::ui
           actions (std::move (actionsToUse))
     {
         content = std::make_unique<Content> (theme, sets, scenes, parent, name,
-                                             [this] (const std::vector<int>& ticked, const juce::File& into)
-                                             { if (actions.import) actions.import (ticked, into); },
-                                             [this] { if (actions.cancel) actions.cancel(); });
+                                             [this] (const std::vector<int>& ticked, const juce::File& into,
+                                                     const std::vector<std::string>& folders)
+                                             { if (actions.import) actions.import (ticked, into, folders); },
+                                             [this] { if (actions.cancel) actions.cancel(); },
+                                             actions.findFiles);
         setUsingNativeTitleBar (true);
         setResizable (true, false);
         setResizeLimits (520, 360, 2400, 2000);

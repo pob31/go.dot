@@ -5070,7 +5070,7 @@ namespace wfg::cue
 
         if (kind == "midi")
         {
-            fireMidi (cue, runId);
+            fireMidi (cue, runId, tick);
             return;
         }
 
@@ -14659,7 +14659,7 @@ namespace wfg::cue
         }
     }
 
-    void Runner::fireMidi (const juce::ValueTree& cue, const std::string& runId)
+    void Runner::fireMidi (const juce::ValueTree& cue, const std::string& runId, std::int64_t tick)
     {
         const auto self = runId;
         auto* selfRun = runs.find (self);
@@ -14696,6 +14696,20 @@ namespace wfg::cue
         spec.data2 = static_cast<int> (numberOf (cue, "data2"));
         spec.sysex = textOf (cue, "sysex");
 
+        /*  A FADE OF ITS VALUE (namespace draft 100, AXY): data2 is where it
+            starts, `fadeTo` where it ends. With no time it is the end that is
+            sent; with one, GO sends the start and the fade takes the run. Only
+            a type whose second byte is a value fades - `wfg validate` says so of
+            any other. */
+        const auto fadeTo = static_cast<int> (numberOf (cue, "fadeTo"));
+        const auto fadeSeconds = numberOf (cue, "fadeTime");
+        const auto fadeable = spec.type == "controlChange" || spec.type == "aftertouch"
+                           || spec.type == "channelPressure" || spec.type == "pitchBend";
+        const auto fading = fadeable && fadeTo >= 0 && fadeTo != spec.data2 && fadeSeconds > 0.0;
+
+        if (fadeable && fadeTo >= 0 && fadeSeconds <= 0.0)
+            spec.data2 = fadeTo;
+
         const auto built = midi::messageFor (spec);
 
         if (! built.ok())
@@ -14707,9 +14721,40 @@ namespace wfg::cue
 
         /*  LEFT TO WHATEVER PLAYS ON THE PORT by a Doh of the GO that sent it
             first (2026-10-01, namespace draft §24): nothing reaches the cable. */
+
+        /*  THE FADE TAKES THE RUN (AXY), as a curve does: its GO's job handed
+            over, to be given back done at the fade's end. A fade that may send
+            nothing still times the cue. */
+        const auto fade = [&] (bool quiet)
+        {
+            MidiFadeJob faded;
+            faded.self = self;
+            faded.cue = cue[idProperty].toString().toStdString();
+            faded.port = textOf (cue, "port");
+            faded.spec = spec;
+            faded.from = spec.data2;
+            faded.to = fadeTo;
+            faded.seconds = fadeSeconds;
+            faded.sCurve = textOf (cue, "fadeCurve") == "sCurve";
+            faded.originTick = tick;
+            faded.last = spec.data2;
+            faded.quiet = quiet;
+            faded.done = job;
+
+            midiFading.erase (std::remove_if (midiFading.begin(), midiFading.end(),
+                                              [] (const MidiFadeJob& over) { return over.finished; }),
+                              midiFading.end());
+            midiFading.push_back (std::move (faded));
+            job.curved = true;
+        };
+
         if (selfRun->sendsLeft)
         {
             job.left = true;
+
+            if (fading)
+                fade (true);
+
             sending.push_back (job);
             return;
         }
@@ -14732,6 +14777,10 @@ namespace wfg::cue
         if (document.getAttribute ("/godot/port/" + portId + "/tx").value_or (std::string {}) == "false")
         {
             job.notSent = true;
+
+            if (fading)
+                fade (true);
+
             sending.push_back (job);
             return;
         }
@@ -14742,6 +14791,9 @@ namespace wfg::cue
             and there is no cable. */
         if (midiOut == nullptr)
         {
+            if (fading)
+                fade (true);
+
             sending.push_back (job);
             return;
         }
@@ -14753,8 +14805,79 @@ namespace wfg::cue
 
         if (! problem.empty())
             job.failure = problem;
+        else if (fading)
+            fade (false);
 
         sending.push_back (job);
+    }
+
+    bool Runner::isMidiFading (const std::string& runId) const
+    {
+        return std::any_of (midiFading.begin(), midiFading.end(),
+                            [&runId] (const MidiFadeJob& job) { return job.self == runId && ! job.finished; });
+    }
+
+    void Runner::advanceMidiFades (Engine& engine, std::int64_t tick)
+    {
+        for (auto& job : midiFading)
+        {
+            if (job.finished)
+                continue;
+
+            auto* run = runs.find (job.self);
+
+            //  OVER BY ANOTHER ROAD - revoked, taken back by Doh!, ended by a jump.
+            if (run == nullptr || run->isFinished())
+            {
+                job.finished = true;
+                continue;
+            }
+
+            /*  ESC, AND A DOUBLE ESC (CLAUDE.md §4.4): the fade stops where it
+                is - the value holds, nothing is put back - and the run ends, as a
+                curve's does. A double Esc has already dropped what was queued. */
+            if (run->state == runState::stopping || beingKilled (*run))
+            {
+                engine.submit (origin::engine, "run.ended", one (job.self));
+                job.finished = true;
+                continue;
+            }
+
+            const auto elapsed = static_cast<double> (tick - job.originTick) / static_cast<double> (TickClock::rateHz);
+            const auto t = job.seconds > 0.0 ? std::clamp (elapsed / job.seconds, 0.0, 1.0) : 1.0;
+            const auto shaped = job.sCurve ? t * t * (3.0 - 2.0 * t) : t;
+            const auto value = t >= 1.0 ? job.to
+                                        : static_cast<int> (std::lround (job.from + (job.to - job.from) * shaped));
+
+            if (value != job.last && ! job.quiet && midiOut != nullptr)
+            {
+                auto spec = job.spec;
+                spec.data2 = value;
+
+                if (const auto built = midi::messageFor (spec); built.ok())
+                {
+                    if (const auto problem = midiOut->sendForRun (job.self, job.port, built.bytes); ! problem.empty())
+                    {
+                        job.done.failure = problem;
+                        job.done.curved = false;
+                        sending.push_back (job.done);
+                        job.finished = true;
+                        continue;
+                    }
+                }
+            }
+
+            job.last = value;
+
+            /*  THE END OF THE FADE: the last value sent above, and the run done
+                by its wait, as a MIDI cue's always is - the next tick. */
+            if (t >= 1.0)
+            {
+                job.done.curved = false;
+                sending.push_back (job.done);
+                job.finished = true;
+            }
+        }
     }
 
     namespace
@@ -17044,7 +17167,10 @@ namespace wfg::cue
                 /*  AN OSC CUE'S CURVES (namespace draft 45): `advanceCurves` ends
                     its run where Esc found it - and its send job was handed over
                     to the curves at GO, so `sending` no longer claims it. */
-                || isCurving (snapshot.id);
+                || isCurving (snapshot.id)
+                /*  A MIDI CUE'S FADE (namespace draft 100): `advanceMidiFades`
+                    ends it where Esc found it, as a curve's. */
+                || isMidiFading (snapshot.id);
 
             if (! owned)
                 engine.submit (origin::engine, "run.ended", one (snapshot.id));
@@ -19849,6 +19975,7 @@ namespace wfg::cue
         applyAuxes();
         recordCurves (engine, tick);
         advanceCurves (engine, tick);
+        advanceMidiFades (engine, tick);
         advanceProcesses (engine, tick);
 
         /*  ABOVE THE NULL-PLAYER GATE as the processes are (namespace draft

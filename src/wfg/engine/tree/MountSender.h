@@ -167,6 +167,11 @@ namespace wfg::tree
             int midiChannel = 1;
             int mscDevice = 127;
             int mscFormat = 127;
+
+            /*  THE PREFIX TAKEN OFF BEFORE A MESSAGE LEAVES (namespace draft 100,
+                AYK): the device's own, when its `removePrefix` is on; empty
+                otherwise. Copied at queue time with the rest. */
+            std::string removedPrefix;
         };
         /*  THE DESTINATION A DECLARATION NAMES, made in one place (namespace
             draft §57, DP.1): host, port, rate cap, bundles, and the serial
@@ -370,6 +375,7 @@ namespace wfg::tree
             The bundles stop at `datagramsAllowed` (namespace draft §88): how
             many of `messages` went, from the front, and in how many datagrams. */
         void sendAlone (const Message& message);
+        static std::string onTheWire (const Message& message);
 
         struct Bundled
         {

@@ -154,6 +154,63 @@ namespace wfg::import::qlab
         std::string name() const;
     };
 
+    /*  A KEY QLAB FIRED A CUE BY (§100): the character it types and the Mac's
+        key code, which names the keys that type none - the function keys, the
+        arrows - and the modifiers held. */
+    struct HotKey
+    {
+        int character = 0;          ///< a UTF-16 unit, nought when none
+        int keyCode = 0;            ///< the Mac's virtual key code
+        bool command = false;
+        bool control = false;
+        bool option = false;
+        bool shift = false;
+        bool function = false;
+        bool numericPad = false;
+    };
+
+    /*  A MIDI MESSAGE QLAB FIRED A CUE BY (§100): `status` a MIDI status byte's
+        high nibble as a byte (144 note on), `channel` nought for any, and each
+        data byte with the comparison QLab put before it. */
+    struct MidiTrigger
+    {
+        int status = 144;
+        int channel = 0;
+        int byte1 = 0;
+        int byte2 = 0;
+        int byte1Operator = 0;
+        int byte2Operator = 0;
+    };
+
+    /*  A MIDI CUE'S MESSAGE (§100), every field QLab keeps whichever type it is. */
+    struct MidiMessage
+    {
+        std::string patch;          ///< QLab 5's patch UUID, QLab 4's patch number as text
+        int messageType = 1;
+        int status = 0;
+        int channel = 1;
+        int byte1 = 0;
+        int byte2 = 0;
+        int byteCombo = 8192;       ///< a pitch bend's fourteen bits
+        bool fade = false;
+        int endValue = 0;           ///< where a fade ends; up to 16383 for a pitch bend
+        std::string raw;            ///< raw bytes in hex, as typed
+
+        //  MIDI Show Control.
+        int deviceId = 0;
+        int commandFormat = 127;
+        int command = 1;            ///< 1 GO ... 30 CLOSE_CUE_PATH
+        std::string qNumber;
+        std::string qList;
+        std::string qPath;
+        int macro = 0;
+        int controlNumber = 0;
+        int controlValue = 0;
+        bool sendTime = false;
+        int hours = 0, minutes = 0, seconds = 0, frames = 0, subframes = 0;
+        int timecodeFormat = 3;     ///< 0 24, 1 25, 2 30 drop, 3 30 fps
+    };
+
     /*  ONE CUE, AS ITS CLASS SAYS. `type` is the archived class without its
         "Cue" - "Group", "Audio", "OSC", "Fade", "Memo"... - since that is what
         a workspace says and the walk asks. Every field below is read where the
@@ -172,11 +229,20 @@ namespace wfg::import::qlab
         int continueMode = 0;       ///< 0 none, 1 auto-continue, 2 auto-follow - as stored
         std::string target;         ///< the targeted cue's UUID
 
-        //  Triggers QLab had - read for the report, not imported (§46.2, ZY).
+        /*  THE TRIGGERS QLAB HAD, each with what it listened for (namespace
+            draft §100, AXZ): a key, a MIDI message, a time of day. A timecode
+            trigger is read for the report alone. */
         bool hotkeyTrigger = false;
         bool midiTrigger = false;
         bool wallClockTrigger = false;
         bool timecodeTrigger = false;
+        HotKey hotkey;
+        MidiTrigger midiTriggerSpec;
+        int wallHours = 0;
+        int wallMinutes = 0;
+        int wallSeconds = 0;
+        int wallClockMode = 0;      ///< as stored; nought is the only one seen
+        int wallDays = 0x7F;        ///< Sunday bit 0 to Saturday bit 6
 
         //  A group, and a cue list or cart (which are groups of mode 0 and 5).
         int groupMode = -1;         ///< 0 list, 1 start first and enter, 2 start first, 3 timeline, 4 random, 5 cart, 6 playlist
@@ -223,6 +289,16 @@ namespace wfg::import::qlab
 
         //  A script cue, kept as text and never run (PRD §3.20).
         std::string source;
+
+        /*  A MIDI CUE (namespace draft §100), as QLab stores it - the numbers of
+            QLab's OSC dictionary: `messageType` 1 a voice message, 2 MIDI Show
+            Control, 3 raw bytes ("SysEx", though any bytes may be typed);
+            `status` 0 note off, 1 note on, 2 key pressure, 3 control change, 4
+            program change, 5 channel pressure, 6 pitch bend. */
+        MidiMessage midi;
+
+        //  A camera cue: its camera patch - QLab 5's UUID, QLab 4's number as text.
+        std::string cameraPatch;
 
         /*  A VIDEO, TEXT OR CAMERA CUE (namespace draft §62): the stage it is
             on - QLab 5's viewport UUID, QLab 4's surface number as text - and
@@ -284,6 +360,26 @@ namespace wfg::import::qlab
         std::string host;
         int port = 0;
         bool tcp = false;
+        int otherDestinations = 0;  ///< QLab 5 sends to every one of a patch's destinations; the first is kept
+        std::string passcode;       ///< a QLab patch's OSC passcode, QLab 5's `userData`
+    };
+
+    //  A MIDI PATCH (§100): what QLab named it, and the device it last saw.
+    struct MidiPatch
+    {
+        std::string id;             ///< a UUID in QLab 5, the patch's number as text in QLab 4
+        std::string name;
+        std::string device;
+    };
+
+    //  A CAMERA PATCH (§100): what QLab named it, and the camera or card it last saw.
+    struct CameraPatch
+    {
+        std::string id;             ///< a UUID in QLab 5, the patch's number as text in QLab 4
+        std::string name;
+        std::string device;         ///< "UltraStudio Express"
+        std::string deviceType;     ///< "AVCaptureDevice", "Blackmagic-DeckLink"
+        std::string displayMode;    ///< "1080i50", where the card says one
     };
 
     struct Workspace
@@ -295,6 +391,8 @@ namespace wfg::import::qlab
         std::vector<Cue> lists;     ///< cue lists and carts, in the workspace's order
         std::vector<AudioPatch> audioPatches;
         std::vector<NetworkPatch> networkPatches;
+        std::vector<MidiPatch> midiPatches;
+        std::vector<CameraPatch> cameraPatches;
         double minVolume = -60.0;   ///< dB: at or below it is silence
 
         std::vector<Stage> stages;

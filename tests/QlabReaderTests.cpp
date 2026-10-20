@@ -629,3 +629,122 @@ TEST_CASE ("qlab reader: the author's workspaces' stages and picture cues read, 
             each (list);
     }
 }
+
+TEST_CASE ("qlab reader: MIDI cues, their patches, triggers, camera patches and the remote network patches (§100)")
+{
+    fixture::Workspace w;
+    w.remotePatches = true;
+
+    const auto fader = w.cue ("MIDICue", "Elsa", { { "messageType", Value::integer (1) }, { "status", Value::integer (3) },
+                                                    { "channel", Value::integer (1) }, { "byte1", Value::integer (14) },
+                                                    { "byte2", Value::integer (0) }, { "doFade", Value::boolean (true) },
+                                                    { "endValue", Value::integer (102) }, { "duration", Value::number (0.9) },
+                                                    { "command", Value::integer (1) },
+                                                    { "midiPatchID", Value::string ("PATCH-MIDI") } });
+    const auto msc = w.cue ("MIDICue", "Lights", { { "messageType", Value::integer (2) }, { "command", Value::integer (1) },
+                                                    { "deviceID", Value::integer (5) }, { "commandFormat", Value::integer (1) },
+                                                    { "qNumber", Value::string ("12.5") }, { "qList", Value::string ("1") } });
+    const auto raw = w.cue ("MIDICue", "Mute", { { "messageType", Value::integer (3) },
+                                                  { "rawString", Value::string ("90 20 7F") } });
+
+    const auto key = w.cues.object ("F53HotKey", { { "QLActionKeyKeyCharacter", Value::integer ('e') },
+                                                   { "QLActionKeyKeyCode", Value::integer (14) },
+                                                   { "QLActionKeyControl", Value::boolean (true) } });
+    const auto keyed = w.memo ("Keyed", { { "useHotKey", Value::boolean (true) }, { "hotKey", Value::uid (key) } });
+
+    const auto trigger = w.cues.object ("MidiTrigger", { { "status", Value::integer (144) }, { "channel", Value::integer (0) },
+                                                         { "byte1", Value::integer (112) }, { "byte2", Value::integer (127) },
+                                                         { "byte1Operator", Value::integer (0) },
+                                                         { "byte2Operator", Value::integer (0) } });
+    const auto heard = w.memo ("Heard", { { "useMIDITrigger", Value::boolean (true) }, { "midiTrigger", Value::uid (trigger) } });
+
+    const auto clock = w.memo ("Clock", { { "useWallClock", Value::boolean (true) }, { "wallHours", Value::integer (19) },
+                                          { "wallMinutes", Value::integer (30) }, { "wallSeconds", Value::integer (5) },
+                                          { "wallSunday", Value::boolean (false) } });
+
+    const auto camera = w.cue ("CameraCue", "Cam", { { "cameraPatchID", Value::string ("PATCH-CAM") } });
+
+    const auto list = w.group ("Main", 0, { fader, msc, raw, keyed, heard, clock, camera });
+    const auto workspace = read (w.bytes ({ list }));
+    const auto& main = workspace.lists.front();
+
+    const auto& elsa = named (main, "Elsa");
+    CHECK (elsa.type == "MIDI");
+    CHECK (elsa.midi.patch == "PATCH-MIDI");
+    CHECK (elsa.midi.messageType == 1);
+    CHECK (elsa.midi.status == 3);
+    CHECK (elsa.midi.byte1 == 14);
+    CHECK (elsa.midi.fade);
+    CHECK (elsa.midi.endValue == 102);
+    CHECK (elsa.duration == doctest::Approx (0.9));
+
+    const auto& lights = named (main, "Lights");
+    CHECK (lights.midi.messageType == 2);
+    CHECK (lights.midi.deviceId == 5);
+    CHECK (lights.midi.commandFormat == 1);
+    CHECK (lights.midi.qNumber == "12.5");
+    CHECK (lights.midi.qList == "1");
+
+    CHECK (named (main, "Mute").midi.raw == "90 20 7F");
+
+    const auto& k = named (main, "Keyed");
+    CHECK (k.hotkeyTrigger);
+    CHECK (k.hotkey.character == 'e');
+    CHECK (k.hotkey.keyCode == 14);
+    CHECK (k.hotkey.control);
+    CHECK_FALSE (k.hotkey.command);
+
+    const auto& h = named (main, "Heard");
+    CHECK (h.midiTrigger);
+    CHECK (h.midiTriggerSpec.status == 144);
+    CHECK (h.midiTriggerSpec.byte1 == 112);
+    CHECK (h.midiTriggerSpec.byte2 == 127);
+
+    const auto& c = named (main, "Clock");
+    CHECK (c.wallClockTrigger);
+    CHECK (c.wallHours == 19);
+    CHECK (c.wallMinutes == 30);
+    CHECK (c.wallSeconds == 5);
+    CHECK (c.wallDays == 0x7E);
+
+    CHECK (named (main, "Cam").cameraPatch == "PATCH-CAM");
+
+    REQUIRE (workspace.midiPatches.size() == 1);
+    CHECK (workspace.midiPatches[0].id == "PATCH-MIDI");
+    CHECK (workspace.midiPatches[0].name == "Desk MIDI");
+    CHECK (workspace.midiPatches[0].device == "USB MIDI Interface");
+
+    REQUIRE (workspace.cameraPatches.size() == 1);
+    CHECK (workspace.cameraPatches[0].name == "Camera 1");
+    CHECK (workspace.cameraPatches[0].device == "FaceTime HD Camera");
+
+    REQUIRE (workspace.networkPatches.size() == 5);
+    CHECK (workspace.networkPatches[2].kind == "com.etc.eos.2");
+    CHECK (workspace.networkPatches[2].otherDestinations == 1);
+    CHECK (workspace.networkPatches[3].kind == "com.figure53.qlab.5");
+    CHECK (workspace.networkPatches[3].passcode == "2001");
+}
+
+TEST_CASE ("qlab reader: QLab 4's MIDI and camera patches by number, a MIDI cue's patch and a camera cue's (§100)")
+{
+    fixture::Workspace w { 4 };
+    const auto midi = w.cue ("MIDICue", "Program", { { "messageType", Value::integer (1) }, { "status", Value::integer (4) },
+                                                      { "byte1", Value::integer (12) }, { "patch", Value::integer (1) } });
+    const auto camera = w.cue ("CameraCue", "Cam", { { "cameraPatch", Value::integer (4) } });
+    const auto workspace = read (w.bytes ({ w.group ("Main", 0, { midi, camera }) }));
+    const auto& main = workspace.lists.front();
+
+    CHECK (named (main, "Program").midi.patch == "1");
+    CHECK (named (main, "Program").midi.status == 4);
+    CHECK (named (main, "Cam").cameraPatch == "4");
+
+    REQUIRE (workspace.midiPatches.size() == 1);
+    CHECK (workspace.midiPatches[0].id == "1");
+    CHECK (workspace.midiPatches[0].name == "Scarlett 6i6 USB");
+
+    REQUIRE (workspace.cameraPatches.size() == 1);
+    CHECK (workspace.cameraPatches[0].id == "4");
+    CHECK (workspace.cameraPatches[0].device == "UltraStudio Express");
+    CHECK (workspace.cameraPatches[0].deviceType == "Blackmagic-DeckLink");
+    CHECK (workspace.cameraPatches[0].displayMode == "1080i50");
+}

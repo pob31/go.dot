@@ -425,3 +425,26 @@ TEST_CASE ("problems: a range beginning past what the cue plays marks it, one en
     CHECK (marks.count ("END1") == 0);
     CHECK (marks.count ("LCK1") == 0);
 }
+
+TEST_CASE ("problems: every cue of the show whose file is missing, in any list, for Find missing files in a folder (§100)")
+{
+    const auto snapshot = snapshotOf ({
+        { "/godot/cue/SND1/kind", word ("media") },
+        { "/godot/cue/SND1/file", word ("thunder.wav") },
+        { "/godot/cue/SND1/missing", yes() },
+        { "/godot/cue/SND2/kind", word ("media") },
+        { "/godot/cue/SND2/file", word ("rain.wav") },
+        { "/godot/cue/SND2/missing", no() },
+        { "/godot/cue/MOV1/kind", word ("video") },
+        { "/godot/cue/MOV1/file", word ("sub/clip.mov") },
+        { "/godot/cue/MOV1/missing", yes() },
+        { "/godot/cue/EMPTY/kind", word ("media") },
+        { "/godot/cue/EMPTY/missing", yes() },
+    });
+
+    const auto missing = model::missingFilesOf (snapshot);
+
+    REQUIRE (missing.size() == 2u);
+    CHECK (missing[0] == std::pair<std::string, std::string> { "MOV1", "sub/clip.mov" });
+    CHECK (missing[1] == std::pair<std::string, std::string> { "SND1", "thunder.wav" });
+}

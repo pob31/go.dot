@@ -34,6 +34,7 @@
 
 #include <functional>
 #include <memory>
+#include <string>
 #include <vector>
 
 namespace wfg::client::ui
@@ -43,8 +44,15 @@ namespace wfg::client::ui
     public:
         struct Actions
         {
-            /** "Import": the scenes ticked, and the folder to make. */
-            std::function<void (const std::vector<int>& scenes, const juce::File& into)> import;
+            /** "Import": the scenes ticked, the folder to make, and the folders added to look in. */
+            std::function<void (const std::vector<int>& scenes, const juce::File& into,
+                                const std::vector<std::string>& searchFolders)> import;
+
+            /*  THE FILES LOOKED FOR (namespace draft §100, AXX), in the folders
+                given too - asked off the message thread, `answer` called back on
+                it. Unset, the window has no Files part: a Live set's. */
+            std::function<void (const std::vector<std::string>& folders,
+                                std::function<void (const ImportFiles&)> answer)> findFiles;
 
             /** Cancel, or the close button: nothing is written. */
             std::function<void()> cancel;

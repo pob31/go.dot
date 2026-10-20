@@ -82,10 +82,10 @@ namespace
         audio.outputNames = { { 1, "FOH L" }, { 2, "FOH R" }, { 3, "Mon 1" } };
         w.audioPatches.push_back (audio);
 
-        w.networkPatches.push_back ({ "S21", "S21", "osc", "192.168.1.221", 8024, false });
-        w.networkPatches.push_back ({ "WFS", "WFS", "osc", "192.168.1.32", 8051, false });
-        w.networkPatches.push_back ({ "SELF", "localhost", "osc", "localhost", 53000, false });
-        w.networkPatches.push_back ({ "TEXT", "Text", "com.figure53.plaintext", "10.0.0.1", 9000, false });
+        w.networkPatches.push_back ({ "S21", "S21", "osc", "192.168.1.221", 8024, false, 0, {} });
+        w.networkPatches.push_back ({ "WFS", "WFS", "osc", "192.168.1.32", 8051, false, 0, {} });
+        w.networkPatches.push_back ({ "SELF", "localhost", "osc", "localhost", 53000, false, 0, {} });
+        w.networkPatches.push_back ({ "TEXT", "Text", "com.figure53.plaintext", "10.0.0.1", 9000, false, 0, {} });
         return w;
     }
 
@@ -384,8 +384,13 @@ TEST_CASE ("qlab walk: messages - atoms, devices, a #v# fade as a curve (ZW)")
         network ("/no/patch", "NOPE") }));
 
     const auto& items = top (plan);
-    CHECK (attribute (items[0], "address") == "/channel/118/mute");
+
+    /*  BOTH PATCHES SEND UNDER /wfs, so since §100 (AYK) each device is named
+        under a prefix of its own, taken off before a message leaves. */
+    CHECK (attribute (items[0], "address") == "/S21/channel/118/mute");
     CHECK (attribute (items[0], "value") == "F");
+    CHECK (attribute (items[1], "address") == "/S21/wfs/input/21/positionXYZ");
+    CHECK (attribute (items[3], "address") == "/WFS/wfs/input/21/lfo/xyz");
     CHECK (attribute (items[1], "value") == "f:-3 f:1 f:3");
     CHECK (attribute (items[2], "value") == "f:0");
     CHECK (attribute (items[3], "value") == "i:0 i:0 i:90 i:1 i:8 i:1 f:5 f:1 f:3");
@@ -407,14 +412,29 @@ TEST_CASE ("qlab walk: messages - atoms, devices, a #v# fade as a curve (ZW)")
     CHECK (items[8].kind == "memo");
     CHECK (plan.placeholders == 3);
 
-    //  Two devices, each with the first segments its cues send under.
+    //  Two devices, each under its own name.
     REQUIRE (plan.devices.size() == 2);
     CHECK (plan.devices[0].name == "S21");
     CHECK (plan.devices[0].host == "192.168.1.221");
     CHECK (plan.devices[0].port == 8024);
-    CHECK (plan.devices[0].prefix == "/channel /wfs");
+    CHECK (plan.devices[0].prefix == "/S21");
+    CHECK (plan.devices[0].removePrefix);
     CHECK (plan.devices[1].name == "WFS");
-    CHECK (said (plan, "two network patches send under /wfs"));
+    CHECK (plan.devices[1].prefix == "/WFS");
+    CHECK_FALSE (said (plan, "two network patches send under /wfs"));
+}
+
+TEST_CASE ("qlab walk: devices that share no address keep their roots as prefixes (ZW)")
+{
+    const auto plan = walk (workspaceOf ({ network ("/channel/118/mute \\F"),
+                                           network ("/wfs/input/21/attenuation 0.", "WFS") }));
+    const auto& items = top (plan);
+
+    CHECK (attribute (items[0], "address") == "/channel/118/mute");
+    REQUIRE (plan.devices.size() == 2);
+    CHECK (plan.devices[0].prefix == "/channel");
+    CHECK_FALSE (plan.devices[0].removePrefix);
+    CHECK (plan.devices[1].prefix == "/wfs");
 }
 
 TEST_CASE ("qlab walk: QLab 4's commands and UDP messages are memos, its OSC messages cues")
@@ -472,16 +492,21 @@ TEST_CASE ("qlab walk: start, stop, goto, arm and the kinds with no equivalent (
     CHECK (attribute (items[6], "notes").find ("tell application") != std::string::npos);
     CHECK (said (plan, "a script is never run"));
 
-    CHECK (items[7].name == "[QLab] Projection");
-    CHECK (attribute (items[7], "notes").find ("a camera cue stays a memo") != std::string::npos);
-    CHECK (attribute (items[7], "notes").find ("Act 2") != std::string::npos);
+    //  A camera a capture cue since §100, on a video input with no camera chosen; its triggers its own.
+    CHECK (items[7].kind == "video");
+    CHECK (items[7].name == "Projection");
+    CHECK (attribute (items[7], "source") == "capture");
+    CHECK (items[7].videoInput == "camera:default");
+    CHECK (attribute (items[7], "notes") == "Act 2");
     CHECK (attribute (items[7], "enabled") == "false");
-    CHECK (said (plan, "QLab fired it by a hotkey and a MIDI trigger"));
+    CHECK (said (plan, "QLab fired it by a key Go.dot has no name for"));
+    REQUIRE (items[7].triggers.size() == 1);
+    CHECK (items[7].triggers[0].kind == "midi");
 
     CHECK (items[8].kind == "memo");
     CHECK (attribute (items[8], "preWait") == "4");
 
-    CHECK (plan.placeholders == 3);
+    CHECK (plan.placeholders == 2);
 }
 
 TEST_CASE ("qlab walk: a message split and typed as QLab spells it")
@@ -888,4 +913,268 @@ TEST_CASE ("qlab walk: a fade of a picture - its opacity, a move, a scale from i
     CHECK (said (plan, "it moves nothing a Go.dot fade of a picture moves"));
     CHECK (items[4].kind == "memo");
     CHECK (said (plan, "it fades only the movie's sound"));
+}
+
+namespace
+{
+    Cue midiCue (const std::string& name, int status, int byte1, int byte2)
+    {
+        auto c = cue ("MIDI", name);
+        c.midi.patch = "PATCH-MIDI";
+        c.midi.status = status;
+        c.midi.channel = 2;
+        c.midi.byte1 = byte1;
+        c.midi.byte2 = byte2;
+        return c;
+    }
+
+    Cue rawMidi (const std::string& name, const std::string& raw)
+    {
+        auto c = cue ("MIDI", name);
+        c.midi.messageType = 3;
+        c.midi.raw = raw;
+        return c;
+    }
+
+    bool has (const Trigger& trigger, const std::string& row, const std::string& value)
+    {
+        return std::find (trigger.attributes.begin(), trigger.attributes.end(),
+                          std::pair<std::string, std::string> { row, value }) != trigger.attributes.end();
+    }
+}
+
+TEST_CASE ("qlab walk: MIDI cues - each voice type, a fade, MIDI Show Control, raw bytes; a port per patch (§100)")
+{
+    auto fader = midiCue ("Elsa fader", 3, 14, 0);
+    fader.midi.fade = true;
+    fader.midi.endValue = 102;
+    fader.duration = 0.9;
+    fader.shape.type = 0;           // as Hécube's fades are stored
+
+    auto linear = fader;
+    linear.id = "Q-linear";
+    linear.name = "linear";
+    linear.shape.type = 3;
+
+    auto bend = midiCue ("Bend", 6, 0, 0);
+    bend.midi.byteCombo = 12000;
+
+    auto msc = cue ("MIDI", "Lights GO");
+    msc.midi.messageType = 2;
+    msc.midi.deviceId = 1;
+    msc.midi.commandFormat = 1;
+    msc.midi.command = 1;
+    msc.midi.qNumber = "12.5";
+    msc.midi.qList = "2";
+
+    auto w = workspaceOf ({ midiCue ("Elsa off", 3, 1, 0), fader, linear, midiCue ("Note", 1, 60, 100),
+                            midiCue ("Program", 4, 12, 0), midiCue ("Pressure", 5, 90, 0), bend, msc,
+                            rawMidi ("Mute", "90 20 7F"), rawMidi ("Two", "B0 07 64 0A 40"),
+                            rawMidi ("Sysex", "F0 7E 7F 06 01 F7"), rawMidi ("Broken", "90 2X") });
+    w.midiPatches.push_back ({ "PATCH-MIDI", "Desk MIDI", "USB MIDI Interface" });
+
+    const auto plan = walk (w);
+    const auto& items = top (plan);
+
+    CHECK (items[0].kind == "midi");
+    CHECK (attribute (items[0], "type") == "controlChange");
+    CHECK (attribute (items[0], "channel") == "2");
+    CHECK (attribute (items[0], "data1") == "1");
+    CHECK (attribute (items[0], "data2").empty());
+    CHECK (attribute (items[0], "fadeTo").empty());
+    CHECK (items[0].port == "midi:PATCH-MIDI");
+
+    CHECK (attribute (items[1], "fadeTo") == "102");
+    CHECK (attribute (items[1], "fadeTime") == "0.9");
+    CHECK (attribute (items[1], "fadeCurve") == "sCurve");
+    CHECK (said (plan, "fade shape taken as Go.dot's S-curve"));
+    CHECK (attribute (items[2], "fadeCurve").empty());
+
+    CHECK (attribute (items[3], "type") == "noteOn");
+    CHECK (attribute (items[3], "data1") == "60");
+    CHECK (attribute (items[3], "data2") == "100");
+    CHECK (attribute (items[4], "type") == "programChange");
+    CHECK (attribute (items[4], "data1") == "12");
+    CHECK (attribute (items[5], "type") == "channelPressure");
+    CHECK (attribute (items[5], "data2") == "90");
+    CHECK (attribute (items[6], "type") == "pitchBend");
+    CHECK (attribute (items[6], "data2") == "12000");
+
+    CHECK (attribute (items[7], "type") == "sysex");
+    CHECK (attribute (items[7], "sysex") == "F0 7F 01 02 01 01 31 32 2E 35 00 32 F7");
+
+    CHECK (attribute (items[8], "type") == "noteOn");
+    CHECK (attribute (items[8], "channel") == "1");
+    CHECK (attribute (items[8], "data1") == "32");
+    CHECK (attribute (items[8], "data2") == "127");
+
+    //  Two messages, running status: a timeline of two MIDI cues.
+    CHECK (items[9].kind == "group");
+    CHECK (attribute (items[9], "mode") == "timeline");
+    REQUIRE (items[9].children.size() == 2);
+    CHECK (attribute (items[9].children[1], "data1") == "10");
+    CHECK (attribute (items[9].children[1], "data2") == "64");
+
+    CHECK (attribute (items[10], "type") == "sysex");
+    CHECK (attribute (items[10], "sysex") == "F0 7E 7F 06 01 F7");
+
+    CHECK (items[11].kind == "memo");
+    CHECK (said (plan, "its bytes are not hex Go.dot can read"));
+
+    //  One port for the patch the voice cues name, one for the cues that name none.
+    REQUIRE (plan.ports.size() == 2);
+    CHECK (plan.ports[0].name == "Desk MIDI");
+    CHECK (plan.ports[0].device == "USB MIDI Interface");
+    CHECK (plan.ports[1].key == "midi:default");
+}
+
+TEST_CASE ("qlab walk: a hotkey, a MIDI trigger and a wall clock become Go.dot's triggers; what cannot is said (§100)")
+{
+    auto keyed = cue ("Memo", "Keyed");
+    keyed.hotkeyTrigger = true;
+    keyed.hotkey.character = 'e';
+    keyed.hotkey.keyCode = 14;
+    keyed.hotkey.control = true;
+
+    auto kept = cue ("Memo", "Kept");
+    kept.hotkeyTrigger = true;
+    kept.hotkey.character = 'z';
+    kept.hotkey.command = true;
+
+    auto function = cue ("Memo", "F6");
+    function.hotkeyTrigger = true;
+    function.hotkey.character = 0xF709;
+    function.hotkey.keyCode = 97;
+    function.hotkey.function = true;
+
+    auto heard = cue ("Memo", "Heard");
+    heard.midiTrigger = true;
+    heard.midiTriggerSpec = { 144, 0, 112, 127, 0, 0 };
+
+    auto anyVelocity = cue ("Memo", "Any velocity");
+    anyVelocity.midiTrigger = true;
+    anyVelocity.midiTriggerSpec = { 0x91, 2, 60, 0, 0, 0 };
+
+    auto clock = cue ("Memo", "Clock");
+    clock.wallClockTrigger = true;
+    clock.wallHours = 19;
+    clock.wallMinutes = 30;
+    clock.wallSeconds = 5;
+    clock.wallDays = 0x7E;
+
+    auto w = workspaceOf ({ keyed, kept, function, heard, anyVelocity, clock });
+    w.lists[0].midiTrigger = true;
+
+    const auto plan = walk (w);
+    const auto& items = top (plan);
+
+    REQUIRE (items[0].triggers.size() == 1);
+    CHECK (items[0].triggers[0].kind == "key");
+    CHECK (has (items[0].triggers[0], "key", "Mod+E"));
+    CHECK (said (plan, "Control is Go.dot's Mod"));
+
+    CHECK (items[1].triggers.empty());
+    CHECK (said (plan, "QLab fired it by Mod+Z, a key Go.dot keeps for itself"));
+
+    REQUIRE (items[2].triggers.size() == 1);
+    CHECK (has (items[2].triggers[0], "key", "F6"));
+
+    REQUIRE (items[3].triggers.size() == 1);
+    CHECK (items[3].triggers[0].kind == "midi");
+    CHECK (has (items[3].triggers[0], "type", "noteOn"));
+    CHECK (has (items[3].triggers[0], "number", "112"));
+    CHECK (has (items[3].triggers[0], "data", "127"));
+
+    //  A note on of velocity nought is any velocity; the channel kept.
+    REQUIRE (items[4].triggers.size() == 1);
+    CHECK (has (items[4].triggers[0], "data", "-1"));
+    CHECK (has (items[4].triggers[0], "channel", "2"));
+
+    REQUIRE (items[5].triggers.size() == 1);
+    CHECK (items[5].triggers[0].kind == "clock");
+    CHECK (has (items[5].triggers[0], "at", "19:30:05"));
+    CHECK (said (plan, "on some days of the week only"));
+
+    CHECK (said (plan, "QLab fired the cue list itself by a trigger"));
+}
+
+TEST_CASE ("qlab walk: an Eos and QLab machines are OSC devices; each QLab named under its own prefix (§100, AYK)")
+{
+    auto w = workspaceOf ({ network ("/eos/cue/11/fire", "EOS"), network ("/go", "MAC1"), network ("/go", "MAC2"),
+                            network ("/select/1", "MAC1"), network ("/channel/1/fader 0.") });
+    w.networkPatches.push_back ({ "EOS", "EOS 5 CF", "com.etc.eos.2", "192.168.6.101", 5000, false, 1, {} });
+    w.networkPatches.push_back ({ "MAC1", "MacMini_Justice1", "com.figure53.qlab.5", "192.168.1.211", 53000, false, 0, "2001" });
+    w.networkPatches.push_back ({ "MAC2", "MacMini Justice 2", "com.figure53.qlab.5", "192.168.1.212", 53000, false, 0, {} });
+
+    const auto plan = walk (w);
+    const auto& items = top (plan);
+
+    CHECK (items[0].kind == "osc");
+    CHECK (attribute (items[0], "address") == "/eos/cue/11/fire");
+    CHECK (attribute (items[1], "address") == "/MacMini_Justice1/go");
+    CHECK (attribute (items[2], "address") == "/MacMini_Justice_2/go");
+    CHECK (attribute (items[3], "address") == "/MacMini_Justice1/select/1");
+    CHECK (attribute (items[4], "address") == "/channel/1/fader");
+
+    REQUIRE (plan.devices.size() == 4);
+    CHECK (plan.devices[0].prefix == "/eos");
+    CHECK_FALSE (plan.devices[0].removePrefix);
+    CHECK (plan.devices[1].prefix == "/MacMini_Justice1");
+    CHECK (plan.devices[1].removePrefix);
+    CHECK (plan.devices[1].port == 53000);
+    CHECK (plan.devices[2].prefix == "/MacMini_Justice_2");
+
+    CHECK (said (plan, "QLab sent the patch EOS 5 CF to 2 destinations"));
+    CHECK (said (plan, "with its passcode"));
+    CHECK (plan.placeholders == 0);
+}
+
+TEST_CASE ("qlab walk: a cart is a Go.dot cart (§100, AYM)")
+{
+    auto w = workspaceOf ({ cue ("Memo", "show") });
+    w.lists.push_back (group ("Pads", 5, { cue ("Memo", "pad") }));
+
+    const auto plan = walk (w);
+    REQUIRE (plan.lists.size() == 2);
+    CHECK_FALSE (plan.lists[0].cart);
+    CHECK (plan.lists[1].cart);
+    CHECK (said (plan, "a cart: a Go.dot cart"));
+}
+
+TEST_CASE ("qlab walk: a hotkey spelled, MSC's bytes, raw hex read (§100)")
+{
+    HotKey key;
+    key.character = 'a';
+    key.option = true;
+    key.shift = true;
+    CHECK (keyFor (key) == "Alt+Shift+A");
+
+    key = {};
+    key.character = '7';
+    key.numericPad = true;
+    CHECK (keyFor (key) == "Num7");
+
+    key = {};
+    key.keyCode = 123;
+    CHECK (keyFor (key) == "ArrowLeft");
+
+    key = {};
+    key.character = '#';
+    CHECK (keyFor (key).empty());
+
+    MidiMessage m;
+    m.command = 8;                  // ALL_OFF: no data
+    m.deviceId = 127;
+    m.commandFormat = 16;
+    CHECK (mscBytes (m) == "F0 7F 7F 02 10 08 F7");
+
+    m.command = 6;                  // SET control 300 to 1000
+    m.controlNumber = 300;
+    m.controlValue = 1000;
+    CHECK (mscBytes (m) == "F0 7F 7F 02 10 06 2C 02 68 07 F7");
+
+    CHECK (hexBytes ("90 20 7f") == std::vector<int> { 0x90, 0x20, 0x7F });
+    CHECK (hexBytes ("f0,7e") == std::vector<int> { 0xF0, 0x7E });
+    CHECK_FALSE (hexBytes ("123").has_value());
+    CHECK_FALSE (hexBytes ("G0").has_value());
 }

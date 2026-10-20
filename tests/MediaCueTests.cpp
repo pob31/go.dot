@@ -845,6 +845,11 @@ TEST_CASE ("media info: the lengths move only when one is learned, and a publish
     {
         for (const auto& [file, seconds] : asLoaded)
         {
+            /*  A file missing at open has no length to keep: once found it is
+                learned (§100), which the case below pins. */
+            if (! (seconds > 0.0))
+                continue;
+
             audio::MediaRecord analysed;
             analysed.seconds = seconds + 100.0;
             analysed.contentHash = file + "#" + std::to_string (pass);
@@ -868,6 +873,9 @@ TEST_CASE ("media info: the lengths move only when one is learned, and a publish
 
     for (const auto& [file, record] : *analysedRecords)
     {
+        if (! (asLoaded.at (file) > 0.0))
+            continue;
+
         CHECK (bitsOf (record.seconds) == bitsOf (asLoaded.at (file)));
         CHECK (record.contentHash == file + "#" + std::to_string (passes - 1));
     }
@@ -1378,4 +1386,40 @@ TEST_CASE ("run media: a run armed twice with no audio side keeps the file of it
     const auto* fired = rig.runOf (rig.mediaId);
     REQUIRE (fired != nullptr);
     CHECK (fired->media == "storm/thunder.wav");
+}
+
+TEST_CASE ("media info: a file missing when the show opened, put back and read, is learned (§100)")
+{
+    /*  THE AUTHOR'S CASE (2026-10-20): a QLab show carried off its computer,
+        imported with its sounds missing, the folder found afterwards. Nought
+        was never the file's length, so once it is read it is learned as an
+        imported file's is - and a length the show opened with is still never
+        changed by a publish. */
+    Rig rig;
+    ScratchFolder scratch;
+
+    const auto media = scratch.folder.getChildFile ("media");
+    REQUIRE (writeSilence (media.getChildFile ("there.wav"), 8000, 12000));
+
+    const auto gone = rig.createMedia ("Gone");
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + gone + "/file", "gone.wav").ok);
+    const auto there = rig.createMedia ("There");
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + there + "/file", "there.wav").ok);
+
+    audio::MediaInfo info { rig.document, media.getFullPathName().toStdString() };
+
+    REQUIRE (info.durations()->count ("gone.wav") == 1u);
+    CHECK_FALSE (info.durations()->at ("gone.wav") > 0.0);
+    const auto opened = info.durations()->at ("there.wav");
+    REQUIRE (opened > 0.0);
+
+    audio::MediaRecord found;
+    found.seconds = 3.25;
+    info.publish ("gone.wav", found);
+    CHECK (info.durations()->at ("gone.wav") == doctest::Approx (3.25));
+
+    audio::MediaRecord other;
+    other.seconds = opened + 10.0;
+    info.publish ("there.wav", other);
+    CHECK (info.durations()->at ("there.wav") == doctest::Approx (opened));
 }

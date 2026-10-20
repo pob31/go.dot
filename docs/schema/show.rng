@@ -3365,6 +3365,33 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="fadeCurve">
+          <a:documentation>The shape of the fade to fadeTo (namespace draft 100): linear, steps of equal size, or sCurve, easing out of the start and into the end, as a fade&apos;s curve does.</a:documentation>
+          <choice>
+            <value>linear</value>
+            <value>sCurve</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="fadeTime">
+          <a:documentation>How long the fade to fadeTo takes (namespace draft 100, AXY). Nought sends fadeTo at once. The cue is playing while it fades and done as the last value leaves; Esc ends the fade where it is, as an OSC curve ends (PRD 4.4: nothing is put back), and a double Esc drops what has not left.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">3600</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="fadeTo">
+          <a:documentation>Where a fade of this cue&apos;s value ends (namespace draft 100, AXY, the author&apos;s pick: QLab&apos;s MIDI fades come over as they are). -1, the default, is no fade: the message is sent once. Otherwise data2 is where the value starts and this where it ends, sent again each tick it changes over fadeTime, so a desk&apos;s fader moves rather than jumps. Faded on a control change, an aftertouch, a channel pressure and a pitch bend, whose second byte is a value; any other type sends once and wfg validate says so. Up to 16383 for a pitch bend, 127 for the rest.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">-1</param>
+            <param name="maxInclusive">16383</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="name">
           <a:documentation>The cue&apos;s name, as the operator reads it.</a:documentation>
           <data type="string"/>
@@ -3707,6 +3734,15 @@
             <value>subscribe</value>
             <value>get</value>
             <value>midi</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="removePrefix">
+          <a:documentation>Whether the prefix is Go.dot&apos;s own name for this device rather than the root of its addresses (namespace draft 100, AYK, the author&apos;s pick): on, it is taken off every address before the message leaves, so a cue aimed at /MacMini_Justice1/go sends /go. For several devices that answer at the same addresses - three QLab machines each taking /go, two identical desks - which could not otherwise be told apart, since a cue reaches the device whose prefix its address starts with. Off, the default, sends the address as it is written.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
           </choice>
         </attribute>
       </optional>

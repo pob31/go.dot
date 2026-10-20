@@ -64,6 +64,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_osc_doh[] = { "device", "takeBack", "leave" };
     inline constexpr std::string_view enum_curve_axis[] = { "none", "tx", "ty", "tz", "rx", "ry", "rz" };
     inline constexpr std::string_view enum_midi_type[] = { "noteOn", "noteOff", "programChange", "controlChange", "pitchBend", "aftertouch", "channelPressure", "sysex" };
+    inline constexpr std::string_view enum_midi_fadeCurve[] = { "linear", "sCurve" };
     inline constexpr std::string_view enum_midi_wait[] = { "none", "sent" };
     inline constexpr std::string_view enum_midi_doh[] = { "device", "takeBack", "leave" };
     inline constexpr std::string_view enum_script_language[] = { "javascript", "lua" };
@@ -2613,6 +2614,30 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "",
           "The second byte: the velocity of a note, the value of a control change, the pressure of an aftertouch, or the whole fourteen bits of a pitch bend, where 8192 is the centre. Ignored by a program change, which has only one byte, and by system exclusive. Nought to 127 for everything but the bend. Renamed from data with its partner (2026-09-22) so the two read as the pair they are." },
+        { "midi", "fadeTo",
+          ValueType::integer, 'i', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "-1",
+          true, -1.0, true, 16383.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "",
+          "Where a fade of this cue's value ends (namespace draft 100, AXY, the author's pick: QLab's MIDI fades come over as they are). -1, the default, is no fade: the message is sent once. Otherwise data2 is where the value starts and this where it ends, sent again each tick it changes over fadeTime, so a desk's fader moves rather than jumps. Faded on a control change, an aftertouch, a channel pressure and a pitch bend, whose second byte is a value; any other type sends once and wfg validate says so. Up to 16383 for a pitch bend, 127 for the rest." },
+        { "midi", "fadeTime",
+          ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "0",
+          true, 0.0, true, 3600.0,
+          nullptr, 0,
+          "s", 50.0, false, "park",
+          "",
+          "How long the fade to fadeTo takes (namespace draft 100, AXY). Nought sends fadeTo at once. The cue is playing while it fades and done as the last value leaves; Esc ends the fade where it is, as an OSC curve ends (PRD 4.4: nothing is put back), and a double Esc drops what has not left." },
+        { "midi", "fadeCurve",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "linear",
+          false, 0.0, false, 0.0,
+          enum_midi_fadeCurve, 2,
+          "", 50.0, false, "park",
+          "",
+          "The shape of the fade to fadeTo (namespace draft 100): linear, steps of equal size, or sCurve, easing out of the start and into the end, as a fade's curve does." },
         { "midi", "sysex",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           false, "",
@@ -3469,6 +3494,14 @@ namespace wfg::doc::generated
           "", 1.0, false, "park",
           "",
           "The address this device answers at, and the root every cue aimed at it carries. SEVERAL, separated by spaces, for a device whose addresses start at the root of its own world: a DiGiCo S21 reached directly answers at /channel for every strip control, /console for ping, pong and the channel counts, and /digico for snapshot recall, so its row reads \"/channel /console /digico\". Declaring it three times would be three rows, three names and three sent counts for one console, and giving it one root that is not its own would mean the address in the cue is not the address in the manual somebody copied it from. A space is what separates them because an OSC address can never contain one, and a device with a single root reads exactly as it always did. A device that DESCRIBES itself has one: its namespace file is one tree and mounts in one place. EDITING THIS DOES NOT REWRITE THE CUES: a cue holds the whole address it writes, so a root somebody changes leaves every cue under the old one aiming at nothing, which wfg validate says out loud. Moving a cue from one device to another is the target menu's job." },
+        { "mount", "removePrefix",
+          ValueType::boolean, 'T', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "false",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 1.0, false, "park",
+          "",
+          "Whether the prefix is Go.dot's own name for this device rather than the root of its addresses (namespace draft 100, AYK, the author's pick): on, it is taken off every address before the message leaves, so a cue aimed at /MacMini_Justice1/go sends /go. For several devices that answer at the same addresses - three QLab machines each taking /go, two identical desks - which could not otherwise be told apart, since a cue reaches the device whose prefix its address starts with. Off, the default, sends the address as it is written." },
         { "mount", "transport",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           true, "udp",

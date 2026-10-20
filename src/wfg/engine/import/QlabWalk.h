@@ -47,7 +47,13 @@
       surface in QLab 4, or a screen drawn on directly) a canvas of its size,
       its outputs video outputs with no display chosen; a video cue a picture
       or a movie, a text cue a text cue, placed as QLab placed them; a fade of
-      either a fade of the picture. A camera cue stays a memo (AKT).
+      either a fade of the picture. A camera cue a capture cue on a video
+      input with no camera chosen yet (§100, amending AKT).
+
+    - MIDI (namespace draft §100): a MIDI cue a Go.dot MIDI cue on a port per
+      QLab patch, its fade the cue's fade; MIDI Show Control and raw bytes
+      spelled out. A hotkey, a MIDI trigger and a wall clock become Go.dot's
+      key, MIDI and clock triggers.
 
     Nothing is approximated silently: every choice that changes what plays is a
     `Note` for the report (ZZ).
@@ -89,6 +95,38 @@ namespace wfg::import::qlab
         int port = 0;
         bool tcp = false;
         std::string prefix;         ///< space-separated, as `mount/prefix` takes several
+
+        /*  ITS PREFIX GO.DOT'S OWN (§100, AYK): several patches sent the same
+            addresses - three QLab machines each sent /go - so each device is
+            named under a prefix of its own, `/MacMini_Justice1`, removed from
+            every address before it is sent. */
+        bool removePrefix = false;
+    };
+
+    /*  A MIDI PORT for one QLab MIDI patch (§100): `key` "midi:<id>", named as
+        QLab named the patch, bound to no output here until somebody binds it. */
+    struct Port
+    {
+        std::string key;
+        std::string name;
+        std::string device;         ///< what QLab last saw on it, for the report
+    };
+
+    /*  A CAMERA for one QLab camera patch (§100): `key` "camera:<id>", a video
+        input of kind device with no camera or card chosen yet. */
+    struct Camera
+    {
+        std::string key;
+        std::string name;
+        std::string device;         ///< what QLab last saw on it, for the report
+    };
+
+    /*  A TRIGGER ON A CUE (§100, AXZ): `kind` key, midi or clock, its rows as
+        `ShowDocument::createTrigger` takes them. */
+    struct Trigger
+    {
+        std::string kind;
+        std::vector<std::pair<std::string, std::string>> attributes;
     };
 
     struct Route
@@ -179,6 +217,15 @@ namespace wfg::import::qlab
         //  A picture, a movie or a text (§62): the canvas it is on, a `Canvas::key`.
         std::string canvas;
 
+        //  A camera (§100): the video input it shows, a `Camera::key`.
+        std::string videoInput;
+
+        //  A MIDI cue (§100): the port it sends on, a `Port::key`.
+        std::string port;
+
+        //  What fires it besides GO (§100, AXZ).
+        std::vector<Trigger> triggers;
+
         std::vector<Item> children;
     };
 
@@ -187,6 +234,7 @@ namespace wfg::import::qlab
         std::string key;
         std::string name;
         std::vector<Item> items;
+        bool cart = false;          ///< a QLab cart: a Go.dot cart (§100, AYM)
     };
 
     struct Plan
@@ -194,6 +242,8 @@ namespace wfg::import::qlab
         std::vector<List> lists;
         std::vector<Bus> buses;
         std::vector<Device> devices;
+        std::vector<Port> ports;
+        std::vector<Camera> cameras;
         std::vector<Canvas> canvases;
         std::vector<Output> outputs;
         std::vector<FontUse> fonts;
@@ -236,4 +286,17 @@ namespace wfg::import::qlab
 
     /** A linear gain in dB, at or below `floorDb` silence (-120). */
     double decibels (double gain, double floorDb);
+
+    /*  A QLAB HOTKEY AS GO.DOT SPELLS A KEY (§100, AYD): ⌘ and Control both
+        `Mod`, Option `Alt`; empty when the key is none Go.dot spells. Whether
+        the show keeps it is the caller's question. */
+    std::string keyFor (const HotKey&);
+
+    /*  A MIDI SHOW CONTROL MESSAGE as the hex bytes of a sysex (§100, AYB),
+        F0 to F7, from what QLab keeps of one. */
+    std::string mscBytes (const MidiMessage&);
+
+    /*  RAW HEX BYTES, AS QLAB TAKES THEM TYPED (§100, AYB): the bytes, or
+        nullopt when a token is not a byte. */
+    std::optional<std::vector<int>> hexBytes (const std::string& text);
 }

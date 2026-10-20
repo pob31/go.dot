@@ -753,6 +753,43 @@ namespace wfg::audio
         return true;
     }
 
+    int MediaAnalyser::lookAgain()
+    {
+        const auto lengths = media != nullptr ? media->durations() : nullptr;
+        int again = 0;
+
+        {
+            const std::lock_guard<std::mutex> lock { guard };
+
+            for (auto it = seen.begin(); it != seen.end();)
+            {
+                auto missing = true;
+
+                if (lengths != nullptr)
+                    if (const auto known = lengths->find (*it); known != lengths->end())
+                        missing = ! (known->second > 0.0);
+
+                const auto waiting = std::find (queued.begin(), queued.end(), *it) != queued.end();
+
+                if (! missing || waiting)
+                {
+                    ++it;
+                    continue;
+                }
+
+                queued.push_back (*it);
+                ++pending;
+                ++again;
+                ++it;
+            }
+        }
+
+        if (again > 0)
+            wake.notify_one();
+
+        return again;
+    }
+
     std::size_t MediaAnalyser::outstanding() const
     {
         const std::lock_guard<std::mutex> lock { guard };
@@ -1028,6 +1065,23 @@ namespace wfg::audio
                         {
                             if (analyser != nullptr)
                                 analyser->sweep (true);
+
+                            return Outcome::ok (args);
+                        } }));
+
+        /*  AND THE MISSING FILES LOOKED FOR AGAIN (namespace draft §100, AXX):
+            this machine's media folder, as the sweep is. */
+        registry.add (machineLocal ({ "media.lookAgain",
+                        "Looks again for every file the show names that was missing when it was looked for "
+                        "(namespace draft 100) - once somebody has put it in the show's media folder, as File > "
+                        "Find missing files in a folder... does. A file found has its length from then on, and its "
+                        "cues stop saying it is missing. Taken and ignored where nothing analyses.",
+                        {},
+                        false,
+                        [analyser] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            if (analyser != nullptr)
+                                analyser->lookAgain();
 
                             return Outcome::ok (args);
                         } }));

@@ -101,6 +101,7 @@
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/audio/TakePictures.h>
 #include <wfg/engine/cue/GroupMode.h>
+#include <wfg/engine/import/FileSearch.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/video/Ffmpeg.h>
 #include <wfg/engine/process/PatchEditor.h>
@@ -119,6 +120,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <set>
 #include <thread>
 #include <initializer_list>
 #include <utility>
@@ -139,7 +141,7 @@ namespace wfg::client
             menuUndo, menuRedo, menuCut, menuCopy, menuPaste, menuSelectAll, menuDeleteCue,
             menuLock, menuLoadToTime, menuUndoHistory, menuRecord, menuShowSettings,
             menuWaveform, menuSurfaces, menuNetworkMonitor, menuAssociate, menuGoDoh, menuNewPerformance, menuUpdateTemplate,
-            menuImportAls, menuImportQlab,
+            menuImportAls, menuImportQlab, menuFindMissing,
             menuConvertUsed, menuConvertWhole, menuConvertUsedQuality, menuConvertWholeQuality,
             menuMovieSound, menuCancelConversion, menuDownloadFfmpeg,
             menuSaveTemplate, menuVideoMonitor, menuHideProjectors, menuCleanCache,
@@ -1097,6 +1099,7 @@ namespace wfg::client
                     case menuUpdateTemplate:
                     case menuImportAls:
                     case menuImportQlab:
+                    case menuFindMissing:
                     case menuConvertUsed:
                     case menuConvertWhole:
                     case menuConvertUsedQuality:
@@ -1156,6 +1159,9 @@ namespace wfg::client
                     //  And from a QLab workspace (§46), the same way.
                     case menuImportQlab: return host.importQlab != nullptr && host.readQlabLists != nullptr
                                                   && host.openWindow != nullptr && ! importing;
+
+                    //  Into this show's media folder (§100): a show with one, unlocked, not already looking.
+                    case menuFindMissing: return unlocked && mediaFolder() != juce::File() && ! findingMissing;
 
                     //  A performance of a show - with its template, or to be its first.
                     case menuUpdateTemplate: return host.compareWithTemplate != nullptr
@@ -1293,6 +1299,7 @@ namespace wfg::client
                     addMenuItem (menu, menuOpen, "Open show...");
                     addMenuItem (menu, menuImportAls, "Import Ableton Live set...");
                     addMenuItem (menu, menuImportQlab, "Import QLab workspace...");
+                    addMenuItem (menu, menuFindMissing, "Find missing files in a folder...");
                     menu.addSeparator();
                     addMenuItem (menu, menuSave, "Save");
                     addMenuItem (menu, menuSaveAs, "Save as...");
@@ -1497,6 +1504,7 @@ namespace wfg::client
                     case menuNewPerformance: askForANewPerformance(); break;
                     case menuImportAls: chooseLiveSets(); break;
                     case menuImportQlab: chooseQlabWorkspace(); break;
+                    case menuFindMissing: chooseMissingFolder(); break;
                     case menuUpdateTemplate:
                         if (templateAroundThisDocument())
                             reviewTemplate ({});
@@ -5011,9 +5019,10 @@ namespace wfg::client
                 }
 
                 ui::ImportWindow::Actions actions;
-                actions.import = [this, sets] (const std::vector<int>& ticked, const juce::File& into)
+                actions.import = [this, sets] (const std::vector<int>& ticked, const juce::File& into,
+                                               const std::vector<std::string>&)
                 {
-                    startImport (sets, ticked, into, host.importSets);
+                    startImport (sets, ticked, into, {}, host.importSets);
                 };
                 actions.cancel = [this] { closeImportWindow(); };
 
@@ -5059,17 +5068,136 @@ namespace wfg::client
                 }
 
                 ui::ImportWindow::Actions actions;
-                actions.import = [this, sets] (const std::vector<int>& ticked, const juce::File& into)
+                actions.import = [this, sets] (const std::vector<int>& ticked, const juce::File& into,
+                                               const std::vector<std::string>& folders)
                 {
-                    startImport (sets, ticked, into, host.importQlab);
+                    startImport (sets, ticked, into, folders, host.importQlab);
                 };
                 actions.cancel = [this] { closeImportWindow(); };
+
+                /*  ITS FILES LOOKED FOR (namespace draft §100, AXX) off the message
+                    thread - a folder picked may be a whole drive - and the answer
+                    posted back to the window, which may have gone by then. */
+                if (host.findQlabFiles)
+                    actions.findFiles = [find = host.findQlabFiles, workspace = sets.front()]
+                                        (const std::vector<std::string>& folders,
+                                         std::function<void (const wfg::ImportFiles&)> answer)
+                    {
+                        std::thread ([find, workspace, folders, answer = std::move (answer)]
+                        {
+                            auto files = find (workspace, folders);
+                            juce::MessageManager::callAsync ([answer, files = std::move (files)] { answer (files); });
+                        }).detach();
+                    };
 
                 importWindow = std::make_unique<ui::ImportWindow> (theme, juce::StringArray { file.getFileNameWithoutExtension() },
                                                                    lists, showsFolder(), file.getFileNameWithoutExtension(),
                                                                    std::move (actions));
                 importWindow->setVisible (true);
                 importWindow->toFront (true);
+            }
+
+            /*  THE MISSING FILES FOUND IN A FOLDER (namespace draft §100, AXX; the
+                author, 2026-10-20: "As long as the user can point the parser to
+                the right folder(s)"). Every cue of the show whose file is
+                missing, its file looked for by name in the folder picked and
+                every folder inside it, walked once off the message thread; each
+                found copied into the show's media folder UNDER THE NAME THE CUE
+                ALREADY GIVES IT - so the document is not touched and nothing is
+                for undo - through a sibling and a rename; then the show is asked
+                to look again, and the cues stop saying their file is missing.
+                Asked again for another folder, it finds what the first did not. */
+            bool findingMissing = false;
+
+            void chooseMissingFolder()
+            {
+                if (refusedWhileLocked() || latest == nullptr || findingMissing)
+                    return;
+
+                const auto media = mediaFolder();
+                auto missing = model::missingFilesOf (*latest);
+
+                if (media == juce::File())
+                    return;
+
+                if (missing.empty())
+                {
+                    shell->transport.setNotice ("No cue of this show is missing its file.");
+                    return;
+                }
+
+                chooser = std::make_unique<juce::FileChooser> ("Choose a folder the " + juce::String (missing.size())
+                                                               + " missing files may be in", showsFolder());
+
+                chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
+                                      [safe = juce::Component::SafePointer<ui::MainWindow> (window.get()), this,
+                                       media, missing = std::move (missing)] (const juce::FileChooser& answered)
+                                      {
+                                          if (safe != nullptr && answered.getResult() != juce::File())
+                                              findMissingIn (answered.getResult(), media, missing);
+                                      });
+            }
+
+            void findMissingIn (const juce::File& folder, const juce::File& media,
+                                const std::vector<std::pair<std::string, std::string>>& missing)
+            {
+                findingMissing = true;
+                shell->transport.setNotice ("Looking in " + folder.getFileName() + " for " + juce::String (missing.size())
+                                            + " missing files...");
+
+                const juce::Component::SafePointer<ui::MainWindow> safe (window.get());
+
+                std::thread ([this, safe, folder, media, missing]
+                {
+                    const wfg::import::FolderIndex index { folder };
+                    std::set<std::string> named;
+                    int found = 0, copied = 0;
+
+                    //  Each file once, however many cues name it: their names are one name in media/.
+                    for (const auto& [cue, file] : missing)
+                    {
+                        if (! named.insert (file).second)
+                            continue;
+
+                        const auto name = juce::String::fromUTF8 (file.c_str()).fromLastOccurrenceOf ("/", false, false);
+                        const auto source = index.find (name.toStdString(), file);
+
+                        if (source == juce::File())
+                            continue;
+
+                        ++found;
+                        const auto target = media.getChildFile (juce::String::fromUTF8 (file.c_str()));
+                        const auto part = target.getSiblingFile (target.getFileName() + ".tmp-found");
+
+                        if (target.getParentDirectory().createDirectory()
+                              && source.copyFileTo (part) && part.moveFileTo (target))
+                            ++copied;
+                        else
+                            part.deleteFile();
+                    }
+
+                    juce::MessageManager::callAsync ([this, safe, folder, found, copied, files = named.size()]
+                    {
+                        if (safe == nullptr)
+                            return;
+
+                        findingMissing = false;
+
+                        if (copied > 0)
+                            send (gesture::lookForMissingAgain());
+
+                        juce::String said;
+                        said << "Found " << found << " of the " << static_cast<int> (files) << " missing files in "
+                             << folder.getFileName();
+
+                        if (copied < found)
+                            said << " - " << (found - copied) << " could not be copied into the show's media folder";
+                        else if (copied > 0)
+                            said << ", and copied them into the show's media folder";
+
+                        shell->transport.setNotice (said);
+                    });
+                }).detach();
             }
 
             /*  Deferred, because the window asking is the one going. */
@@ -5085,6 +5213,7 @@ namespace wfg::client
             /*  THE IMPORT, whichever importer the window was for - a Live set's or a
                 QLab workspace's (§46) - with the same words in the foot. */
             void startImport (const std::vector<std::string>& sets, const std::vector<int>& ticked, const juce::File& into,
+                              const std::vector<std::string>& searchFolders,
                               const std::function<wfg::ImportResult (const wfg::ImportRequest&,
                                                                      const std::function<void (const std::string&)>&)>& importer)
             {
@@ -5105,6 +5234,7 @@ namespace wfg::client
                 request.sets = sets;
                 request.scenes = ticked;
                 request.into = into.getFullPathName().toStdString();
+                request.searchFolders = searchFolders;
 
                 /*  OFF THE MESSAGE THREAD: a tour copies a gigabyte of sound. Every
                     word back is posted to it, and nothing is touched once this

@@ -458,6 +458,8 @@ add_library(wfg_engine STATIC
     wfg/engine/import/Bplist.cpp
     wfg/engine/import/Bplist.h
     wfg/engine/import/ImportCommon.cpp
+    wfg/engine/import/FileSearch.cpp
+    wfg/engine/import/FileSearch.h
     wfg/engine/import/ImportCommon.h
     wfg/engine/import/QlabImport.cpp
     wfg/engine/import/QlabImport.h

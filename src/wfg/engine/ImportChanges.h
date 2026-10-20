@@ -65,6 +65,20 @@ namespace wfg
         std::string templateSet;            ///< with several: the template, empty for the newest
         std::vector<int> scenes;            ///< ticked, by index in the template's set
         std::string into;                   ///< the show folder to make
+
+        /*  FOLDERS TO LOOK IN for a file not where the workspace says (namespace
+            draft §100, AXX), in the order somebody picked them. */
+        std::vector<std::string> searchFolders;
+    };
+
+    /*  THE FILES A WORKSPACE PLAYS, LOOKED FOR (namespace draft §100, AXX): how
+        many it names, and those not found - where it says, or in any folder
+        given - each as the report would name it. */
+    struct ImportFiles
+    {
+        int total = 0;
+        std::vector<std::string> missing;
+        std::string error;                  ///< why the workspace could not be read
     };
 
     struct ImportResult
