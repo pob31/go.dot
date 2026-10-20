@@ -32918,13 +32918,15 @@ the row, and "standby is clear - click a row's left edge to park it" under its t
   author asked for *"a bit darker"*), laid on every
   kind of row right after its ground so the column runs unbroken and the picked and standby washes
   still paint over it. In `clients/desktop/theme.json`, so F5 tunes it.
-- **AXK** *(proposed)* **The words**: *"▶ marks the cue GO fires next: the standby. Click in this column
-  on any cue to move the ▶ there; ↑ and ↓ move it one cue at a time. Its row is lit amber, and its name
-  stands beside the GO button."* What it is before what it is called; amber, never "yellow".
+- **AXK** **The words**: *"▶ marks the cue GO fires next: the standby. Click in this column on any cue
+  to move the ▶ there; ↑ and ↓ move it one cue at a time. Its row is lit amber, and its name stands
+  beside the GO button."* What it is before what it is called; amber, never "yellow". (The author,
+  2026-10-20: *"Wording seems okay."*)
 - The tester guides, both languages, say where the column is, what the ▶ means, how it moves, what
   "no standby" means and where the reminder is.
 
 Test: `cue list: the pointer column - a wider gutter with its own ground, a heading glyph that says what
 it is, and a hint while the standby is clear (§97)` (RunPaneUiTests; with `WFG_SNAPSHOT_DIR`,
-`cue-list-pointer.png` and `cue-list-pointer-parked.png`). Owed: the author's look in the window, the
-words of AXJ and AXK, and the friend's second try.
+`cue-list-pointer.png` and `cue-list-pointer-parked.png`). The author looked, asked for the narrower
+grey, the air before the number and the darker ground, and passed the words (2026-10-20). Owed: the
+friend's second try.
