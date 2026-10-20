@@ -970,7 +970,8 @@ TEST_CASE ("qlab walk: MIDI cues - each voice type, a fade, MIDI Show Control, r
     auto w = workspaceOf ({ midiCue ("Elsa off", 3, 1, 0), fader, linear, midiCue ("Note", 1, 60, 100),
                             midiCue ("Program", 4, 12, 0), midiCue ("Pressure", 5, 90, 0), bend, msc,
                             rawMidi ("Mute", "90 20 7F"), rawMidi ("Two", "B0 07 64 0A 40"),
-                            rawMidi ("Sysex", "F0 7E 7F 06 01 F7"), rawMidi ("Broken", "90 2X") });
+                            rawMidi ("Sysex", "F0 7E 7F 06 01 F7"), rawMidi ("Broken", "90 2X"),
+                            rawMidi ("Typed", "f0 7e  7f,06 01") });
     w.midiPatches.push_back ({ "PATCH-MIDI", "Desk MIDI", "USB MIDI Interface" });
 
     const auto plan = walk (w);
@@ -1020,6 +1021,10 @@ TEST_CASE ("qlab walk: MIDI cues - each voice type, a fade, MIDI Show Control, r
 
     CHECK (items[11].kind == "memo");
     CHECK (said (plan, "its bytes are not hex Go.dot can read"));
+
+    //  Written as a manual prints it, its F7 added (said).
+    CHECK (attribute (items[12], "sysex") == "F0 7E 7F 06 01 F7");
+    CHECK (said (plan, "did not end with F7: one is added"));
 
     //  One port for the patch the voice cues name, one for the cues that name none.
     REQUIRE (plan.ports.size() == 2);

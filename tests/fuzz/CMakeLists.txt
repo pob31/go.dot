@@ -113,7 +113,7 @@ if(WFG_FUZZ_HAVE_JUCE)
     set(WFG_IMPORT "${WFG_SRC}/wfg/engine/import")
     wfg_fuzz_target(fuzz_qlab MAIN FuzzQlab.cpp JUCE
         SOURCES "${WFG_IMPORT}/Bplist.cpp" "${WFG_IMPORT}/QlabReader.cpp" "${WFG_IMPORT}/QlabWalk.cpp"
-                "${WFG_SRC}/wfg/engine/osc/OscValue.cpp" FuzzImportShim.cpp)
+                "${WFG_SRC}/wfg/engine/cue/KeyChord.cpp" "${WFG_SRC}/wfg/engine/osc/OscValue.cpp" FuzzImportShim.cpp)
     wfg_fuzz_target(fuzz_als MAIN FuzzAls.cpp JUCE
         SOURCES "${WFG_IMPORT}/AlsReader.cpp" "${WFG_IMPORT}/AlsWalk.cpp"
                 "${WFG_SRC}/wfg/engine/osc/OscValue.cpp" FuzzImportShim.cpp)

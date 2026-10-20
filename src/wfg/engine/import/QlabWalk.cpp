@@ -945,12 +945,24 @@ namespace wfg::import::qlab
 
                     if (bytes->front() == 0xF0)
                     {
-                        auto hex = m.raw;
+                        auto whole = *bytes;
 
-                        if (bytes->back() != 0xF7)
+                        if (whole.size() < 2 || whole.back() != 0xF7)
                         {
-                            hex += " F7";
+                            whole.push_back (0xF7);
                             note (Note::Kind::approximated, cue, "its system-exclusive bytes did not end with F7: one is added");
+                        }
+
+                        //  Written out as a manual prints them, whatever spacing and case QLab kept.
+                        std::string hex;
+                        static constexpr const char* digits = "0123456789ABCDEF";
+
+                        for (const auto b : whole)
+                        {
+                            if (! hex.empty())
+                                hex += ' ';
+                            hex += digits[(b >> 4) & 0x0F];
+                            hex += digits[b & 0x0F];
                         }
 
                         item.attributes.push_back ({ "type", "sysex" });
