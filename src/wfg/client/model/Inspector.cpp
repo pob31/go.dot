@@ -42,6 +42,7 @@
 #include <functional>
 #include <iterator>
 #include <map>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -1018,7 +1019,40 @@ namespace wfg::client::model
             menu of the show's movies, "not locked" first; and while it is,
             what the movie leads - its start offset and speed - drawn but not
             typed into, since the engine would refuse it as locked-to-movie. */
-        void offerTheMovies (const tree::TreeSnapshot& snapshot, std::vector<Field>& decided)
+        /*  WHAT EVERY CUE OF A SELECTION WOULD READ ALIKE, read once for all
+            of them. The movie menu is the show's movies whichever sound asks,
+            and building it is a walk of every cue's rows: once per sound, six
+            hundred picked with ctrl/⌘-A made that walk seventy-five times a
+            pass (2026-10-20). One cue inspected alone fills it for itself. */
+        struct Shared
+        {
+            std::optional<std::vector<std::pair<std::string, std::string>>> movies;
+        };
+
+        std::vector<std::pair<std::string, std::string>> movieChoices (const tree::TreeSnapshot& snapshot)
+        {
+            std::vector<std::pair<std::string, std::string>> choices { { "", "not locked" } };
+            constexpr std::string_view prefix = "/godot/cue/";
+
+            for (const auto* node : snapshot.under (prefix))
+            {
+                constexpr std::string_view suffix = "/source";
+                const std::string_view address = node->address;
+
+                if (address.size() <= prefix.size() + suffix.size()
+                      || address.substr (address.size() - suffix.size()) != suffix || text (node) != "movie")
+                    continue;
+
+                const auto id = std::string (address.substr (prefix.size(), address.size() - prefix.size() - suffix.size()));
+                const auto number = text (snapshot, "/godot/cue/" + id + "/number");
+                const auto name = shownCueName (snapshot, id);
+                choices.push_back ({ id, (number.empty() ? std::string {} : number + "  ") + (name.empty() ? id : name) });
+            }
+
+            return choices;
+        }
+
+        void offerTheMovies (const tree::TreeSnapshot& snapshot, Shared& shared, std::vector<Field>& decided)
         {
             Field* lock = nullptr;
 
@@ -1032,23 +1066,11 @@ namespace wfg::client::model
             if (lock->writable)
             {
                 lock->control = Control::movieRef;
-                lock->choices = { { "", "not locked" } };
 
-                for (const auto* node : snapshot.all())
-                {
-                    constexpr std::string_view prefix = "/godot/cue/";
-                    constexpr std::string_view suffix = "/source";
-                    const std::string_view address = node->address;
+                if (! shared.movies.has_value())
+                    shared.movies = movieChoices (snapshot);
 
-                    if (address.size() <= prefix.size() + suffix.size() || address.substr (0, prefix.size()) != prefix
-                          || address.substr (address.size() - suffix.size()) != suffix || text (node) != "movie")
-                        continue;
-
-                    const auto id = std::string (address.substr (prefix.size(), address.size() - prefix.size() - suffix.size()));
-                    const auto number = text (snapshot, "/godot/cue/" + id + "/number");
-                    const auto name = shownCueName (snapshot, id);
-                    lock->choices.push_back ({ id, (number.empty() ? std::string {} : number + "  ") + (name.empty() ? id : name) });
-                }
+                lock->choices = *shared.movies;
             }
 
             if (lock->value.empty() || lock->mixed)
@@ -1881,284 +1903,288 @@ namespace wfg::client::model
         return {};
     }
 
+    namespace
+    {
+        Inspection inspectSharing (const tree::TreeSnapshot& snapshot, const std::string& cueId, Shared& shared)
+        {
+            Inspection out;
+
+            if (cueId.empty())
+                return out;
+
+            out.cueId = cueId;
+            out.cueName = shownCueName (snapshot, cueId);
+            out.kind = text (snapshot, "/godot/cue/" + cueId + "/kind");
+
+            /*  THE CUE'S OWN ROWS, FOUND BY ITS PREFIX. Read off the tree rather
+                than a table of which attributes a kind has - exactly the table
+                §14.2 says a generic inspector must not have.
+
+                NOT `all()`, WHICH THIS WAS (2026-10-20): the window inspects on
+                every pass, not only when the pick changes, and once per picked
+                cue - so six hundred memos picked with ctrl/⌘-A walked thirteen
+                thousand nodes six hundred times, twenty-five times a second.
+                `under` is a binary search per half and costs the cue's own rows. */
+            const auto prefix = "/godot/cue/" + cueId + "/";
+
+            std::vector<Field> decided, reported;
+
+            for (const auto* node : snapshot.under (prefix))
+            {
+                const auto name = node->address.substr (prefix.size());
+
+                //  Only this cue's own rows: anything deeper belongs to something else.
+                if (name.find ('/') != std::string::npos)
+                    continue;
+
+                auto field = fieldFrom (*node, name);
+
+                (field.writable ? decided : reported).push_back (std::move (field));
+            }
+
+            /*  WHAT THE SHOW'S OUTPUTS ARE, for the rows that point at one.
+
+                A SECOND SCAN, AND ONLY FOR A MEDIA CUE. `readOutputs` walks the
+                tree again rather than this loop gathering buses as it goes, and
+                that is a trade taken deliberately: doing it by hand here would be
+                a second copy of how a bus is read, and the two would drift the
+                first time a column was added to that row. What it costs is one
+                more linear pass when somebody clicks a media cue, against the same
+                human reaction time the comment above weighs. */
+            if (out.kind == "media")
+            {
+                fitToTheRig (snapshot, cueId, decided);
+                offerTheStrips (snapshot, cueId, decided);
+            }
+
+            //  A picture's strip, a menu as a sound's is (namespace draft §49).
+            if (out.kind == "video")
+                offerTheStrips (snapshot, cueId, decided);
+
+            /*  A VIDEO CUE'S CANVAS is a menu of the show's (Phase 8a). */
+            if (out.kind == "video")
+                offerTheCanvases (snapshot, decided);
+
+            /*  A MIC CUE'S OUTPUTS are a media cue's, and its source is two menus
+                of its own (Phase 9b). */
+            if (out.kind == "mic")
+            {
+                fitToTheRig (snapshot, cueId, decided);
+                offerTheInputsAndChannels (snapshot, decided);
+            }
+
+            /*  A FADE'S AUX is a menu of the show's auxes (namespace draft §93). */
+            if (out.kind == "fade")
+                offerTheInputsAndChannels (snapshot, decided);
+
+            /*  And the same kind of second pass for a network cue, for the same
+                reason: which devices exist is a fact about THIS show and cannot
+                come from the parameter table. */
+            if (out.kind == "osc")
+                aimAtADevice (snapshot, decided);
+
+            if (out.kind == "midi")
+            {
+                aimAtAPort (snapshot, decided);
+                nameTheNumbers (decided);
+            }
+
+            if (out.kind == "osc" || out.kind == "midi")
+                wordTheDoh (snapshot, out.kind, decided);
+
+            if (out.kind == "fade")
+                greyWhatAFadeLeavesAlone (decided, fadeAimKind (snapshot, cueId));
+
+            if (out.kind == "transport")
+                wordTheVerb (decided);
+
+            if (out.kind == "timecode")
+                wordTheCode (snapshot, decided);
+
+            //  A time group and its members, in words (namespace draft §60, TG.10).
+            const auto asks = whatACodeAsks (snapshot, cueId, out.kind, decided);
+            wordTheTime (snapshot, out.kind, asks, decided);
+
+            /*  AN UNNAMED CUE'S NAME BOX shows, greyed, what the cue is called
+                while it stays unnamed (namespace draft §53): a fade after its
+                target, a sound after its file. Typing names it; emptying the box
+                gives the automatic name back, and it follows the cue again. */
+            for (auto& field : decided)
+                if (field.name == "name" && field.value.empty() && ! field.mixed)
+                    field.placeholder = text (snapshot, "/godot/cue/" + cueId + "/autoName");
+
+            /*  THE DCA A CUE ANSWERS TO, on the three kinds that carry the row -
+                a media cue and a group marked with one, a fade that moves one - and
+                asked of the rows rather than of the kind, so that whichever kind
+                gains it next gets the menu with no line here. */
+            aimAtADca (snapshot, decided);
+            offerTheMovies (snapshot, shared, decided);
+
+            //  Which group's header prepares it, on every kind: the row is every cue's (§30, QZ).
+            offerTheGroupsAround (snapshot, cueId, decided);
+
+            greyWhatOnlyAHandAsks (snapshot, cueId, out.kind, decided);
+            greyWhatOnlyACodeAsks (out.kind, asks, decided);
+            wordTheJoin (out.kind, decided);
+            wordTheDelay (out.kind, decided);
+            wordTheRangeJoin (snapshot, cueId, out.kind, decided);
+            greyTheMapping (out.kind, decided);
+
+            /*  THE EQ'S NINETEEN ROWS HAVE AN EDITOR OF THEIR OWN (Phase 9a), the
+                panel at the foot, and are not listed here - by prefix, so a
+                twentieth row joins the panel without a name in this file.
+                They stay reachable: the opener below is the door. */
+            if (out.kind == "media" || out.kind == "mic")
+                std::erase_if (decided, [] (const Field& field)
+                                        { return field.name.rfind ("eq", 0) == 0; });
+
+            /*  AND THE LEVEL LANE IS DRAWN OVER THE WAVEFORM (namespace draft
+                §20.5), where its points can be seen against the sound they ride;
+                a list of numbers in a text box is not a way to edit a curve. The
+                Waveform opener is the door, and the page keeps the row. */
+            if (out.kind == "media")
+                std::erase_if (decided, [] (const Field& field) { return field.name == "levelLane"; });
+
+            /*  AND THE FOLD IS NOBODY'S TO ASK FOR ANY MORE (2026-10-08): a stereo
+                cue onto a mono output is folded by the routing itself, so the
+                switch had nothing left to say. Its attribute stays in the schema
+                so a show that set it still opens. */
+            if (out.kind == "media" || out.kind == "mic")
+                std::erase_if (decided, [] (const Field& field) { return field.name == "stereoToMono"; });
+
+            /*  AND A PICTURE'S PLACE, COLOUR AND MASK ARE ITS PANEL'S (namespace
+                draft §47, AAG): a frame dragged on its canvas, curves drawn, a mask
+                outlined - the inspector keeps what it is, where and how it comes
+                in. */
+            if (out.kind == "video")
+                std::erase_if (decided, [] (const Field& field)
+                                        { return std::find (pictureRows().begin(), pictureRows().end(), field.name)
+                                                   != pictureRows().end(); });
+
+            /*  AND WHAT ELSE A FADE MOVES IS ITS MIXER'S (namespace draft §26, PG):
+                a send, an EQ number or a plugin value is a strip, a box or a
+                plugin's own knob with a tick box, and a list of pairs in a text box
+                is not a way to edit any of them. The Mixer opener is the door. */
+            if (out.kind == "fade")
+                std::erase_if (decided, [] (const Field& field)
+                                        { return field.name == "sends" || field.name == "eq" || field.name == "fx"; });
+
+            /*  AND A SCRIPT'S SOURCE IS ITS EDITOR'S (namespace draft §66, AMO; the
+                author, 2026-10-15: "No need to show the script content in the
+                inspector"): code is read and written at the foot, where it has
+                room, its colours and its lines. The Code opener is the door. */
+            if (out.kind == "script")
+                std::erase_if (decided, [] (const Field& field) { return field.name == "source"; });
+
+            /*  AND A PATCH IS ITS CANVAS'S (namespace draft §65, AMY; the author,
+                2026-10-15: "we can remove in the inspector the preview of the
+                content of the text of the patch. I think it's not really
+                helping"): read and edited at the foot or in Pd. The Patch opener
+                is the door. */
+            if (out.kind == "process")
+                std::erase_if (decided, [] (const Field& field) { return field.name == "patch"; });
+
+            //  The four blocks, in the order somebody fills them in.
+            auto kindRows = [&out]
+            {
+                const auto found = kindOrder().find (out.kind);
+                return found != kindOrder().end() ? found->second : std::vector<std::string> {};
+            }();
+
+            /*  WHAT A CODE ASKS FIRST, where a code asks it (namespace draft §60,
+                TG.10): a time group's member says when it starts and how it keeps
+                up before what it plays - those two are why it is in the group - and
+                a time group says what it follows before anything else. Elsewhere
+                the rows keep their places, greyed: at the end of what a cue does,
+                and `timeSource` beside a group's `mode`. */
+            if (asks.member)
+                kindRows.insert (kindRows.begin(), { "at", "chase" });
+
+            if (asks.group)
+            {
+                std::erase (kindRows, std::string ("timeSource"));
+                kindRows.insert (kindRows.begin(), "timeSource");
+            }
+
+            Block isBlock { "what it is", {} }, whenBlock { "when", {} },
+                  doesBlock { "what it does", {} }, listBlock { "in the list", {} },
+                  samplerBlock { "sampler", {} };
+
+            for (auto& field : decided)
+            {
+                if (named (saidFirst, field.name))      isBlock.fields.push_back (std::move (field));
+                else if (named (when, field.name))      whenBlock.fields.push_back (std::move (field));
+                else if (named (saidLast, field.name))  listBlock.fields.push_back (std::move (field));
+                else                                    doesBlock.fields.push_back (std::move (field));
+            }
+
+            sortInto (isBlock.fields, saidFirst);
+            sortInto (whenBlock.fields, when);
+            sortInto (doesBlock.fields, kindRows);
+            sortInto (listBlock.fields, saidLast);
+
+            /*  A MEDIA CUE'S SAMPLER ROWS ARE A DRAWER OF THEIR OWN (author,
+                2026-09-30: "we can also make more drawers for things"). Eight rows
+                that only a hand on a strip asks, greyed on every cue that is not a
+                sampler member - which is most of them - and they were the bottom
+                half of what a media cue does. Moved whole and in the order they
+                had, so a sampler member reads as it did, one heading further down;
+                `dca` stays behind, since a DCA trims any cue (see `samplerRows`).
+                A video cue's too, since a picture plays from a strip (§49). */
+            if (out.kind == "media" || out.kind == "video")
+            {
+                std::stable_partition (doesBlock.fields.begin(), doesBlock.fields.end(),
+                                       [] (const Field& field) { return ! named (samplerRows, field.name); });
+
+                const auto firstSampler = std::find_if (doesBlock.fields.begin(), doesBlock.fields.end(),
+                                                        [] (const Field& field)
+                                                        { return named (samplerRows, field.name); });
+
+                samplerBlock.fields.assign (std::make_move_iterator (firstSampler),
+                                            std::make_move_iterator (doesBlock.fields.end()));
+                doesBlock.fields.erase (firstSampler, doesBlock.fields.end());
+            }
+
+            /*  AND THE PANELS THIS CUE HAS, at the end of what it DOES and after
+                the sorts, so an opener never lands in the middle of the rows a
+                kind orders. The author asked for them here rather than in a menu
+                (2026-09-21: *"the controls to show the waveform, the send levels,
+                the EQ, the group timeline ... No hunting in the menus"*), and the
+                reasoning is the ordinary one: the inspector is where a cue is
+                being worked on, so a longer look at that same cue is a thing to
+                ask for from there.
+
+                They are NOT parameters and write nothing. A row here is usually a
+                decision the document holds; these are doors. The window draws them
+                differently for that reason - §4.8's rule applies to form as well
+                as to colour. */
+            /*  SINCE 2026-09-30 THEY ARE NOT AMONG THE ROWS AT ALL but in a bar of
+                their own at the head of the panel (author: "the toggles for the
+                foot panels in the inspector should be at the top to make opening
+                the panel really quick"). At the end of what a cue does they were a
+                scroll away on any cue with a long list of rows - a media cue in a
+                sampler group most of all - and a door is quickest where the eye
+                lands first. */
+            out.panels = openersFor (out.kind, cueId, text (snapshot, "/godot/cue/" + cueId + "/source"),
+                                     out.kind == "fade" ? fadeAimKind (snapshot, cueId) : std::string {});
+            out.panelCue = cueId;
+
+            for (auto* block : { &isBlock, &whenBlock, &doesBlock, &samplerBlock, &listBlock })
+                if (! block->fields.empty())
+                    out.blocks.push_back (std::move (*block));
+
+            sortInto (reported, {});
+            out.details = std::move (reported);
+            out.count = 1;
+
+            return out;
+        }
+    }
+
     Inspection inspect (const tree::TreeSnapshot& snapshot, const std::string& cueId)
     {
-        Inspection out;
-
-        if (cueId.empty())
-            return out;
-
-        out.cueId = cueId;
-        out.cueName = shownCueName (snapshot, cueId);
-        out.kind = text (snapshot, "/godot/cue/" + cueId + "/kind");
-
-        /*  ONE SCAN OF THE TREE, AND ONLY WHEN A SELECTION CHANGES. `all()` is
-            linear and allocates, which is why the cue list is forbidden it -
-            there it would run per row per pass. Here it runs when somebody
-            clicks, which is a few thousand comparisons against a human
-            reaction time, and the alternative is this client keeping its own
-            copy of which attributes a kind has: exactly the table §14.2 says a
-            generic inspector must not have.
-
-            (`childrenOf` would do the same scan and is banned outright, so the
-            gate stays honest: what is forbidden is the per-row habit, not the
-            one-off.) */
-        const auto prefix = "/godot/cue/" + cueId + "/";
-
-        std::vector<Field> decided, reported;
-
-        for (const auto* node : snapshot.all())
-        {
-            if (node->address.rfind (prefix, 0) != 0)
-                continue;
-
-            const auto name = node->address.substr (prefix.size());
-
-            //  Only this cue's own rows: anything deeper belongs to something else.
-            if (name.find ('/') != std::string::npos)
-                continue;
-
-            auto field = fieldFrom (*node, name);
-
-            (field.writable ? decided : reported).push_back (std::move (field));
-        }
-
-        /*  WHAT THE SHOW'S OUTPUTS ARE, for the rows that point at one.
-
-            A SECOND SCAN, AND ONLY FOR A MEDIA CUE. `readOutputs` walks the
-            tree again rather than this loop gathering buses as it goes, and
-            that is a trade taken deliberately: doing it by hand here would be
-            a second copy of how a bus is read, and the two would drift the
-            first time a column was added to that row. What it costs is one
-            more linear pass when somebody clicks a media cue, against the same
-            human reaction time the comment above weighs. */
-        if (out.kind == "media")
-        {
-            fitToTheRig (snapshot, cueId, decided);
-            offerTheStrips (snapshot, cueId, decided);
-        }
-
-        //  A picture's strip, a menu as a sound's is (namespace draft §49).
-        if (out.kind == "video")
-            offerTheStrips (snapshot, cueId, decided);
-
-        /*  A VIDEO CUE'S CANVAS is a menu of the show's (Phase 8a). */
-        if (out.kind == "video")
-            offerTheCanvases (snapshot, decided);
-
-        /*  A MIC CUE'S OUTPUTS are a media cue's, and its source is two menus
-            of its own (Phase 9b). */
-        if (out.kind == "mic")
-        {
-            fitToTheRig (snapshot, cueId, decided);
-            offerTheInputsAndChannels (snapshot, decided);
-        }
-
-        /*  A FADE'S AUX is a menu of the show's auxes (namespace draft §93). */
-        if (out.kind == "fade")
-            offerTheInputsAndChannels (snapshot, decided);
-
-        /*  And the same kind of second pass for a network cue, for the same
-            reason: which devices exist is a fact about THIS show and cannot
-            come from the parameter table. */
-        if (out.kind == "osc")
-            aimAtADevice (snapshot, decided);
-
-        if (out.kind == "midi")
-        {
-            aimAtAPort (snapshot, decided);
-            nameTheNumbers (decided);
-        }
-
-        if (out.kind == "osc" || out.kind == "midi")
-            wordTheDoh (snapshot, out.kind, decided);
-
-        if (out.kind == "fade")
-            greyWhatAFadeLeavesAlone (decided, fadeAimKind (snapshot, cueId));
-
-        if (out.kind == "transport")
-            wordTheVerb (decided);
-
-        if (out.kind == "timecode")
-            wordTheCode (snapshot, decided);
-
-        //  A time group and its members, in words (namespace draft §60, TG.10).
-        const auto asks = whatACodeAsks (snapshot, cueId, out.kind, decided);
-        wordTheTime (snapshot, out.kind, asks, decided);
-
-        /*  AN UNNAMED CUE'S NAME BOX shows, greyed, what the cue is called
-            while it stays unnamed (namespace draft §53): a fade after its
-            target, a sound after its file. Typing names it; emptying the box
-            gives the automatic name back, and it follows the cue again. */
-        for (auto& field : decided)
-            if (field.name == "name" && field.value.empty() && ! field.mixed)
-                field.placeholder = text (snapshot, "/godot/cue/" + cueId + "/autoName");
-
-        /*  THE DCA A CUE ANSWERS TO, on the three kinds that carry the row -
-            a media cue and a group marked with one, a fade that moves one - and
-            asked of the rows rather than of the kind, so that whichever kind
-            gains it next gets the menu with no line here. */
-        aimAtADca (snapshot, decided);
-        offerTheMovies (snapshot, decided);
-
-        //  Which group's header prepares it, on every kind: the row is every cue's (§30, QZ).
-        offerTheGroupsAround (snapshot, cueId, decided);
-
-        greyWhatOnlyAHandAsks (snapshot, cueId, out.kind, decided);
-        greyWhatOnlyACodeAsks (out.kind, asks, decided);
-        wordTheJoin (out.kind, decided);
-        wordTheDelay (out.kind, decided);
-        wordTheRangeJoin (snapshot, cueId, out.kind, decided);
-        greyTheMapping (out.kind, decided);
-
-        /*  THE EQ'S NINETEEN ROWS HAVE AN EDITOR OF THEIR OWN (Phase 9a), the
-            panel at the foot, and are not listed here - by prefix, so a
-            twentieth row joins the panel without a name in this file.
-            They stay reachable: the opener below is the door. */
-        if (out.kind == "media" || out.kind == "mic")
-            std::erase_if (decided, [] (const Field& field)
-                                    { return field.name.rfind ("eq", 0) == 0; });
-
-        /*  AND THE LEVEL LANE IS DRAWN OVER THE WAVEFORM (namespace draft
-            §20.5), where its points can be seen against the sound they ride;
-            a list of numbers in a text box is not a way to edit a curve. The
-            Waveform opener is the door, and the page keeps the row. */
-        if (out.kind == "media")
-            std::erase_if (decided, [] (const Field& field) { return field.name == "levelLane"; });
-
-        /*  AND THE FOLD IS NOBODY'S TO ASK FOR ANY MORE (2026-10-08): a stereo
-            cue onto a mono output is folded by the routing itself, so the
-            switch had nothing left to say. Its attribute stays in the schema
-            so a show that set it still opens. */
-        if (out.kind == "media" || out.kind == "mic")
-            std::erase_if (decided, [] (const Field& field) { return field.name == "stereoToMono"; });
-
-        /*  AND A PICTURE'S PLACE, COLOUR AND MASK ARE ITS PANEL'S (namespace
-            draft §47, AAG): a frame dragged on its canvas, curves drawn, a mask
-            outlined - the inspector keeps what it is, where and how it comes
-            in. */
-        if (out.kind == "video")
-            std::erase_if (decided, [] (const Field& field)
-                                    { return std::find (pictureRows().begin(), pictureRows().end(), field.name)
-                                               != pictureRows().end(); });
-
-        /*  AND WHAT ELSE A FADE MOVES IS ITS MIXER'S (namespace draft §26, PG):
-            a send, an EQ number or a plugin value is a strip, a box or a
-            plugin's own knob with a tick box, and a list of pairs in a text box
-            is not a way to edit any of them. The Mixer opener is the door. */
-        if (out.kind == "fade")
-            std::erase_if (decided, [] (const Field& field)
-                                    { return field.name == "sends" || field.name == "eq" || field.name == "fx"; });
-
-        /*  AND A SCRIPT'S SOURCE IS ITS EDITOR'S (namespace draft §66, AMO; the
-            author, 2026-10-15: "No need to show the script content in the
-            inspector"): code is read and written at the foot, where it has
-            room, its colours and its lines. The Code opener is the door. */
-        if (out.kind == "script")
-            std::erase_if (decided, [] (const Field& field) { return field.name == "source"; });
-
-        /*  AND A PATCH IS ITS CANVAS'S (namespace draft §65, AMY; the author,
-            2026-10-15: "we can remove in the inspector the preview of the
-            content of the text of the patch. I think it's not really
-            helping"): read and edited at the foot or in Pd. The Patch opener
-            is the door. */
-        if (out.kind == "process")
-            std::erase_if (decided, [] (const Field& field) { return field.name == "patch"; });
-
-        //  The four blocks, in the order somebody fills them in.
-        auto kindRows = [&out]
-        {
-            const auto found = kindOrder().find (out.kind);
-            return found != kindOrder().end() ? found->second : std::vector<std::string> {};
-        }();
-
-        /*  WHAT A CODE ASKS FIRST, where a code asks it (namespace draft §60,
-            TG.10): a time group's member says when it starts and how it keeps
-            up before what it plays - those two are why it is in the group - and
-            a time group says what it follows before anything else. Elsewhere
-            the rows keep their places, greyed: at the end of what a cue does,
-            and `timeSource` beside a group's `mode`. */
-        if (asks.member)
-            kindRows.insert (kindRows.begin(), { "at", "chase" });
-
-        if (asks.group)
-        {
-            std::erase (kindRows, std::string ("timeSource"));
-            kindRows.insert (kindRows.begin(), "timeSource");
-        }
-
-        Block isBlock { "what it is", {} }, whenBlock { "when", {} },
-              doesBlock { "what it does", {} }, listBlock { "in the list", {} },
-              samplerBlock { "sampler", {} };
-
-        for (auto& field : decided)
-        {
-            if (named (saidFirst, field.name))      isBlock.fields.push_back (std::move (field));
-            else if (named (when, field.name))      whenBlock.fields.push_back (std::move (field));
-            else if (named (saidLast, field.name))  listBlock.fields.push_back (std::move (field));
-            else                                    doesBlock.fields.push_back (std::move (field));
-        }
-
-        sortInto (isBlock.fields, saidFirst);
-        sortInto (whenBlock.fields, when);
-        sortInto (doesBlock.fields, kindRows);
-        sortInto (listBlock.fields, saidLast);
-
-        /*  A MEDIA CUE'S SAMPLER ROWS ARE A DRAWER OF THEIR OWN (author,
-            2026-09-30: "we can also make more drawers for things"). Eight rows
-            that only a hand on a strip asks, greyed on every cue that is not a
-            sampler member - which is most of them - and they were the bottom
-            half of what a media cue does. Moved whole and in the order they
-            had, so a sampler member reads as it did, one heading further down;
-            `dca` stays behind, since a DCA trims any cue (see `samplerRows`).
-            A video cue's too, since a picture plays from a strip (§49). */
-        if (out.kind == "media" || out.kind == "video")
-        {
-            std::stable_partition (doesBlock.fields.begin(), doesBlock.fields.end(),
-                                   [] (const Field& field) { return ! named (samplerRows, field.name); });
-
-            const auto firstSampler = std::find_if (doesBlock.fields.begin(), doesBlock.fields.end(),
-                                                    [] (const Field& field)
-                                                    { return named (samplerRows, field.name); });
-
-            samplerBlock.fields.assign (std::make_move_iterator (firstSampler),
-                                        std::make_move_iterator (doesBlock.fields.end()));
-            doesBlock.fields.erase (firstSampler, doesBlock.fields.end());
-        }
-
-        /*  AND THE PANELS THIS CUE HAS, at the end of what it DOES and after
-            the sorts, so an opener never lands in the middle of the rows a
-            kind orders. The author asked for them here rather than in a menu
-            (2026-09-21: *"the controls to show the waveform, the send levels,
-            the EQ, the group timeline ... No hunting in the menus"*), and the
-            reasoning is the ordinary one: the inspector is where a cue is
-            being worked on, so a longer look at that same cue is a thing to
-            ask for from there.
-
-            They are NOT parameters and write nothing. A row here is usually a
-            decision the document holds; these are doors. The window draws them
-            differently for that reason - §4.8's rule applies to form as well
-            as to colour. */
-        /*  SINCE 2026-09-30 THEY ARE NOT AMONG THE ROWS AT ALL but in a bar of
-            their own at the head of the panel (author: "the toggles for the
-            foot panels in the inspector should be at the top to make opening
-            the panel really quick"). At the end of what a cue does they were a
-            scroll away on any cue with a long list of rows - a media cue in a
-            sampler group most of all - and a door is quickest where the eye
-            lands first. */
-        out.panels = openersFor (out.kind, cueId, text (snapshot, "/godot/cue/" + cueId + "/source"),
-                                 out.kind == "fade" ? fadeAimKind (snapshot, cueId) : std::string {});
-        out.panelCue = cueId;
-
-        for (auto* block : { &isBlock, &whenBlock, &doesBlock, &samplerBlock, &listBlock })
-            if (! block->fields.empty())
-                out.blocks.push_back (std::move (*block));
-
-        sortInto (reported, {});
-        out.details = std::move (reported);
-        out.count = 1;
-
-        return out;
+        Shared alone;
+        return inspectSharing (snapshot, cueId, alone);
     }
 
     Inspection inspectDual (const tree::TreeSnapshot& snapshot, const std::string& movie,
@@ -2272,8 +2298,10 @@ namespace wfg::client::model
             blank - which is honest, and the page's own rule. */
         std::vector<Inspection> each;
 
+        Shared alike;
+
         for (const auto& id : cueIds)
-            each.push_back (inspect (snapshot, id));
+            each.push_back (inspectSharing (snapshot, id, alike));
 
         Inspection out;
         out.count = cueIds.size();

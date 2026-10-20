@@ -51,6 +51,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <set>
@@ -495,6 +496,68 @@ TEST_CASE ("tree: all() comes back in address order")
         INFO ("at " << nodes[i]->address);
         CHECK (nodes[i - 1]->address < nodes[i]->address);
     }
+}
+
+TEST_CASE ("tree: under() is all() narrowed to a prefix, across every half and with written mounted nodes read in place")
+{
+    /*  What the client reads one cue by (2026-10-20): a binary search per
+        half and a merge, which must come out exactly as walking `all()` and
+        keeping the addresses that start with the prefix. */
+    const auto nodesOf = [] (std::initializer_list<std::pair<const char*, const char*>> rows)
+    {
+        std::vector<tree::Node> nodes;
+
+        for (const auto& [address, value] : rows)
+        {
+            tree::Node node;
+            node.address = address;
+            node.values = { osc::Value::string (value) };
+            nodes.push_back (std::move (node));
+        }
+
+        return nodes;
+    };
+
+    const auto document = std::make_shared<const std::vector<tree::Node>> (
+        nodesOf ({ { "/godot/cue/A/kind", "memo" }, { "/godot/cue/A/name", "One" },
+                   { "/godot/cue/AB/kind", "memo" }, { "/godot/cue/B/kind", "osc" }, { "/godot/list/L/order", "A B" } }));
+    const auto messages = std::make_shared<const std::vector<tree::Node>> (
+        nodesOf ({ { "/godot/cue/B/messages", "M" }, { "/godot/message/M/address", "/x" } }));
+    const auto mounted = std::make_shared<const std::vector<tree::Node>> (
+        nodesOf ({ { "/godot/cue/A/zz", "mounted" }, { "/wfs/input/1/x", "0" }, { "/wfs/input/1/y", "0" } }));
+    const auto written = std::make_shared<const std::vector<tree::Node>> (
+        nodesOf ({ { "/wfs/input/1/y", "5" } }));
+
+    const tree::TreeSnapshot snapshot (7, document, mounted,
+                                       nodesOf ({ { "/godot/cue/A/state", "idle" }, { "/godot/engine/tick", "7" } }),
+                                       written, messages);
+
+    for (const auto* prefix : { "/godot/cue/A/", "/godot/cue/", "/godot/", "/wfs/", "/", "/godot/nothing/", "" })
+    {
+        INFO ("prefix " << prefix);
+
+        std::vector<const tree::Node*> expected;
+
+        for (const auto* node : snapshot.all())
+            if (node->address.rfind (prefix, 0) == 0)
+                expected.push_back (node);
+
+        CHECK (snapshot.under (prefix) == expected);
+    }
+
+    //  The cue's own rows from three halves, in order, and not its neighbour AB's.
+    std::vector<std::string> addresses;
+
+    for (const auto* node : snapshot.under ("/godot/cue/A/"))
+        addresses.push_back (node->address);
+
+    CHECK (addresses == std::vector<std::string> { "/godot/cue/A/kind", "/godot/cue/A/name",
+                                                   "/godot/cue/A/state", "/godot/cue/A/zz" });
+
+    //  And the written value, not the mounted copy's.
+    const auto mountedRows = snapshot.under ("/wfs/input/1/y");
+    REQUIRE (mountedRows.size() == 1);
+    CHECK (mountedRows.front()->values.front().getString() == "5");
 }
 
 //==============================================================================

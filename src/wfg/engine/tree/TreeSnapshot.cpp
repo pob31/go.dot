@@ -17,6 +17,7 @@
 #include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <algorithm>
+#include <cstddef>
 
 namespace wfg::tree
 {
@@ -177,6 +178,41 @@ namespace wfg::tree
         for (const auto* node : all())
             if (isImmediateChild (node->address, address))
                 result.push_back (node);
+
+        return result;
+    }
+
+    std::vector<const Node*> TreeSnapshot::under (std::string_view prefix) const
+    {
+        std::vector<const Node*> result;
+        const auto byAddress = [] (const Node* a, const Node* b) { return a->address < b->address; };
+
+        //  Each half is sorted, so its nodes under the prefix are one run starting at its lower bound.
+        const auto take = [&result, &byAddress, prefix] (const std::vector<Node>& nodes, const std::vector<Node>* instead)
+        {
+            const auto runFrom = static_cast<std::ptrdiff_t> (result.size());
+
+            auto at = std::lower_bound (nodes.begin(), nodes.end(), prefix,
+                                        [] (const Node& node, std::string_view target)
+                                        {
+                                            return node.address < target;
+                                        });
+
+            for (; at != nodes.end() && std::string_view (at->address).starts_with (prefix); ++at)
+            {
+                //  A written mounted node is read in place of its copy, as `all()` reads it (ZC).
+                const auto* fresh = instead != nullptr ? findIn (*instead, at->address) : nullptr;
+                result.push_back (fresh != nullptr ? fresh : &*at);
+            }
+
+            //  The halves share no address, so merging each run into what came before is `all()`'s merge.
+            std::inplace_merge (result.begin(), result.begin() + runFrom, result.end(), byAddress);
+        };
+
+        take (runtime, nullptr);
+        if (document != nullptr) take (*document, nullptr);
+        if (messages != nullptr) take (*messages, nullptr);
+        if (mounted != nullptr)  take (*mounted, written.get());
 
         return result;
     }

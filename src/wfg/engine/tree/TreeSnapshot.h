@@ -99,6 +99,13 @@ namespace wfg::tree
         /** The immediate children of a container, in address order. */
         std::vector<const Node*> childrenOf (std::string_view address) const;
 
+        /*  EVERY NODE WHOSE ADDRESS STARTS WITH `prefix`, in address order -
+            found by a binary search in each half rather than a walk of all of
+            them, so it costs what it returns and not what the show holds. What
+            the client reads one cue by: a selection of six hundred memos asked
+            `all()` six hundred times a pass (2026-10-20). */
+        std::vector<const Node*> under (std::string_view prefix) const;
+
         /*  THE SHOW'S MESSAGES AND CURVES AS ONE OBJECT (namespace draft §88):
             a reader that makes something of a cue's messages may keep what it
             made while this is the same object, since a published snapshot never

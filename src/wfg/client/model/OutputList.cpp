@@ -114,7 +114,7 @@ namespace wfg::client::model
             it. */
         std::map<std::string, OutputRow> found;
 
-        for (const auto* node : snapshot.all())
+        for (const auto* node : snapshot.under (prefix))
         {
             if (node->address.rfind (prefix, 0) != 0)
                 continue;

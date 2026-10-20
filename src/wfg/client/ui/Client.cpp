@@ -3602,8 +3602,7 @@ namespace wfg::client
 
                 if (inspecting && ! loadingToTime && ! browsingUndo)
                 {
-                    auto inspection = model::inspectMany (*snapshot, selection.ids(), selection.anchor());
-                    model::addKeyLine (inspection, keyTriggers);
+                    const auto& inspection = inspectPick (*snapshot, reading.revision);
                     shell->inspector.show (inspection);
 
                     /*  AND THE SAME PANEL BUTTONS IN THE FOOT'S HEAD (§94),
@@ -6337,6 +6336,47 @@ namespace wfg::client
 
             /** How many were picked when the menu was last rebuilt, so it rebuilds when that moves. */
             std::size_t chosenAtLastMenu = 0;
+
+            /*  THE PICK AS LAST INSPECTED, and what it was read against. One cue
+                is read again every pass, its reported rows moving with the
+                show. SEVERAL ARE READ AGAIN ONLY WHEN SOMETHING THEY SHOW CAN
+                HAVE MOVED (2026-10-20): the pick, its anchor, the show's
+                revision - what a selection draws is the rows they share and
+                may write, which are decisions - and otherwise once a second,
+                or less often when reading them takes long, for the menus that
+                follow the machine. Six hundred cues read twenty-five times a
+                second held the window up: the author's ctrl/⌘-A over a QLab
+                import, mostly memos. */
+            struct PickRead
+            {
+                model::Inspection inspection;
+                std::vector<std::string> ids;
+                std::string anchor;
+                std::uint64_t revision = 0;
+                juce::uint32 dueAt = 0;
+            } pickRead;
+
+            const model::Inspection& inspectPick (const tree::TreeSnapshot& snapshot, std::uint64_t revision)
+            {
+                const auto now = juce::Time::getMillisecondCounter();
+
+                if (pickRead.inspection.count > 1 && pickRead.ids == selection.ids()
+                      && pickRead.anchor == selection.anchor() && pickRead.revision == revision
+                      && now < pickRead.dueAt)
+                    return pickRead.inspection;
+
+                pickRead.inspection = model::inspectMany (snapshot, selection.ids(), selection.anchor());
+                model::addKeyLine (pickRead.inspection, keyTriggers);
+
+                pickRead.ids = selection.ids();
+                pickRead.anchor = selection.anchor();
+                pickRead.revision = revision;
+
+                const auto took = juce::Time::getMillisecondCounter() - now;
+                pickRead.dueAt = juce::Time::getMillisecondCounter() + juce::jmax (1000u, 20u * took);
+
+                return pickRead.inspection;
+            }
 
             /** The engine's clipboard as last mirrored to the system's. */
             std::string clipboardSeen;

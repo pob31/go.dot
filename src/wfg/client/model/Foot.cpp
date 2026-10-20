@@ -697,13 +697,10 @@ namespace wfg::client::model
         /*  AND THE PLAYHEAD, from whichever run is sounding this cue. Read from
             the run half rather than from the document, because where a cue has
             got to is a fact about a performance and not about a show. */
-        for (const auto* node : snapshot.all())
+        constexpr std::string_view runs = "/godot/run/";
+
+        for (const auto* node : snapshot.under (runs))
         {
-            constexpr std::string_view runs = "/godot/run/";
-
-            if (node->address.rfind (runs, 0) != 0)
-                continue;
-
             const auto rest = node->address.substr (runs.size());
             const auto slash = rest.find ('/');
 

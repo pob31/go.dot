@@ -77,7 +77,7 @@ namespace wfg::client::model
             it, and is passed over by the slash test below. */
         std::map<std::string, InputRow> found;
 
-        for (const auto* node : snapshot.all())
+        for (const auto* node : snapshot.under (prefix))
         {
             if (node->address.rfind (prefix, 0) != 0)
                 continue;

@@ -164,7 +164,7 @@ namespace wfg::client::model
         std::map<std::string, CanvasRow> found;
         std::string order;
 
-        for (const auto* node : snapshot.all())
+        for (const auto* node : snapshot.under (canvasPrefix))
         {
             if (node->address == canvasOrderAddress)
             {
@@ -360,7 +360,7 @@ namespace wfg::client::model
         std::map<std::string, VideoOutputRow> found;
         std::string order;
 
-        for (const auto* node : snapshot.all())
+        for (const auto* node : snapshot.under (outputPrefix))
         {
             if (node->address == outputOrderAddress)
             {
@@ -634,7 +634,7 @@ namespace wfg::client::model
         std::map<std::string, VideoInputRow> found;
         std::string order;
 
-        for (const auto* node : snapshot.all())
+        for (const auto* node : snapshot.under (inputPrefix))
         {
             if (node->address == inputOrderAddress)
             {
@@ -672,7 +672,7 @@ namespace wfg::client::model
         std::map<std::string, VideoInsertRow> found;
         std::string order;
 
-        for (const auto* node : snapshot.all())
+        for (const auto* node : snapshot.under (insertPrefix))
         {
             if (node->address == insertOrderAddress)
             {

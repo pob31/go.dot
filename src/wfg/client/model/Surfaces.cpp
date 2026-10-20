@@ -238,7 +238,7 @@ namespace wfg::client::model
         std::map<std::string, SurfaceRow> found;
         std::string order;
 
-        for (const auto* node : snapshot.all())
+        for (const auto* node : snapshot.under (surfacePrefix))
         {
             if (node->address == surfaceOrderAddress)
             {
@@ -571,7 +571,6 @@ namespace wfg::client::model
             the `kind` the engine derives from the element. */
         std::map<std::string, StripRow> found;
         std::set<std::string> strips;
-        std::string order;
         std::map<std::string, surface::DcaLight> lights;
         bool lightsRead = false;
 
@@ -580,14 +579,8 @@ namespace wfg::client::model
         std::map<std::string, surface::DcaContents> contents;
         bool marksRead = false;
 
-        for (const auto* node : snapshot.all())
+        for (const auto* node : snapshot.under (slotPrefix))
         {
-            if (node->address == surfaceOrderAddress)
-            {
-                order = text (node);
-                continue;
-            }
-
             std::string id, name;
 
             if (! splitAddress (node->address, slotPrefix, id, name))
@@ -729,7 +722,7 @@ namespace wfg::client::model
             description), so the panel's columns are in the order the strips
             are used. A strip whose surface the order does not name goes last,
             by surface and then by index, rather than vanishing. */
-        const auto surfaceOrder = words (order);
+        const auto surfaceOrder = words (text (snapshot, surfaceOrderAddress));
         std::map<std::string, std::size_t> placeOf;
 
         for (std::size_t at = 0; at < surfaceOrder.size(); ++at)
@@ -781,7 +774,7 @@ namespace wfg::client::model
         std::map<std::string, DcaRow> found;
         std::string order;
 
-        for (const auto* node : snapshot.all())
+        for (const auto* node : snapshot.under (dcaPrefix))
         {
             if (node->address == dcaOrderAddress)
             {

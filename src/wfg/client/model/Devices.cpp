@@ -82,7 +82,7 @@ namespace wfg::client::model
             per call and is banned for it. */
         std::map<std::string, DeviceRow> found;
 
-        for (const auto* node : snapshot.all())
+        for (const auto* node : snapshot.under (devicePrefix))
         {
             if (node->address.rfind (devicePrefix, 0) != 0)
                 continue;
@@ -200,7 +200,7 @@ namespace wfg::client::model
         static constexpr const char* presetPrefix = "/godot/preset/";
         std::map<std::string, PresetRow> found;
 
-        for (const auto* node : snapshot.all())
+        for (const auto* node : snapshot.under (presetPrefix))
         {
             if (node->address.rfind (presetPrefix, 0) != 0)
                 continue;

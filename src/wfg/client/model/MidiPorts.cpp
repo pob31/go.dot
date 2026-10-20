@@ -91,7 +91,7 @@ namespace wfg::client::model
             banned for it. */
         std::map<std::string, PortRow> found;
 
-        for (const auto* node : snapshot.all())
+        for (const auto* node : snapshot.under (portPrefix))
         {
             if (node->address.rfind (portPrefix, 0) != 0)
                 continue;

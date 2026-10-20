@@ -69,7 +69,7 @@ namespace wfg::client::model
         std::map<std::string, RangeRow> found;
         std::map<std::string, std::string> ownerOf;
 
-        for (const auto* node : snapshot.all())
+        for (const auto* node : snapshot.under (prefix))
         {
             if (node->address.rfind (prefix, 0) != 0)
                 continue;
