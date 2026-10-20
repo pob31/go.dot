@@ -575,8 +575,20 @@ namespace wfg::client
                     tells the Shell when its edge is dragged, because how much
                     of the window it may take is the window's question. */
                 ui::FootPanelComponent::Actions footActions;
+                /*  A RANGE'S OUT POINT THAT REACHES THE END IS THE END (namespace
+                    draft §99, AXQ): a drag to the end of the bar, the end typed in
+                    the table - sent with `toEnd`, one record. */
                 footActions.set = [this] (const std::string& address, const std::string& value)
-                { send (gesture::setNode (address, value)); };
+                {
+                    if (latest != nullptr)
+                        if (const auto writes = model::rangeEndWrites (*latest, address, value); ! writes.empty())
+                        {
+                            send (gesture::setNodes (writes));
+                            return;
+                        }
+
+                    send (gesture::setNode (address, value));
+                };
 
                 /*  AND A SEND MIXER OR AN EQ OVER SEVERAL PICKED CUES (namespace
                     draft §30.11): one `node.setMany` a frame, so a drag over six
@@ -648,7 +660,10 @@ namespace wfg::client
                 footActions.dial = [this] (const std::string& address) { dialTo (address); };
 
                 footActions.createRange = [this] (const std::string& cueId, double in, double out)
-                                          { send (gesture::createRange (cueId, in, out)); };
+                {
+                    send (gesture::createRange (cueId, in, out,
+                                                latest != nullptr && model::reachesItsEnd (*latest, cueId, out)));
+                };
 
                 footActions.editPatch = [this] (const std::string& cueId) { send (gesture::editPatch (cueId)); };
                 footActions.getPd = [this] { askToDownloadPd(); };

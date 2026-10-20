@@ -156,6 +156,7 @@ namespace wfg::cue
         {
             double total = 0.0;
             auto anyRange = false;
+            std::optional<std::optional<double>> played;     // asked once, and only of a cue with ranges
 
             for (const auto& child : cue)
             {
@@ -169,8 +170,12 @@ namespace wfg::cue
                 if (passes <= 0)
                     return std::nullopt;
 
-                const auto span = read.number (child, "range", "out")
-                                    - read.number (child, "range", "in");
+                //  Each end as it plays (namespace draft §99): to the end of what the cue plays, no further.
+                if (! played.has_value())
+                    played = playedLengthOf (cue, durations);
+
+                const auto in = read.number (child, "range", "in");
+                const auto span = playedOutOf (child, in, read.number (child, "range", "out"), *played) - in;
 
                 if (! (span > 0.0))
                     return std::nullopt;
@@ -203,7 +208,8 @@ namespace wfg::cue
             that plays for ever swallows everything after it, which is right:
             nothing gets past a bed. */
         void placeInRanges (const Reader& read, const juce::ValueTree& cue, double sinceStart,
-                            PlannedRun& out, std::vector<Confusion>& confused)
+                            PlannedRun& out, std::vector<Confusion>& confused,
+                            const std::map<std::string, double>* durations)
         {
             /*  ITS DELAY FIRST (namespace draft §70, AOV): a sound held back is
                 at `sinceStart` less its delay, and one the instant finds still
@@ -227,7 +233,8 @@ namespace wfg::cue
                     continue;
 
                 const auto in = read.number (child, "range", "in");
-                const auto span = read.number (child, "range", "out") - in;
+                const auto span = playedOutOf (child, in, read.number (child, "range", "out"),
+                                               playedLengthOf (cue, durations)) - in;
                 const auto passes = read.integer (child, "range", "loops");
 
                 if (! (span > 0.0))
@@ -530,7 +537,7 @@ namespace wfg::cue
                             beside.startsIn = entry.from - at;
                         }
                         else if (entry.element == "Media")
-                            placeInRanges (read, entry.node, at - entry.from, beside, plan.confused);
+                            placeInRanges (read, entry.node, at - entry.from, beside, plan.confused, durations);
                         else if (entry.element == "Group")
                             beside.offset = at - entry.from;
                         else if (entry.element == "Mic")
@@ -732,7 +739,7 @@ namespace wfg::cue
                         plan.confused.push_back ({ target.id, confusion::unknownLength,
                                                   "the offset asked for, played from the top" });
 
-                    placeInRanges (read, target.node, offset, run, plan.confused);
+                    placeInRanges (read, target.node, offset, run, plan.confused, durations);
                     plan.runs.push_back (run);
                 }
                 else
@@ -1007,7 +1014,7 @@ namespace wfg::cue
                 run.startsIn = entry.from - seconds;
             }
             else if (entry.element == "Media")
-                placeInRanges (read, entry.node, seconds - entry.from, run, plan.confused);
+                placeInRanges (read, entry.node, seconds - entry.from, run, plan.confused, durations);
             else if (entry.element == "Group")
                 run.offset = seconds - entry.from;
             else if (entry.element != "Mic")
@@ -1382,7 +1389,7 @@ namespace wfg::cue
             run.ancestors = entry.ancestors;
 
             if (entry.element == "Media")
-                placeInRanges (read, entry.node, 0.0, run, plan.confused);
+                placeInRanges (read, entry.node, 0.0, run, plan.confused, durations);
 
             /*  A CODE THAT RUNS UNTIL IT IS STOPPED (namespace draft §59,
                 TC.7), fired at an earlier manual step: running, and how far it
@@ -1836,7 +1843,7 @@ namespace wfg::cue
                 run.when = planned::sounding;
 
                 if (element == "Media")
-                    placeInRanges (read, cue, 0.0, run, plan.confused);
+                    placeInRanges (read, cue, 0.0, run, plan.confused, durations);
 
                 plan.runs.push_back (run);
             }

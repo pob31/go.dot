@@ -108,7 +108,7 @@ namespace wfg::audio
         ranges.reserve (request.ranges.size());
 
         for (const auto& range : request.ranges)
-            ranges.push_back ({ range.in, range.out, range.loops });
+            ranges.push_back ({ range.in, range.out, range.loops, range.toEnd });
 
         /*  A LIVE INPUT HAS NO FILE (Phase 9b): its source is which logical
             inputs its channel's stage takes, two atomics, and nothing about the
@@ -119,15 +119,30 @@ namespace wfg::audio
                                              request.startOffset, request.stretch,
                                              request.startSlot, request.sliceOffset))
         {
-            /*  MEDIA-MISSING COVERS ALL THREE, for now: a file that is not
-                there, one that is there and is not audio, and a range that
-                is not inside it are all "this cue cannot be made ready",
-                and `lastError` carries which. A `no-slot`
-                of its own arrives with the run-level range reporting in
-                PR 3.9, where there is something to report it against. */
+            /*  THE CAUSE, SAID (namespace draft §99, AXU). Until 0.1.9 a file
+                that is not there, one that is not audio and a range not inside
+                it were all `media-missing` - and a cue whose sound sat in the
+                show's media folder said "missing" to an author who could see
+                it there (2026-10-20). Each is its own word now; `lastError`
+                still says it in a sentence. */
+            const auto word = [] (audio::AudioHost::ArmRefusal refusal)
+            {
+                switch (refusal)
+                {
+                    case audio::AudioHost::ArmRefusal::notAudio: return cue::runError::notAudio;
+                    case audio::AudioHost::ArmRefusal::outside:  return cue::runError::rangeOutside;
+                    case audio::AudioHost::ArmRefusal::noSlot:   return cue::runError::noSlot;
+                    case audio::AudioHost::ArmRefusal::none:
+                    case audio::AudioHost::ArmRefusal::missing:
+                    case audio::AudioHost::ArmRefusal::other:    break;
+                }
+
+                return cue::runError::mediaMissing;
+            };
+
             engine.submit (origin::engine, "run.failed",
                            { osc::Value::string (request.runId),
-                             osc::Value::string (cue::runError::mediaMissing) });
+                             osc::Value::string (word (audioHost.lastArmRefusal())) });
             return;
         }
 

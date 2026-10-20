@@ -447,8 +447,12 @@ namespace wfg::doc
         EditResult splitRange (const std::string& cueId, double at,
                                const std::string& id = {});
 
+        /*  A RANGE OF A CUE'S FILE, `in` to `out`. `toEnd` says it runs to the
+            end of what the cue plays, however long that turns out to be
+            (namespace draft §99, AXQ): `out` is then the length as the caller
+            knew it, for a reader that does not know the row. */
         EditResult createRange (const std::string& cueId, double in, double out,
-                                const std::string& id = {});
+                                const std::string& id = {}, bool toEnd = false);
 
         /*  ON A CUE WITH NO RANGES, `splitRange` cuts the whole of what it plays
             (namespace draft §81, "Add new slice"): a range from its start offset

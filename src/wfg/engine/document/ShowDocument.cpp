@@ -53,6 +53,7 @@ namespace wfg::doc
         const juce::Identifier idProperty { "id" };
         const juce::Identifier standbyProperty { "standby" };
         const juce::Identifier lockedProperty { "locked" };
+        const juce::Identifier rangeToEnd { "toEnd" };
 
         /*  A group's two words read straight off the node: absent is the
             empty word, which GroupMode.h reads as the table's default. */
@@ -1921,6 +1922,19 @@ namespace wfg::doc
         keepBefore (target.node, property, onto);
         target.node.setProperty (property, toVar (value), onto);
 
+        /*  A NUMBER WRITTEN FOR A RANGE'S END IS THAT NUMBER (namespace draft
+            §99, AXR): the range no longer runs to the end of whatever the cue
+            plays. In the same step and on the same history, so an Undo puts
+            both back; and before the movie's sounds follow, so they follow
+            both. A writer that carries an end on - an edit's time map, a
+            conversion's cut - says `toEnd` again after. */
+        if (target.attribute->name() == "out" && target.node.hasType ("Range")
+              && static_cast<bool> (target.node.getProperty (rangeToEnd, false)))
+        {
+            keepBefore (target.node, rangeToEnd, onto);
+            target.node.removeProperty (rangeToEnd, onto);
+        }
+
         keepSoundsAfter (target.node, target.attribute->name());
         letNameFollow (target.node, defaultName);
 
@@ -2189,7 +2203,10 @@ namespace wfg::doc
             for (const auto* row : { "startOffset", "rate" })
                 copy (movie, sound, juce::Identifier (row));
 
-            follow (sound, "Range", { "in", "out", "loops", "name" });
+            /*  `toEnd` after `out`, as it is written (§99, AXS): a movie's range
+                to its end is its sound's to the sound's own, which is often a
+                few frames shorter - the author's Limp Bizkit cue, 0.42 s. */
+            follow (sound, "Range", { "in", "out", "loops", "name", "toEnd" });
             follow (sound, "Section", { "in", "out", "trim", "fadeIn", "fadeOut", "fadeInCurve", "fadeOutCurve", "gap" });
         }
     }
@@ -3334,7 +3351,7 @@ namespace wfg::doc
     }
 
     EditResult ShowDocument::createRange (const std::string& cueId, double in, double out,
-                                          const std::string& id)
+                                          const std::string& id, bool toEnd)
     {
         auto cue = findById (cueId);
 
@@ -3365,6 +3382,11 @@ namespace wfg::doc
         auto made = insertObject (cue, endOfSequence, "Range", id,
                                   { { "in", osc::formatDouble (in) },
                                     { "out", osc::formatDouble (out) } });
+
+        //  TO THE END, SAID (§99, AXQ): a row of its own, after the out point that would clear it.
+        if (made.ok && toEnd)
+            if (const auto ended = setAttribute ("/godot/range/" + made.id + "/toEnd", "true"); ! ended.ok)
+                return ended;
 
         if (made.ok)
             keepSoundsAfter (findById (made.id), "in");
@@ -3439,9 +3461,15 @@ namespace wfg::doc
                                                     std::to_string (loops)); ! kept.ok)
                     return kept;
 
+            //  The end, if the range ran to it, is the second half's now (§99).
+            if (static_cast<bool> (child.getProperty ("toEnd", false)))
+                if (const auto ended = setAttribute ("/godot/range/" + made.id + "/toEnd", "true"); ! ended.ok)
+                    return ended;
+
             /*  AND THE FIRST HALF STOPS WHERE THE SECOND BEGINS. Written last,
                 so that at no point in this edit does the cue hold two ranges
-                claiming the same seconds. */
+                claiming the same seconds - and, a number, it no longer runs to
+                the end. */
             if (const auto shortened = setAttribute ("/godot/range/" + first + "/out",
                                                      osc::formatDouble (at)); ! shortened.ok)
                 return shortened;
@@ -3463,6 +3491,7 @@ namespace wfg::doc
             std::string id;
             double in = 0.0;
             double out = 0.0;
+            bool toEnd = false;     // §99: read before any write of the out point clears it
         };
 
         std::vector<HeldRange> heldRangesOf (const juce::ValueTree& cue)
@@ -3473,7 +3502,8 @@ namespace wfg::doc
                 if (child.hasType ("Range"))
                     out.push_back ({ child, child[idProperty].toString().toStdString(),
                                      static_cast<double> (child.getProperty ("in", 0.0)),
-                                     static_cast<double> (child.getProperty ("out", 0.0)) });
+                                     static_cast<double> (child.getProperty ("out", 0.0)),
+                                     static_cast<bool> (child.getProperty ("toEnd", false)) });
 
             return out;
         }
@@ -3549,7 +3579,8 @@ namespace wfg::doc
         if (! (length > start + sameInstant) || ! (at > start + sameInstant) || ! (at < length - sameInstant))
             return EditResult::failed (reason::badValue);
 
-        const auto whole = createRange (cueId, start, length, wholeId);
+        //  To the end of its material, said so (§99): the second slice keeps it.
+        const auto whole = createRange (cueId, start, length, wholeId, true);
 
         if (! whole.ok)
             return whole;
@@ -3734,7 +3765,9 @@ namespace wfg::doc
             if (! (length > offset + sameInstant))
                 return EditResult::failed (reason::badValue);
 
-            const auto whole = createRange (cueId, offset, std::max (length, to), takeId());
+            //  To the end of its material, said so (§99), unless the slices reach past what was given.
+            const auto whole = createRange (cueId, offset, std::max (length, to), takeId(),
+                                            to <= length + sameInstant);
 
             if (! whole.ok)
                 return whole;
@@ -3862,6 +3895,11 @@ namespace wfg::doc
 
             if (static_cast<bool> (holder.node.getProperty ("pingPong", false)))
                 if (const auto written = setAttribute (base + "pingPong", "true"); ! written.ok)
+                    return written;
+
+            //  The tail ends where the holder did: at the end, if it ran to it (§99).
+            if (holder.toEnd)
+                if (const auto written = setAttribute (base + "toEnd", "true"); ! written.ok)
                     return written;
         }
 
@@ -4872,12 +4910,16 @@ namespace wfg::doc
             moment ending before it begins: the in point first when it draws
             away from the old out point, the out point first otherwise. */
         std::vector<CarriedRange> ranges;
+        std::vector<bool> ranToEnd;
 
         for (const auto& child : cue)
             if (child.hasType ("Range"))
+            {
                 ranges.push_back ({ child[idProperty].toString().toStdString(),
                                     static_cast<double> (child.getProperty ("in", 0.0)),
                                     static_cast<double> (child.getProperty ("out", 0.0)), false });
+                ranToEnd.push_back (static_cast<bool> (child.getProperty (rangeToEnd, false)));
+            }
 
         const auto moved = carryRanges (ranges, runs);
 
@@ -4903,6 +4945,13 @@ namespace wfg::doc
 
             if (const auto second = setAttribute (rangeBase + (inFirst ? "out" : "in"), inFirst ? outText : inText); ! second.ok)
                 return second;
+
+            /*  TO THE END STILL (§99): the end of the edited timeline is the end,
+                however long the edit made it; the out point carried is its length
+                as the map put it, for a reader that does not know the row. */
+            if (ranToEnd[i])
+                if (const auto ended = setAttribute (rangeBase + "toEnd", "true"); ! ended.ok)
+                    return ended;
         }
 
         /*  THE START OFFSET; nought stays nought. */

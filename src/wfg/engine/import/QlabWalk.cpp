@@ -1098,6 +1098,11 @@ namespace wfg::import::qlab
             void ranges (const Cue& cue, Item& item)
             {
                 const auto end = cue.endTime > tiny ? cue.endTime : cue.fileDuration;
+
+                /*  QLAB'S END OF THE FILE IS THE END (§99): no end time, or one at the
+                    file's duration, runs to the end of whatever file the cue plays. */
+                const auto toTheEnd = ! (cue.endTime > tiny)
+                                        || (cue.fileDuration > tiny && cue.endTime >= cue.fileDuration - tiny);
                 const auto loopsOf = [] (int playCount, bool infinite) { return infinite ? 0 : std::max (1, playCount); };
 
                 if (! cue.slices.empty())
@@ -1122,7 +1127,7 @@ namespace wfg::import::qlab
                         from = slice.time;
                     }
 
-                    item.ranges.push_back ({ from, end, loopsOf (cue.lastSlice.playCount, cue.lastSlice.infinite) });
+                    item.ranges.push_back ({ from, end, loopsOf (cue.lastSlice.playCount, cue.lastSlice.infinite), toTheEnd });
 
                     if (cue.infiniteLoop || cue.playCount > 1)
                         note (Note::Kind::approximated, cue, "the whole cue's loop over its slices is not imported: each "
@@ -1146,7 +1151,7 @@ namespace wfg::import::qlab
                     return;
                 }
 
-                item.ranges.push_back ({ cue.startTime, end, loopsOf (cue.playCount, cue.infiniteLoop) });
+                item.ranges.push_back ({ cue.startTime, end, loopsOf (cue.playCount, cue.infiniteLoop), toTheEnd });
             }
 
             Item mic (const Cue& cue)

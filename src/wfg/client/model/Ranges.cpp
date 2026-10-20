@@ -17,6 +17,7 @@
 #include <wfg/client/model/Ranges.h>
 
 #include <wfg/client/model/Text.h>
+#include <wfg/engine/cue/RangeEnd.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
@@ -92,6 +93,7 @@ namespace wfg::client::model
             else if (name == "out")    row.out = seconds (reading);
             else if (name == "loops")  row.loops = count (reading, 1);
             else if (name == "pingPong") row.pingPong = reading == "true";
+            else if (name == "toEnd")  row.toEnd = reading == "true";
             else if (name == "index")  row.index = count (reading, 0);
         }
 
@@ -124,6 +126,42 @@ namespace wfg::client::model
                               });
 
         return out;
+    }
+
+    void endsAsPlayed (std::vector<RangeRow>& rows, double fileLength)
+    {
+        if (! (fileLength > 0.0))
+            return;
+
+        for (auto& row : rows)
+            if (row.in < fileLength)
+                row.out = wfg::cue::rangeOutOf (row.out, row.toEnd, fileLength);
+    }
+
+    bool reachesItsEnd (const tree::TreeSnapshot& snapshot, const std::string& cueId, double out)
+    {
+        const auto length = osc::parseDouble (text (snapshot, "/godot/cue/" + cueId + "/duration")).value_or (0.0);
+        return wfg::cue::reachesTheEnd (out, length);
+    }
+
+    std::vector<std::pair<std::string, std::string>> rangeEndWrites (const tree::TreeSnapshot& snapshot,
+                                                                     const std::string& address,
+                                                                     const std::string& value)
+    {
+        static constexpr std::string_view tail = "/out";
+
+        if (address.rfind (prefix, 0) != 0 || address.size() <= prefix.size() + tail.size()
+              || address.compare (address.size() - tail.size(), tail.size(), tail) != 0)
+            return {};
+
+        const auto rangeId = address.substr (prefix.size(), address.size() - prefix.size() - tail.size());
+        const auto out = osc::parseDouble (value);
+
+        if (rangeId.empty() || rangeId.find ('/') != std::string::npos || ! out.has_value()
+              || ! reachesItsEnd (snapshot, text (snapshot, rangeAddress (rangeId, "cue")), *out))
+            return {};
+
+        return { { address, value }, { rangeAddress (rangeId, "toEnd"), "true" } };
     }
 
     std::vector<RangeRow> readRanges (const tree::TreeSnapshot& snapshot, const std::string& cueId)

@@ -108,6 +108,19 @@ extern "C" int LLVMFuzzerTestOneInput (const std::uint8_t* data, std::size_t siz
             for (const auto& send : sound.sends)
                 aimed (send);
 
+    /*  NO RANGE PAST THE END OF ITS FILE (namespace draft §99): a range that
+        reaches the end is imported as running to it, and none is written
+        longer than the file the set says it plays. */
+    for (const auto& step : whole.steps)
+        for (const auto& sound : step.sounds)
+            if (sound.file.sampleRate > 0.0 && sound.file.frames > 0)
+            {
+                const auto fileSeconds = static_cast<double> (sound.file.frames) / sound.file.sampleRate;
+
+                if (sound.out > fileSeconds + 0.001 || (sound.loops && sound.loopOut > fileSeconds + 0.001))
+                    broken ("a range past the end of its file");
+            }
+
     for (const auto& mix : whole.mixes)
     {
         for (const auto& send : mix.sends)

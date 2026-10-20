@@ -16,6 +16,8 @@
 
 #include "PlayedMedia.h"
 
+#include <wfg/engine/cue/RangeEnd.h>
+
 namespace wfg::cue
 {
     namespace
@@ -184,5 +186,13 @@ namespace wfg::cue
             return std::nullopt;
 
         return played.lengthSeconds;
+    }
+
+    double playedOutOf (const juce::ValueTree& range, double in, double out, std::optional<double> playedLength)
+    {
+        if (! playedLength.has_value() || ! (in < *playedLength))
+            return out;
+
+        return rangeOutOf (out, static_cast<bool> (range.getProperty ("toEnd", false)), *playedLength);
     }
 }

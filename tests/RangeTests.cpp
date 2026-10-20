@@ -1586,3 +1586,113 @@ TEST_CASE ("marker: made on a sound, published flat with its cue and place, name
     CHECK (rig.apply ("object.delete", { osc::Value::string (ids[0]) }) == 1u);
     CHECK_FALSE (rig.document.findById (ids[0]).isValid());
 }
+
+//==============================================================================
+/*  A RANGE THAT RUNS TO THE END, SAID SO (namespace draft §99, AXQ-AXS): the
+    row the edits keep - a split's second half, a slice's tail, the whole made
+    from a cue with none - and the one a number written puts back to false, in
+    the same step so an Undo puts both back. */
+TEST_CASE ("range end: to the end is kept by the edits that keep the end, and a number written says a number (§99)")
+{
+    RangeRig rig;
+
+    const auto whole = rig.document.createRange (rig.cueId, 0.0, 30.0, {}, true);
+    REQUIRE (whole.ok);
+    CHECK (rig.stored (whole.id, "toEnd") == "true");
+
+    //  A split: the second half ends where the whole did - at the end.
+    const auto second = rig.document.splitRange (rig.cueId, 12.0);
+    REQUIRE (second.ok);
+    CHECK (rig.stored (whole.id, "toEnd") == "false");
+    CHECK (rig.stored (second.id, "toEnd") == "true");
+
+    //  A number written for its out point is that number; an Undo puts the end back.
+    rig.document.beginTransaction ("node.set", 100, "test", {});
+    REQUIRE (rig.document.setAttribute ("/godot/range/" + second.id + "/out", "25").ok);
+    CHECK (rig.stored (second.id, "toEnd") == "false");
+    CHECK (rig.stored (second.id, "out") == "25");
+
+    REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
+    CHECK (rig.stored (second.id, "toEnd") == "true");
+    CHECK (rig.stored (second.id, "out") == "30");
+
+    //  Its in point is no number about the end.
+    REQUIRE (rig.document.setAttribute ("/godot/range/" + second.id + "/in", "13").ok);
+    CHECK (rig.stored (second.id, "toEnd") == "true");
+
+}
+
+TEST_CASE ("range end: a cue made ranges from the whole of what it plays runs to its end (§99)")
+{
+    SUBCASE ("Add new slice on a cue with no ranges")
+    {
+        RangeRig rig;
+        std::string id, wholeId;
+        REQUIRE (rig.document.splitWhole (rig.cueId, 10.0, 30.0, id, wholeId).ok);
+        CHECK (rig.stored (wholeId, "toEnd") == "false");
+        CHECK (rig.stored (id, "toEnd") == "true");
+    }
+
+    SUBCASE ("Make new slices on a cue with no ranges: the tail after them keeps the end")
+    {
+        RangeRig rig;
+        std::string ids;
+        REQUIRE (rig.document.sliceSpan (rig.cueId, 10.0, 20.0, 2, 30.0, ids).ok);
+
+        std::vector<std::string> made;
+        std::string word;
+
+        for (const auto c : ids + " ")
+        {
+            if (c == ' ')
+            {
+                if (! word.empty())
+                    made.push_back (word);
+
+                word.clear();
+            }
+            else
+                word += c;
+        }
+
+        //  The whole, cut back to the span's start; two slices; the tail to the end.
+        REQUIRE (made.size() == 4u);
+        CHECK (rig.stored (made[0], "toEnd") == "false");
+        CHECK (rig.stored (made[1], "toEnd") == "false");
+        CHECK (rig.stored (made[2], "toEnd") == "false");
+        CHECK (rig.stored (made[3], "toEnd") == "true");
+        CHECK (rig.stored (made[3], "out") == "30");
+    }
+
+    SUBCASE ("a range made to a point is that point")
+    {
+        RangeRig rig;
+        std::string id;
+        REQUIRE (rig.document.spanRanges (rig.cueId, std::nullopt, 20.0, id).ok);
+        CHECK (rig.stored (id, "toEnd") == "false");
+    }
+}
+
+TEST_CASE ("range end: a sound locked to its movie takes the movie's end as its own (§99)")
+{
+    RangeRig rig;
+
+    const auto movie = rig.document.createCue (rig.listId, 2, "video", "Faith").id;
+    const auto sound = rig.document.createCue (rig.listId, 3, "media", "Faith (sound)").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + movie + "/source", "movie").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + movie + "/file", "faith.mov").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + sound + "/file", "faith (sound).wav").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + sound + "/lockedTo", movie).ok);
+
+    //  The movie's whole, to its end: 162.6625 s of picture.
+    REQUIRE (rig.document.createRange (movie, 0.0, 162.6625, {}, true).ok);
+
+    const auto followed = rig.document.findById (sound).getChildWithName ("Range");
+    REQUIRE (followed.isValid());
+    CHECK (static_cast<bool> (followed.getProperty ("toEnd", false)));
+
+    //  A number on the movie's is a number on the sound's too.
+    const auto movieRange = rig.document.findById (movie).getChildWithName ("Range")["id"].toString().toStdString();
+    REQUIRE (rig.document.setAttribute ("/godot/range/" + movieRange + "/out", "100").ok);
+    CHECK_FALSE (static_cast<bool> (rig.document.findById (sound).getChildWithName ("Range").getProperty ("toEnd", false)));
+}

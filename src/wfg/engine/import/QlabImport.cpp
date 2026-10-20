@@ -278,7 +278,8 @@ namespace wfg::import::qlab
                 {
                     const auto& range = item.ranges[at];
                     const auto made2 = document.createRange (id, range.in, range.out,
-                                                             ids.of (item.key + ":range:" + std::to_string (at)));
+                                                             ids.of (item.key + ":range:" + std::to_string (at)),
+                                                             range.toEnd);
 
                     if (! made2.ok)
                     {

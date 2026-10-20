@@ -552,3 +552,85 @@ TEST_CASE ("played media: the monitor shows a movie's render at the edited secon
     CHECK (frame.seconds == doctest::Approx (21.0));
     CHECK (frame.shown);
 }
+
+//==============================================================================
+/*  WHERE A RANGE ENDS, AS THE ENGINE TIMES IT (namespace draft §99, AXQ-AXR):
+    the out points the Runner hands the arm, and stops at, are the ones that
+    play - the end of what the cue plays for a range that runs to it, and no
+    further than that for any other. The stop placed at a range's end is then
+    never after the end of the loop the arm made. */
+TEST_CASE ("range end: the arm is handed each out point as it plays, to the end and no further (§99)")
+{
+    const auto armedOuts = [] (EditShow& show)
+    {
+        show.ticks (5);
+        REQUIRE (show.audio.arms.size() == 1u);
+
+        std::vector<double> outs;
+
+        for (const auto& range : show.audio.arms.front().ranges)
+            outs.push_back (range.out);
+
+        return outs;
+    };
+
+    SUBCASE ("a bounce a hair shorter than its range - the author's NADIA, 1.2 microseconds")
+    {
+        EditShow show;
+        show.lengths["night.wav"] = 338.8245;
+        REQUIRE (show.document.createRange (show.cueId, 0.0, 338.82450124688285).ok);
+
+        const auto outs = armedOuts (show);
+        REQUIRE (outs.size() == 1u);
+        CHECK (outs[0] <= 338.8245);
+        CHECK (outs[0] == doctest::Approx (338.8245).epsilon (1.0e-12));
+    }
+
+    SUBCASE ("a range 0.42 s past its sound - the author's Limp Bizkit")
+    {
+        EditShow show;
+        show.lengths["night.wav"] = 162.2465;
+        REQUIRE (show.document.createRange (show.cueId, 0.0, 162.6625).ok);
+
+        const auto outs = armedOuts (show);
+        REQUIRE (outs.size() == 1u);
+        CHECK (outs[0] == doctest::Approx (162.2465));
+    }
+
+    SUBCASE ("a range to the end is as long as the file, whatever its number says, and says so to the arm")
+    {
+        EditShow show;
+        REQUIRE (show.document.createRange (show.cueId, 0.0, 10.0).ok);
+        REQUIRE (show.document.createRange (show.cueId, 12.0, 20.0, {}, true).ok);
+
+        const auto outs = armedOuts (show);
+        REQUIRE (outs.size() == 2u);
+        CHECK (outs[0] == doctest::Approx (10.0));
+        CHECK (outs[1] == doctest::Approx (30.0));
+        CHECK_FALSE (show.audio.arms.front().ranges[0].toEnd);
+        CHECK (show.audio.arms.front().ranges[1].toEnd);
+    }
+
+    SUBCASE ("a range inside the file is its number, and one beginning past the end is left for the arm to refuse")
+    {
+        EditShow show;
+        REQUIRE (show.document.createRange (show.cueId, 2.0, 8.0).ok);
+        REQUIRE (show.document.createRange (show.cueId, 31.0, 33.0).ok);
+
+        const auto outs = armedOuts (show);
+        REQUIRE (outs.size() == 2u);
+        CHECK (outs[0] == doctest::Approx (8.0));
+        CHECK (outs[1] == doctest::Approx (33.0));
+    }
+
+    SUBCASE ("a length nobody knows leaves the numbers as they are")
+    {
+        EditShow show;
+        show.lengths.clear();
+        REQUIRE (show.document.createRange (show.cueId, 0.0, 40.0, {}, true).ok);
+
+        const auto outs = armedOuts (show);
+        REQUIRE (outs.size() == 1u);
+        CHECK (outs[0] == doctest::Approx (40.0));
+    }
+}

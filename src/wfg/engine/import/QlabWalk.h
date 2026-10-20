@@ -102,6 +102,7 @@ namespace wfg::import::qlab
         double in = 0.0;
         double out = 0.0;
         int loops = 1;              ///< nought for ever
+        bool toEnd = false;         ///< runs to the end of the file, however long (§99)
     };
 
     struct Curve

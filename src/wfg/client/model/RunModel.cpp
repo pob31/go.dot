@@ -611,6 +611,7 @@ namespace wfg::client::model
                         found != rangesOfCue.end())
                     {
                         row.ranges = found->second;
+                        endsAsPlayed (row.ranges, row.length);
                     }
 
                     row.playFrom = osc::parseDouble (text (snapshot, cue + "startOffset"))

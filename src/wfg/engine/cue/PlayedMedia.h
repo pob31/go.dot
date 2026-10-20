@@ -95,4 +95,11 @@ namespace wfg::cue
 
     /** The length a cue plays, from the edit or the lengths; nothing when it is not known. */
     std::optional<double> playedLengthOf (const juce::ValueTree& cue, const std::map<std::string, double>* durations);
+
+    /*  A RANGE'S OUT POINT AS IT PLAYS (namespace draft §99): the end of what
+        the cue plays for a `Range` node that runs to it, and its number no
+        further than that end for any other (cue::rangeOutOf). Its number as it
+        stands when the length is not known, or when the range begins at or
+        past the end - nothing of it plays, and the arm says so. */
+    double playedOutOf (const juce::ValueTree& range, double in, double out, std::optional<double> playedLength);
 }

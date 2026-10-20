@@ -32967,3 +32967,73 @@ Go.dot closes.
 Test: `osc tables: a column dragged wider by its edge in the head, kept on this computer, a double click
 putting it back (§98)` (RunPaneUiTests, a subcase a table); `column widths: kept on this computer, one
 line a column, a line that does not read passed over (§98)` (ClientTests). Owed: the author's look.
+
+## 99. A range ends where the file does
+
+**Asked 2026-10-20** by the author, about two cues of a test show that said their files were missing while
+the files sat in the show's media folder: *"The system can't find the files, but I could import them as
+fresh cues. Replacing them with the same file from the menu doesn't solve the issue."* Then, shown the
+cause: *"How do we prevent this from happening again?"* - and, to the five things proposed, *"Yes,
+please"*; *"This will be for v0.1.9"*.
+
+What was found: neither file was missing. Each cue had a range whose out point was a number of seconds
+past the end of the file it plays, and the arm refused any range ending more than a microsecond past the
+end (`armRangeInto`), reported as `media-missing` - the word for a file that is not there. A frozen edit
+(§55) was bounced to whole samples, 338.8245 s, while its range, the sections' lengths added up, ended at
+338.82450124688 s: 1.2 microseconds, a twentieth of a sample. A sound locked to its movie (§37.5) took the
+movie's range, 162.6625 s, and the sound is 162.2465 s: 0.42 s. Replacing the file kept the range; a
+fresh cue had none, and played. A range stored "the end" only as a number measured once, so a re-bounce,
+a shorter sound, a file replaced or resampled left the number behind.
+
+- **AXQ** **A range that runs to the end says so** (the author's yes to it, 2026-10-20): `range/toEnd`, a
+  row of its own beside the out point, which then holds the length as it was last known, for a reader
+  that does not know the row - an older Go.dot plays that number. Readers that know it take the end of
+  what the cue plays, however long that is (`cue::rangeOutOf`, `RangeEnd.h`, one header the window's
+  model reads too). Set by the gestures that take a range to the end: the window sends a number within a
+  millisecond of the end of what the cue plays, or past it, as the end - a drag of an out point or a
+  slice to the end of the bar, the end typed in the table, a range made by + or the menus up to the end
+  (`model::rangeEndWrites`, one `node.setMany`, one step of Undo; `range.create`'s new `toEnd`). Kept by
+  the edits that keep the end: a split's second half, the tail after Make new slices, the whole made of a
+  cue with none (Add new slice, Make new slices), an edit's time map (§55), a conversion's cut (§37.5),
+  part paste (§38). An importer's range to the end of its file runs to the end (QLab: no end time or the
+  file's; Live: an end at the file's). WRITING AN OUT POINT SAYS A NUMBER and sets it false, in the same
+  step (`ShowDocument::setAttribute`). The window decides, never the engine, which does not read files
+  - so the record carries it and a replay with no media agrees.
+- **AXR** **A range that ends past the end plays to the end** (the author's yes): the arm clamps to the
+  file's own length, to the sample, and the Runner hands the arm and times its stops from the same end
+  (`Runner::rangesOf`, `rangeLengthOf`: the log header's lengths, else those learned since), so the stop
+  at a range's end is never after the end of the loop the arm made - which would play its first moments
+  again. The solver and the show walk read the ends the same way (`cue::playedOutOf`). A range that
+  BEGINS at or past the end, or ends before it begins, still plays nothing and fails the arm.
+- **AXS** **A sound locked to its movie takes the movie's end as its own**: `toEnd` is copied with the
+  ranges, so the movie's whole is the sound's whole, a few frames shorter or not.
+- **AXT** *(proposed)* **The cue's row says it**: a range that begins at or past the end of what the cue
+  plays marks the cue *outside the file* (it plays nothing of it); one whose number ends more than a
+  millisecond past it, *past the end* ("it plays to the end"); a range to the end, one a hair past, and
+  any range of a sound locked to its movie say nothing. Beside the missing file's mark (§64), keyed
+  `range:<cue>`; read against the cue's `duration` on every pass. Words mine, owed the author's.
+- **AXU** *(proposed)* **A refusal says its cause**: the arm's refusals were all `media-missing`; now a
+  file that is there and is not audio is `not-audio` ("not audio"), a range or a start offset outside the
+  file is `range-outside` ("outside the file"), more ranges than slots `no-slot` as before
+  (`AudioHost::lastArmRefusal`). Words mine, owed.
+- **AXV** *(proposed)* **`wfg validate` asks it of the bundle's files**: a range beginning at or past the
+  end is a problem (exit 1); one only ending past it is said and changes no exit code; never for a locked
+  sound.
+- **AXW** *(proposed)* **The log header's lengths to the nanosecond** (nine decimals, were three): the
+  session's and its replay's range ends come from them, and three decimals could put a stop half a
+  millisecond past a loop's end. Older logs read as before.
+- Not done: a range already in a show is not rewritten to run to the end - it plays to the end by AXR,
+  and the next gesture that takes it there says so. A sound locked to its movie still drops the movie's
+  `pingPong` (seen here, not this round's).
+- Fuzz rules (tests/fuzz): the Live walk writes no range past the end of the file the set names;
+  QLab's walk lets only an item's last range run to the end.
+
+Test: `range end: to the end is kept by the edits that keep the end, and a number written says a number
+(§99)`, `range end: a cue made ranges from the whole of what it plays runs to its end (§99)`, `range end: a
+sound locked to its movie takes the movie's end as its own (§99)` (RangeTests); `range end: the arm is
+handed each out point as it plays, to the end and no further (§99)` (EditPlaybackTests, the author's two
+cues as subcases); `range end: a range past the file's end loops at the file's end, and a refusal says
+why (§99)` (AudioTests, heard on a ramp); `problems: a range beginning past what the cue plays marks it,
+one ending past it says it plays to the end (§99)` (ProblemsTests); `client: a range's end is drawn as it
+plays, sent as the end when it reaches it, and its refusals said apart (§99)` (ClientTests). Owed: the
+author's words for AXT and AXU, and his look at the two cues in 0.1.9.

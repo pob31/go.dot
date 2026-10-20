@@ -3545,12 +3545,15 @@ TEST_CASE ("ranges: a cue with more of them than the graph has slots is refused,
     CHECK (rig.host.lastError().find ("no-slot") != std::string::npos);
 }
 
-TEST_CASE ("ranges: one that is not inside the file fails the arm, which is when the file is read")
+TEST_CASE ("ranges: one that begins outside the file fails the arm, which is when the file is read; one that ends past it plays to its end")
 {
     /*  The document could not have known. A show is authored on one machine and
         its media copied onto another, so `out` against the file length is a
         question for the arm rather than for the load - which is the same rule
-        that lets a show with a missing sound still open. */
+        that lets a show with a missing sound still open. Since 0.1.9 (namespace
+        draft §99, AXR) a range that only ENDS past the file plays to the file's
+        end: the author's frozen bounce, a twentieth of a sample short, and a
+        sound shorter than its movie were refused whole and said "missing". */
     HostRig rig;
     REQUIRE (rig.host.start (hostFor (2)));
 
@@ -3564,7 +3567,9 @@ TEST_CASE ("ranges: one that is not inside the file fails the arm, which is when
     const auto path = tone.getFullPathName().toStdString();
 
     CHECK (rig.host.setTrackRanges (0, path, { { 0.0, 3.0, 1 } }));        // the whole file
-    CHECK_FALSE (rig.host.setTrackRanges (0, path, { { 0.0, 4.0, 1 } }));  // a second too far
+    CHECK (rig.host.setTrackRanges (0, path, { { 0.0, 4.0, 1 } }));        // a second too far: to the end
+    CHECK_FALSE (rig.host.setTrackRanges (0, path, { { 3.0, 4.0, 1 } }));  // begins at the end
+    CHECK (rig.host.lastArmRefusal() == audio::AudioHost::ArmRefusal::outside);
     CHECK_FALSE (rig.host.setTrackRanges (0, path, { { 2.0, 1.0, 1 } }));  // backwards
 }
 
@@ -9265,4 +9270,60 @@ TEST_CASE ("audio host: a range that bounces plays out and back between its poin
     CHECK (highest <= 2.01);
     CHECK (turns >= 2);
     CHECK (show.rig.host.trackPlayState (0).playing);
+}
+
+//==============================================================================
+/*  WHERE A RANGE ENDS, AT THE ARM (namespace draft §99, AXR, AXU). The author's
+    two cues of 2026-10-20 were refused whole and said "missing": a frozen
+    bounce 1.2 microseconds shorter than its range, a sound 0.42 s shorter than
+    the movie whose range it takes. A range that only ENDS past the file now
+    plays to the file's end - heard here on a ramp, whose every sample says
+    where in the file it came from - and the refusals that are left each say
+    their own cause. */
+TEST_CASE ("range end: a range past the file's end loops at the file's end, and a refusal says why (§99)")
+{
+    SpeedRig voice;
+    const auto ramp = writeRamp (voice.rig.storage.folder, voice.rate, 2);
+    REQUIRE (ramp.existsAsFile());
+    const auto path = ramp.getFullPathName().toStdString();
+
+    /*  0.4 s past a two-second file, looping for ever: the loop is the file's
+        two seconds, never two seconds of sound and four tenths of silence. */
+    REQUIRE (voice.open (ramp, false, { { 0.0, 2.4, 0 } }));
+    CHECK (voice.rig.host.lastArmRefusal() == audio::AudioHost::ArmRefusal::none);
+    REQUIRE (voice.go (1.0));
+
+    const auto heard = voice.record (0.2, 4.5);
+    const auto wrap = [] (double t) { return std::fmod (t, 2.0); };
+    CHECK (offPath (heard, voice.rate, 2, voice.startedAt, voice.launch, wrap, 2.0) == 0);
+
+    REQUIRE (voice.rig.host.stopTrack (0));
+
+    for (int i = 0; i < 8; ++i)
+        voice.rig.host.processBlock();
+
+    //  To the end, said: whatever the number, the file's own end.
+    CHECK (voice.rig.host.setTrackRanges (0, path, { { 0.5, 1.0, 1, true } }));
+    CHECK (voice.rig.host.lastArmRefusal() == audio::AudioHost::ArmRefusal::none);
+
+    //  Beginning at or past the end: nothing of it plays, and it says so.
+    CHECK_FALSE (voice.rig.host.setTrackRanges (0, path, { { 2.0, 3.0, 1 } }));
+    CHECK (voice.rig.host.lastArmRefusal() == audio::AudioHost::ArmRefusal::outside);
+
+    CHECK_FALSE (voice.rig.host.setTrackRanges (0, path, { { 1.5, 1.0, 1 } }));
+    CHECK (voice.rig.host.lastArmRefusal() == audio::AudioHost::ArmRefusal::outside);
+
+    //  A file that is not there, and one that is there and is not audio, apart.
+    const auto absent = voice.rig.storage.folder.getChildFile ("absent.wav");
+    CHECK_FALSE (voice.rig.host.setTrackRanges (0, absent.getFullPathName().toStdString(), { { 0.0, 1.0, 1 } }));
+    CHECK (voice.rig.host.lastArmRefusal() == audio::AudioHost::ArmRefusal::missing);
+
+    const auto junk = voice.rig.storage.folder.getChildFile ("junk.wav");
+    REQUIRE (junk.replaceWithText ("this is not a sound"));
+    CHECK_FALSE (voice.rig.host.setTrackRanges (0, junk.getFullPathName().toStdString(), { { 0.0, 1.0, 1 } }));
+    CHECK (voice.rig.host.lastArmRefusal() == audio::AudioHost::ArmRefusal::notAudio);
+
+    //  And an arm that takes clears the cause.
+    CHECK (voice.rig.host.setTrackRanges (0, path, { { 0.0, 1.0, 1 } }));
+    CHECK (voice.rig.host.lastArmRefusal() == audio::AudioHost::ArmRefusal::none);
 }

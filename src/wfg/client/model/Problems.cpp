@@ -28,6 +28,8 @@
 #include <wfg/client/model/Text.h>
 #include <wfg/client/model/Video.h>
 #include <wfg/engine/cue/GroupMode.h>
+#include <wfg/engine/cue/RangeEnd.h>
+#include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <algorithm>
@@ -103,6 +105,7 @@ namespace wfg::client::model
                 if (const auto name = text (snapshot, base + "file"); ! name.empty())
                 {
                     addOnce (keys, "file:" + id);
+                    addOnce (keys, "range:" + id);
                     needs.files.emplace_back (id, name);
                 }
             };
@@ -535,6 +538,17 @@ namespace wfg::client::model
                 out.hiddenIn[row.id] = std::move (hidden);
         }
 
+        /*  AND THE RANGES OF THE CUES WITH A FILE (§99): one walk of the tree for
+            them all, when the rows are built and never on a pass. */
+        if (! out.files.empty())
+        {
+            const auto all = rangesByCue (snapshot);
+
+            for (const auto& [cue, file] : out.files)
+                if (const auto found = all.find (cue); found != all.end())
+                    out.ranged[cue] = { found->second, ! text (snapshot, "/godot/cue/" + cue + "/lockedTo").empty() };
+        }
+
         return out;
     }
 
@@ -543,10 +557,52 @@ namespace wfg::client::model
         std::vector<Problem> out;
 
         for (const auto& [cue, file] : needs.files)
-            if (yes (snapshot, "/godot/cue/" + cue + "/missing"))
+        {
+            const auto base = "/godot/cue/" + cue + "/";
+
+            if (yes (snapshot, base + "missing"))
+            {
                 out.push_back ({ {}, "file:" + cue, "missing",
                                  "Missing: " + file + " is not in the show's media, or Go.dot cannot read it - GO will"
                                  " play nothing of it" });
+                continue;
+            }
+
+            /*  ITS RANGES AGAINST WHAT IT PLAYS (§99, AXT): the first that does
+                not fit is the one said, a range outside before one past the end.
+                Words mine, owed the author's. */
+            const auto found = needs.ranged.find (cue);
+            const auto length = osc::parseDouble (text (snapshot, base + "duration")).value_or (0.0);
+
+            if (found == needs.ranged.end() || ! (length > 0.0))
+                continue;
+
+            const auto& ranges = found->second.ranges;
+            const auto outside = std::find_if (ranges.begin(), ranges.end(),
+                                               [length] (const RangeRow& range) { return ! (range.in < length); });
+
+            if (outside != ranges.end())
+            {
+                out.push_back ({ {}, "range:" + cue, "outside the file",
+                                 "Outside the file: range " + std::to_string (outside->index + 1) + " begins at "
+                                   + timeText (outside->in) + ", at or past the end of " + file + " ("
+                                   + timeText (length) + ") - GO will play nothing of it" });
+                continue;
+            }
+
+            if (found->second.locked)
+                continue;
+
+            for (const auto& range : ranges)
+                if (const auto over = wfg::cue::rangeOverrunOf (range.out, range.toEnd, length); over > 0.0)
+                {
+                    out.push_back ({ {}, "range:" + cue, "past the end",
+                                     "Past the end: range " + std::to_string (range.index + 1) + " ends "
+                                       + timeText (over) + (over < 60.0 ? " s" : "") + " after the end of " + file
+                                       + " - it plays to the end" });
+                    break;
+                }
+        }
 
         return out;
     }

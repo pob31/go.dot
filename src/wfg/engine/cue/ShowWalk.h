@@ -738,8 +738,10 @@ namespace wfg::cue
                 if (passes <= 0)
                     return std::nullopt;
 
-                const auto span = reader.number (child, "range", "out")
-                                    - reader.number (child, "range", "in");
+                //  Each end as it plays (namespace draft §99): to the end of what the cue plays, no further.
+                const auto in = reader.number (child, "range", "in");
+                const auto span = playedOutOf (child, in, reader.number (child, "range", "out"),
+                                               playedLengthOf (node, durations)) - in;
 
                 if (! (span > 0.0))
                     return std::nullopt;

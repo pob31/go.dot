@@ -66,8 +66,19 @@ namespace wfg::client::model
         int loops = 1;      ///< nought is for ever
         bool pingPong = false;  ///< out and back between its points (namespace draft §41)
         int index = 0;      ///< where it sits in the cue's list
+        bool toEnd = false; ///< runs to the end of what the cue plays, however long (§99); last, so a row built by position keeps its meaning
 
         double length() const noexcept { return out - in; }
+
+        /*  Exact, and said without `==` on a double: the strict build compiles
+            with -Wfloat-equal, which a defaulted comparison would trip. */
+        bool operator== (const RangeRow& other) const noexcept
+        {
+            const auto same = [] (double a, double b) { return ! (a < b) && ! (b < a); };
+
+            return id == other.id && name == other.name && same (in, other.in) && same (out, other.out)
+                && loops == other.loops && pingPong == other.pingPong && index == other.index && toEnd == other.toEnd;
+        }
     };
 
     /** Every range of this cue, in the order playback walks them. */
@@ -82,6 +93,33 @@ namespace wfg::client::model
         stop. One walk answers for all of them, and `readRanges` is this with
         one cue picked out of it. */
     std::map<std::string, std::vector<RangeRow>> rangesByCue (const tree::TreeSnapshot&);
+
+    /*  EACH END AS IT PLAYS (namespace draft §99, AXQ-AXR): a range that runs
+        to the end is drawn to the end of what the cue plays, and any other no
+        further than that end - what the engine plays, so the bar and the
+        table show what will be heard. A `fileLength` of nought or less is a
+        length not known, and leaves the numbers; so does a range that begins
+        at or past the end, which plays nothing and is marked for it. The
+        cue's mark reads the written numbers, before this. */
+    void endsAsPlayed (std::vector<RangeRow>&, double fileLength);
+
+    /*  A NUMBER THAT REACHES THE END MEANS THE END (namespace draft §99, AXQ):
+        an out point within a millisecond of the end of what the cue plays, or
+        past it, is sent as the end - so the bounce, the movie's shorter sound
+        or the longer file that comes next still plays to its own. Asked of
+        the cue's `duration` row, which is what it plays; a length not known
+        is never the end.
+
+        `rangeEndWrites` is what one write of `address` should be: for a
+        range's `out` that reaches the end, that write and `toEnd` true, in
+        that order (the out point's write clears it), as one `node.setMany` -
+        one record, one step of Undo; empty for anything else, which is
+        written as it was. `reachesItsEnd` asks the same of a range about to
+        be made. */
+    std::vector<std::pair<std::string, std::string>> rangeEndWrites (const tree::TreeSnapshot&,
+                                                                     const std::string& address,
+                                                                     const std::string& value);
+    bool reachesItsEnd (const tree::TreeSnapshot&, const std::string& cueId, double out);
 
     /*  WHAT THE POINTER IS OVER. `slice` names the pair that meet there, and
         is preferred to either edge on its own: at a join the two handles sit

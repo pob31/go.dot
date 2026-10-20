@@ -362,3 +362,66 @@ TEST_CASE ("problems: a cue or an output past what the audio was built with is s
     const auto rebuilt = snapshotOf (rows);
     CHECK (model::machineProblems (rebuilt, model::indexObjects (rebuilt)).empty());
 }
+
+//==============================================================================
+/*  WHAT A CUE'S RANGES DO NOT FIT, said on its row (namespace draft §99, AXT):
+    a range that begins at or past the end plays nothing; one that only ends
+    past it by more than a millisecond plays to the end, and says it was
+    written longer - never for a sound locked to its movie; a range to the end,
+    or one a hair past it, says nothing. */
+TEST_CASE ("problems: a range beginning past what the cue plays marks it, one ending past it says it plays to the end (§99)")
+{
+    const auto range = [] (const char* id, const char* cue, double in, double out, int index, bool toEnd = false)
+    {
+        const auto base = std::string ("/godot/range/") + id + "/";
+        return std::vector<std::pair<std::string, Value>> {
+            { base + "cue", word (cue) }, { base + "in", Value::float64 (in) }, { base + "out", Value::float64 (out) },
+            { base + "index", Value::int32 (index) }, { base + "toEnd", toEnd ? yes() : no() } };
+    };
+
+    std::map<std::string, Value> rows {
+        { "/godot/audio/status", word ("running") },
+    };
+
+    const auto sound = [&rows] (const char* id, const char* file, double seconds, const char* lockedTo = "")
+    {
+        const auto base = std::string ("/godot/cue/") + id + "/";
+        rows[base + "kind"] = word ("media");
+        rows[base + "file"] = word (file);
+        rows[base + "missing"] = no();
+        rows[base + "duration"] = Value::float64 (seconds);
+        rows[base + "lockedTo"] = word (lockedTo);
+    };
+
+    sound ("OUT1", "late.wav", 10.0);                 // its second range begins past the end
+    sound ("OVR1", "faith (sound).wav", 162.2465);    // 0.42 s past
+    sound ("HAIR", "nadia (edit) 2.wav", 338.8245);   // 1.2 microseconds past
+    sound ("END1", "bed.wav", 20.0);                  // to the end, its number stale
+    sound ("LCK1", "clip (sound).wav", 9.5, "MOV1");  // locked: shorter than its movie by nature
+
+    for (const auto& list : { range ("R1", "OUT1", 0.0, 5.0, 0), range ("R2", "OUT1", 12.0, 14.0, 1),
+                              range ("R3", "OVR1", 0.0, 162.6625, 0),
+                              range ("R4", "HAIR", 0.0, 338.82450124688285, 0),
+                              range ("R5", "END1", 0.0, 25.0, 0, true),
+                              range ("R6", "LCK1", 0.0, 10.0, 0) })
+        for (const auto& [address, value] : list)
+            rows[address] = value;
+
+    const auto snapshot = snapshotOf (rows);
+    const std::vector<model::Row> shown { cueRow ("OUT1", "media"), cueRow ("OVR1", "media"), cueRow ("HAIR", "media"),
+                                          cueRow ("END1", "media"), cueRow ("LCK1", "media") };
+    const auto needs = model::needsOf (snapshot, shown, model::indexObjects (snapshot));
+    const auto marks = model::cueProblems (needs, model::fileProblems (snapshot, needs));
+
+    REQUIRE (marks.count ("OUT1") == 1);
+    CHECK (marks.at ("OUT1").text == "outside the file");
+    CHECK (marks.at ("OUT1").meaning.find ("range 2 begins at") != std::string::npos);
+
+    REQUIRE (marks.count ("OVR1") == 1);
+    CHECK (marks.at ("OVR1").text == "past the end");
+    CHECK (marks.at ("OVR1").meaning.find ("it plays to the end") != std::string::npos);
+
+    CHECK (marks.count ("HAIR") == 0);
+    CHECK (marks.count ("END1") == 0);
+    CHECK (marks.count ("LCK1") == 0);
+}

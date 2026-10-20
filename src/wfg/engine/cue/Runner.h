@@ -193,6 +193,11 @@ namespace wfg::cue
             points, a pass each way, rather than from its in-point again. */
         bool pingPong = false;
 
+        /*  WHETHER IT RUNS TO THE END (namespace draft §99): `out` is then the
+            length of what the cue plays, as far as the show knows it, and the
+            arm takes the file's own to the sample. */
+        bool toEnd = false;
+
         /*  Which range it is, by its identifier: a slice moved while it sounds
             is followed by this rather than by its place in the list, which an
             edit elsewhere in the list can change under it (namespace draft
@@ -2058,8 +2063,20 @@ namespace wfg::cue
             takes effect at the next iteration, which is a re-read at the
             boundary rather than a live reference - and a live reference into
             the document would be the tick thread handing the message thread a
-            tree it may edit meanwhile. */
+            tree it may edit meanwhile.
+
+            EACH OUT POINT AS IT PLAYS (namespace draft §99, AXQ-AXR): the end of
+            what the cue plays for a range that runs to it, and no further than
+            that for any other - so the stop placed at the range's end is never
+            after the end of the loop the arm made, which would play the loop's
+            first moments again. */
         std::vector<RangeSpec> rangesOf (const juce::ValueTree& cue) const;
+
+        /*  HOW LONG WHAT THE CUE PLAYS IS, for its ranges' ends: the log's
+            lengths, which a replay reads too, else the lengths learned since -
+            a bounce frozen in this session is in no header; nought when nobody
+            knows. */
+        double rangeLengthOf (const juce::ValueTree& cue) const;
 
         /** The cue's twenty-three EQ rows, read through the schema so a saved
             flat EQ - which the writer omits - reads as flat. */

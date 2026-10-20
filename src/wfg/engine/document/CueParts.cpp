@@ -59,7 +59,7 @@ namespace wfg::doc::parts
 
                 { Part::time, "time", { "Media", "Video" },
                   { "startOffset", "rate", "rateMode", "delay", "delayBy" },
-                  "Range", { "name", "in", "out", "loops" } },
+                  "Range", { "name", "in", "out", "loops", "toEnd" } },
 
                 { Part::speed, "speed", { "Media", "Video" }, { "rate", "rateMode" }, {}, {} },
 
@@ -551,7 +551,9 @@ namespace wfg::doc
                         const auto made = createRange (cueId,
                                                        static_cast<double> (want.getProperty ("in", 0.0)),
                                                        static_cast<double> (want.getProperty ("out", 0.0)),
-                                                       nextId());
+                                                       nextId(),
+                                                       //  To the end of the TARGET's file, as long as that is (§99).
+                                                       static_cast<bool> (want.getProperty ("toEnd", false)));
 
                         if (! made.ok)
                             return made;

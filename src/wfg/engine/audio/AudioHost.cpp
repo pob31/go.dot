@@ -1856,7 +1856,10 @@ namespace wfg::audio
             auto* clip = clipOn (trackIndex, slotIndex);
 
             if (clip == nullptr || engine == nullptr || ! file.existsAsFile())
+            {
+                refuse (file.existsAsFile() ? AudioHost::ArmRefusal::other : AudioHost::ArmRefusal::missing);
                 return false;
+            }
 
             /*  A FILE THAT IS THERE AND IS NOT AUDIO IS A FAILED ARM, asked with
                 the very predicate Tracktion builds the graph with. Since the
@@ -1876,6 +1879,7 @@ namespace wfg::audio
             {
                 error = "\"" + file.getFileName().toStdString()
                           + "\" is there and is not audio this build can decode";
+                refuse (AudioHost::ArmRefusal::notAudio);
                 return false;
             }
 
@@ -1909,6 +1913,7 @@ namespace wfg::audio
                 error = "a start offset of " + seconds (startOffset) + " seconds is not inside \""
                           + file.getFileName().toStdString() + "\", which is "
                           + seconds (sourceSeconds) + " seconds long";
+                refuse (AudioHost::ArmRefusal::outside);
                 return false;
             }
 
@@ -1975,12 +1980,24 @@ namespace wfg::audio
 
             const auto length = clip->getSourceLength().inSeconds();
 
-            /*  A RANGE PAST THE END OF THE FILE IS A FAILED ARM, and this is
-                where the file is finally open to be asked. The document could
-                not have known: a show is authored on one machine and its media
-                copied onto another, and refusing the load would have made a
-                sound that had not arrived yet into a show nobody could work on. */
-            if (! (range.out > range.in) || range.in < 0.0 || range.out > length + 1.0e-6)
+            /*  A RANGE THAT ENDS PAST THE END OF THE FILE PLAYS TO ITS END
+                (namespace draft §99, AXR), and one that runs to the end plays to
+                it to the sample, whatever length the show thought. This is where
+                the file is finally open to be asked, and the document could not
+                have known: a show is authored on one machine and its media
+                copied onto another, a bounce is whole samples a twentieth of one
+                shorter than its edit, a sound is a few frames shorter than the
+                movie whose ranges it takes. Until 0.1.9 any of those refused the
+                cue, said as a file that was missing (the author, 2026-10-20).
+
+                A RANGE THAT BEGINS AT OR PAST THE END, or ends before it begins,
+                has nothing to play and still refuses - as `outside`, so the run
+                says so. The Runner clamps the same ends from the same lengths
+                (Runner::rangesOf), so the stop it places at a range's end is
+                never after the end of the loop made here. */
+            const auto out = range.toEnd ? length : std::min (range.out, length);
+
+            if (! (range.out > range.in) || range.in < 0.0 || ! (out > range.in))
             {
                 /*  juce::String rather than the canonical formatter: this is
                     a sentence for a person, and the audio layer names nothing
@@ -1993,11 +2010,12 @@ namespace wfg::audio
                 error = "a range of " + seconds (range.in) + " to " + seconds (range.out)
                           + " seconds is not inside \"" + file.getFileName().toStdString()
                           + "\", which is " + seconds (length) + " seconds long";
+                refuse (AudioHost::ArmRefusal::outside);
                 return false;
             }
 
             clip->setLoopRangeBeats ({ tracktion::BeatPosition::fromBeats (range.in),
-                                       tracktion::BeatPosition::fromBeats (range.out) });
+                                       tracktion::BeatPosition::fromBeats (out) });
 
             /*  PART-WAY INTO ITS LOOP (2026-10-02, K8's review): a bed Esc paused
                 inside a looping slice carries on at the same point of it. The
@@ -2009,7 +2027,7 @@ namespace wfg::audio
                 what it was. */
             if (intoLoop > 0.0)
                 clip->setOffset (tracktion::TimeDuration::fromSeconds (
-                                     std::fmod (intoLoop, range.out - range.in)));
+                                     std::fmod (intoLoop, out - range.in)));
 
             return clip->isLooping();
         }
@@ -2031,10 +2049,12 @@ namespace wfg::audio
                              double startOffset, bool stretch, int startSlot, double sliceOffset)
         {
             const juce::File file { juce::String (mediaFile) };
+            refusal = AudioHost::ArmRefusal::none;
 
             if (edit == nullptr || ! file.existsAsFile())
             {
                 error = "there is no graph, or \"" + mediaFile + "\" is not a file";
+                refuse (edit == nullptr ? AudioHost::ArmRefusal::other : AudioHost::ArmRefusal::missing);
                 return false;
             }
 
@@ -2048,6 +2068,7 @@ namespace wfg::audio
                 error = "no-slot: this cue has " + std::to_string (ranges.size())
                           + " ranges and the graph was built with " + std::to_string (editSlots)
                           + " slots a track, which is fixed until the graph is built again (Apply while stopped)";
+                refuse (AudioHost::ArmRefusal::noSlot);
                 return false;
             }
 
@@ -2114,6 +2135,10 @@ namespace wfg::audio
             }
 
             edit->dispatchPendingUpdatesSynchronously();
+
+            //  A placeholder slot that would not point is no refusal of this cue.
+            if (armed)
+                refusal = AudioHost::ArmRefusal::none;
 
             return armed;
         }
@@ -2815,6 +2840,17 @@ namespace wfg::audio
         BlockSink* sink = nullptr;
         bool running = false;
         std::string error;
+
+        /*  THE FIRST CAUSE an arm met (namespace draft §99, AXU): set once, so a
+            cue whose second range is outside its file and whose third is fine
+            says the second's. Reset at the top of each `setTrackRanges`. */
+        AudioHost::ArmRefusal refusal = AudioHost::ArmRefusal::none;
+
+        void refuse (AudioHost::ArmRefusal kind) noexcept
+        {
+            if (refusal == AudioHost::ArmRefusal::none)
+                refusal = kind;
+        }
     };
 
     //==============================================================================
@@ -2832,6 +2868,7 @@ namespace wfg::audio
     void AudioHost::stop()                                 { impl->stop(); }
     bool AudioHost::isRunning() const noexcept             { return impl->running; }
     const std::string& AudioHost::lastError() const noexcept { return impl->error; }
+    AudioHost::ArmRefusal AudioHost::lastArmRefusal() const noexcept { return impl->refusal; }
     void AudioHost::processBlock()                         { impl->processBlock(); }
     void AudioHost::processBlock (const float* const* inputs, int numInputs)
     { impl->processBlock (inputs, numInputs); }

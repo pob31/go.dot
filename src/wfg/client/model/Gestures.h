@@ -183,7 +183,9 @@ namespace wfg::client::gesture
         `createCue`, the identifier is the engine's to draw and the log's to
         record - a window is not the second consumer of entropy in this
         project - so the panel finds what it made on the next pass. */
-    Event createRange (const std::string& cueId, double in, double out);
+    /*  `toEnd` says the range runs to the end of what the cue plays (namespace
+        draft §99), `out` being that length as the window knows it. */
+    Event createRange (const std::string& cueId, double in, double out, bool toEnd = false);
 
     /*  Gives a media cue a send into one mix channel, born at `level` when one
         is given - the level a hand raising a silent fader asked for, so the

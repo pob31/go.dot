@@ -250,6 +250,17 @@ namespace wfg::cue
         /** The cue names a file the bundle does not have. */
         inline constexpr const char* mediaMissing = "media-missing";
 
+        /*  THE FILE IS THERE AND IS NOT AUDIO this build can decode (namespace
+            draft §99, AXU): said apart from a missing one, because the remedy
+            is a different file, not finding this one. */
+        inline constexpr const char* notAudio = "not-audio";
+
+        /*  A RANGE, OR A START OFFSET, BEGINS AT OR PAST THE END OF THE FILE,
+            or a range ends before it begins (§99, AXU): nothing of it can play.
+            A range that only ENDS past the end is no failure - it plays to the
+            end (AXR). The remedy is the range, in the cue's own table. */
+        inline constexpr const char* rangeOutside = "range-outside";
+
         /*  A SOUND WHOSE EDIT HAS NO RENDER YET (namespace draft §55, ADM): the
             cue plays the render of its sections while its edit is open, and
             the renderer has not made one of the edit as it now is. The

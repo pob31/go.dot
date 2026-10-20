@@ -78,7 +78,13 @@ extern "C" int LLVMFuzzerTestOneInput (const std::uint8_t* data, std::size_t siz
         face.family = postScript;
         return face;
     };
-    (void) qlab::walk (workspace, options);
+    /*  ONLY AN ITEM'S LAST RANGE RUNS TO THE END (namespace draft §99): the
+        slices before it end where the next begins. */
+    for (const auto& list : qlab::walk (workspace, options).lists)
+        for (const auto& item : list.items)
+            for (std::size_t at = 0; at + 1 < item.ranges.size(); ++at)
+                if (item.ranges[at].toEnd)
+                    __builtin_trap();
 
     //  Hostile sizes and channel counts: a file QLab found that is nothing like the cue.
     for (auto& [id, count] : options.channels) count = 0;

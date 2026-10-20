@@ -132,7 +132,7 @@
     },
     "prepareError": {
       "FULL_PATH": "/godot/cue/F7HR8TVD/prepareError",
-      "DESCRIPTION": "Why getting this cue ready failed, beside prepare reading partial, as a run's error word: media-missing when its file - a sound's, a still's or a movie's - is not in the show's media or cannot be read, no-track when every voice was busy, no-slot when it has more ranges than the graph has launcher slots, bad-route when its sound is wider than a track or its destination cannot be honoured, not-built when a mic cue's rack channel was declared since the graph was built, rendering while a sound's open edit has no render yet (namespace draft 55). Empty otherwise (namespace draft 48).",
+      "DESCRIPTION": "Why getting this cue ready failed, beside prepare reading partial, as a run's error word: media-missing when its file - a sound's, a still's or a movie's - is not in the show's media or cannot be read, not-audio when a sound's file is there and is not audio, range-outside when a range or the start offset begins at or past the end of its file (namespace draft 99), no-track when every voice was busy, no-slot when it has more ranges than the graph has launcher slots, bad-route when its sound is wider than a track or its destination cannot be honoured, not-built when a mic cue's rack channel was declared since the graph was built, rendering while a sound's open edit has no render yet (namespace draft 55). Empty otherwise (namespace draft 48).",
       "TYPE": "s",
       "ACCESS": 1,
       "VALUE": [""],

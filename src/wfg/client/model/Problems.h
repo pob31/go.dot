@@ -44,6 +44,7 @@
 */
 
 #include <wfg/client/model/Icons.h>
+#include <wfg/client/model/Ranges.h>
 #include <wfg/client/model/ShowModel.h>
 
 #include <map>
@@ -136,13 +137,32 @@ namespace wfg::client::model
         std::map<std::string, std::vector<std::string>> hiddenIn;
         std::vector<std::pair<std::string, std::string>> files;     ///< cue, its file
 
+        /*  THE RANGES OF THOSE CUES, as written (namespace draft §99): set
+            against what each plays on every pass, which is what a length
+            learned after the rows were built needs. `locked` is a sound
+            locked to its movie, which takes the movie's ranges. */
+        struct Ranged
+        {
+            std::vector<RangeRow> ranges;
+            bool locked = false;
+
+            bool operator== (const Ranged&) const = default;
+        };
+
+        std::map<std::string, Ranged> ranged;
+
         bool operator== (const CueNeeds&) const = default;
     };
 
     CueNeeds needsOf (const tree::TreeSnapshot&, const std::vector<Row>&, const ObjectIndex&);
 
     /*  The cues of the list whose file was looked for and is not there
-        (`cue/<id>/missing`, namespace draft §64), one problem each, page empty. */
+        (`cue/<id>/missing`, namespace draft §64), one problem each, page empty.
+        AND THOSE WHOSE RANGES DO NOT FIT WHAT THEY PLAY (namespace draft §99,
+        AXT), keyed `range:<cue>`: a range that begins at or past the end plays
+        nothing ("outside the file"); one that only ends past it by more than a
+        millisecond plays to the end, and says so ("past the end") - never for
+        a sound locked to its movie, a few frames shorter by nature. */
     std::vector<Problem> fileProblems (const tree::TreeSnapshot&, const CueNeeds&);
 
     /*  EVERY CUE THAT NEEDS SOMETHING MISSING, marked: the warning shape, the

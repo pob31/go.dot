@@ -492,7 +492,18 @@ namespace wfg::audio
 
             /** Passes before playback moves on. Zero is for ever. */
             int loops = 1;
+
+            /*  RUNS TO THE END of the file, to the sample (namespace draft §99):
+                `out` is then only what the show thought the length was. */
+            bool toEnd = false;
         };
+
+        /*  WHY AN ARM WAS REFUSED (namespace draft §99, AXU), so the run says
+            the cause rather than "missing" for all of them: the file is not
+            there; it is there and is not audio; a range or a start offset
+            begins at or past its end, or a range ends before it begins; more
+            ranges than the graph has slots; anything else - no graph. */
+        enum class ArmRefusal { none, missing, notAudio, outside, noSlot, other };
 
         /*  Points a track's resident clip at a media file. This is the seed of
             what PR 2.3 will call arming a cue: the clip stays, its source
@@ -556,6 +567,12 @@ namespace wfg::audio
                              const std::vector<RangeSpec>& ranges,
                              double startOffset = 0.0, bool stretch = false,
                              int startSlot = 0, double sliceOffset = 0.0);
+
+        /*  What the last `setTrackRanges` that refused refused for, the first
+            cause it met; `none` after one that armed. `lastError` says it in a
+            sentence. A RANGE THAT ENDS PAST THE END IS NO REFUSAL: it plays to
+            the end of the file and no further (§99, AXR). */
+        ArmRefusal lastArmRefusal() const noexcept;
 
         /*  A CUE'S SPEED, PLACED AHEAD (namespace draft §22.4): from the last
             breakpoint the voice holds, its speed moves in a straight line to

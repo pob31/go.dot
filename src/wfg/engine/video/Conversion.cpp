@@ -304,6 +304,10 @@ namespace wfg::video
                         const auto in = std::max (0.0, secondsOf (child, "in", 0.0));
                         from = from < 0.0 ? in : std::min (from, in);
                         furthest = std::max (furthest, secondsOf (child, "out", 0.0));
+
+                        //  A range to the end of the file uses it to the end (§99), whatever its number says.
+                        if (static_cast<bool> (child.getProperty ("toEnd", false)))
+                            toTheEnd = true;
                     }
 
                 /*  NO RANGE: from the start offset, to the end of the file. */
@@ -668,12 +672,18 @@ namespace wfg::video
                                     const auto rangeBase = "/godot/range/" + child["id"].toString().toStdString() + "/";
                                     const auto in = secondsOf (child, "in", 0.0);
                                     const auto out = secondsOf (child, "out", 0.0);
+                                    const auto toEnd = static_cast<bool> (child.getProperty ("toEnd", false));
 
                                     for (const auto& [row, value] : { std::pair<const char*, double> { "in", in },
                                                                       std::pair<const char*, double> { "out", out } })
                                         if (const auto edit = document.setAttribute (rangeBase + row,
                                                                                      osc::formatDouble (std::max (0.0, value - cut)));
                                             ! edit.ok)
+                                            return Outcome::rejected (edit.reason);
+
+                                    //  The out point's write said a number; the end is still the end (§99).
+                                    if (toEnd)
+                                        if (const auto edit = document.setAttribute (rangeBase + "toEnd", "true"); ! edit.ok)
                                             return Outcome::rejected (edit.reason);
                                 }
 

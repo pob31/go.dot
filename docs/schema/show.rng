@@ -2159,7 +2159,7 @@
       </optional>
       <optional>
         <attribute name="out">
-          <a:documentation>Where in the file it ends, in seconds. Checked against the file length when the cue is ARMED, which is when the file is read, and not when the show loads - a show whose media is not on this machine yet is still a show somebody has to open. An out that is not after its in fails the arm.</a:documentation>
+          <a:documentation>Where in the file it ends, in seconds. Checked against the file length when the cue is ARMED, which is when the file is read, and not when the show loads - a show whose media is not on this machine yet is still a show somebody has to open. An out that is not after its in fails the arm; one past the end of what the cue plays is played to that end and no further, and a range that begins at or past it fails the arm as range-outside (namespace draft 99).</a:documentation>
           <data type="double">
             <param name="minInclusive">0</param>
           </data>
@@ -2168,6 +2168,15 @@
       <optional>
         <attribute name="pingPong">
           <a:documentation>Whether the range BOUNCES between its points (namespace draft 41, the author&apos;s ping-pong loop): out to its out-point and back to its in-point, each way a pass, rather than from its in-point again. Played backwards, it bounces the same way round.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="toEnd">
+          <a:documentation>Whether the range runs to the end of what the cue plays, however long that turns out to be (namespace draft 99): a bounce a twentieth of a sample shorter than its edit, a sound shorter than the movie it is locked to, a file replaced by a longer one. The out point then holds the length as it was last known, for a reader that does not know this row, and is never past the end. Writing an out point says a number and sets this false; a gesture that takes a range to the end sets it true, and the record says so, so a replay with no media agrees.</a:documentation>
           <choice>
             <value>true</value>
             <value>false</value>

@@ -18,6 +18,7 @@
 
 #include <wfg/engine/cue/AutoName.h>
 #include <wfg/engine/cue/PlayedMedia.h>
+#include <wfg/engine/cue/RangeEnd.h>
 #include <wfg/engine/cue/PictureSpec.h>
 
 #include <wfg/engine/cue/LaneCommands.h>
@@ -664,14 +665,37 @@ namespace wfg::cue
             const auto loops = value ("loops");
             range.loops = loops.empty() ? 1 : std::atoi (loops.c_str());
             range.pingPong = value ("pingPong") == "true";
+            range.toEnd = value ("toEnd") == "true";
 
             out.push_back (range);
         }
+
+        /*  THE ENDS AS THEY PLAY (§99): asked once for the cue, and only when it
+            has ranges. A length nobody knows leaves the numbers to the arm, and
+            so does a range that begins at or past the end - nothing of it can
+            play, the arm refuses it as `range-outside`, and a range made of no
+            seconds here would be one every length below divides by. */
+        if (! out.empty())
+            if (const auto length = rangeLengthOf (cue); length > 0.0)
+                for (auto& range : out)
+                    if (range.in < length)
+                        range.out = rangeOutOf (range.out, range.toEnd, length);
 
         /*  DOCUMENT ORDER IS PLAYLIST ORDER, which is why nothing sorts here:
             `range/index` is derived from exactly this walk, so the strip's
             numbering and the order the graph plays them in are one fact. */
         return out;
+    }
+
+    double Runner::rangeLengthOf (const juce::ValueTree& cue) const
+    {
+        if (const auto logged = playedLengthOf (cue, handlerDurations()); logged.has_value() && *logged > 0.0)
+            return *logged;
+
+        if (const auto learned = playedLengthOf (cue, durations); learned.has_value() && *learned > 0.0)
+            return *learned;
+
+        return 0.0;
     }
 
     audio::EqSettings Runner::eqOf (const juce::ValueTree& cue,

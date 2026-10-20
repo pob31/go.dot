@@ -98,6 +98,18 @@ namespace wfg::client::model
             return { Icon::missing, "wrong width",
                      "Wrong width: its input is not as wide as its rack channel takes - GO will play nothing" };
 
+        /*  THE FILE IS THERE, AND SAID SO (namespace draft §99, AXU): until 0.1.9
+            both of these read "missing", and sent somebody looking for a file
+            that sat in the show's media folder. Words mine, owed the author's. */
+        if (prepare == "partial" && error == "not-audio")
+            return { Icon::missing, "not audio",
+                     "Not audio: the file is in the show's media, and Go.dot cannot read it as sound - GO will play nothing" };
+
+        if (prepare == "partial" && error == "range-outside")
+            return { Icon::missing, "outside the file",
+                     "Outside the file: a range, or the start offset, begins at or past the end of the file - GO will"
+                     " play nothing until it is moved back, in the cue's ranges" };
+
         if (prepare == "partial" && error == "media-missing")
             return { Icon::missing, "missing",
                      std::string ("Missing: the file is not in the show's media, or Go.dot cannot read it - GO will ")

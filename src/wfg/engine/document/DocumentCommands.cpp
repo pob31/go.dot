@@ -411,18 +411,21 @@ namespace wfg::doc
         //----------------------------------------------------------------------
         registry.add ({ "range.create",
                         "Adds a range to a media cue: a named region of its file, and one"
-                        " entry in the playlist the cue plays instead of the whole thing.",
+                        " entry in the playlist the cue plays instead of the whole thing. `toEnd`"
+                        " true says it runs to the end of what the cue plays, however long that"
+                        " is, `out` being that length as the window knew it (namespace draft 99).",
                         { { "cue", 's', false }, { "in", 'd', false }, { "out", 'd', false },
-                          { "id", 's', true } },
+                          { "id", 's', true }, { "toEnd", 'T', true } },
                         true,
                         [&document] (CommandContext&, const std::vector<osc::Value>& args)
                         {
                             const auto id = args.size() > 3 ? args[3].getString() : std::string {};
+                            const auto toEnd = args.size() > 4 && args[4].isBool() && args[4].getBool();
 
                             const auto edit = document.createRange (args[0].getString(),
                                                                     args[1].getFloat64(),
                                                                     args[2].getFloat64(),
-                                                                    id);
+                                                                    id, toEnd);
 
                             return fromEdit (edit, withId (args, 3, edit.id));
                         } });

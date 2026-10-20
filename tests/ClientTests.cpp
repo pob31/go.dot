@@ -16689,3 +16689,71 @@ TEST_CASE ("column widths: kept on this computer, one line a column, a line that
     CHECK (read.of ("osc-grid.channel") == 120);
     CHECK (read.of ("osc-grid.parameter") == 200);
 }
+
+//==============================================================================
+/*  WHERE A RANGE ENDS, IN THE WINDOW (namespace draft §99, AXQ-AXU): the bar and
+    the table draw each end as it plays; a number that reaches the end of what
+    the cue plays is sent as the end, with the number, as one record; and the
+    refusals that are not a missing file say their own cause. */
+TEST_CASE ("client: a range's end is drawn as it plays, sent as the end when it reaches it, and its refusals said apart (§99)")
+{
+    //  Drawn as it plays.
+    std::vector<model::RangeRow> rows { { "A", "", 0.0, 5.0 }, { "B", "", 6.0, 12.0 }, { "C", "", 13.0, 14.0 },
+                                        { "D", "", 21.0, 22.0 } };
+    rows[2].toEnd = true;
+    model::endsAsPlayed (rows, 20.0);
+    CHECK (rows[0].out == doctest::Approx (5.0));
+    CHECK (rows[1].out == doctest::Approx (12.0));
+    CHECK (rows[2].out == doctest::Approx (20.0));
+    CHECK (rows[3].out == doctest::Approx (22.0));     // begins past the end: left, and marked
+
+    auto unknown = rows;
+    model::endsAsPlayed (unknown, 0.0);
+    CHECK (unknown == rows);
+
+    //  Sent as the end.
+    std::vector<tree::Node> nodes;
+    const auto put = [&nodes] (const char* address, osc::Value value)
+    {
+        tree::Node node;
+        node.address = address;
+        node.values = { std::move (value) };
+        nodes.push_back (std::move (node));
+    };
+
+    put ("/godot/cue/CUE1/duration", osc::Value::float64 (162.2465));
+    put ("/godot/range/RNG1/cue", osc::Value::string ("CUE1"));
+    std::sort (nodes.begin(), nodes.end(), [] (const tree::Node& a, const tree::Node& b) { return a.address < b.address; });
+    const tree::TreeSnapshot snapshot (0, nullptr, nullptr, std::move (nodes));
+
+    const auto atEnd = model::rangeEndWrites (snapshot, "/godot/range/RNG1/out", "162.2465");
+    REQUIRE (atEnd.size() == 2u);
+    CHECK (atEnd[0] == std::pair<std::string, std::string> { "/godot/range/RNG1/out", "162.2465" });
+    CHECK (atEnd[1] == std::pair<std::string, std::string> { "/godot/range/RNG1/toEnd", "true" });
+
+    CHECK (model::rangeEndWrites (snapshot, "/godot/range/RNG1/out", "162.2460").size() == 2u);   // within a millisecond
+    CHECK (model::rangeEndWrites (snapshot, "/godot/range/RNG1/out", "170").size() == 2u);        // past it
+    CHECK (model::rangeEndWrites (snapshot, "/godot/range/RNG1/out", "100").empty());             // a number
+    CHECK (model::rangeEndWrites (snapshot, "/godot/range/RNG1/in", "162.2465").empty());         // not an end
+    CHECK (model::rangeEndWrites (snapshot, "/godot/cue/CUE1/level", "0").empty());
+
+    CHECK (model::reachesItsEnd (snapshot, "CUE1", 162.2465));
+    CHECK_FALSE (model::reachesItsEnd (snapshot, "CUE1", 160.0));
+    CHECK_FALSE (model::reachesItsEnd (snapshot, "NOCUE001", 10.0));     // a length not known is never the end
+
+    //  The gesture says so, the identifier left for the engine to draw.
+    const auto made = gesture::createRange ("CUE1", 0.0, 162.2465, true);
+    REQUIRE (made.args.size() == 5u);
+    CHECK (made.args[3].getString().empty());
+    CHECK (made.args[4].getBool());
+    CHECK (gesture::createRange ("CUE1", 0.0, 10.0).args.size() == 3u);
+
+    //  Refusals said apart from a missing file.
+    const auto notAudio = model::readinessMark ("partial", "not-audio", "media");
+    CHECK (notAudio.text == "not audio");
+    CHECK (notAudio.meaning.find ("Missing") == std::string::npos);
+
+    const auto outside = model::readinessMark ("partial", "range-outside", "media");
+    CHECK (outside.text == "outside the file");
+    CHECK (outside.meaning.find ("begins at or past the end") != std::string::npos);
+}

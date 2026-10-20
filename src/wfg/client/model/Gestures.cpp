@@ -443,11 +443,19 @@ namespace wfg::client::gesture
         return { origin::window, "binding.learn", { osc::Value::string (bindingId) } };
     }
 
-    Event createRange (const std::string& cueId, double in, double out)
+    Event createRange (const std::string& cueId, double in, double out, bool toEnd)
     {
-        return { origin::window, "range.create",
-                 { osc::Value::string (cueId), osc::Value::float64 (in),
-                   osc::Value::float64 (out) } };
+        std::vector<osc::Value> args { osc::Value::string (cueId), osc::Value::float64 (in),
+                                       osc::Value::float64 (out) };
+
+        //  The identifier left for the engine to draw, then the end said (§99).
+        if (toEnd)
+        {
+            args.push_back (osc::Value::string ({}));
+            args.push_back (osc::Value::boolean (true));
+        }
+
+        return { origin::window, "range.create", std::move (args) };
     }
 
     Event moveObject (const std::string& id, const std::string& parent, int index)

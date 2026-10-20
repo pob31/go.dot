@@ -16,6 +16,7 @@
 
 #include <wfg/engine/import/AlsImport.h>
 
+#include <wfg/engine/cue/RangeEnd.h>
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/Sequence.h>
@@ -783,19 +784,25 @@ namespace wfg::import::als
                                           ? static_cast<double> (sound.file.frames) / sound.file.sampleRate : 0.0;
                 const auto whole = sound.in < 0.0005 && fileLength > 0.0 && std::abs (sound.out - fileLength) < 0.0005;
 
+                /*  A RANGE LIVE PLAYS TO THE FILE'S END RUNS TO THE END (§99): so a
+                    file bounced again or replaced still plays to its own. */
+                const auto loopToEnd = cue::reachesTheEnd (sound.loopOut, fileLength);
+
                 if (sound.loops)
                 {
                     if (std::abs (sound.in - sound.loopIn) < 0.0005)
                     {
-                        const auto range = document.createRange (cueId, sound.loopIn, sound.loopOut, ids.of (sound.key + ":loop"));
+                        const auto range = document.createRange (cueId, sound.loopIn, sound.loopOut, ids.of (sound.key + ":loop"),
+                                                                 loopToEnd);
 
                         if (range.ok)
                             write ("/godot/range/" + range.id + "/loops", "0", step.scene);
                     }
                     else
                     {
-                        document.createRange (cueId, sound.in, sound.loopOut, ids.of (sound.key + ":range"));
-                        const auto range = document.createRange (cueId, sound.loopIn, sound.loopOut, ids.of (sound.key + ":loop"));
+                        document.createRange (cueId, sound.in, sound.loopOut, ids.of (sound.key + ":range"), loopToEnd);
+                        const auto range = document.createRange (cueId, sound.loopIn, sound.loopOut, ids.of (sound.key + ":loop"),
+                                                                 loopToEnd);
 
                         if (range.ok)
                             write ("/godot/range/" + range.id + "/loops", "0", step.scene);
@@ -803,7 +810,8 @@ namespace wfg::import::als
                 }
                 else if (! whole && sound.out > sound.in)
                 {
-                    document.createRange (cueId, sound.in, sound.out, ids.of (sound.key + ":range"));
+                    document.createRange (cueId, sound.in, sound.out, ids.of (sound.key + ":range"),
+                                          cue::reachesTheEnd (sound.out, fileLength));
                 }
 
                 //  --- Its EQ (QL) -------------------------------------------------

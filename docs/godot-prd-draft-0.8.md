@@ -2483,6 +2483,12 @@ name. Playback walks the list.
 - Ranges need not be contiguous nor in file order (decision L) — a media cue is
   then a playlist over one file, which covers alternate takes and versioned
   sections without duplicating media.
+- **A range ends where the file does.** A range taken to the end of its file
+  *runs to the end* of whatever the cue plays — a frozen edit's bounce, a sound
+  shorter than the movie it is locked to, a file replaced — and one whose out-point
+  is past the end plays to the end; only a range that begins past the end plays
+  nothing, and says so. *Added in 0.8, at the author's direction (2026-10-20,
+  `docs/godot-namespace-draft-0.1.md` §99).*
 - **Ranges and loop counts are copyable between cues.** This is the third
   instance of the same gesture (after output assignment and fader binding), so it
   is **structured copy-paste of named field groups** rather than a feature per

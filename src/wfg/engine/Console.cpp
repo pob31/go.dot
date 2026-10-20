@@ -83,6 +83,7 @@
 #include <wfg/engine/video/VideoProbe.h>
 #include <wfg/engine/video/FfmpegInstall.h>
 #include <wfg/engine/video/InstalledFonts.h>
+#include <wfg/engine/video/Movie.h>
 #include <wfg/engine/video/ShowFonts.h>
 #include <wfg/engine/video/TextRaster.h>
 #include <wfg/engine/video/VideoCommands.h>
@@ -101,6 +102,7 @@
 #include <wfg/engine/document/SectionCommands.h>
 #include <wfg/engine/audio/EditRenderer.h>
 #include <wfg/engine/cue/PlayedMedia.h>
+#include <wfg/engine/cue/RangeEnd.h>
 #include <wfg/engine/document/DocumentSession.h>
 #include <wfg/engine/document/DocumentWriter.h>
 #include <wfg/engine/document/RelaxNg.h>
@@ -2234,6 +2236,70 @@ namespace
                     result.problems.push_back ((label + "plugins/" + file + ", which this bundle does not have -"
                                                         " that voice will play the preset with the cue's own values")
                                                    .toStdString());
+            };
+
+            walk (document.root());
+        }
+
+        /*  A CUE'S RANGES AGAINST THE FILE IT PLAYS (namespace draft §99, AXV),
+            asked of the files in this bundle - the document never reads one.
+            A range that BEGINS at or past the end plays nothing and its cue is
+            refused at the arm (`range-outside`): a problem. One that only ENDS
+            past it by more than a millisecond plays to the end, and somebody
+            may want to know its number says more: said, and no exit code - and
+            not for a sound locked to a movie, which takes the movie's ranges
+            and is often a few frames shorter by nature. A length that does not
+            read is the missing-file warning's business, not this one's. */
+        if (target.isDirectory())
+        {
+            const auto mediaFolder = target.getChildFile ("media").getFullPathName().toStdString();
+
+            std::function<void (const juce::ValueTree&)> walk = [&] (const juce::ValueTree& node)
+            {
+                for (const auto& child : node)
+                    walk (child);
+
+                if (! (node.hasType ("Media") || node.hasType ("Video")) || ! node.getChildWithName ("Range").isValid())
+                    return;
+
+                auto length = wfg::cue::editedLengthOf (node).value_or (0.0);
+
+                if (! (length > 0.0))
+                {
+                    const auto named = node.getProperty ("file").toString().toStdString();
+                    const auto onDisk = wfg::audio::resolveMediaPath (mediaFolder, named);
+                    length = node.hasType ("Video") ? wfg::video::movie::durationOf (onDisk)
+                                                    : wfg::audio::mediaDurationSeconds (onDisk);
+                }
+
+                if (! (length > 0.0))
+                    return;
+
+                const auto label = "cue " + node.getProperty ("number").toString() + " \""
+                                     + juce::String (wfg::cue::AutoNames { node.getRoot() }.shownAs (node)) + "\": ";
+                const auto locked = node.getProperty ("lockedTo").toString().isNotEmpty();
+                int index = 0;
+
+                for (const auto& range : node)
+                {
+                    if (! range.hasType ("Range"))
+                        continue;
+
+                    ++index;
+                    const auto in = static_cast<double> (range.getProperty ("in", 0.0));
+                    const auto out = static_cast<double> (range.getProperty ("out", 0.0));
+                    const auto which = "its range " + juce::String (index) + " ";
+
+                    if (! (in < length))
+                        result.problems.push_back ((label + which + "begins at " + juce::String (in, 3)
+                                                    + " s, at or past the end of what it plays (" + juce::String (length, 3)
+                                                    + " s) - GO will play nothing").toStdString());
+                    else if (const auto over = wfg::cue::rangeOverrunOf (out, static_cast<bool> (range.getProperty ("toEnd", false)),
+                                                                          length);
+                             over > 0.0 && ! locked)
+                        std::cerr << "    " << label << which << "ends " << juce::String (over, 3)
+                                  << " s past the end of what it plays - it plays to the end" << std::endl;
+                }
             };
 
             walk (document.root());
@@ -4963,9 +5029,13 @@ namespace
                                                            : std::string(),
                                       named)) };
 
+            /*  TO THE NANOSECOND (namespace draft §99): a range that runs to the
+                end is stopped at the length read here, by the session and its
+                replay alike, and three decimals put that stop up to half a
+                millisecond past a loop's end - its first moments heard again. */
             headerLines.push_back ("media " + named + " "
                                      + std::to_string (file.existsAsFile() ? file.getSize() : 0)
-                                     + " " + juce::String (seconds, 3).toStdString());
+                                     + " " + juce::String (seconds, 9).toStdString());
         }
 
         if (! logPath.empty() && engine.log().open (logPath, headerLines))
