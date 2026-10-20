@@ -34,7 +34,9 @@
     pointer glyph and its number is drawn in the standby colour; a disabled cue
     is dimmed AND its name is struck; a group says its mode in words. Somebody
     reading this list on a projector with the colour wrong still knows where GO
-    will go.
+    will go. The column the glyph stands in has a ground of its own and a ▶ for
+    a heading that says, hovered or clicked, what it is and how it moves; and
+    while nothing is parked the heading says so (namespace draft §97).
 
     WHAT THIS DOES NOT DO YET: selection, dragging, editing a cell. Those are
     M5 and after, and each wants a round of the author's eye before it is
@@ -197,6 +199,18 @@ namespace wfg::client::ui
             and only the rows whose flag came or went are asked to paint. */
         void setFlags (std::set<std::string> flaggedNow);
 
+        /*  WHAT THE POINTER IS AND HOW IT MOVES, in sentences (namespace draft
+            §97): the heading glyph's tooltip and the card a click on it
+            opens. One place, so the two cannot come to say different things. */
+        static juce::String pointerWords();
+
+        /*  AND WHAT THE HEADING SAYS WHILE NOTHING IS PARKED, across the
+            name column's heading - gone the moment a cue is. */
+        static juce::String noStandbyWords();
+
+        /** The glyph over the gutter, which carries the tooltip and opens the card. */
+        juce::Component& pointerHeadingForTest() noexcept { return pointerHeading; }
+
         void paint (juce::Graphics& g) override;
         void resized() override;
         bool keyPressed (const juce::KeyPress& key) override;
@@ -316,9 +330,32 @@ namespace wfg::client::ui
         void paintHeadings (juce::Graphics& g, juce::Rectangle<int> area);
         int headingHeight() const noexcept;
 
+        /*  THE GUTTER'S OWN GROUND (namespace draft §97), laid on every kind
+            of row right after its ground, so the column runs unbroken down
+            the list and the washes still paint over it. */
+        void paintGutterGround (juce::Graphics& g, int height) const;
+
+        /*  THE POINTER COLUMN'S HEADING (namespace draft §97, the author's
+            AXG-AXH): the standby's ▶ over the gutter, a tooltip on the hover
+            and a card on a click, saying what the pointer is and how it
+            moves. A component of its own because a ListBox's tooltip is asked
+            per row, never per column, and the heading is not a row. */
+        class PointerHeading final : public juce::Component,
+                                     public juce::SettableTooltipClient
+        {
+        public:
+            void setTheme (const model::Theme& themeToUse);
+            void paint (juce::Graphics& g) override;
+            void mouseUp (const juce::MouseEvent& event) override;
+
+        private:
+            model::Theme theme;
+        };
+
         Actions actions;
         model::Theme theme;
         juce::ListBox list { "cues", this };
+        PointerHeading pointerHeading;
 
         /*  A COPY, not a pointer into the model: the model is rebuilt whole
             when the show moves, and a view holding references into the vector
@@ -346,6 +383,12 @@ namespace wfg::client::ui
         bool flagKeyDown = false;
         std::string standby;
         int standbyRow = -1;
+
+        /*  WHETHER THE HEADING SAYS "no standby" (§97): nothing parked, the
+            list not a cart, and some row that could take the pointer. */
+        bool cart = false;
+        bool parkable = false;
+        bool hintsNoStandby() const noexcept;
         std::vector<std::string> chosen;     ///< the picked cues, as the selection holds them
         bool isChosen (const std::string& id) const;
 

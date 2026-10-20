@@ -57,7 +57,7 @@ A show is a folder that contains one or more `.wfg` files plus a `media/` folder
 3. **Add sounds.** Drag WAV, AIFF, FLAC or Ogg files onto the cue list. Each becomes a media cue named after its file. Drop one on an existing cue to replace its file.
 4. **Add other cues** from the *Add* row above the list: `memo`, `media`, `mic`, `video`, `fade`, `transport`, `osc`, `midi`, `process`, `script`, `group`. The ones with a ▾ open a short menu of kinds.
 5. **Shape each cue** in the inspector on the right: name, pre-wait, post-wait, follow, level. The buttons at the top of the inspector open the panels at the foot of the window: *Waveform*, *EQ*, *FX*, *Sends*, *Curve*, *Timeline*.
-6. **Run it.** Click the far left of any cue to move the playback pointer. The standby cue is highlighted with a yellow mark. Press **Space** for GO.
+6. **Run it.** The grey column at the far left of the cue list holds the pointer: the cue marked ▶ there is the standby, the one GO fires next. Its row is lit amber and its name stands beside the GO button. Click that column on any cue to move the ▶ there, or use ↑ / ↓. Until a cue holds it, the top of the list says "no standby" and GO has nothing to fire. Hover or click the ▶ at the top of the column for a reminder. Press **Space** for GO.
 7. **Save** with Ctrl+S (⌘S on a Mac). Autosave runs anyway.
 
 ### The keys that matter during a show

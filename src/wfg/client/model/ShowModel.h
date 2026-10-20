@@ -304,6 +304,11 @@ namespace wfg::client::model
         /** The list these rows belong to. */
         const std::string& list() const noexcept { return listId; }
 
+        /*  WHETHER THAT LIST IS A CART (namespace draft 74, AQR), which has no
+            standby and never will: what keeps the cue list from telling
+            somebody to park a pointer it cannot hold (§97). */
+        bool isCart() const noexcept { return cart; }
+
         /** How many times a walk has actually run, for the counting test. */
         std::size_t rebuilds() const noexcept { return walks; }
 
@@ -357,5 +362,6 @@ namespace wfg::client::model
         std::size_t walks = 0;
         bool built = false;
         bool foldsMoved = false;
+        bool cart = false;
     };
 }

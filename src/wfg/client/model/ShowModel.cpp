@@ -154,6 +154,7 @@ namespace wfg::client::model
 
         drawn.clear();
         indexOfCue.clear();
+        cart = ! listId.empty() && text (snapshot, "/godot/list/" + listId + "/kind") == "cart";
 
         if (! listId.empty())
             walk (snapshot, listId, true, 0);

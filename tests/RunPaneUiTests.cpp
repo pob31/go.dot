@@ -310,6 +310,182 @@ TEST_CASE ("cue list: how ready each cue is, a mark in a cell of its own beside 
     }
 }
 
+TEST_CASE ("cue list: the pointer column - a wider gutter with its own ground, a heading glyph that says what it is, and a hint while the standby is clear (§97)")
+{
+    /*  Namespace draft §97: a friend of the author's did not find the standby
+        pointer. The gutter is four units wide on a ground of its own, its
+        heading is the standby's ▶ with the words on a hover, the heading says
+        "no standby" while nothing is parked, and a click in the wider gutter
+        parks while one past it picks. With WFG_SNAPSHOT_DIR set,
+        cue-list-pointer.png (clear) and cue-list-pointer-parked.png. */
+    wfg::doc::ShowDocument document;
+    const auto list = document.createList ("Main");
+    REQUIRE (list.ok);
+    const auto first = document.createCue (list.id, 0, "memo", "Doors").id;
+    REQUIRE (document.createCue (list.id, 1, "memo", "Preshow").ok);
+
+    wfg::Engine engine;
+    wfg::cue::RunTable runs;
+    wfg::tree::MountTable mounts;
+    wfg::tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
+    parameters.markStale();
+
+    wfg::tree::EngineState state;
+    const auto snapshot = parameters.publish (0, state);
+    REQUIRE (snapshot != nullptr);
+
+    model::ShowModel show;
+    REQUIRE (show.refresh (*snapshot, list.id));
+    CHECK_FALSE (show.isCart());
+
+    int firstRow = -1;
+
+    for (std::size_t at = 0; at < show.rows().size(); ++at)
+        if (show.rows()[at].id == first && show.rows()[at].rowKind == model::RowKind::cue)
+            firstRow = static_cast<int> (at);
+
+    REQUIRE (firstRow >= 0);
+
+    std::string parked, picked;
+    ui::CueListComponent::Actions actions;
+    actions.park = [&] (const std::string& id) { parked = id; };
+    actions.pick = [&] (const std::string& id, bool, bool) { picked = id; };
+
+    const model::Theme theme;
+    ui::CueListComponent cues (theme, actions);
+    cues.setSize (900, 200);
+    cues.show (show, {}, {});
+
+    const auto paint = [&cues]
+    {
+        juce::Image canvas (juce::Image::ARGB, 900, 200, true, juce::SoftwareImageType());
+        juce::Graphics g (canvas);
+        cues.paintEntireComponent (g, false);
+        return canvas;
+    };
+
+    const auto unit = juce::roundToInt (theme.type * 7.0);
+    const auto pad = unit / 2;
+    const auto rowHeight = juce::roundToInt (theme.row * theme.type);
+    const auto headingHeight = juce::roundToInt (rowHeight * 0.7);
+    const auto gutter = juce::Rectangle<int> (pad, 0, 4 * unit, 200);
+    const auto kindLeft = 900 - pad - (3 * 6 + 8) * unit;
+    const auto nameLeft = pad + 4 * unit + 6 * unit;
+    const auto nameHeading = juce::Rectangle<int> (nameLeft, 0, kindLeft - nameLeft, headingHeight);
+    const auto firstTop = headingHeight + firstRow * rowHeight;
+
+    const auto amber = [] (juce::Colour c)
+    {
+        return c.getRed() > 150 && c.getGreen() > 100 && c.getBlue() < 120 && c.getRed() - c.getBlue() > 80;
+    };
+
+    const auto amberIn = [&amber] (const juce::Image& image, juce::Rectangle<int> area)
+    {
+        int count = 0;
+
+        for (int y = area.getY(); y < area.getBottom(); ++y)
+            for (int x = area.getX(); x < area.getRight(); ++x)
+                if (amber (image.getPixelAt (x, y)))
+                    ++count;
+
+        return count;
+    };
+
+    const auto save = [] (const juce::Image& image, const char* name)
+    {
+        if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+        {
+            const juce::File file { juce::File (dir).getChildFile (name) };
+            file.getParentDirectory().createDirectory();
+            file.deleteFile();
+
+            juce::FileOutputStream out { file };
+            REQUIRE (out.openedOk());
+            CHECK (juce::PNGImageFormat().writeImageToStream (image, out));
+            MESSAGE ("wrote " << file.getFullPathName().toStdString());
+        }
+    };
+
+    //  NOTHING PARKED: the glyph heads the gutter, and the heading says so.
+    const auto clear = paint();
+    save (clear, "cue-list-pointer.png");
+
+    CHECK (amberIn (clear, gutter.withHeight (headingHeight)) > 0);
+    CHECK (amberIn (clear, nameHeading) > 0);
+    CHECK (amberIn (clear, gutter.withY (firstTop).withHeight (rowHeight)) == 0);
+
+    //  THE GUTTER'S OWN GROUND, the full four units, on a row with nothing in its gutter.
+    const auto y = firstTop + 3;
+    CHECK (clear.getPixelAt (pad + 1, y) == ui::Look::colour (theme, "gutter"));
+    CHECK (clear.getPixelAt (pad + 4 * unit - 1, y) == ui::Look::colour (theme, "gutter"));
+    CHECK (clear.getPixelAt (898, y) == ui::Look::colour (theme, "panel-cue"));
+    CHECK (ui::Look::colour (theme, "gutter") != ui::Look::colour (theme, "panel-cue"));
+
+    //  THE HEADING'S WORDS AND PLACE.
+    auto& heading = cues.pointerHeadingForTest();
+    CHECK (heading.getX() == pad);
+    CHECK (heading.getWidth() == 4 * unit);
+    auto* tip = dynamic_cast<juce::TooltipClient*> (&heading);
+    REQUIRE (tip != nullptr);
+    CHECK (tip->getTooltip() == ui::CueListComponent::pointerWords());
+    CHECK (tip->getTooltip().contains ("GO fires next"));
+    CHECK (tip->getTooltip().contains ("Click in this column"));
+    CHECK (ui::CueListComponent::noStandbyWords().startsWith ("no standby"));
+
+    //  PARKED: the glyph on the row, and the hint gone.
+    cues.show (show, first, {});
+    const auto parkedImage = paint();
+    save (parkedImage, "cue-list-pointer-parked.png");
+
+    CHECK (amberIn (parkedImage, gutter.withY (firstTop).withHeight (rowHeight)) > 0);
+    CHECK (amberIn (parkedImage, nameHeading) == 0);
+
+    /*  THE CLICK SPLIT, at the new width: three units in parks, one unit past
+        the gutter picks. */
+    juce::ListBox* box = nullptr;
+
+    for (auto* child : cues.getChildren())
+        if (auto* found = dynamic_cast<juce::ListBox*> (child))
+            box = found;
+
+    REQUIRE (box != nullptr);
+    auto* rows = box->getListBoxModel();
+    REQUIRE (rows != nullptr);
+
+    //  Through the list's model, as the row's own mouse-up would: x is the row's.
+    const auto click = [rows, box, firstRow] (float x)
+    {
+        const auto source = juce::Desktop::getInstance().getMainMouseSource();
+        const auto now = juce::Time::getCurrentTime();
+        const juce::Point<float> at { x, 4.0f };
+        const juce::ModifierKeys left { juce::ModifierKeys::leftButtonModifier };
+        const juce::MouseEvent event (source, at, left, juce::MouseInputSource::defaultPressure,
+                                      0.0f, 0.0f, 0.0f, 0.0f, box, box, now, at, now, 1, false);
+        rows->listBoxItemClicked (firstRow, event);
+    };
+
+    click (static_cast<float> (pad + 3 * unit));
+    CHECK (parked == first);
+    CHECK (picked.empty());
+
+    parked.clear();
+    click (static_cast<float> (pad + 5 * unit));
+    CHECK (parked.empty());
+    CHECK (picked == first);
+
+    //  A CART HAS NO STANDBY, and its heading never asks for one.
+    REQUIRE (document.setAttribute ("/godot/list/" + list.id + "/kind", "cart").ok);
+    parameters.markStale();
+    state.documentRevision = document.revision();       // what the engine publishes, which the model keys on
+    const auto cartSnapshot = parameters.publish (1, state);
+    REQUIRE (cartSnapshot != nullptr);
+    REQUIRE (show.refresh (*cartSnapshot, list.id));
+    CHECK (show.isCart());
+
+    cues.show (show, {}, {});
+    CHECK (amberIn (paint(), nameHeading) == 0);
+}
+
 TEST_CASE ("cue list: a drag anywhere inside a group keeps its footer's band to drop on, and its title shows the header's too")
 {
     /*  The author, 2026-10-17: the footer "disappears if you move away from

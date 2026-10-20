@@ -56,6 +56,14 @@ namespace wfg::client::ui
             words, and the order somebody works in rather than the alphabet. */
         constexpr int numberChars = 6;
 
+        /*  THE PARK GUTTER, where the pointer stands and the one place a click
+            parks it (namespace draft §97). Twice the two it was, and with a
+            ground of its own: at two it read as the list's margin, and a
+            friend of the author's trying Go.dot for the first time did not
+            find it (2026-10-20) - "this one important detail is not obvious".
+            Every carving that steps past the gutter asks this one number. */
+        constexpr int gutterChars = 4;
+
         /*  TWICE THE SIZE THEY WERE (author, 2026-09-18: "you can enlarge these
             triangles two fold"). A twist is the one control on a row and it was
             drawn at the size of a word beside it. The glyph's ink is about half
@@ -209,6 +217,7 @@ namespace wfg::client::ui
         list.setWantsKeyboardFocus (false);     // the arrows are this component's
         list.getViewport()->setScrollBarsShown (true, false);
         addAndMakeVisible (list);
+        addAndMakeVisible (pointerHeading);
 
         /*  THE CELL EDITOR rides on the list's own scrolling surface, so a
             box opened over a row stays over it when the list scrolls. Enter
@@ -254,7 +263,7 @@ namespace wfg::client::ui
     {
         const auto unit = juce::roundToInt (theme.type * 7.0);
 
-        return unit / 2 + unit * 2 + numberChars * unit;
+        return unit / 2 + gutterChars * unit + numberChars * unit;
     }
 
     /** Where the rail of the Nth enclosing container stands. Level 1 is the outermost. */
@@ -299,9 +308,96 @@ namespace wfg::client::ui
         list.setRowHeight (rowHeight());
         list.setColour (juce::ListBox::backgroundColourId, Look::colour (theme, "panel-cue"));
         list.setColour (juce::ListBox::outlineColourId, Look::colour (theme, "rule"));
+        pointerHeading.setTheme (theme);
 
         resized();
         repaint();
+    }
+
+    void CueListComponent::paintGutterGround (juce::Graphics& g, int height) const
+    {
+        const auto unit = juce::roundToInt (theme.type * 7.0);
+
+        g.setColour (Look::colour (theme, "gutter"));
+        g.fillRect (unit / 2, 0, gutterChars * unit, height);
+    }
+
+    juce::String CueListComponent::pointerWords()
+    {
+        return juce::String::fromUTF8 ("\xe2\x96\xb6 marks the cue GO fires next: the standby. Click in this"
+                                       " column on any cue to move the \xe2\x96\xb6 there; \xe2\x86\x91 and"
+                                       " \xe2\x86\x93 move it one cue at a time. Its row is lit amber, and its"
+                                       " name stands beside the GO button.");
+    }
+
+    juce::String CueListComponent::noStandbyWords()
+    {
+        return juce::String::fromUTF8 ("no standby: click in the \xe2\x96\xb6 column beside a cue to park it there");
+    }
+
+    void CueListComponent::PointerHeading::setTheme (const model::Theme& themeToUse)
+    {
+        theme = themeToUse;
+        setTooltip (pointerWords());
+        setMouseCursor (juce::MouseCursor::PointingHandCursor);
+        repaint();
+    }
+
+    void CueListComponent::PointerHeading::paint (juce::Graphics& g)
+    {
+        /*  THE SAME GLYPH IN THE SAME AMBER as the one on the standby's row,
+            so the heading names its column by showing what stands in it - and
+            on the gutter's ground, so it reads as the head of that column. */
+        g.fillAll (Look::colour (theme, "gutter"));
+        g.setColour (Look::colour (theme, "standby"));
+        g.setFont (Look::font (theme, 13.0f));
+        g.drawText (juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xb6")),
+                    getLocalBounds(), juce::Justification::centred, false);
+    }
+
+    void CueListComponent::PointerHeading::mouseUp (const juce::MouseEvent& event)
+    {
+        /*  A CLICK KEEPS THE WORDS UP (the author, 2026-10-20: a hover tip and
+            a card on a click), for whoever did not wait for the tooltip. The
+            card is the tooltip's sentences, wrapped, on the heading's ground;
+            a click anywhere else puts it away. */
+        if (! event.mouseWasClicked() || event.mods.isPopupMenu())
+            return;
+
+        class Card final : public juce::Component
+        {
+        public:
+            explicit Card (const model::Theme& themeToUse) : theme (themeToUse)
+            {
+                const auto width = juce::roundToInt (320.0 * theme.type);
+
+                layout.createLayout (text(), static_cast<float> (width - margin() * 2));
+                setSize (width, juce::roundToInt (layout.getHeight()) + margin() * 2);
+            }
+
+            void paint (juce::Graphics& g) override
+            {
+                g.fillAll (Look::colour (theme, "panel-high"));
+                layout.draw (g, getLocalBounds().reduced (margin()).toFloat());
+            }
+
+        private:
+            int margin() const { return juce::roundToInt (10.0 * theme.type); }
+
+            juce::AttributedString text() const
+            {
+                juce::AttributedString said;
+                said.append ("The standby pointer\n", Look::font (theme, 14.0f).boldened(),
+                             Look::colour (theme, "standby"));
+                said.append (pointerWords(), Look::font (theme, 13.0f), Look::colour (theme, "ink"));
+                return said;
+            }
+
+            model::Theme theme;
+            juce::TextLayout layout;
+        };
+
+        juce::CallOutBox::launchAsynchronously (std::make_unique<Card> (theme), getScreenBounds(), nullptr);
     }
 
     bool CueListComponent::isChosen (const std::string& id) const
@@ -330,7 +426,7 @@ namespace wfg::client::ui
         const auto indent = unit * 2;
 
         auto area = juce::Rectangle<int> (0, 0, width, height).reduced (pad, 0);
-        area.removeFromLeft (unit * 2);
+        area.removeFromLeft (gutterChars * unit);
 
         Cells cells;
         cells.postWait = area.removeFromRight (timeChars * unit);
@@ -631,6 +727,7 @@ namespace wfg::client::ui
             one question instead of three. */
         const auto structureMoved = model.rebuilds() != drawnWalk || model.list() != drawnList
                                  || stepsVersion != drawnSteps;
+        const auto hintWas = hintsNoStandby();
 
         if (structureMoved)
         {
@@ -638,6 +735,9 @@ namespace wfg::client::ui
             drawnWalk = model.rebuilds();
             drawnList = model.list();
             drawnSteps = stepsVersion;
+            cart = model.isCart();
+            parkable = std::any_of (rows.begin(), rows.end(),
+                                    [] (const model::Row& row) { return ! row.parksOn().empty(); });
 
             /*  THE STEPS GO UNDER THE AIMED CUE'S OWN ROW - after its members
                 and bands when it is a group, so they read as what happened
@@ -738,6 +838,17 @@ namespace wfg::client::ui
                 if (const auto at = model.indexOf (id); at >= 0 && ! structureMoved)
                     list.repaintRow (at);
         }
+
+        /*  AND THE HEADING, only when its hint comes or goes (§97): once when
+            the pointer is cleared and once when a cue is parked, a strip one
+            heading high - not at tick rate, and never the whole list. */
+        if (hintsNoStandby() != hintWas)
+            repaint (0, 0, getWidth(), headingHeight());
+    }
+
+    bool CueListComponent::hintsNoStandby() const noexcept
+    {
+        return standby.empty() && ! cart && parkable;
     }
 
     int CueListComponent::getNumRows()
@@ -820,6 +931,7 @@ namespace wfg::client::ui
             only parity. */
         g.fillAll (Look::colour (theme, entry.section != model::Section::member
                                           ? "panel-section-cue" : "panel-cue"));
+        paintGutterGround (g, height);
 
         if (isPicked)
         {
@@ -913,7 +1025,7 @@ namespace wfg::client::ui
             The pointer's own mark lives here too, at the far left where the
             eye runs down looking for it, rather than beside the name where it
             moved with the indent. */
-        const auto gutter = area.removeFromLeft (unit * 2);
+        const auto gutter = area.removeFromLeft (gutterChars * unit);
 
         if (isStandby)
         {
@@ -1205,9 +1317,10 @@ namespace wfg::client::ui
         const auto light = ! hint.empty();
 
         g.fillAll (Look::colour (theme, light ? "panel-cue" : "panel-section"));
+        paintGutterGround (g, height);
 
         auto area = juce::Rectangle<int> (0, 0, width, height).reduced (pad, 0);
-        area.removeFromLeft (unit * 2 + numberChars * unit);
+        area.removeFromLeft (gutterChars * unit + numberChars * unit);
 
         paintRails (entry, row, g, height);
 
@@ -1339,7 +1452,7 @@ namespace wfg::client::ui
         if (entry.isGroup)
         {
             const auto indent = unit * 2;
-            const auto twistFrom = unit / 2 + unit * 2 + numberChars * unit + entry.depth * indent;
+            const auto twistFrom = unit / 2 + gutterChars * unit + numberChars * unit + entry.depth * indent;
 
             if (event.x >= twistFrom && event.x < twistFrom + indent)
             {
@@ -1354,7 +1467,7 @@ namespace wfg::client::ui
             click has to carry and the reason the whole row could not be one of
             them. The page splits them the same way, and it is why the row body
             was left inert until there was an inspector for it to speak to. */
-        if (event.x > unit * 2 + unit / 2)
+        if (event.x > gutterChars * unit + unit / 2)
         {
             /*  WITH WHAT THE HAND HELD: shift extends from the anchor, ctrl/⌘
                 toggles, and the selection model reads them (model/Selection.h).
@@ -2346,7 +2459,7 @@ namespace wfg::client::ui
         g.fillRect (area.getX(), area.getBottom() - 1, area.getWidth(), 1);
 
         auto row = area.reduced (pad, 0);
-        row.removeFromLeft (unit * 2);        // the park gutter, which has no label
+        row.removeFromLeft (gutterChars * unit);   // the park gutter: its heading is the pointerHeading component
 
         g.setColour (Look::colour (theme, "ink-off"));
         g.setFont (Look::font (theme, 10.0f));
@@ -2375,6 +2488,17 @@ namespace wfg::client::ui
 
         g.drawFittedText ("CUE", row.removeFromLeft (numberChars * unit),
                           juce::Justification::centredLeft, 1, 0.6f);
+
+        /*  NOTHING PARKED, SAID WHERE THE EYE IS (namespace draft §97, the
+            author's AXI): across the name column's heading, in the standby's
+            amber, while GO has nothing to fire and a cue could take the
+            pointer. The web console says the same under its transport. */
+        if (hintsNoStandby())
+        {
+            g.setColour (Look::colour (theme, "standby"));
+            g.drawFittedText (noStandbyWords(), row.reduced (pad, 0),
+                              juce::Justification::centredLeft, 1, 0.6f);
+        }
     }
 
     void CueListComponent::setSteps (const std::string& underCue, std::vector<model::Row> stepsToShow)
@@ -2495,9 +2619,10 @@ namespace wfg::client::ui
         const auto picked = Look::colour (theme, "picked");
 
         g.fillAll (Look::colour (theme, "panel-in"));
+        paintGutterGround (g, height);
 
         auto area = juce::Rectangle<int> (0, 0, width, height).reduced (unit / 2, 0);
-        area.removeFromLeft (unit * 2 + entry.depth * indent);
+        area.removeFromLeft (gutterChars * unit + entry.depth * indent);
 
         if (entry.pointer)
         {
@@ -2544,6 +2669,11 @@ namespace wfg::client::ui
     void CueListComponent::resized()
     {
         auto area = getLocalBounds();
+        const auto unit = juce::roundToInt (theme.type * 7.0);
+
+        //  The gutter's heading, in the cell paintHeadings leaves for it, the rule under it kept.
+        pointerHeading.setBounds (unit / 2, 0, gutterChars * unit, juce::jmax (0, headingHeight() - 1));
+
         area.removeFromTop (headingHeight());   // the labels, which never scroll
         list.setBounds (area);
         placeEditor();

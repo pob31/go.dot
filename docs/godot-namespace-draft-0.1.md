@@ -32879,3 +32879,45 @@ its mixer slid every button sideways by the width of the two.
 
 Test: `foot panel: the head's panel buttons sit under the inspector's column and stay put whether Copy
 and Paste show or not (§96)` (RunPaneUiTests). Owed: the author's look in the window.
+
+## 97. The pointer column said plainly
+
+**Asked 2026-10-20** by the author, after a friend tried Go.dot: *"We need to make the playhead/Standby
+pointer more straight forward to get started. A friend told me the rest was dense, but this one
+important detail is not obvious and not documented. Should we have something at the top with a help
+bubble, or a difference in background compared to the rest of the cue lines? Also make the pointer
+column a bit wider?"*
+
+What was found: the desktop list marked the standby with a 16 % amber wash, a 3 px bar at the left
+edge, a ▶ and an amber number, in a gutter two units wide (14 px at type 1) with no heading and no
+ground of its own, so it read as the list's margin. Nothing in the window said what the ▶ was or that
+a click in that gutter, and only there, parks the pointer. With nothing parked the window said "no
+standby" beside GO and nothing more. The tester guides called the mark "yellow"; it is amber, and GO
+is a brighter yellow on purpose (`go`, 2026-09-25). The web console already did better: the word on
+the row, and "standby is clear - click a row's left edge to park it" under its transport.
+
+- **AXG** **The column is headed by the standby's ▶ alone**, in the cell `paintHeadings` left blank,
+  and the gutter is **four units** wide where it was two (`gutterChars`, one constant every carving
+  past the gutter asks: the rows, the bands, the steps, the cells, the rails, the click that parks).
+- **AXH** **The heading's ▶ carries the words twice**: a tooltip on the hover, and on a click a card
+  (`juce::CallOutBox`) with the same sentences under "The standby pointer", which stays until a click
+  elsewhere. One string, `CueListComponent::pointerWords()`, so the two cannot drift.
+- **AXI** **While nothing is parked the heading says so**, across the name column's heading in the
+  standby's amber: *"no standby: click in the ▶ column beside a cue to park it there"*. It goes the
+  moment a cue is parked, and it is never shown on a cart, which has no standby (§74, AQR), nor on a
+  list with no row that could take the pointer. The heading strip is repainted only when the hint
+  comes or goes, never at tick rate.
+- **AXJ** *(proposed)* **The gutter has a ground of its own**, a `gutter` theme token (#1C1C23: a shade
+  off both the black cue row and the blue-grey section row, under the headings' grey), laid on every
+  kind of row right after its ground so the column runs unbroken and the picked and standby washes
+  still paint over it. In `clients/desktop/theme.json`, so F5 tunes it.
+- **AXK** *(proposed)* **The words**: *"▶ marks the cue GO fires next: the standby. Click in this column
+  on any cue to move the ▶ there; ↑ and ↓ move it one cue at a time. Its row is lit amber, and its name
+  stands beside the GO button."* What it is before what it is called; amber, never "yellow".
+- The tester guides, both languages, say where the column is, what the ▶ means, how it moves, what
+  "no standby" means and where the reminder is.
+
+Test: `cue list: the pointer column - a wider gutter with its own ground, a heading glyph that says what
+it is, and a hint while the standby is clear (§97)` (RunPaneUiTests; with `WFG_SNAPSHOT_DIR`,
+`cue-list-pointer.png` and `cue-list-pointer-parked.png`). Owed: the author's look in the window, the
+words of AXJ and AXK, and the friend's second try.

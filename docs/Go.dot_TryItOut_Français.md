@@ -59,7 +59,7 @@ Un spectacle est un dossier avec au moins un fichier `.wfg` et un dossier `media
 3. **Ajouter des sons.** Glissez des fichiers WAV, AIFF, FLAC ou Ogg sur la liste. Chacun devient une cue média au nom du fichier. Déposez-en un sur une cue existante pour remplacer son fichier.
 4. **Ajouter d'autres cues** depuis la rangée *Add* au-dessus de la liste : `memo`, `media`, `mic`, `video`, `fade`, `transport`, `osc`, `midi`, `process`, `script`, `group`. Ceux qui portent un ▾ ouvrent un petit menu de variantes.
 5. **Régler chaque cue** dans l'inspecteur à droite : nom, pre-wait, post-wait, enchaînement, niveau. Les boutons en haut de l'inspecteur ouvrent les panneaux en pied de fenêtre : *Waveform*, *EQ*, *FX*, *Sends*, *Curve*, *Timeline*.
-6. **Jouer.** Cliquez à l'extrême gauche d'une cue pour y déplacer le pointeur de lecture. La cue en attente (standby) est signalée par une marque jaune. **Espace** fait GO.
+6. **Jouer.** La colonne grise à l'extrême gauche de la liste porte le pointeur : la cue marquée ▶ est la cue en attente (standby), celle que GO lancera. Sa ligne est éclairée en ambre et son nom s'affiche à côté du bouton GO. Cliquez dans cette colonne sur n'importe quelle cue pour y placer le ▶, ou utilisez ↑ / ↓. Tant qu'aucune cue ne le porte, le haut de la liste affiche « no standby » et GO n'a rien à lancer. Survolez ou cliquez le ▶ en haut de la colonne pour un rappel. **Espace** fait GO.
 7. **Enregistrer** avec Ctrl+S (⌘S sur Mac). La sauvegarde automatique tourne de toute façon.
 
 ### Les touches qui comptent pendant le spectacle

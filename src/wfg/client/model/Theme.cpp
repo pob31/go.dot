@@ -108,6 +108,12 @@ namespace wfg::client::model
                     take the greyish blue the sections wore for an hour. */
                 { "panel-section-cue", 0xFF10141C },
 
+                /*  THE POINTER'S COLUMN (namespace draft §97): a shade off both
+                    the black row and the blue-grey section, and under the
+                    headings' own grey, so the gutter reads as a column that
+                    runs the length of the list rather than as its margin. */
+                { "gutter",            0xFF1C1C23 },
+
                 /*  THE RUNNING PANE IS BLACK (author, 2026-09-18: "can you also
                     make the running cue backgrounds black?"), which is also
                     where a waveform's colours have most to stand against. One
