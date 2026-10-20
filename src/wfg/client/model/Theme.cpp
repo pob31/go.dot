@@ -111,8 +111,12 @@ namespace wfg::client::model
                 /*  THE POINTER'S COLUMN (namespace draft §97): a shade off both
                     the black row and the blue-grey section, and under the
                     headings' own grey, so the gutter reads as a column that
-                    runs the length of the list rather than as its margin. */
-                { "gutter",            0xFF1C1C23 },
+                    runs the length of the list rather than as its margin.
+                    Darker than it was first drawn (#1C1C23; the author,
+                    2026-10-20: "the grey can be a bit darker"): the amber
+                    hint in the heading already makes the column found, so
+                    the ground only has to be there, not to call out. */
+                { "gutter",            0xFF15151A },
 
                 /*  THE RUNNING PANE IS BLACK (author, 2026-09-18: "can you also
                     make the running cue backgrounds black?"), which is also

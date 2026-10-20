@@ -313,10 +313,11 @@ TEST_CASE ("cue list: how ready each cue is, a mark in a cell of its own beside 
 TEST_CASE ("cue list: the pointer column - a wider gutter with its own ground, a heading glyph that says what it is, and a hint while the standby is clear (§97)")
 {
     /*  Namespace draft §97: a friend of the author's did not find the standby
-        pointer. The gutter is four units wide on a ground of its own, its
-        heading is the standby's ▶ with the words on a hover, the heading says
-        "no standby" while nothing is parked, and a click in the wider gutter
-        parks while one past it picks. With WFG_SNAPSHOT_DIR set,
+        pointer. The gutter is three units of a ground of its own and a unit of
+        the row's before the number (the author, 2026-10-20: "the grey C
+        isn't stuck to the grey background"), its heading is the standby's ▶
+        with the words on a hover, the heading says "no standby" while nothing
+        is parked, and a click on the grey parks while one past it picks. With WFG_SNAPSHOT_DIR set,
         cue-list-pointer.png (clear) and cue-list-pointer-parked.png. */
     wfg::doc::ShowDocument document;
     const auto list = document.createList ("Main");
@@ -368,7 +369,7 @@ TEST_CASE ("cue list: the pointer column - a wider gutter with its own ground, a
     const auto pad = unit / 2;
     const auto rowHeight = juce::roundToInt (theme.row * theme.type);
     const auto headingHeight = juce::roundToInt (rowHeight * 0.7);
-    const auto gutter = juce::Rectangle<int> (pad, 0, 4 * unit, 200);
+    const auto gutter = juce::Rectangle<int> (pad, 0, 3 * unit, 200);     // the grey; a unit of air follows
     const auto kindLeft = 900 - pad - (3 * 6 + 8) * unit;
     const auto nameLeft = pad + 4 * unit + 6 * unit;
     const auto nameHeading = juce::Rectangle<int> (nameLeft, 0, kindLeft - nameLeft, headingHeight);
@@ -414,17 +415,23 @@ TEST_CASE ("cue list: the pointer column - a wider gutter with its own ground, a
     CHECK (amberIn (clear, nameHeading) > 0);
     CHECK (amberIn (clear, gutter.withY (firstTop).withHeight (rowHeight)) == 0);
 
-    //  THE GUTTER'S OWN GROUND, the full four units, on a row with nothing in its gutter.
+    /*  THE GUTTER'S OWN GROUND, the three units, on a row with nothing in its
+        gutter - and the unit after it the row's own, so the number stands clear. */
     const auto y = firstTop + 3;
     CHECK (clear.getPixelAt (pad + 1, y) == ui::Look::colour (theme, "gutter"));
-    CHECK (clear.getPixelAt (pad + 4 * unit - 1, y) == ui::Look::colour (theme, "gutter"));
+    CHECK (clear.getPixelAt (pad + 3 * unit - 1, y) == ui::Look::colour (theme, "gutter"));
+    CHECK (clear.getPixelAt (pad + 3 * unit, y) == ui::Look::colour (theme, "panel-cue"));
+    CHECK (clear.getPixelAt (pad + 4 * unit - 1, y) == ui::Look::colour (theme, "panel-cue"));
     CHECK (clear.getPixelAt (898, y) == ui::Look::colour (theme, "panel-cue"));
+
+    //  And in the heading: the air between the ▶'s cell and "CUE" is the heading's grey, not the column's.
+    CHECK (clear.getPixelAt (pad + 3 * unit + 1, 2) == ui::Look::colour (theme, "panel-high"));
     CHECK (ui::Look::colour (theme, "gutter") != ui::Look::colour (theme, "panel-cue"));
 
     //  THE HEADING'S WORDS AND PLACE.
     auto& heading = cues.pointerHeadingForTest();
     CHECK (heading.getX() == pad);
-    CHECK (heading.getWidth() == 4 * unit);
+    CHECK (heading.getWidth() == 3 * unit);
     auto* tip = dynamic_cast<juce::TooltipClient*> (&heading);
     REQUIRE (tip != nullptr);
     CHECK (tip->getTooltip() == ui::CueListComponent::pointerWords());
@@ -464,11 +471,16 @@ TEST_CASE ("cue list: the pointer column - a wider gutter with its own ground, a
         rows->listBoxItemClicked (firstRow, event);
     };
 
-    click (static_cast<float> (pad + 3 * unit));
+    click (static_cast<float> (pad + 2 * unit));            // on the grey
     CHECK (parked == first);
     CHECK (picked.empty());
 
     parked.clear();
+    click (static_cast<float> (pad + 3 * unit + unit / 2));  // in the air before the number
+    CHECK (parked.empty());
+    CHECK (picked == first);
+
+    picked.clear();
     click (static_cast<float> (pad + 5 * unit));
     CHECK (parked.empty());
     CHECK (picked == first);

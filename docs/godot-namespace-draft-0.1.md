@@ -32897,18 +32897,25 @@ is a brighter yellow on purpose (`go`, 2026-09-25). The web console already did 
 the row, and "standby is clear - click a row's left edge to park it" under its transport.
 
 - **AXG** **The column is headed by the standby's ▶ alone**, in the cell `paintHeadings` left blank,
-  and the gutter is **four units** wide where it was two (`gutterChars`, one constant every carving
-  past the gutter asks: the rows, the bands, the steps, the cells, the rails, the click that parks).
+  and the gutter takes **four units** where it took two (`gutterSpanChars`, one constant every carving
+  past the gutter asks: the rows, the bands, the steps, the cells, the rails). Of the four, **three are
+  the grey column** (`gutterChars`: the ground, the heading's cell, the click that parks) and **one is
+  the row's own ground**, so a cue's number and the heading's "CUE" never touch the grey (the author,
+  2026-10-20, on the first look: *"the column can be a bit narrower and in exchange add a little
+  padding before cue. So the grey C isn't stuck to the grey background"*). A click in that unit picks,
+  as the rest of the row does.
 - **AXH** **The heading's ▶ carries the words twice**: a tooltip on the hover, and on a click a card
   (`juce::CallOutBox`) with the same sentences under "The standby pointer", which stays until a click
   elsewhere. One string, `CueListComponent::pointerWords()`, so the two cannot drift.
 - **AXI** **While nothing is parked the heading says so**, across the name column's heading in the
-  standby's amber: *"no standby: click in the ▶ column beside a cue to park it there"*. It goes the
+  standby's amber: *"no standby: click in the ▶ column beside a cue to park it there"* (the author, on
+  the first look: *"The yellow text makes it unavoidable. Keep this as it is."*). It goes the
   moment a cue is parked, and it is never shown on a cart, which has no standby (§74, AQR), nor on a
   list with no row that could take the pointer. The heading strip is repainted only when the hint
   comes or goes, never at tick rate.
-- **AXJ** *(proposed)* **The gutter has a ground of its own**, a `gutter` theme token (#1C1C23: a shade
-  off both the black cue row and the blue-grey section row, under the headings' grey), laid on every
+- **AXJ** **The gutter has a ground of its own**, a `gutter` theme token (#15151A: a shade off both the
+  black cue row and the blue-grey section row, under the headings' grey; first drawn #1C1C23, and the
+  author asked for *"a bit darker"*), laid on every
   kind of row right after its ground so the column runs unbroken and the picked and standby washes
   still paint over it. In `clients/desktop/theme.json`, so F5 tunes it.
 - **AXK** *(proposed)* **The words**: *"▶ marks the cue GO fires next: the standby. Click in this column

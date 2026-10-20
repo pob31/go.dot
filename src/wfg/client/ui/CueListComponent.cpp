@@ -61,8 +61,17 @@ namespace wfg::client::ui
             ground of its own: at two it read as the list's margin, and a
             friend of the author's trying Go.dot for the first time did not
             find it (2026-10-20) - "this one important detail is not obvious".
-            Every carving that steps past the gutter asks this one number. */
-        constexpr int gutterChars = 4;
+            Every carving that steps past the gutter asks `gutterSpanChars`.
+
+            THREE GREY AND ONE OF AIR (the author, 2026-10-20: "the column can
+            be a bit narrower and in exchange add a little padding before cue.
+            So the grey C isn't stuck to the grey background"). The grey is
+            the column and the one place a click parks; the unit after it is
+            the row's own ground, so a number never touches the grey. The two
+            add to the four the column first had, so nothing else moved. */
+        constexpr int gutterChars = 3;
+        constexpr int gutterGapChars = 1;
+        constexpr int gutterSpanChars = gutterChars + gutterGapChars;
 
         /*  TWICE THE SIZE THEY WERE (author, 2026-09-18: "you can enlarge these
             triangles two fold"). A twist is the one control on a row and it was
@@ -263,7 +272,7 @@ namespace wfg::client::ui
     {
         const auto unit = juce::roundToInt (theme.type * 7.0);
 
-        return unit / 2 + gutterChars * unit + numberChars * unit;
+        return unit / 2 + gutterSpanChars * unit + numberChars * unit;
     }
 
     /** Where the rail of the Nth enclosing container stands. Level 1 is the outermost. */
@@ -426,7 +435,7 @@ namespace wfg::client::ui
         const auto indent = unit * 2;
 
         auto area = juce::Rectangle<int> (0, 0, width, height).reduced (pad, 0);
-        area.removeFromLeft (gutterChars * unit);
+        area.removeFromLeft (gutterSpanChars * unit);
 
         Cells cells;
         cells.postWait = area.removeFromRight (timeChars * unit);
@@ -1026,6 +1035,7 @@ namespace wfg::client::ui
             eye runs down looking for it, rather than beside the name where it
             moved with the indent. */
         const auto gutter = area.removeFromLeft (gutterChars * unit);
+        area.removeFromLeft (gutterGapChars * unit);    // the air before the number (§97)
 
         if (isStandby)
         {
@@ -1320,7 +1330,7 @@ namespace wfg::client::ui
         paintGutterGround (g, height);
 
         auto area = juce::Rectangle<int> (0, 0, width, height).reduced (pad, 0);
-        area.removeFromLeft (gutterChars * unit + numberChars * unit);
+        area.removeFromLeft (gutterSpanChars * unit + numberChars * unit);
 
         paintRails (entry, row, g, height);
 
@@ -1452,7 +1462,7 @@ namespace wfg::client::ui
         if (entry.isGroup)
         {
             const auto indent = unit * 2;
-            const auto twistFrom = unit / 2 + gutterChars * unit + numberChars * unit + entry.depth * indent;
+            const auto twistFrom = unit / 2 + gutterSpanChars * unit + numberChars * unit + entry.depth * indent;
 
             if (event.x >= twistFrom && event.x < twistFrom + indent)
             {
@@ -2459,7 +2469,7 @@ namespace wfg::client::ui
         g.fillRect (area.getX(), area.getBottom() - 1, area.getWidth(), 1);
 
         auto row = area.reduced (pad, 0);
-        row.removeFromLeft (gutterChars * unit);   // the park gutter: its heading is the pointerHeading component
+        row.removeFromLeft (gutterSpanChars * unit);   // the park gutter: its heading is the pointerHeading component
 
         g.setColour (Look::colour (theme, "ink-off"));
         g.setFont (Look::font (theme, 10.0f));
@@ -2622,7 +2632,7 @@ namespace wfg::client::ui
         paintGutterGround (g, height);
 
         auto area = juce::Rectangle<int> (0, 0, width, height).reduced (unit / 2, 0);
-        area.removeFromLeft (gutterChars * unit + entry.depth * indent);
+        area.removeFromLeft (gutterSpanChars * unit + entry.depth * indent);
 
         if (entry.pointer)
         {
