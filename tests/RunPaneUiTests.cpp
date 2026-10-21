@@ -498,6 +498,125 @@ TEST_CASE ("cue list: the pointer column - a wider gutter with its own ground, a
     CHECK (amberIn (paint(), nameHeading) == 0);
 }
 
+TEST_CASE ("cue list: a standby that moves onto a group brings the group into view, from its title when it is taller than the window")
+{
+    /*  The author, 2026-10-21: "if a group is selected next we only see the
+        title and not the contents of it". Twenty memos, a group of four, a
+        group of thirty, in a list nine or so rows high. */
+    wfg::doc::ShowDocument document;
+    const auto list = document.createList ("Main");
+    REQUIRE (list.ok);
+
+    std::vector<std::string> memos;
+
+    for (int at = 0; at < 20; ++at)
+        memos.push_back (document.createCue (list.id, at, "memo",
+                                             "Memo " + std::to_string (at)).id);
+
+    const auto smallGroup = document.createCue (list.id, 20, "group", "Small").id;
+    REQUIRE (! smallGroup.empty());
+
+    for (int at = 0; at < 4; ++at)
+        REQUIRE (document.createCue (smallGroup, at, "memo", "In small").ok);
+
+    const auto largeGroup = document.createCue (list.id, 21, "group", "Large").id;
+    REQUIRE (! largeGroup.empty());
+
+    for (int at = 0; at < 30; ++at)
+        REQUIRE (document.createCue (largeGroup, at, "memo", "In large").ok);
+
+    wfg::Engine engine;
+    wfg::cue::RunTable runs;
+    wfg::tree::MountTable mounts;
+    wfg::tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
+    parameters.markStale();
+
+    wfg::tree::EngineState state;
+    const auto snapshot = parameters.publish (0, state);
+    REQUIRE (snapshot != nullptr);
+
+    model::ShowModel show;
+    REQUIRE (show.refresh (*snapshot, list.id));
+
+    const auto indexOf = [&show] (const std::string& id)
+    {
+        for (std::size_t at = 0; at < show.rows().size(); ++at)
+            if (show.rows()[at].id == id && show.rows()[at].rowKind == model::RowKind::cue)
+                return static_cast<int> (at);
+
+        return -1;
+    };
+
+    //  A group's extent: its title and every row deeper than it after it.
+    const auto lastOf = [&show] (int title)
+    {
+        auto last = title;
+        const auto& rows = show.rows();
+
+        while (last + 1 < static_cast<int> (rows.size())
+                 && rows[static_cast<std::size_t> (last + 1)].depth > rows[static_cast<std::size_t> (title)].depth)
+            ++last;
+
+        return last;
+    };
+
+    const auto smallRow = indexOf (smallGroup);
+    const auto largeRow = indexOf (largeGroup);
+    REQUIRE (smallRow >= 0);
+    REQUIRE (lastOf (smallRow) >= smallRow + 4);
+    REQUIRE (lastOf (largeRow) >= largeRow + 30);
+
+    const model::Theme theme;
+    ui::CueListComponent cues (theme, {});
+    cues.setSize (900, 300);
+    cues.show (show, memos.front(), {});
+
+    juce::ListBox* box = nullptr;
+
+    for (auto* child : cues.getChildren())
+        if (auto* found = dynamic_cast<juce::ListBox*> (child))
+            box = found;
+
+    REQUIRE (box != nullptr);
+    auto* view = box->getViewport();
+    REQUIRE (view != nullptr);
+
+    const auto height = box->getRowHeight();
+    const auto shown = view->getMaximumVisibleHeight();
+    REQUIRE (shown / height > 6);
+    REQUIRE (shown / height < 30);
+
+    const auto onScreen = [&] (int row)
+    {
+        const auto top = view->getViewPositionY();
+        return row * height >= top && (row + 1) * height <= top + shown;
+    };
+
+    //  THE LAST MEMO, then the small group: the title AND its four members show.
+    cues.show (show, memos.back(), {});
+    CHECK (onScreen (indexOf (memos.back())));
+
+    cues.show (show, smallGroup, {});
+    CHECK (onScreen (smallRow));
+    CHECK (onScreen (lastOf (smallRow)));
+
+    //  THE LARGE GROUP: taller than the window, so shown from its title, at the top.
+    cues.show (show, largeGroup, {});
+    CHECK (view->getViewPositionY() == largeRow * height);
+    CHECK (onScreen (largeRow + 1));
+
+    //  AND BACK UP onto the small group, above: the whole of it again.
+    cues.show (show, smallGroup, {});
+    CHECK (onScreen (smallRow));
+    CHECK (onScreen (lastOf (smallRow)));
+
+    //  A memo is still only itself: no scroll when it is already on screen.
+    const auto before = view->getViewPositionY();
+    cues.show (show, memos.back(), {});
+    CHECK (onScreen (indexOf (memos.back())));
+    CHECK (view->getViewPositionY() <= before);
+}
+
 TEST_CASE ("cue list: a drag anywhere inside a group keeps its footer's band to drop on, and its title shows the header's too")
 {
     /*  The author, 2026-10-17: the footer "disappears if you move away from

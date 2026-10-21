@@ -234,6 +234,10 @@ namespace wfg::client::ui
             this list holds as picked arrives a pass after a pick. */
         void popUpMenu (const std::string& cueId, bool picked);
 
+        /*  ROWS `first` TO `last` BROUGHT INTO VIEW, as few rows scrolled as
+            that takes; a span taller than the window is shown from `first`. */
+        void revealRows (int first, int last);
+
         /*  EDITING IN PLACE (author, 2026-09-18): a double-click on the
             number, the name or one of the three times opens a box over that
             cell. Enter or a click elsewhere commits and dismisses; Esc

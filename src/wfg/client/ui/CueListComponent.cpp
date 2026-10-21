@@ -47,6 +47,29 @@ namespace wfg::client::ui
             if (rows[index].id == id)
             { list.scrollToEnsureRowIsOnscreen (static_cast<int> (index)); return; }
     }
+
+    void CueListComponent::revealRows (int first, int last)
+    {
+        auto* view = list.getViewport();
+
+        if (view == nullptr)
+            return;
+
+        //  The bottom asked first and the top second, so the top wins when both cannot.
+        const auto height = juce::jmax (1, list.getRowHeight());
+        const auto shown = view->getMaximumVisibleHeight();
+        const auto was = view->getViewPositionY();
+        auto top = was;
+
+        if ((last + 1) * height > top + shown)
+            top = (last + 1) * height - shown;
+
+        if (first * height < top)
+            top = first * height;
+
+        if (top != was)
+            view->setViewPosition (view->getViewPositionX(), juce::jmax (0, top));
+    }
     namespace
     {
         /*  THE COLUMNS, as fractions of the width left after the number and
@@ -821,9 +844,24 @@ namespace wfg::client::ui
             /*  AND IT IS BROUGHT INTO VIEW, because a pointer that has moved
                 somewhere the operator cannot see is worse than no pointer: the
                 list scrolls itself only when the standby moves, never while
-                somebody is reading. */
+                somebody is reading.
+
+                A GROUP IS BROUGHT INTO VIEW WHOLE, as much of it as fits (the
+                author, 2026-10-21: "if a group is selected next we only see
+                the title and not the contents of it"): its title and every
+                row under it, and one longer than the window from its title. */
             if (standbyRow >= 0 && list.getHeight() > 0)
-                list.scrollToEnsureRowIsOnscreen (standbyRow);
+            {
+                auto last = standbyRow;
+
+                if (rows[static_cast<std::size_t> (standbyRow)].isGroup)
+                    while (last + 1 < static_cast<int> (rows.size())
+                             && rows[static_cast<std::size_t> (last + 1)].depth
+                                  > rows[static_cast<std::size_t> (standbyRow)].depth)
+                        ++last;
+
+                revealRows (standbyRow, last);
+            }
         }
 
         /*  AND WHICH CUE IS PICKED, which moves as often as somebody clicks and
