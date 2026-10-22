@@ -69,6 +69,7 @@ namespace wfg::app
         {
             NSProcessInfo* process = [NSProcessInfo processInfo];
             power.lowPowerMode = process.lowPowerModeEnabled;
+            power.cappedBy = power.lowPowerMode ? PowerCap::lowPowerMode : PowerCap::none;
 
             switch (process.thermalState)
             {

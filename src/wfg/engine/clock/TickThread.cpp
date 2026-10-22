@@ -41,7 +41,14 @@ namespace wfg
             Two milliseconds and a quarter of a millisecond, so a 20 ms tick
             costs one long sleep and about eight short ones rather than eighty.
             Waiting in uniform short slices instead would work and would spin
-            the CPU up for no benefit anybody can hear. */
+            the CPU up for no benefit anybody can hear.
+
+            THE POLL HAS TO BE FINE FOR THIS TO HOLD. On Windows a condition
+            variable's timed wait ends on the system's next timer interrupt,
+            15.6 ms apart unless some program asked for finer, so each
+            quarter-millisecond slice was up to 15 ms and the lateness it was
+            meant to bound was the lateness it caused; FineWait is a
+            high-resolution timer there (namespace draft §108). */
         constexpr auto wakeGuard = std::chrono::milliseconds { 2 };
         constexpr auto pollSlice = std::chrono::microseconds { 250 };
 
@@ -124,7 +131,7 @@ namespace wfg
             stopping = true;
         }
 
-        wakeUp.notify_all();
+        wakeUp.wake();
         worker.join();
         running.store (false, std::memory_order_relaxed);
     }
@@ -152,8 +159,8 @@ namespace wfg
                 const auto at = std::max<std::int64_t> (0, lastTick());
                 const auto outcome = engine.processTick (at);
                 if (afterTick) afterTick (outcome);
+                wakeUp.wait (std::chrono::milliseconds (20));
                 lock.lock();
-                wakeUp.wait_for (lock, std::chrono::milliseconds (20), [this] { return stopping; });
                 continue;
             }
             const auto action = nextTickAction (schedule,
@@ -208,7 +215,13 @@ namespace wfg
                              ? std::chrono::duration_cast<std::chrono::nanoseconds> (remaining - wakeGuard)
                              : std::chrono::duration_cast<std::chrono::nanoseconds> (pollSlice);
 
-            wakeUp.wait_for (lock, slice, [this] { return stopping; });
+            /*  Out of the lock, so stop() and setSuspended() never queue
+                behind a sleeping thread; `stopping` is re-read under it at
+                the top of the loop, and a wake that lands between the unlock
+                and the wait is kept by FineWait rather than lost. */
+            lock.unlock();
+            wakeUp.wait (slice);
+            lock.lock();
         }
     }
 }

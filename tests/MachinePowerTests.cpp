@@ -16,8 +16,8 @@
 
 /*
     THIS COMPUTER'S POWER (namespace draft §108): what the system is told and
-    what it says. The Mac declares and reads; everywhere else is unhindered
-    and declares nothing, and both are checked for saying so truthfully.
+    what it says. The Mac and Windows declare and read; Linux is unhindered
+    and declares nothing, and each is checked for saying so truthfully.
 */
 
 #include <3rd_party/doctest/tracktion_doctest.hpp>
@@ -35,25 +35,45 @@ TEST_CASE ("power: the process declares itself latency-critical where the system
     const app::LatencyCritical critical { "Go.dot tests" };
     const auto power = app::readMachinePower();
     const std::string thermal = app::wordOf (power.thermal);
+    const std::string cappedBy = app::wordOf (power.cappedBy);
 
     CHECK ((thermal == "nominal" || thermal == "fair" || thermal == "serious" || thermal == "critical"));
 
+    //  lowPower and its reason agree, whatever the machine running this is doing.
+    CHECK (power.lowPowerMode == (power.cappedBy != app::PowerCap::none));
+
    #if JUCE_MAC
     CHECK (critical.declared());
+    CHECK ((cappedBy == "none" || cappedBy == "lowPowerMode"));
+    CHECK_FALSE (power.onBattery);
+   #elif JUCE_WINDOWS
+    CHECK (critical.declared());
+    CHECK (cappedBy != "lowPowerMode");
+    CHECK (thermal == "nominal");
    #else
     CHECK_FALSE (critical.declared());
     CHECK_FALSE (power.lowPowerMode);
+    CHECK (cappedBy == "none");
+    CHECK_FALSE (power.onBattery);
     CHECK (thermal == "nominal");
    #endif
 
-    //  The four words, each its own, and nominal for anything out of range.
+    //  The words, each its own, and the resting one for anything out of range.
     CHECK (std::string (app::wordOf (app::Thermal::nominal)) == "nominal");
     CHECK (std::string (app::wordOf (app::Thermal::fair)) == "fair");
     CHECK (std::string (app::wordOf (app::Thermal::serious)) == "serious");
     CHECK (std::string (app::wordOf (app::Thermal::critical)) == "critical");
     CHECK (std::string (app::wordOf (static_cast<app::Thermal> (9))) == "nominal");
 
-    //  Declared twice over is two activities, each ended on its own.
+    CHECK (std::string (app::wordOf (app::PowerCap::none)) == "none");
+    CHECK (std::string (app::wordOf (app::PowerCap::lowPowerMode)) == "lowPowerMode");
+    CHECK (std::string (app::wordOf (app::PowerCap::batterySaver)) == "batterySaver");
+    CHECK (std::string (app::wordOf (app::PowerCap::bestPowerEfficiency)) == "bestPowerEfficiency");
+    CHECK (std::string (app::wordOf (app::PowerCap::powerSaverPlan)) == "powerSaverPlan");
+    CHECK (std::string (app::wordOf (app::PowerCap::processorLimited)) == "processorLimited");
+    CHECK (std::string (app::wordOf (static_cast<app::PowerCap> (9))) == "none");
+
+    //  Declared twice over is two declarations, each ended on its own.
     {
         const app::LatencyCritical again { "Go.dot tests, again" };
         CHECK (again.declared() == critical.declared());

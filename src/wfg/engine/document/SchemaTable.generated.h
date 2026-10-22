@@ -33,6 +33,7 @@
 namespace wfg::doc::generated
 {
     inline constexpr std::string_view enum_engine_clock[] = { "dummy", "device" };
+    inline constexpr std::string_view enum_engine_lowPowerBy[] = { "none", "lowPowerMode", "batterySaver", "bestPowerEfficiency", "powerSaverPlan", "processorLimited" };
     inline constexpr std::string_view enum_engine_thermal[] = { "nominal", "fair", "serious", "critical" };
     inline constexpr std::string_view enum_engine_spaceMouse[] = { "off", "searching", "connected", "driver" };
     inline constexpr std::string_view enum_pair_role[] = { "none", "main", "backup" };
@@ -279,7 +280,23 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 1.0, false, "park",
           "",
-          "Whether this computer is in Low Power Mode (macOS; namespace draft 108): its processor is capped, and a show heavy with plugins or video can fall behind. Read once a second on the message thread. No app can switch it off - the fix is the Battery settings of the Mac. False elsewhere." },
+          "Whether something caps this computer-s processor (namespace draft 108): Low Power Mode on a Mac; on Windows Battery saver, the power mode slider at Best power efficiency, the Power saver plan, or a processor limited below its full speed. lowPowerBy says which. A show heavy with plugins or video can fall behind. Read once a second on the message thread. No app can switch it off - the fix is the system-s own power settings. False on Linux." },
+        { "engine", "lowPowerBy",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
+          true, "none",
+          false, 0.0, false, 0.0,
+          enum_engine_lowPowerBy, 6,
+          "", 1.0, false, "park",
+          "",
+          "What caps the processor when lowPower is true (namespace draft 108), as the system names it: lowPowerMode is the Mac-s; batterySaver, bestPowerEfficiency (the power mode slider), powerSaverPlan and processorLimited (a plan-s processor maximum state under 100 %, or a limit the firmware applied) are Windows-s, the first that holds. None otherwise." },
+        { "engine", "onBattery",
+          ValueType::boolean, 'T', false, Access::read, Kind::state, Persist::none, Scope::show,
+          true, "false",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 1.0, false, "park",
+          "",
+          "Whether this computer runs on its battery (Windows; namespace draft 108): a laptop slows itself as the charge falls and turns Battery saver on by itself. Read once a second on the message thread. False where it cannot be asked." },
         { "engine", "thermal",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "nominal",
@@ -287,7 +304,7 @@ namespace wfg::doc::generated
           enum_engine_thermal, 4,
           "", 1.0, false, "park",
           "",
-          "How hot this computer says it is (macOS; namespace draft 108), in the system-s own four steps: from serious it has slowed its processor for heat. Read once a second on the message thread. Nominal elsewhere." },
+          "How hot this computer says it is (macOS; namespace draft 108), in the system-s own four steps: from serious it has slowed its processor for heat. Read once a second on the message thread. Nominal elsewhere: Windows has no such reading." },
         { "engine", "audioGaps",
           ValueType::integer, 'i', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "0",

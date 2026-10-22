@@ -377,6 +377,8 @@ add_library(wfg_engine STATIC
     wfg/engine/clock/ClockEstimate.h
     wfg/engine/clock/DummyAudioClock.cpp
     wfg/engine/clock/DummyAudioClock.h
+    wfg/engine/clock/FineWait.cpp
+    wfg/engine/clock/FineWait.h
     wfg/engine/clock/RateClock.h
     wfg/engine/clock/SampleClock.h
     wfg/engine/clock/SampleTime.cpp
@@ -743,6 +745,12 @@ endif()
 target_link_libraries(wfg_engine
     PUBLIC  wfg::thirdparty
     PRIVATE wfg::warnings)
+
+# Windows' half of app/MachinePower.h (namespace draft §108): the active power
+# plan and the processors' limits are powrprof's.
+if(WIN32)
+    target_link_libraries(wfg_engine PRIVATE powrprof)
+endif()
 
 # AJA's library (namespace draft §72, AQC; cmake/WfgThirdParty.cmake), for
 # render/Card_aja.cpp: PRIVATE, so its headers and definitions reach the

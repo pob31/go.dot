@@ -33712,9 +33712,74 @@ Mine *(proposed)*, the author's to overrule:
   Pressing the warning opens the Mac's Battery settings, since no page of Show settings puts it right;
   the settings window shows no tab for it.
 
+**Asked again 2026-10-22**, of Windows: *"Can we check the power mode of the CPU on Windows pins the load
+on high performance cores at full speed? Is there anything to do to avoid glitches and other underruns?"*
+- then, of the four things offered and the fifth advised against: *"Let's build 1 to 4 as you suggested."*
+
+What was found. Windows pins nothing either, and Go.dot on Windows declared nothing and read nothing:
+the tick thread at TIME_CRITICAL, the plugin child's worker and JUCE's WASAPI thread under MMCSS "Pro
+Audio", and the process left to be whatever the scheduler took it for. Windows 11 drops a process it
+takes for background to its economy class (EcoQoS), which on a hybrid processor - the author's Core
+Ultra 7 255H has six performance cores, eight efficiency cores and two low-power ones - is also what
+puts it on the efficiency cores; it idle-sleeps the computer under a show that is only waiting for its
+GO unless something holds a power request; and a timed wait ends on the system's next timer interrupt,
+15.6 ms apart for a process that never asked for finer, and under Windows 11 for one whose window is
+minimised even if it did. **The tick thread's quarter-millisecond polls were therefore up to 15 ms each**
+on any machine where no other program had raised the timer - the author's box reads 1 ms only because
+an editor and a browser asked - and the lateness they were there to bound was the lateness they caused.
+What Windows lets an app read: Battery saver, the power mode slider, the active plan, each processor's
+current limit against its full speed, and whether the computer runs on its battery. Nothing of heat.
+
+What actually drops Windows audio was said beside the plan and is not Go.dot's to fix: driver DPC
+latency (Wi-Fi, NVIDIA, ACPI battery, Thunderbolt), USB selective suspend and a bad port (§30's RME
+dropouts were a port), PCIe link power saving, deep C-states and core parking, Defender and Update.
+LatencyMon finds those; Go.dot cannot see them from user mode. For a show: mains, Wi-Fi off, the High
+performance plan, selective suspend off, and `/godot/engine/latenessMax` read after a rehearsal.
+
+The author's: **BAY** the four built - the declaration, the computer kept awake, the tick's wait made
+fine, the states read and said. A hard pin of the engine and the plugin child to the performance cores
+(CPU sets, which would cover the ASIO thread too) and Go.dot switching the power plan itself were
+offered against and left out: the pin fights Windows' own placement and leaves ten cores idle for
+decoding and video, and the plan is the operator's machine, read and warned about rather than rewritten,
+as decided for the Mac.
+
+Mine *(proposed)*, the author's to overrule:
+
+- **BAZ** **On Windows the declaration is the process's power throttling switched off and a power
+  request.** `SetProcessInformation (ProcessPowerThrottling)` with execution speed and timer resolution
+  both controlled and both off: never EcoQoS, so a hybrid processor keeps it on the performance cores,
+  and its timer requests honoured with the window minimised (Windows 10 knows no timer flag and is asked
+  for the speed alone). `PowerSetRequest (PowerRequestSystemRequired)` with the same reason the Mac
+  shows - "Go.dot is running a show", "is playing a plugin", "is showing video" - listed by
+  `powercfg /requests`; the display is not asked for. `declared()` is the throttling call's answer.
+- **BBA** **The tick thread waits on `clock/FineWait`**: on Windows a high-resolution waitable timer
+  (`CREATE_WAITABLE_TIMER_HIGH_RESOLUTION`, Windows 10 1803's; about half a millisecond at worst and
+  independent of what any program asked the system for) beside an auto-reset event that ends a wait
+  early, a wake before the wait kept rather than lost; elsewhere the condition variable it always was,
+  which is tens of microseconds there. The engine asks for no timer resolution of its own: a finer
+  system tick costs power across the machine and the tick thread no longer needs it.
+- **BBB** **`lowPower` is Windows' too, `lowPowerBy` names what caps the processor, `onBattery` is
+  new.** `lowPowerBy`: `lowPowerMode` (the Mac's), `batterySaver`, `bestPowerEfficiency` (the power
+  mode slider), `powerSaverPlan`, `processorLimited` (a processor whose current limit from
+  `CallNtPowerInformation` sits below its full speed: a plan's processor maximum state under 100 %, or
+  a limit the firmware applied), the first that holds in that order, `none` otherwise. The slider is
+  read through `PowerGetEffectiveOverlayScheme`, exported by powrprof.dll since Windows 10 1709 and
+  undocumented, so looked up by name and absent means not at Best power efficiency. `thermal` stays
+  nominal on Windows: there is no such reading. `onBattery` from `GetSystemPowerStatus`; false where it
+  cannot be asked, the Mac included for now.
+- **BBC** **Said by the setting**, so the sentence names what to flip and where it lives: "This
+  computer is in Battery saver: its processor is capped, ... - Settings, Power & battery."; "This
+  computer's power mode is Best power efficiency: its processor is held back, ..."; "... is on the Power
+  saver plan: ... - Control Panel, Power Options."; "This computer's processor is limited below its full
+  speed by its power plan or firmware, ... - Control Panel, Power Options, the plan's processor power
+  management."; a reason not known falls back to the Mac's sentence. **On battery is its own warning**:
+  "This computer is running on its battery: it slows itself as the charge falls, and turns Battery saver
+  on by itself - plug it in." Pressing the warning opens Windows' Power & battery settings
+  (`ms-settings:powersleep`), as it opens the Mac's Battery.
+
 ### 108.2 Rows and commands
 
-Two read-only engine rows (BAW). No command.
+Four read-only engine rows (BAW, BBB): `lowPower`, `lowPowerBy`, `onBattery`, `thermal`. No command.
 
 ### 108.3 As built
 
@@ -33723,12 +33788,18 @@ Two read-only engine rows (BAW). No command.
 everyone else's. The serve verb holds the declaration beside its JUCE initialiser and a one-second
 `PowerWatch` timer beside its `EngineState`; the children hold theirs after their own initialiser.
 `model/Problems`: `settingsPages::thisComputer`, first in `byPage`; `TransportComponent` opens
-`x-apple.systempreferences:com.apple.Battery-Settings.extension` for it on the Mac.
+`x-apple.systempreferences:com.apple.Battery-Settings.extension` for it on the Mac and
+`ms-settings:powersleep` on Windows. Windows' half of `MachinePower.cpp` (powrprof linked there):
+`optOutOfPowerThrottling`, `keepAwake`, `readMachinePower` with `PowerCap` and its `wordOf`;
+`clock/FineWait.h` the tick thread's wait, `TickThread` without its condition variable.
 
 ### 108.4 Stages
 
 | stage | what | commit |
 |---|---|---|
 | MP.1 | the declaration, the rows, the warning (MachinePowerTests, ProblemsTests) | |
+| MP.2 | Windows: the declaration and the power request, FineWait, lowPowerBy and onBattery, the sentences (MachinePowerTests, ProblemsTests, ClockTests) | |
 
-Owed: the author's look at the warning with Low Power Mode switched on, on the Mac mini or a laptop.
+Owed: the author's look at the warning with Low Power Mode switched on, on the Mac mini or a laptop;
+on the Windows laptop, unplugged and with Battery saver on, and `powercfg /requests` with a show open;
+`/godot/engine/latenessMax` before and after on a machine where nothing else has raised the timer.

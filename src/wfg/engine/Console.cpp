@@ -3454,7 +3454,8 @@ namespace
         /*  LATENCY-CRITICAL TO THE SYSTEM for as long as it serves (namespace
             draft §108, app/MachinePower.h): never napped, its timers never
             coalesced, and the computer not put to sleep under a show that is
-            only waiting for its next GO. The Mac's; nothing elsewhere. */
+            only waiting for its next GO. The Mac's and Windows'; nothing on
+            Linux. */
         const wfg::app::LatencyCritical latencyCritical { "Go.dot is running a show" };
 
         useEngineFolderOption (args);
@@ -4876,10 +4877,14 @@ namespace
             {
                 const auto power = wfg::app::readMachinePower();
                 lowPower.store (power.lowPowerMode, std::memory_order_relaxed);
+                cappedBy.store (static_cast<int> (power.cappedBy), std::memory_order_relaxed);
+                onBattery.store (power.onBattery, std::memory_order_relaxed);
                 thermal.store (static_cast<int> (power.thermal), std::memory_order_relaxed);
             }
 
             std::atomic<bool> lowPower { false };
+            std::atomic<int> cappedBy { 0 };
+            std::atomic<bool> onBattery { false };
             std::atomic<int> thermal { 0 };
         } powerWatch;
 
@@ -8412,6 +8417,9 @@ namespace
                                 state.latenessMax = ticks.latenessMax();
                                 state.tickRealtime = ticks.hasElevatedPriority();
                                 state.lowPowerMode = powerWatch.lowPower.load (std::memory_order_relaxed);
+                                state.lowPowerBy = wfg::app::wordOf (static_cast<wfg::app::PowerCap> (
+                                                        powerWatch.cappedBy.load (std::memory_order_relaxed)));
+                                state.onBattery = powerWatch.onBattery.load (std::memory_order_relaxed);
                                 state.thermal = wfg::app::wordOf (static_cast<wfg::app::Thermal> (
                                                     powerWatch.thermal.load (std::memory_order_relaxed)));
                                 state.audioGaps = audioGapsSeen.load (std::memory_order_relaxed);

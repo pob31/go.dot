@@ -488,3 +488,48 @@ TEST_CASE ("problems: this computer held back by its own system is said first, a
     CHECK (anySays (model::machineProblems (critical, model::indexObjects (critical)),
                     "This computer is too hot and has slowed its processor hard: let it cool, or move it out of the heat - nothing in Go.dot puts this right."));
 }
+
+TEST_CASE ("problems: a Windows laptop held back says which setting caps it, and that it runs on its battery")
+{
+    /*  Namespace draft §108, the Windows half (2026-10-22): the engine names
+        the setting, so the sentence says what to flip and where it lives;
+        running on the battery is its own warning. All on "This computer",
+        and no cue wears any of it. */
+    const auto snapshot = snapshotOf ({
+        { "/godot/engine/lowPower", yes() },
+        { "/godot/engine/lowPowerBy", word ("batterySaver") },
+        { "/godot/engine/onBattery", yes() },
+        { "/godot/engine/thermal", word ("nominal") },
+    });
+
+    const auto index = model::indexObjects (snapshot);
+    const auto problems = model::machineProblems (snapshot, index);
+    const auto pages = model::byPage (problems);
+
+    REQUIRE (pages.size() == 1);
+    CHECK (pages[0].page == page::thisComputer);
+    CHECK (pages[0].icon == model::Icon::warning);
+    CHECK (pages[0].sentences.size() == 2);
+
+    CHECK (anySays (problems, "This computer is in Battery saver: its processor is capped, and a show heavy with plugins or video can fall behind - Settings, Power & battery."));
+    CHECK (anySays (problems, "This computer is running on its battery: it slows itself as the charge falls, and turns Battery saver on by itself - plug it in."));
+
+    //  Each of Windows' other reasons names its own setting; a reason not known falls back to the Mac's words.
+    const auto saying = [] (const char* by)
+    {
+        const auto one = snapshotOf ({ { "/godot/engine/lowPower", yes() }, { "/godot/engine/lowPowerBy", word (by) } });
+        const auto found = model::machineProblems (one, model::indexObjects (one));
+        REQUIRE (found.size() == 1);
+        return found[0].sentence;
+    };
+
+    CHECK (saying ("bestPowerEfficiency") == "This computer's power mode is Best power efficiency: its processor is held back, and a show heavy with plugins or video can fall behind - Settings, Power & battery.");
+    CHECK (saying ("powerSaverPlan") == "This computer is on the Power saver plan: its processor is capped, and a show heavy with plugins or video can fall behind - Control Panel, Power Options.");
+    CHECK (saying ("processorLimited") == "This computer's processor is limited below its full speed by its power plan or firmware, and a show heavy with plugins or video can fall behind - Control Panel, Power Options, the plan's processor power management.");
+    CHECK (saying ("lowPowerMode") == "This computer is in Low Power Mode: its processor is capped, and a show heavy with plugins or video can fall behind - System Settings, Battery.");
+    CHECK (saying ("none") == saying ("lowPowerMode"));
+
+    //  On the mains with nothing capping it: nothing said.
+    const auto fine = snapshotOf ({ { "/godot/engine/lowPower", no() }, { "/godot/engine/onBattery", no() } });
+    CHECK (model::machineProblems (fine, model::indexObjects (fine)).empty());
+}

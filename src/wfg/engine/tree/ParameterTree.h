@@ -119,11 +119,17 @@ namespace wfg::tree
         std::int64_t audioGaps = 0, audioGapMax = 0, audioCallbackMax = 0;
         std::int64_t logPending = 0;
 
-        /*  WHAT THE SYSTEM SAYS HOLDS THIS COMPUTER BACK (macOS; namespace
-            draft §108): Low Power Mode caps the processor, and the thermal
-            state - nominal, fair, serious, critical - says it has been slowed
-            for heat from `serious`. Unhindered elsewhere. */
+        /*  WHAT THE SYSTEM SAYS HOLDS THIS COMPUTER BACK (namespace draft
+            §108): something caps the processor - the Mac's Low Power Mode,
+            Windows' Battery saver, its slider at Best power efficiency, the
+            Power saver plan, a processor limited below its full speed - and
+            `lowPowerBy` names which (app/MachinePower.h's words); the Mac's
+            thermal state - nominal, fair, serious, critical - says it has
+            been slowed for heat from `serious`; and Windows says whether it
+            runs on its battery. Unhindered where it cannot be asked. */
         bool lowPowerMode = false;
+        std::string lowPowerBy = "none";
+        bool onBattery = false;
         std::string thermal = "nominal";
 
         /** The SpaceMouse reader's word and the puck's name (O.11). */

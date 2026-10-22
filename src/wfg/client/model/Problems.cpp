@@ -323,14 +323,36 @@ namespace wfg::client::model
         std::vector<Problem> out;
 
         /*  THE COMPUTER ITSELF, HELD BACK BY ITS OWN SYSTEM (namespace draft
-            §108): Low Power Mode caps the processor; a Mac hot enough has
-            slowed it. Said first and put right in the system's own settings,
-            which is what the sentence names; nothing in the show needs either
-            by key, so no cue wears it - it is every cue's at once. */
+            §108): something caps the processor - the Mac's Low Power Mode,
+            Windows' Battery saver, its power mode slider, its Power saver
+            plan, a processor limited below its full speed - and the engine
+            says which, so the sentence names the setting to flip and where
+            it lives; a Mac hot enough has slowed it; a laptop runs on its
+            battery. Said first and put right in the system's own settings,
+            which is what the sentence names; nothing in the show needs any
+            of it by key, so no cue wears it - it is every cue's at once. */
         if (yes (snapshot, "/godot/engine/lowPower"))
+        {
+            const auto by = text (snapshot, "/godot/engine/lowPowerBy");
+            const std::string falls = ", and a show heavy with plugins or video can fall behind - ";
+
             out.push_back ({ pageName::thisComputer, "lowPower", "low power",
-                             "This computer is in Low Power Mode: its processor is capped, and a show heavy with"
-                             " plugins or video can fall behind - System Settings, Battery." });
+                             by == "batterySaver"
+                               ? "This computer is in Battery saver: its processor is capped" + falls + "Settings, Power & battery."
+                             : by == "bestPowerEfficiency"
+                               ? "This computer's power mode is Best power efficiency: its processor is held back" + falls + "Settings, Power & battery."
+                             : by == "powerSaverPlan"
+                               ? "This computer is on the Power saver plan: its processor is capped" + falls + "Control Panel, Power Options."
+                             : by == "processorLimited"
+                               ? "This computer's processor is limited below its full speed by its power plan or firmware" + falls
+                                   + "Control Panel, Power Options, the plan's processor power management."
+                               : "This computer is in Low Power Mode: its processor is capped" + falls + "System Settings, Battery." });
+        }
+
+        if (yes (snapshot, "/godot/engine/onBattery"))
+            out.push_back ({ pageName::thisComputer, "onBattery", "on battery",
+                             "This computer is running on its battery: it slows itself as the charge falls, and turns"
+                             " Battery saver on by itself - plug it in." });
 
         if (const auto thermal = text (snapshot, "/godot/engine/thermal"); thermal == "serious" || thermal == "critical")
             out.push_back ({ pageName::thisComputer, "thermal", "too hot",

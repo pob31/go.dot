@@ -50,6 +50,7 @@
     operator would look when a show feels loose.
 */
 
+#include <wfg/engine/clock/FineWait.h>
 #include <wfg/engine/clock/SampleClock.h>
 #include <wfg/engine/clock/TickClock.h>
 
@@ -59,7 +60,6 @@
 
 #include <atomic>
 #include <functional>
-#include <condition_variable>
 #include <cstdint>
 #include <mutex>
 #include <thread>
@@ -208,7 +208,7 @@ namespace wfg
 
         // Keep serving commands and publishing snapshots at the frozen tick,
         // without running the scheduler or advancing any cue's elapsed time.
-        void setSuspended (bool value) noexcept { suspended.store (value); wakeUp.notify_all(); }
+        void setSuspended (bool value) noexcept { suspended.store (value); wakeUp.wake(); }
         bool isSuspended() const noexcept { return suspended.load(); }
 
         // Only while stopped. Keep tick indices monotonic across a device switch.
@@ -287,7 +287,7 @@ namespace wfg
 
         std::thread worker;
         std::mutex mutex;
-        std::condition_variable wakeUp;
+        FineWait wakeUp;
         bool stopping = false;
 
         std::atomic<bool> running { false };

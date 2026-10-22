@@ -388,17 +388,20 @@ namespace wfg::client::ui
             button->setComponentID ("problem:" + juce::String (page.page));
 
             /*  THE COMPUTER'S OWN (namespace draft §108) opens the system's
-                settings, where Low Power Mode is switched off, and on the Mac
-                only: nowhere else says it. */
+                settings, where Low Power Mode or Battery saver is switched
+                off and the laptop's charge is seen: the Mac's Battery, Windows'
+                Power & battery. Linux says nothing of its own. */
             const auto computer = page.page == model::settingsPages::thisComputer;
+            const auto mac = (juce::SystemStats::getOperatingSystemType() & juce::SystemStats::MacOSX) != 0;
+            const auto windows = (juce::SystemStats::getOperatingSystemType() & juce::SystemStats::Windows) != 0;
 
             juce::StringArray said;
             said.add (page.page.empty()
                         ? juce::String ("Missing files - press to pick the next cue whose file is missing:")
                         : computer
-                        ? juce::String (page.page) + (juce::SystemStats::getOperatingSystemType() & juce::SystemStats::MacOSX
-                                                        ? " - press to open the Mac's Battery settings:"
-                                                        : ":")
+                        ? juce::String (page.page) + (mac ? " - press to open the Mac's Battery settings:"
+                                                      : windows ? " - press to open Windows' Power & battery settings:"
+                                                      : ":")
                         : juce::String (page.page) + " - press to open Show settings on it:");
 
             for (std::size_t at = 0; at < page.sentences.size() && at < 8; ++at)
@@ -408,7 +411,7 @@ namespace wfg::client::ui
                 said.add ("and " + juce::String (static_cast<int> (page.sentences.size() - 8)) + " more");
 
             button->setTooltip (said.joinIntoString ("\n"));
-            button->onClick = [this, which = page.page, computer]
+            button->onClick = [this, which = page.page, computer, mac, windows]
             {
                 if (which.empty())
                 {
@@ -417,8 +420,10 @@ namespace wfg::client::ui
                 }
                 else if (computer)
                 {
-                    if (juce::SystemStats::getOperatingSystemType() & juce::SystemStats::MacOSX)
+                    if (mac)
                         juce::URL ("x-apple.systempreferences:com.apple.Battery-Settings.extension").launchInDefaultBrowser();
+                    else if (windows)
+                        juce::URL ("ms-settings:powersleep").launchInDefaultBrowser();
                 }
                 else if (actions.openSettings)
                     actions.openSettings (which);

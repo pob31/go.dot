@@ -556,3 +556,44 @@ TEST_CASE ("tick thread: suspended audio keeps commands responsive without advan
     thread.stop();
     CHECK (scheduled.load() == 2);
 }
+
+TEST_CASE ("fine wait: a quarter-millisecond slice is not a system tick, and a wake ends a wait at once")
+{
+    /*  Namespace draft §108, the Windows half (2026-10-22). Forty slices of
+        a quarter of a millisecond come to a few tens of milliseconds on a
+        timer that is fine, and to 625 ms on Windows' default 15.6 ms tick -
+        which is what the tick thread's polls were on any machine where no
+        other program had asked the system for a finer one. The bound is
+        loose enough for a loaded build box and still a fifth of the figure
+        it rules out. */
+    wfg::FineWait wait;
+
+    auto start = std::chrono::steady_clock::now();
+
+    for (int i = 0; i < 40; ++i)
+        wait.wait (std::chrono::microseconds (250));
+
+    CHECK (std::chrono::steady_clock::now() - start < std::chrono::milliseconds (300));
+
+   #if defined (_WIN32)
+    CHECK (wait.fine());
+   #endif
+
+    //  A wake that came before the wait is kept: the wait returns at once rather than two seconds later.
+    wait.wake();
+    start = std::chrono::steady_clock::now();
+    wait.wait (std::chrono::seconds (2));
+    CHECK (std::chrono::steady_clock::now() - start < std::chrono::milliseconds (500));
+
+    //  One from another thread ends the wait in progress.
+    std::thread waker ([&wait]
+    {
+        std::this_thread::sleep_for (std::chrono::milliseconds (30));
+        wait.wake();
+    });
+
+    start = std::chrono::steady_clock::now();
+    wait.wait (std::chrono::seconds (5));
+    CHECK (std::chrono::steady_clock::now() - start < std::chrono::seconds (2));
+    waker.join();
+}
