@@ -43,6 +43,7 @@
 
 #include <wfg/client/model/Fx.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -125,6 +126,16 @@ namespace wfg::client::model
 
     /** "10 s", "1 min", "1 min 30 s": what a take's length is said as. */
     std::string secondsWords (double seconds);
+
+    /*  A LONGEST TAKE AS SOMEBODY TYPES IT (namespace draft §105, AZP): a
+        number of minutes - "25", "2,5" or "2.5" - or one with its unit, "90 s",
+        "45 min", "2 h", or a clock, "1:30:00" (hours) or "12:30" (minutes and
+        seconds). In seconds, above nought and at most a day; nothing for what
+        cannot be read. */
+    std::optional<double> parseTakeLength (const std::string& typed);
+
+    /** The longest take a typed length may be: a day. */
+    inline constexpr double longestTakeSeconds = 86400.0;
 
     /*  WHAT KEEPS LOAD NOW WAITING (Phase 9b, namespace draft §18.5): the cues
         sounding, by name - "Voix solo is sounding" - or nothing when the graph

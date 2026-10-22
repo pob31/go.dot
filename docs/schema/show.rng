@@ -4358,10 +4358,10 @@
       </optional>
       <optional>
         <attribute name="takeSeconds">
-          <a:documentation>The longest take this channel records, in seconds (Phase 9c, namespace draft 19.2): above nought the channel carries a recorder between its plugins before it and after it, and nought is no recorder - the channel of 9b. What it costs is memory, set aside and touched when the graph is built, never when Rec is pressed: (1 + layers) times this, at the rate, two channels, four bytes a sample. A change takes effect at Load now, and empties the take the channel held.</a:documentation>
+          <a:documentation>The longest take this channel records, in seconds (Phase 9c, namespace draft 19.2): above nought the channel carries a recorder between its plugins before it and after it, and nought is no recorder - the channel of 9b. Typed, up to a day (namespace draft 105, AZP). What it costs is memory, set aside and touched when the graph is built, never when Rec is pressed: (1 + layers) times this, at the rate, two channels, four bytes a sample. The takes together are given no more than half this computer-s memory: a channel whose take would cross that line records nothing and says so in takeProblem (AZX). A change takes effect at Load now, and empties the take the channel held.</a:documentation>
           <data type="double">
             <param name="minInclusive">0</param>
-            <param name="maxInclusive">600</param>
+            <param name="maxInclusive">86400</param>
           </data>
         </attribute>
       </optional>

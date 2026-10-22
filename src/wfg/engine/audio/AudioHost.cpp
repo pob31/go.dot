@@ -43,6 +43,7 @@
 #include <bit>
 #include <cmath>
 #include <cstdint>
+#include <new>
 #include <cstring>
 #include <limits>
 #include <map>
@@ -917,13 +918,17 @@ namespace wfg::audio
                 {
                     const auto found = takes.find (channel.id);
 
-                    if (found == takes.end() || found->second.take == nullptr)
+                    if (found == takes.end())
                         continue;
 
+                    /*  A TAKE REFUSED ITS MEMORY (§105, AZX) is built as asked
+                        all the same - so the graph does not read as differing
+                        from the show - with nought set aside and the reason. */
                     auto& each = built[channel.id];
                     each.seconds = found->second.shape.takeSeconds;
                     each.layers = found->second.shape.layers;
-                    each.bytes = static_cast<std::uint64_t> (found->second.take->bytes());
+                    each.bytes = found->second.take != nullptr
+                                   ? static_cast<std::uint64_t> (found->second.take->bytes()) : 0u;
                     each.problem = found->second.problem;
 
                     for (const auto& entry : channel.plugins)
@@ -1346,6 +1351,25 @@ namespace wfg::audio
                 since this thread is the store's only writer. */
             std::map<std::string, TakeStore> kept;
 
+            /*  NEVER MORE THAN HALF THIS COMPUTER (namespace draft §105, AZX):
+                a longest take is typed now, and hours of it at 48 kHz are tens
+                of gigabytes, touched page by page - a machine asked for more
+                than it has would grind or be killed. The takes together stay
+                under half the memory; a channel whose take would cross that
+                line records nothing, plays as a channel with no recorder, and
+                says why. */
+            const auto spare = static_cast<std::uint64_t> (std::max (0, juce::SystemStats::getMemorySizeInMegabytes()))
+                                 * 1024u * 1024u / 2u;
+            std::uint64_t spent = 0;
+
+            const auto refuse = [] (TakeStore& store, std::uint64_t wanted)
+            {
+                store.take = nullptr;
+                store.problem = "the take was not set aside: "
+                                  + std::to_string ((wanted + 512u * 1024u * 1024u) / (1024u * 1024u * 1024u))
+                                  + " GB is more than this computer can spare - a shorter take or fewer layers";
+            };
+
             for (const auto& channel : spec.rack)
             {
                 if (channel.takeSeconds <= 0.0)
@@ -1366,14 +1390,35 @@ namespace wfg::audio
                 {
                     auto same = found->second;
                     same.problem.clear();
+                    spent += static_cast<std::uint64_t> (same.take->bytes());
                     kept[channel.id] = std::move (same);
                     continue;
                 }
 
                 TakeStore store;
                 store.shape = shape;
-                store.take = std::make_shared<Looper>();
-                store.take->prepare (shape);
+
+                if (const auto wanted = static_cast<std::uint64_t> (Looper::bytesFor (shape));
+                      spare > 0 && spent + wanted > spare)
+                {
+                    refuse (store, wanted);
+                    kept[channel.id] = std::move (store);
+                    continue;
+                }
+
+                //  And what the system refuses all the same, said as plainly.
+                try
+                {
+                    store.take = std::make_shared<Looper>();
+                    store.take->prepare (shape);
+                    spent += static_cast<std::uint64_t> (store.take->bytes());
+                }
+                catch (const std::bad_alloc&)
+                {
+                    refuse (store, static_cast<std::uint64_t> (Looper::bytesFor (shape)));
+                    kept[channel.id] = std::move (store);
+                    continue;
+                }
 
                 if (found != takes.end() && found->second.take != nullptr
                       && found->second.take->state() != TakeState::empty)

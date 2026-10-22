@@ -128,6 +128,11 @@ namespace wfg::audio
         /** What prepare() set aside, in bytes - said in words in the Rack tab. */
         std::size_t bytes() const noexcept;
 
+        /*  What prepare() would set aside for a shape, in bytes, without
+            setting anything aside: asked before a typed length that could be
+            hours is given its memory (namespace draft §105, AZX). */
+        static std::size_t bytesFor (const Shape&) noexcept;
+
         /** The longest take, in samples; nought for no recorder. */
         std::int64_t capacity() const noexcept          { return takeSamples; }
 

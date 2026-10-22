@@ -66,8 +66,87 @@ namespace wfg::client::model
         if (whole < 60)
             return std::to_string (whole) + " s";
 
+        //  A typed take may run to hours (§105).
+        if (whole >= 3600)
+        {
+            const auto hours = whole / 3600, minutesLeft = (whole % 3600 + 30) / 60;
+            return std::to_string (hours) + " h" + (minutesLeft == 0 ? std::string() : " " + std::to_string (minutesLeft) + " min");
+        }
+
         const auto minutes = whole / 60, rest = whole % 60;
         return std::to_string (minutes) + " min" + (rest == 0 ? std::string() : " " + std::to_string (rest) + " s");
+    }
+
+    std::optional<double> parseTakeLength (const std::string& typed)
+    {
+        std::string text;
+
+        for (const auto c : typed)
+            if (! std::isspace (static_cast<unsigned char> (c)))
+                text += c == ',' ? '.' : static_cast<char> (std::tolower (static_cast<unsigned char> (c)));
+
+        if (text.empty())
+            return std::nullopt;
+
+        std::optional<double> seconds;
+
+        /*  A CLOCK: hours, minutes and seconds with two colons, minutes and
+            seconds with one - every part a number, the last below sixty. */
+        if (text.find (':') != std::string::npos)
+        {
+            std::vector<double> parts;
+            std::size_t from = 0;
+
+            while (true)
+            {
+                const auto colon = text.find (':', from);
+                const auto value = osc::parseDouble (text.substr (from, colon == std::string::npos ? std::string::npos
+                                                                                                    : colon - from));
+                if (! value || *value < 0.0)
+                    return std::nullopt;
+
+                parts.push_back (*value);
+
+                if (colon == std::string::npos)
+                    break;
+
+                from = colon + 1;
+            }
+
+            if (parts.size() < 2 || parts.size() > 3 || parts.back() >= 60.0)
+                return std::nullopt;
+
+            seconds = parts.size() == 3 ? parts[0] * 3600.0 + parts[1] * 60.0 + parts[2]
+                                        : parts[0] * 60.0 + parts[1];
+        }
+        else
+        {
+            //  A NUMBER AND ITS UNIT, minutes when it has none.
+            auto digits = text.size();
+
+            while (digits > 0 && std::isalpha (static_cast<unsigned char> (text[digits - 1])))
+                --digits;
+
+            const auto unit = text.substr (digits);
+            const auto value = osc::parseDouble (text.substr (0, digits));
+
+            if (! value)
+                return std::nullopt;
+
+            if (unit.empty() || unit == "m" || unit == "min" || unit == "mn" || unit == "minutes")
+                seconds = *value * 60.0;
+            else if (unit == "s" || unit == "sec" || unit == "seconds")
+                seconds = *value;
+            else if (unit == "h" || unit == "hours")
+                seconds = *value * 3600.0;
+            else
+                return std::nullopt;
+        }
+
+        if (! seconds || ! std::isfinite (*seconds) || *seconds <= 0.0 || *seconds > longestTakeSeconds)
+            return std::nullopt;
+
+        return seconds;
     }
 
     std::string takeWords (const RackChannelRow& channel, const RackReading& rack)

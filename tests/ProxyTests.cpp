@@ -2959,8 +2959,22 @@ TEST_CASE ("sampling: a take recorded through the plugin before the recorder loo
     CHECK (longer->state() == audio::TakeState::empty);
     CHECK (table.builtTakeOf ("SM000001").problem == "the take was cleared: its longest take or its layers changed");
 
+    /*  A day with every layer (namespace draft §105, AZX): far past half of
+        any computer this runs on, so nothing is set aside, the channel plays
+        as one with no recorder, and the graph is built all the same - as the
+        show asks, so it does not read as differing - saying why. */
+    spec.rack[0].takeSeconds = 86400.0;
+    spec.rack[0].layers = 16;
+    REQUIRE (host.buildEdit (spec));
+    CHECK (host.takeOf ("SM000001") == nullptr);
+    CHECK (table.builtTakeOf ("SM000001").bytes == 0);
+    CHECK (table.builtTakeOf ("SM000001").seconds > 86399.0);
+    CHECK (table.builtTakeOf ("SM000001").problem.find ("the take was not set aside") == 0);
+    CHECK (table.builtTakeOf ("SM000001").problem.find ("more than this computer can spare") != std::string::npos);
+
     //  And a channel that no longer samples lets its take go.
     spec.rack[0].takeSeconds = 0.0;
+    spec.rack[0].layers = 4;
     REQUIRE (host.buildEdit (spec));
     CHECK (host.takeOf ("SM000001") == nullptr);
     CHECK (table.builtTakeOf ("SM000001").bytes == 0);

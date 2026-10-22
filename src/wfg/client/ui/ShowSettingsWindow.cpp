@@ -6777,11 +6777,24 @@ namespace wfg::client::ui
                 static constexpr int layerCounts[] = { 1, 2, 4, 8, 16 };
 
                 juce::PopupMenu menu;
+                auto offered = false;
 
                 for (int at = 0; at < 7; ++at)
+                {
+                    const auto ticked = std::abs (channel.takeSeconds - lengths[at]) < 1.0e-9;
+                    offered = offered || ticked;
                     menu.addItem (at + 1, at == 0 ? juce::String ("No recorder")
                                                   : "Records up to " + juce::String (model::secondsWords (lengths[at])),
-                                  true, std::abs (channel.takeSeconds - lengths[at]) < 1.0e-9);
+                                  true, ticked);
+                }
+
+                /*  ANY LENGTH, TYPED (namespace draft §105, AZP): one that is
+                    none of the menu's is shown ticked under them. */
+                if (! offered && channel.samples())
+                    menu.addItem (9, "Records up to " + juce::String (model::secondsWords (channel.takeSeconds)),
+                                  true, true);
+
+                menu.addItem (8, "Type a length...");
 
                 juce::PopupMenu layers;
 
@@ -6798,13 +6811,47 @@ namespace wfg::client::ui
                                         if (safe == nullptr || chosen <= 0 || ! safe->send)
                                             return;
 
-                                        if (chosen >= 100 && chosen < 105)
+                                        if (chosen == 8)
+                                            safe->askTakeLength (id);
+                                        else if (chosen >= 100 && chosen < 105)
                                             safe->send (gesture::setNode ("/godot/slot/" + id + "/layers",
                                                                           std::to_string (layerCounts[chosen - 100])));
                                         else if (chosen <= 7)
                                             safe->send (gesture::setNode ("/godot/slot/" + id + "/takeSeconds",
                                                                           std::to_string (std::llround (lengths[chosen - 1]))));
                                     });
+            }
+
+            /*  THE LONGEST TAKE, TYPED (namespace draft §105, AZP): minutes, or
+                with a unit or as a clock (model::parseTakeLength), up to a day;
+                what it costs is said on the Rack tab's foot as before, and the
+                engine sets aside no more than half this computer (AZX). */
+            void askTakeLength (const std::string& channelId)
+            {
+                auto* ask = new juce::AlertWindow ("The longest take",
+                                                   "In minutes - or 90 s, 2 h, 1:30:00. What it costs in memory"
+                                                   " is said under the list, and set aside at Load now.",
+                                                   juce::MessageBoxIconType::NoIcon);
+                ask->addTextEditor ("length", {}, "Records up to");
+                ask->addButton ("Set", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                ask->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+                ask->enterModalState (true, juce::ModalCallbackFunction::create (
+                    [ask, channelId, safe = juce::Component::SafePointer<RackPage> (this)] (int result)
+                    {
+                        if (safe == nullptr || result != 1 || ! safe->send)
+                            return;
+
+                        const auto typed = ask->getTextEditorContents ("length").toStdString();
+
+                        if (const auto seconds = model::parseTakeLength (typed))
+                            safe->send (gesture::setNode ("/godot/slot/" + channelId + "/takeSeconds",
+                                                          osc::formatDouble (*seconds)));
+                        else
+                            juce::AlertWindow::showMessageBoxAsync (juce::MessageBoxIconType::WarningIcon, "Not set",
+                                                                    "\"" + juce::String (typed) + "\" is no length up to a day"
+                                                                    " - minutes, or 90 s, 2 h, 1:30:00");
+                    }), true);
             }
 
             /*  A PLUGIN'S SIDE (decision BZ): printed into the take, or heard as

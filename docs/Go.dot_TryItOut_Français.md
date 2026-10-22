@@ -123,7 +123,7 @@ Tout ce qui suit est construit. Les sections marquées nouveau sont arrivées ap
 | --- | --- | --- |
 | Cues micro | Ouvrir une entrée nommée à travers une tranche de rack avec ses propres plugins, choisie sur la ligne *FX rack* de la cue | *Add > mic* ; *Show settings > Inputs*, *Rack* |
 | Auxiliaires (nouveau) | Un retour de réverbération ou de délai que les cues alimentent par leurs envois : ses propres plugins, son niveau, sa sortie et ses envois, gardés avec le spectacle ; un fondu peut les déplacer le temps de la soirée. Un clic sur le nom d'un auxiliaire dans le panneau des envois d'une cue ouvre l'auxiliaire lui-même | *Show settings > Rack* : + Mono aux, + Stereo aux ; le panneau *sends* d'une cue |
-| Échantillonnage live | Enregistrer du son pendant le spectacle, puis la boucler, la superposer ou l'effacer | Panneau *Take* ; *transport > On a take* |
+| Échantillonnage live | Enregistrer du son pendant le spectacle, puis la boucler, la superposer ou l'effacer. Une prise peut durer ce que vous tapez, jusqu'à une journée (nouveau) | Panneau *Take* ; *transport > On a take* ; *Show settings > Rack* pour sa durée |
 | Enregistreur live | Garder l'instant de chaque cue lancée pendant un filage, dans une prise | Ctrl+Maj+R |
 
 ### Parler au reste de l'installation

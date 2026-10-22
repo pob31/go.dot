@@ -165,6 +165,26 @@ namespace
 }
 
 //==============================================================================
+TEST_CASE ("looper: what a shape costs is known before it is set aside, to the byte (§105)")
+{
+    /*  A typed take may be hours (namespace draft §105, AZP), so the host asks
+        what it would cost before setting it aside (AZX): bytesFor must be what
+        prepare then sets aside, whatever the rate, the layers or a take
+        shorter than a loop. */
+    for (const auto& shape : { Looper::Shape { 48000.0, 2, 60.0, 4 }, Looper::Shape { 44100.0, 2, 10.0, 1 },
+                               Looper::Shape { 96000.0, 1, 0.001, 16 }, Looper::Shape { 48000.0, 2, 0.0, 4 } })
+    {
+        Looper looper;
+        looper.prepare (shape);
+        CHECK (Looper::bytesFor (shape) == looper.bytes());
+    }
+
+    //  An hour with four layers at 48 kHz: some 6.9 GB, said without a byte of it set aside.
+    const auto hour = Looper::bytesFor ({ 48000.0, 2, 3600.0, 4 });
+    CHECK (hour > 6'900'000'000ull);
+    CHECK (hour < 6'950'000'000ull);
+}
+
 TEST_CASE ("looper: a take is recorded and closed to the sample, and loops from its first sample")
 {
     Rig rig (1.0);

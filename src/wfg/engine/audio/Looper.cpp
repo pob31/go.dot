@@ -94,6 +94,21 @@ namespace wfg::audio
         publish();
     }
 
+    std::size_t Looper::bytesFor (const Shape& wanted) noexcept
+    {
+        //  prepare()'s own arithmetic, step for step.
+        const auto rate = wanted.sampleRate > 0.0 ? wanted.sampleRate : 48000.0;
+        const auto channels = static_cast<std::size_t> (std::clamp (wanted.channels, 1, maxChannels));
+        const auto slotCount = static_cast<std::size_t> (1 + std::clamp (wanted.layers, 0, maxLayers));
+        const auto fadeLength = std::max<std::int64_t> (1, std::lround (crossfadeSeconds * rate));
+        const auto asked = static_cast<std::int64_t> (std::llround (std::max (0.0, wanted.takeSeconds) * rate));
+        const auto samples = asked > 0 ? std::max<std::int64_t> (asked, 2 * fadeLength) : 0;
+        const auto chunkCount = samples > 0 ? static_cast<std::size_t> ((samples + fadeLength + peakSamples - 1) / peakSamples) : 0;
+
+        return slotCount * channels * chunkCount * static_cast<std::size_t> (peakSamples) * sizeof (float)
+                 + slotCount * chunkCount * (sizeof (std::uint32_t) + sizeof (float));
+    }
+
     std::size_t Looper::bytes() const noexcept
     {
         return memory.size() * sizeof (float)

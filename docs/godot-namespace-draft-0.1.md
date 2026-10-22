@@ -33444,12 +33444,20 @@ Mine *(proposed)*, the author's to overrule:
 - **AZW** **The load is asked once per add**, on the first pass within three seconds that shows the graph
   lagging; an add made while something sounds is never loaded later by itself, since a rebuild the hand did
   not ask for would stop the sound for a moment at a moment nobody chose.
+- **AZX** **A typed take is up to a day, and the takes together get no more than half this computer's
+  memory.** An hour with four layers at 48 kHz is some 6.9 GB, touched page by page at Load now (§19.2); a
+  machine asked for more than it has would grind or be killed, the show with it. A channel whose take would
+  cross the line records nothing, plays as a channel with no recorder, and its `takeProblem` says so - *the
+  take was not set aside: 564 GB is more than this computer can spare - a shorter take or fewer layers*. The
+  graph is built as the show asks all the same, so it does not read as differing from it. What the system
+  refuses even under the line (`std::bad_alloc`) is said in the same words.
 
 ### 105.2 Rows and commands
 
 | Address | Type | Access | Notes |
 |---|---|---|---|
 | `/godot/cue/<id>/fxHideUnused` | `T`, false | rw, show | a media or a mic cue's: its FX panel leaves out what it has no insert for |
+| `/godot/slot/<id>/takeSeconds` | `d`, 0 s (0..86400) | rw, show | was 0..600 (§19.5): typed, up to a day (AZP) |
 
 `cue.plugin <cue> <name> <identifier> <format> <path> [plugin] [fx]` - a known plugin added where the cue's
 chain lives and switched in on it (AZN, AZV).
@@ -33468,7 +33476,13 @@ chain lives and switched in on it (AZN, AZV).
   answer adds nothing when the pick has moved on. `ShowDocument::createCuePlugin` asks what can be refused
   before writing.
 
-Words mine, for the author to keep or change: *Add plugin...*, *Not in the audio yet: Load now builds it
+- **The typed take**: the Rack tab's recorder menu ends with *Type a length...*, which asks in minutes - or
+  `90 s`, `2 h`, `1:30:00`, a comma as good as a point (`model::parseTakeLength`); a length none of the
+  menu's is shown ticked under them, and hours are said as hours (*1 h 30 min*). `Looper::bytesFor` is what
+  `prepare` would set aside, asked first by `refreshTakes`, which keeps the running total under half of
+  `SystemStats::getMemorySizeInMegabytes`.
+
+Words mine, for the author to keep or change: *Type a length...*, *The longest take*, *Add plugin...*, *Not in the audio yet: Load now builds it
 in.*, *... is sounding: Load now waits for nothing to sound.*, *2 unused plugins hidden*, and the panel
 tooltips.
 
@@ -33477,7 +33491,7 @@ tooltips.
 | stage | what | commit |
 |---|---|---|
 | FX.A-FX.D | FX rack; Edit switches in; Hide unused plugins; add from the panel and load if quiet (PluginSetTests, RunPaneUiTests, ClientTests, MicTests) | |
-| FX.E | the longest take typed | |
+| FX.E | the longest take typed, never more than half the machine (LooperTests, ProxyTests, ClientTests) | |
 | FX.F | pads on the live take | |
 
 Owed: the author's try - a plugin added from a media cue's panel and from a mic cue's, with nothing playing

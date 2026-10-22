@@ -10277,6 +10277,30 @@ TEST_CASE ("client: a mic cue's chain starts at its input, its path is said agai
     CHECK (model::busyWords (*rig.publish (6)).empty());
 }
 
+TEST_CASE ("client: a longest take is typed in minutes, with a unit, or as a clock, up to a day (§105)")
+{
+    const auto read = [] (const char* typed) { return model::parseTakeLength (typed).value_or (-1.0); };
+
+    //  Minutes when it has no unit, a comma as good as a point (a French booth types 2,5).
+    CHECK (read ("25") == doctest::Approx (1500.0));
+    CHECK (read ("2,5") == doctest::Approx (150.0));
+    CHECK (read (" 2.5 min ") == doctest::Approx (150.0));
+    CHECK (read ("90 s") == doctest::Approx (90.0));
+    CHECK (read ("2 h") == doctest::Approx (7200.0));
+    CHECK (read ("1:30:00") == doctest::Approx (5400.0));
+    CHECK (read ("12:30") == doctest::Approx (750.0));
+    CHECK (read ("24h") == doctest::Approx (86400.0));
+
+    //  Nothing for what is no length, none at all, or more than a day.
+    for (const auto* typed : { "", "abc", "0", "-5", "25 days", "1:75", "1:2:3:4", "24:00:01", "1441" })
+        CHECK_FALSE (model::parseTakeLength (typed).has_value());
+
+    //  And hours are said as hours.
+    CHECK (model::secondsWords (5400.0) == "1 h 30 min");
+    CHECK (model::secondsWords (7200.0) == "2 h");
+    CHECK (model::secondsWords (600.0) == "10 min");
+}
+
 TEST_CASE ("client: the rack reads each channel with its own chain, and says the worst case against the budget")
 {
     /*  Phase 9b (namespace draft §18.3): the Rack tab's reading, made through
@@ -10464,8 +10488,8 @@ TEST_CASE ("client: a sampling channel says its recorder, what it sets aside, an
     CHECK (model::takeWords (closed.channels[0], closed)
              == "It records up to 1 min with 4 layers on top: about 115.2 MB at 48 kHz, set aside when the audio opens.");
 
-    //  The schema's own words for what a row may hold.
-    CHECK (rig.apply (9, "window", "node.set", { V::string ("/godot/slot/K1000001/takeSeconds"), V::string ("900") }).applied == 0);
+    //  The schema's own words for what a row may hold: a day at the most, typed (§105, AZP).
+    CHECK (rig.apply (9, "window", "node.set", { V::string ("/godot/slot/K1000001/takeSeconds"), V::string ("86401") }).applied == 0);
     CHECK (rig.apply (10, "window", "node.set", { V::string ("/godot/plugin/" + gain + "/side"), V::string ("sideways") }).applied == 0);
 
     CHECK (model::secondsWords (10) == "10 s");
