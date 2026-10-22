@@ -35,6 +35,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <vector>
 
 using namespace wfg;
 
@@ -123,6 +124,41 @@ TEST_CASE ("surface pages: the EQ map is the author's, and every row in it is th
     CHECK (eqControls[3].colour == 1);
     CHECK (eqControls[9].colour == 3);
     CHECK (eqControls.back().colour == 5);
+}
+
+TEST_CASE ("surface pages: the Stream Deck+'s EQ pages hold every control once, never two bands on a page")
+{
+    std::vector<int> seen (surface::eqControlCount, 0);
+
+    for (std::size_t page = 0; page < surface::deckEqPages.size(); ++page)
+    {
+        int colour = -1;
+
+        for (const auto index : surface::deckEqPages[page])
+        {
+            if (index < 0)
+                continue;
+
+            REQUIRE (index < surface::eqControlCount);
+            ++seen[static_cast<std::size_t> (index)];
+
+            //  The cuts share their page; every other page is one band's.
+            const auto bandColour = surface::eqControls[static_cast<std::size_t> (index)].colour;
+
+            if (page > 0)
+            {
+                CAPTURE (page);
+                CHECK ((colour < 0 || colour == bandColour));
+                colour = bandColour;
+            }
+        }
+    }
+
+    for (const auto count : seen)
+        CHECK (count == 1);
+
+    CHECK (surface::deckEqPages[0][0] == 0);
+    CHECK (surface::deckEqPages[0][3] == surface::eqControlCount - 1);
 }
 
 TEST_CASE ("surface pages: sixteen rotaries show the EQ at once, eight in two pages")

@@ -579,10 +579,10 @@ TEST_CASE ("stream deck bridge: the Stream Deck+'s dials turn the aimed cue's EQ
     desk.step();
 
     CHECK (desk.table.pageOf ("SURF0001").word == "eq");
-    CHECK (desk.table.pageOf ("SURF0001").count == 4);
+    CHECK (desk.table.pageOf ("SURF0001").count == 5);
     CHECK (desk.host.keys[1].lit);
     CHECK (desk.host.zones[0].label == "HP freq");
-    CHECK (desk.host.zones[0].title.find ("EQ 1/4 - 1 Preshow") == 0);
+    CHECK (desk.host.zones[0].title.find ("EQ 1/5 - 1 Preshow") == 0);
 
     //  A turn: the high-pass's frequency, by the page's own law.
     surface::DeckInput turn;
@@ -626,7 +626,7 @@ TEST_CASE ("stream deck bridge: the Stream Deck+'s dials turn the aimed cue's EQ
     REQUIRE (desk.submitted.size() == 1);
     CHECK (desk.submitted[0].args[0].getString() == "/godot/cue/CUE00001/eqHpfFreq");
 
-    //  A swipe to the left brings the next four.
+    //  A swipe to the left brings the next page: band one, whole.
     surface::DeckInput swipe;
     swipe.kind = surface::DeckInput::Kind::swipe;
     swipe.x = 600;
@@ -635,7 +635,61 @@ TEST_CASE ("stream deck bridge: the Stream Deck+'s dials turn the aimed cue's EQ
     desk.step();
     desk.step();
     CHECK (desk.table.pageOf ("SURF0001").index == 1);
-    CHECK (desk.host.zones[0].label == "B1 Q");
+    CHECK (desk.host.zones[0].label == "B1 shape");
+    CHECK (desk.host.zones[3].label == "B1 Q");
+}
+
+TEST_CASE ("stream deck bridge: the Stream Deck+'s EQ is five pages - the cuts, then a band a page")
+{
+    /*  The author, 2026-10-22: "On the Streamdeck+ EQ layout, I would have 5
+        pages, one with the Low cut left and the high cut right. Then the first
+        band which has 4 parameters, then the second band and so on, not
+        mixing bands across pages." */
+    Desk desk ("plus");
+    desk.fake.eqOf ("CUE00001");
+    desk.fake.text ("/godot/surface/aim", "CUE00001");
+    desk.step();
+
+    const auto labels = [&desk]
+    {
+        std::vector<std::string> out;
+
+        for (int dial = 0; dial < 4; ++dial)
+            out.push_back (desk.host.zones[dial].label);
+
+        return out;
+    };
+
+    using Labels = std::vector<std::string>;
+    const std::vector<Labels> pages { { "HP freq", "", "", "LP freq" },
+                                      { "B1 shape", "B1 freq", "B1 gain", "B1 Q" },
+                                      { "", "B2 freq", "B2 gain", "B2 Q" },
+                                      { "", "B3 freq", "B3 gain", "B3 Q" },
+                                      { "B4 shape", "B4 freq", "B4 gain", "B4 Q" } };
+
+    //  The EQ key, and again for each page after; once more is the first again.
+    for (std::size_t page = 0; page <= pages.size(); ++page)
+    {
+        desk.host.keysDown ("AL12K1A00001", { 1 });
+        desk.step();
+        desk.host.keysDown ("AL12K1A00001", {});
+        desk.step();
+
+        CAPTURE (page);
+        CHECK (desk.table.pageOf ("SURF0001").index == static_cast<int> (page % pages.size()));
+        CHECK (labels() == pages[page % pages.size()]);
+    }
+
+    //  An empty dial turns nothing; the low-pass is the cuts page's last dial.
+    desk.submitted.clear();
+    surface::DeckInput turn;
+    turn.kind = surface::DeckInput::Kind::dialTurns;
+    turn.detents = { 0, 3, 0, -1 };
+    desk.host.input ("AL12K1A00001", turn);
+    desk.step();
+
+    REQUIRE (desk.submitted.size() == 1);
+    CHECK (desk.submitted[0].args[0].getString() == "/godot/cue/CUE00001/eqLpfFreq");
 }
 
 TEST_CASE ("stream deck bridge: the Send page makes a send a turn up asks for, and the arrows aim the next cue")

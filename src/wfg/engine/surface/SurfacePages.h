@@ -106,6 +106,24 @@ namespace wfg::surface
         { "eqLpfFreq", "LP freq",  "LP Frq",  Law::frequency, 1000.0, 20000.0, 5, "eqLpf", Press::toggleSwitch, {} },
     } };
 
+    /*  THE STREAM DECK+'S EQ, A BAND A PAGE (the author, 2026-10-22: "On the
+        Streamdeck+ EQ layout, I would have 5 pages, one with the Low cut left
+        and the high cut right. Then the first band which has 4 parameters,
+        then the second band and so on, not mixing bands across pages."): four
+        dials a page, each slot the index of an `eqControls` entry, or -1 for a
+        dial left empty. A band's frequency, gain and width sit on the same
+        dials on every page; a band with no shape leaves the first one empty. */
+    inline constexpr int deckEqPageCount = 5;
+    inline constexpr int deckEqDials = 4;
+
+    inline constexpr std::array<std::array<int, deckEqDials>, deckEqPageCount> deckEqPages { {
+        { 0, -1, -1, 15 },          // the high-pass on the left, the low-pass on the right
+        { 1, 2, 3, 4 },             // band one: shape, frequency, gain, width
+        { -1, 5, 6, 7 },            // band two
+        { -1, 8, 9, 10 },           // band three
+        { 11, 12, 13, 14 },         // band four
+    } };
+
     /** How many pages `controls` need on `rotaries` rotaries: one at least. */
     int pageCount (int controls, int rotaries) noexcept;
 

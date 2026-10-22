@@ -33251,3 +33251,23 @@ did, and is put down when the deck goes (§101)` (DeckBridgeTests); `client: the
 a hand moved last, and the window's hand lets it go (§101)` (ClientTests); `surface: each surface's page
 is published every tick` reads `moves` (SurfaceTests). Owed: the author's try with the D700 and a
 Stream Deck+ together, and with a deck pulled out on an EQ page.
+
+## 102. The Stream Deck+'s EQ, a band a page
+
+**Asked 2026-10-22** by the author: *"On the Streamdeck+ EQ layout, I would have 5 pages, one with the Low
+cut left and the high cut right. Then the first band which has 4 parameters, then the second band and so
+on, not mixing bands across pages."* The deck cut the D700's run of sixteen controls (§30) four at a
+time, so its first page was the high-pass and three of band one's controls, and band one's width began
+the next.
+
+- **AYU** **Five pages, the cuts then a band each** (the author's ask): the high-pass's frequency on the
+  first dial and the low-pass's on the last; then band one - shape, frequency, gain, width - and bands
+  two, three and four. `surface::deckEqPages` (SurfacePages.h), read by `DeckBridge::compose`; the EQ key
+  and the swipe walk the five, the D700 and the MCU keep their own map.
+- **AYV** *(proposed)* **A band's controls sit on the same dials on every page**: bands two and three,
+  which have no shape, leave the first dial empty, so frequency, gain and width are always the second,
+  third and fourth. An empty dial turns nothing and its strip says nothing.
+
+Tests: `stream deck bridge: the Stream Deck+'s EQ is five pages - the cuts, then a band a page`
+(DeckBridgeTests); `surface pages: the Stream Deck+'s EQ pages hold every control once, never two bands
+on a page` (SurfacePagesTests). Owed: the author's try on his Stream Deck+.

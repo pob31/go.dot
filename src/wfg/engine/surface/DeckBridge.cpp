@@ -762,7 +762,7 @@ namespace wfg::surface
         {
             switch (deck.page)
             {
-                case Page::eq:   return pageCount (eqControlCount, zones);
+                case Page::eq:   return deckEqPageCount;
                 case Page::send: return pageCount (static_cast<int> (wordsOf (textAt (at(), "/godot/audio/mixes")).size()), zones);
                 case Page::fx:   return std::max (1, static_cast<int> (fxPagesOf (aimNow()).size()));
                 case Page::loop:
@@ -964,12 +964,15 @@ namespace wfg::surface
                 return;
             }
 
-            for (int position = 0; position < zones; ++position)
-            {
-                const auto index = deck.pageIndex * zones + position;
+            //  A band a page, the cuts first (`deckEqPages`), not the D700's run of sixteen.
+            const auto& slots = deckEqPages[static_cast<std::size_t> (std::clamp (deck.pageIndex, 0, deckEqPageCount - 1))];
 
-                if (index >= eqControlCount)
-                    break;
+            for (int position = 0; position < zones && position < deckEqDials; ++position)
+            {
+                const auto index = slots[static_cast<std::size_t> (position)];
+
+                if (index < 0 || index >= eqControlCount)
+                    continue;
 
                 const auto& eq = eqControls[static_cast<std::size_t> (index)];
                 auto& control = deck.controls[static_cast<std::size_t> (position)];
