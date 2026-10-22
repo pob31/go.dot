@@ -428,7 +428,21 @@ namespace wfg::client
                 inspectorActions.setKey = [this] (const std::string& cueId, const std::string& address,
                                                   const std::string& key)
                 {
-                    send (address.empty() ? gesture::createKeyTrigger (cueId, key) : gesture::setNode (address, key));
+                    /*  ITS KIND WRITTEN WITH IT (§104): the trigger may be a deck's
+                        key until this one, and a key is one step to undo. */
+                    if (address.empty())
+                    {
+                        send (gesture::createKeyTrigger (cueId, key));
+                        return;
+                    }
+
+                    const auto base = address.substr (0, address.size() - std::string_view ("key").size());
+                    send (gesture::setNodes ({ { base + "kind", "key" }, { address, key } }));
+                };
+
+                inspectorActions.learnDeckKey = [this] (const std::string& cueId)
+                {
+                    send (gesture::learnDeckKey (cueId));
                 };
 
                 inspectorActions.clearKey = [this] (const std::string& triggerId)

@@ -47,10 +47,17 @@ namespace wfg::client::model
         std::string key;        ///< its key, spelled as KeyChord spells one; empty for none yet
         bool enabled = true;
 
+        /*  A STREAM DECK'S KEY instead (namespace draft §104): `kind` deck, the
+            surface, the key from nought, and the surface's name for the words. */
+        std::string kind = "key";
+        std::string surface {};
+        int button = 0;
+        std::string surfaceName {};
+
         bool operator== (const KeyTrigger&) const = default;
     };
 
-    /** Every key trigger the show has, in the tree's order. */
+    /** Every key trigger the show has, the computer's and the Stream Decks', in the tree's order. */
     std::vector<KeyTrigger> readKeyTriggers (const tree::TreeSnapshot& snapshot);
 
     /*  THE TRIGGERS A KEY FIRES: every switched-on trigger with that key,

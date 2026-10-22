@@ -996,10 +996,14 @@ TEST_CASE ("key trigger: its key is spelled once, is never one the show keeps, a
     CHECK (matchOsc (*index, "/desk/go", noArgs()).empty());
 }
 
-TEST_CASE ("key trigger: trigger.create makes one with its key, and trigger.fire fires its cue, standby still")
+TEST_CASE ("key trigger: trigger.create makes one with its key, and its press is a GO from its cue (§104)")
 {
+    /*  The author, 2026-10-22: "the assignment starts the targetted cue and
+        the pointer goes to the next cue on standby". A third cue, so the
+        standby moving past the key's cue and staying where it was read apart. */
     FiringRig rig;
-    REQUIRE (rig.document.setAttribute (standbyAddressOf (rig.listId), rig.other).ok);
+    const auto third = rig.document.createCue (rig.listId, 2, "memo", "Interval").id;
+    REQUIRE (rig.document.setAttribute (standbyAddressOf (rig.listId), third).ok);
 
     CHECK (rig.tick ("trigger.create", { osc::Value::string (rig.cueId), osc::Value::string ("key"),
                                          osc::Value::string (""), osc::Value::string ("key"),
@@ -1016,6 +1020,70 @@ TEST_CASE ("key trigger: trigger.create makes one with its key, and trigger.fire
 
     //  Its key let go: nothing to release on a memo, and no mistake.
     CHECK (rig.tick ("trigger.release", { osc::Value::string (id) }).rejected == 0);
+
+    //  A GO, so a second press at once is a bounce, refused, the pointer kept.
+    CHECK (rig.tick ("trigger.fire", { osc::Value::string (id) }).rejected == 1);
+    CHECK (rig.document.getAttribute ("/godot/list/" + rig.listId + "/standby") == rig.other);
+}
+
+TEST_CASE ("key trigger: Doh! takes a key's GO back, and a Stream Deck's key is a GO as a computer key is (§104)")
+{
+    FiringRig rig;
+    const auto third = rig.document.createCue (rig.listId, 2, "memo", "Interval").id;
+    REQUIRE (rig.document.setAttribute (standbyAddressOf (rig.listId), third).ok);
+
+    const auto deck = rig.add (triggerKind::key);
+    rig.set (deck, "kind", "deck");
+    rig.set (deck, "button", "4");
+
+    CHECK (rig.tick ("trigger.fire", { osc::Value::string (deck) }).rejected == 0);
+    const auto run = rig.runOf (rig.cueId);
+    CHECK (! run.empty());
+    CHECK (rig.document.getAttribute ("/godot/list/" + rig.listId + "/standby") == rig.other);
+
+    //  Doh!: what it fired comes down, and the pointer stands on the key's cue.
+    CHECK (rig.tick ("go.doh").rejected == 0);
+    CHECK (rig.document.getAttribute ("/godot/list/" + rig.listId + "/standby") == rig.cueId);
+}
+
+TEST_CASE ("key trigger: its own list moves and GO stays where it was; a cart's cue and an OSC trigger move no standby (§104)")
+{
+    FiringRig rig;
+    const auto second = rig.document.createList ("Background").id;
+    const auto loop = rig.document.createCue (second, 0, "memo", "Rain bed").id;
+    const auto after = rig.document.createCue (second, 1, "memo", "Wind bed").id;
+    REQUIRE (rig.document.setAttribute (standbyAddressOf (rig.listId), rig.other).ok);
+    REQUIRE (rig.document.setAttribute (standbyAddressOf (second), loop).ok);
+    REQUIRE (rig.tick ("list.focus", { osc::Value::string (rig.listId) }).rejected == 0);
+
+    const auto key = rig.add (triggerKind::key, loop);
+    rig.set (key, "key", "F7");
+
+    CHECK (rig.tick ("trigger.fire", { osc::Value::string (key) }).rejected == 0);
+    CHECK (! rig.runOf (loop).empty());
+    CHECK (rig.document.getAttribute ("/godot/list/" + second + "/standby") == after);
+    CHECK (rig.document.getAttribute ("/godot/list/focus") == rig.listId);
+    CHECK (rig.document.getAttribute ("/godot/list/" + rig.listId + "/standby") == rig.other);
+
+    //  An OSC trigger fires its cue and leaves the standby alone, as ever.
+    const auto byOsc = rig.add (triggerKind::osc, rig.cueId);
+    rig.set (byOsc, "address", "/desk/house");
+
+    for (int wait = 0; wait < 30; ++wait)
+        rig.tick ("list.focus", { osc::Value::string (rig.listId) });
+
+    CHECK (rig.tick ("trigger.fire", { osc::Value::string (byOsc) }).rejected == 0);
+    CHECK (! rig.runOf (rig.cueId).empty());
+    CHECK (rig.document.getAttribute ("/godot/list/" + rig.listId + "/standby") == rig.other);
+
+    //  A cart has no standby: its cue's key fires it, as before.
+    const auto cart = rig.document.createList ("Pads", {}, { { "kind", "cart" } }).id;
+    const auto pad = rig.document.createCue (cart, 0, "memo", "Thunder").id;
+    const auto padKey = rig.add (triggerKind::key, pad);
+    rig.set (padKey, "key", "F8");
+
+    CHECK (rig.tick ("trigger.fire", { osc::Value::string (padKey) }).rejected == 0);
+    CHECK (! rig.runOf (pad).empty());
 }
 
 TEST_CASE ("matchMidi: a value may be at least or at most data, for a velocity-sensitive pad (§100)")

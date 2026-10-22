@@ -3976,6 +3976,11 @@ namespace wfg::client::ui
                     send (gesture::pressCue (key.cue));
                     pressedCue = key.cue;
                 }
+                else if (key.action == "learnt" && ! key.trigger.empty())
+                {
+                    send (gesture::fireTrigger (key.trigger));
+                    pressedTrigger = key.trigger;
+                }
                 else if (key.action == "go")          send (gesture::go());
                 else if (key.action == "esc")         send (gesture::stopAll());
                 else if (key.action == "doh")         send (gesture::doh());
@@ -3988,7 +3993,11 @@ namespace wfg::client::ui
                 if (! pressedCue.empty() && send)
                     send (gesture::releaseCue (pressedCue));
 
+                if (! pressedTrigger.empty() && send)
+                    send (gesture::releaseTrigger (pressedTrigger));
+
                 pressedCue.clear();
+                pressedTrigger.clear();
             }
 
         private:
@@ -4003,7 +4012,7 @@ namespace wfg::client::ui
 
             std::string surfaceId;
             std::vector<std::pair<std::string, std::string>> deckMenu, cartMenu;
-            std::string keysText, problem, pressedCue;
+            std::string keysText, problem, pressedCue, pressedTrigger;
             std::vector<model::DeckKeyRow> keys;
             std::pair<int, int> columnsRows { 5, 3 };
             std::vector<juce::Image> drawn;

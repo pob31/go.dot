@@ -186,7 +186,17 @@ namespace wfg::surface
             return found != keys.end() ? found->second : std::string {};
         }
 
+        //==============================================================================
+        /*  THE CUE A STREAM DECK KEY IS BEING LEARNT FOR (namespace draft §104):
+            set by `surface.learnKey` while the inspector's Key line listens,
+            emptied when it stops or when a deck's key was taken. The next key
+            pressed on a deck of keys is that cue's, and fires nothing. Tonight's,
+            never stored. */
+        const std::string& learningKey() const noexcept  { return learnKeyFor; }
+        void setLearningKey (std::string cueId)            { learnKeyFor = std::move (cueId); }
+
     private:
+        std::string learnKeyFor;
         Dial dialed;
         std::map<std::string, Status> table;
         std::map<std::string, Page> pages;

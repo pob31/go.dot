@@ -115,6 +115,10 @@ namespace wfg::client::ui
             std::function<void (const std::string& cueId, const std::string& address, const std::string& key)> setKey;
             std::function<void (const std::string& triggerId)> clearKey;
 
+            /*  A STREAM DECK KEY LEARNT TOO (namespace draft §104): told the cue
+                when the Key line starts listening, and nothing when it stops. */
+            std::function<void (const std::string& cueId)> learnDeckKey;
+
             /*  A CONTROL BOUND TO A NUMBER (namespace draft §74, BD.11): a
                 binding made on its address - for the whole show, or while
                 `cueId` runs - and the next control moved learned. The bindings
@@ -208,6 +212,7 @@ namespace wfg::client::ui
 
         /*  THE KEY LINE LISTENING, or null; and what it says while it does. */
         Line* keyListener = nullptr;
+        std::string listenedFrom;      // what the Key line showed when it began to listen (§104)
         void stopListening();
         static juce::String keyWords (const model::Field& field);
 

@@ -312,6 +312,14 @@ namespace wfg::client::model
             const auto space = fields[0].find (' ');
             key.action = fields[0].substr (0, space);
             key.cue = space == std::string::npos ? std::string {} : fields[0].substr (space + 1);
+
+            //  A learnt key says its trigger before its cue (§104).
+            if (key.action == "learnt")
+            {
+                const auto between = key.cue.find (' ');
+                key.trigger = key.cue.substr (0, between);
+                key.cue = between == std::string::npos ? std::string {} : key.cue.substr (between + 1);
+            }
             key.top = fields[1];
             key.label = fields[2];
             key.bottom = fields[3];

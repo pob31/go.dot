@@ -43,6 +43,27 @@ namespace wfg::surface
                             return Outcome::ok (args);
                         } }));
 
+        /*  A STREAM DECK KEY LEARNT FOR A CUE (namespace draft §104): the
+            inspector's Key line, listening, says which cue; the deck bridge
+            takes the next key pressed on a deck of keys for it, and writes the
+            trigger itself. Empty lets go. A command, so the log says who asked;
+            what the press wrote is its own record. */
+        registry.add ({ "surface.learnKey",
+                        "Takes the next Stream Deck key pressed as the named cue's key, or stops listening"
+                        " with an empty argument.",
+                        { { "cue", 's', false } },
+                        true,
+                        [&document, &table] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args[0].getString();
+
+                            if (! id.empty() && ! document.findById (id).isValid())
+                                return Outcome::rejected (reason::unknownId);
+
+                            table.setLearningKey (id);
+                            return Outcome::ok (args);
+                        } });
+
         registry.add ({ "surface.aim",
                         "Chooses the media cue a surface's rotaries edit on its EQ and Send pages,"
                         " or none with an empty argument. One cue for every surface.",

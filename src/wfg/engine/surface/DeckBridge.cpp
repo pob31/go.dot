@@ -182,6 +182,7 @@ namespace wfg::surface
             {
                 case DeckRole::blank:            return "";
                 case DeckRole::pad:              return "cue";
+                case DeckRole::learnt:           return "learnt";
                 case DeckRole::cartPage:         return "cartPage";
                 case DeckRole::go:               return "go";
                 case DeckRole::esc:              return "esc";
@@ -274,6 +275,7 @@ namespace wfg::surface
             int cartPage = 0;
             std::vector<bool> down;
             std::map<int, std::string> held;        // key -> the cue it pressed
+            std::map<int, std::string> heldTriggers; // key -> the learnt trigger it fired (§104)
 
             std::vector<std::optional<KeyPicture>> shownKeys;
             std::array<std::optional<ZonePicture>, zones> shownZones {};
@@ -310,6 +312,91 @@ namespace wfg::surface
         std::vector<Deck> decks;
         std::shared_ptr<const tree::TreeSnapshot> published;
         std::vector<DeckHost::Plugged> lastPlugged;
+
+        /*  THE KEYS LEARNT FOR CUES (namespace draft §104): every deck trigger
+            the show has, by surface and key, and every cue's first key trigger
+            - the computer's or a deck's, the one the Key line shows - read
+            again when the show's revision moves, never per tick. */
+        struct Learnt
+        {
+            std::string trigger;
+            std::string cue;
+            bool enabled = true;
+        };
+
+        std::map<std::string, std::map<int, Learnt>> learnt;
+        std::map<std::string, std::string> keyTriggerOfCue;
+        double triggersRead = -1.0;
+
+        void readTriggers()
+        {
+            const auto revision = numberAt (at(), "/godot/document/revision").value_or (-1.0);
+
+            if (at() == nullptr || std::abs (revision - triggersRead) < 0.5)
+                return;
+
+            triggersRead = revision;
+            learnt.clear();
+            keyTriggerOfCue.clear();
+
+            constexpr std::string_view prefix = "/godot/trigger/";
+            constexpr std::string_view kindRow = "/kind";
+
+            for (const auto* node : at()->all())
+            {
+                const std::string_view address = node->address;
+
+                if (address.size() <= prefix.size() + kindRow.size()
+                      || address.substr (0, prefix.size()) != prefix
+                      || address.substr (address.size() - kindRow.size()) != kindRow
+                      || node->values.size() != 1 || ! node->values.front().isString())
+                    continue;
+
+                const auto& kind = node->values.front().getString();
+
+                if (kind != "key" && kind != "deck")
+                    continue;
+
+                const auto id = std::string (address.substr (prefix.size(),
+                                                             address.size() - prefix.size() - kindRow.size()));
+                const auto base = std::string (prefix) + id + "/";
+                const auto cue = textAt (at(), base + "cue");
+
+                keyTriggerOfCue.emplace (cue, id);
+
+                if (kind != "deck")
+                    continue;
+
+                const auto* enabled = soleAt (at(), base + "enabled");
+                Learnt entry { id, cue, enabled == nullptr || ! enabled->isBool() || enabled->getBool() };
+                const auto button = static_cast<int> (numberAt (at(), base + "button").value_or (-1.0));
+
+                if (button >= 0)
+                    learnt[textAt (at(), base + "surface")].emplace (button, std::move (entry));
+            }
+        }
+
+        std::vector<int> learntKeysOf (const Deck& deck) const
+        {
+            std::vector<int> keys;
+
+            if (const auto found = learnt.find (deck.spec.id); found != learnt.end())
+                for (const auto& [key, entry] : found->second)
+                    keys.push_back (key);
+
+            return keys;
+        }
+
+        const Learnt* learntAt (const Deck& deck, int key) const
+        {
+            const auto found = learnt.find (deck.spec.id);
+
+            if (found == learnt.end())
+                return nullptr;
+
+            const auto entry = found->second.find (key);
+            return entry != found->second.end() ? &entry->second : nullptr;
+        }
 
         State (DeckHost& hostToUse, SurfaceTable& tableToUse) : host (hostToUse), table (tableToUse) {}
 
@@ -546,9 +633,54 @@ namespace wfg::surface
             for (const auto& [key, cue] : deck.held)
                 submit (commandFrom (deck.origin, "cue.release", { osc::Value::string (cue) }));
 
+            for (const auto& [key, trigger] : deck.heldTriggers)
+                submit (commandFrom (deck.origin, "trigger.release", { osc::Value::string (trigger) }));
+
             deck.held.clear();
+            deck.heldTriggers.clear();
             deck.down.clear();
             deck.dials = {};
+        }
+
+        /*  A KEY LEARNT FOR A CUE (namespace draft §104): while the Key line
+            listens, the next key of a deck of keys is the cue's - a pad's key
+            or an empty one, the cart flowing around it; a show key or the
+            page's key is refused and the line goes on listening. The cue's key
+            trigger is rewritten as this key, or made; a deck key another cue
+            had is taken from it (AZG). Then the listening stops. The press
+            fires nothing. */
+        void learn (Deck& deck, int key, const std::string& cue, const Submit& submit)
+        {
+            const auto role = deck.layout.keys[static_cast<std::size_t> (key)].role;
+
+            if (role != DeckRole::blank && role != DeckRole::pad && role != DeckRole::learnt)
+                return;
+
+            const auto button = std::to_string (key);
+
+            if (const auto* other = learntAt (deck, key); other != nullptr && other->cue != cue)
+                submit (commandFrom (deck.origin, "object.delete", { osc::Value::string (other->trigger) }));
+
+            if (const auto found = keyTriggerOfCue.find (cue); found != keyTriggerOfCue.end())
+            {
+                const auto base = "/godot/trigger/" + found->second + "/";
+                submit (commandFrom (deck.origin, "node.setMany",
+                                     { osc::Value::string (base + "kind"), osc::Value::string ("deck"),
+                                       osc::Value::string (base + "surface"), osc::Value::string (deck.spec.id),
+                                       osc::Value::string (base + "button"), osc::Value::string (button),
+                                       osc::Value::string (base + "key"), osc::Value::string (std::string {}) }));
+            }
+            else
+            {
+                submit (commandFrom (deck.origin, "trigger.create",
+                                     { osc::Value::string (cue), osc::Value::string ("deck"),
+                                       osc::Value::string (std::string {}),
+                                       osc::Value::string ("surface"), osc::Value::string (deck.spec.id),
+                                       osc::Value::string ("button"), osc::Value::string (button) }));
+            }
+
+            submit (commandFrom (deck.origin, "surface.learnKey", { osc::Value::string (std::string {}) }));
+            table.setLearningKey ({});
         }
 
         void keyDown (Deck& deck, int key, const Submit& submit, std::int64_t tick)
@@ -556,11 +688,27 @@ namespace wfg::surface
             if (key < 0 || key >= static_cast<int> (deck.layout.keys.size()))
                 return;
 
+            if (const auto cue = table.learningKey(); ! cue.empty() && deck.model.has_value() && ! hasDials (*deck.model))
+            {
+                learn (deck, key, cue, submit);
+                return;
+            }
+
             const auto& role = deck.layout.keys[static_cast<std::size_t> (key)];
 
             switch (role.role)
             {
                 case DeckRole::blank:
+                    break;
+
+                /*  A LEARNT KEY IS ITS TRIGGER'S (§104): a GO from its cue, which
+                    `trigger.fire` decides; let go, `trigger.release`. */
+                case DeckRole::learnt:
+                    if (const auto* entry = learntAt (deck, key))
+                    {
+                        submit (commandFrom (deck.origin, "trigger.fire", { osc::Value::string (entry->trigger) }));
+                        deck.heldTriggers[key] = entry->trigger;
+                    }
                     break;
 
                 case DeckRole::pad:
@@ -628,6 +776,12 @@ namespace wfg::surface
 
         void keyUp (Deck& deck, int key, const Submit& submit)
         {
+            if (const auto trigger = deck.heldTriggers.find (key); trigger != deck.heldTriggers.end())
+            {
+                submit (commandFrom (deck.origin, "trigger.release", { osc::Value::string (trigger->second) }));
+                deck.heldTriggers.erase (trigger);
+            }
+
             const auto found = deck.held.find (key);
 
             if (found == deck.held.end())
@@ -1276,6 +1430,7 @@ namespace wfg::surface
 
                 case DeckRole::blank:
                 case DeckRole::pad:
+                case DeckRole::learnt:
                 case DeckRole::cartPage:
                 case DeckRole::pageSend:
                 case DeckRole::pageEq:
@@ -1301,6 +1456,25 @@ namespace wfg::surface
                 case DeckRole::pad:
                     if (key.pad >= 0 && key.pad < static_cast<int> (deck.padCues.size()))
                         return padPicture (deck.padCues[static_cast<std::size_t> (key.pad)], going);
+
+                    return {};
+
+                /*  A LEARNT KEY WEARS ITS CUE, as a pad does - and says "off"
+                    while its trigger is switched off (§104). */
+                case DeckRole::learnt:
+                    if (const auto* entry = learntAt (deck, key.pad))
+                    {
+                        auto picture = padPicture (entry->cue, going);
+
+                        if (! entry->enabled)
+                        {
+                            picture.dim = true;
+                            picture.lit = false;
+                            picture.bottom = "off";
+                        }
+
+                        return picture;
+                    }
 
                     return {};
 
@@ -1571,6 +1745,11 @@ namespace wfg::surface
             if (key.role == DeckRole::pad && key.pad >= 0 && key.pad < static_cast<int> (deck.padCues.size()))
                 action += " " + deck.padCues[static_cast<std::size_t> (key.pad)];
 
+            //  A learnt key: its trigger, then its cue (§104).
+            if (key.role == DeckRole::learnt)
+                if (const auto* entry = learntAt (deck, key.pad))
+                    action += " " + entry->trigger + " " + entry->cue;
+
             const auto clean = [] (std::string text)
             {
                 std::replace (text.begin(), text.end(), '\t', ' ');
@@ -1601,8 +1780,9 @@ namespace wfg::surface
             else
             {
                 deck.padCues = padsOf (cartOf (deck));
+                readTriggers();
                 deck.layout = deckLayoutFor (spec, deck.spec.showKeys, static_cast<int> (deck.padCues.size()),
-                                             deck.cartPage);
+                                             deck.cartPage, learntKeysOf (deck));
                 deck.cartPage = deck.layout.page;
             }
 

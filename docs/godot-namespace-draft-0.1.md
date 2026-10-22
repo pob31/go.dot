@@ -33301,3 +33301,84 @@ Tests: `osc messages: a message's values go one under another, and the numbers a
 (§103)`; `osc tables: a column dragged wider by its edge in the head, kept on this computer, a double
 click putting it back (§98)` reads one edge for the values (RunPaneUiTests). Owed: the author's look at a
 whole WFS-DIY dump.
+
+## 104. A Stream Deck key learnt for a cue, and a key that is a GO from its cue
+
+Asked by the author on 2026-10-22: *"How do I assign a Streamdeck key to a cue? Could the Streamdeck be also
+part of the Key learn action?"* - and then, of what a learnt key should do: *"I would say the assignment
+starts the targetted cue and the pointer goes to the next cue on standby."*
+
+What was found: a deck of keys showed one cart, its cues in the cart's order (§95, AWX), so a key was given
+to a cue only by putting the cue in the cart at that place; a show list's cue could not be on a key at all.
+The inspector's Key line learnt a computer key only (§74, ARE), and a key trigger fired its cue with the
+standby left where it was (AQU).
+
+### 104.1 Decisions
+
+The author's, asked 2026-10-22 (the options and their wording mine, AQ's rule):
+
+- **AZA** **A learnt key is a GO from its cue**, the computer's key and a Stream Deck's alike: the cue fired
+  as GO fires it, the standby moved past it - Doh! takes it back, and the GO debounce holds back a bounce.
+- **AZB** **Its own list moves**: a key on a cue of another list than the one GO acts on moves that list's
+  standby, and GO goes on acting on the list it was on.
+- **AZC** **A learnt key keeps its cue on every page of the cart the deck shows**, and the cart's cues flow
+  around it.
+- **AZD** **The Key line learns a Stream Deck key too** (the author's question).
+
+Mine *(proposed)*, the author's to overrule:
+
+- **AZE** **A key is a GO from its cue only on a cue of a show list.** A cart has no standby (AQR), so a key
+  on a cart's cue fires it as before; so does a key on a sampler group's member (it presses its strip) and on
+  a time group's member (§60). Every other trigger - OSC, MIDI, the clock - still moves no standby (PRD §3.5).
+- **AZF** **Where the GO lands**: the standby is put where a park would land for that cue, as a jump cue's
+  is (`nearestStop`) - a cue inside a timeline group fires its group. **Doh! after a key's GO** puts the
+  standby on the key's cue, as after any GO it stands on the cue the GO fired; the pointer as it was before
+  the key is not kept.
+- **AZG** **A deck key is a trigger of its own kind**, `deck`, naming the surface and the key (`button`,
+  from nought in the hand's order). Learnt, the cue's first key trigger - the one the Key line shows - is
+  rewritten as this key (`node.setMany` of its kind, surface, key and button), or a trigger is made; a deck
+  key another cue had is taken from it (`object.delete`). Choosing a computer key afterwards writes the kind
+  back. The words on the Key line: "<the surface's name> key 7", counting from one.
+- **AZH** **What cannot be learnt**: a show key or the page key of a deck of keys - refused, and the line
+  goes on listening; any key of a Stream Deck+, whose keys are its pages' (a press there does what it always
+  does). A learnt key under a show key switched on later is the show key's.
+- **AZI** **The learn press fires nothing**, and the engine is told when the Key line listens
+  (`surface.learnKey <cue>`, empty when it stops); the deck bridge writes what it took, from the surface's
+  origin, and stops listening itself.
+- **AZJ** **A learnt key's picture is its cue's**, as a pad's: number, name, colour, lit while it goes;
+  dim with "off" while its trigger is switched off. The Surfaces page's picture fires it
+  (`trigger.fire`/`trigger.release`) as the deck would.
+
+### 104.2 Rows and commands
+
+| Address | Type | Access | Notes |
+|---|---|---|---|
+| `trigger/<id>/kind` | `s` | rw | gains `deck` |
+| `trigger/<id>/surface` | `s` | rw | deck: the Stream Deck surface, by identifier |
+| `trigger/<id>/button` | `i` | rw | deck: the key, `0..33`, from nought at the top left |
+| `surface/<id>/keys` | `s` | r | a learnt key's line starts `learnt <trigger> <cue>` |
+
+`trigger.fire` takes as many run identifiers as a GO makes. `surface.learnKey <cue>` - the deck's Key
+learn, empty to stop. `lists/goDebounce`'s words say a key's GO is a GO.
+
+### 104.3 As built
+
+- **The engine**: GO's body is one helper (`goOn` in `registerGoCommands`), called by `go` with the
+  focused list's standby and by `trigger.fire` for a `key` or `deck` trigger on a show list's cue, with that
+  cue's stop in its own list. The debounce is asked before anything is written.
+- **The deck**: `DeckBridge` indexes the deck triggers when the show's revision moves, lays a deck of keys
+  out around them (`deckLayoutFor`'s `learntKeys`), fires and releases them, and takes the next key for the
+  cue `SurfaceTable::learningKey` names.
+- **The window**: the Key line asks the decks to listen while it does ("Press a key or a Stream Deck key -
+  Esc cancels"), stops when the key it shows changes, and says a deck key in words.
+
+### 104.4 Stages
+
+| stage | what | commit |
+|---|---|---|
+| K.1-K.4 | GO from a key's cue; the deck trigger, learnt and laid out; the Key line (TriggerTests, DeckBridgeTests, ClientTests) | |
+
+Owed: the author's try - a show list's cue given a key and a Stream Deck key from the Key line, each
+pressed (the cue fires, the standby moves past it), Doh! after; a cart of more cues than keys with a
+learnt key on it, paged. The words "Press a key or a Stream Deck key - Esc cancels" and "<name> key 7" are
+mine, for the author to keep or change.

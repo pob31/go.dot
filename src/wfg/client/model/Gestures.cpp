@@ -780,6 +780,11 @@ namespace wfg::client::gesture
         return { origin::window, "cue.press", { osc::Value::string (cueId) } };
     }
 
+    Event learnDeckKey (const std::string& cueId)
+    {
+        return { origin::window, "surface.learnKey", { osc::Value::string (cueId) } };
+    }
+
     Event releaseCue (const std::string& cueId)
     {
         return { origin::window, "cue.release", { osc::Value::string (cueId) } };

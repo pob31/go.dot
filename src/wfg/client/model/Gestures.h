@@ -511,6 +511,10 @@ namespace wfg::client::gesture
         a Stream Deck's picture on the Surfaces page, pressed and let go of as
         the deck's own key would be. */
     Event pressCue (const std::string& cueId);
+
+    /*  The next Stream Deck key pressed taken as this cue's key, while the Key
+        line listens; empty stops (namespace draft §104). */
+    Event learnDeckKey (const std::string& cueId);
     Event releaseCue (const std::string& cueId);
 
     /** An output's test pattern on or off, to find which projector is which: tonight's. */

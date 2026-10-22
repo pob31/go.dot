@@ -5148,7 +5148,7 @@ namespace wfg::doc
         if (ownerForElement (cue.getType().toString().toStdString()) != "cue")
             return EditResult::failed (reason::typeMismatch);
 
-        if (kind != "osc" && kind != "midi" && kind != "clock" && kind != "key")
+        if (kind != "osc" && kind != "midi" && kind != "clock" && kind != "key" && kind != "deck")
             return EditResult::failed (reason::badValue);
 
         /*  BORN WITH ITS SETTINGS (namespace draft §74), as a cue is: a key

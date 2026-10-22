@@ -50,14 +50,14 @@
 
 namespace wfg::surface
 {
-    enum class DeckRole { blank, pad, cartPage, go, esc, doh, standbyUp, standbyDown,
+    enum class DeckRole { blank, pad, learnt, cartPage, go, esc, doh, standbyUp, standbyDown,
                           pageSend, pageEq, pageFx, pageLoop,
                           aimPrevious, aimNext, controlsPrevious, controlsNext };
 
     struct DeckKey
     {
         DeckRole role = DeckRole::blank;
-        int pad = -1;           // pad: which of the cart's pads
+        int pad = -1;           // pad: which of the cart's pads; learnt: the key itself
     };
 
     /*  WHAT A DECK OF KEYS SHOWS NOW, key by key in the hand's order - the
@@ -74,8 +74,10 @@ namespace wfg::surface
     std::vector<DeckRole> deckShowKeys (const DeckSpec& spec);
 
     /** A deck of keys over a cart of `pads` pads, on its page `page` (taken
-        round into range). */
-    DeckLayout deckLayoutFor (const DeckSpec& spec, bool showKeys, int pads, int page);
+        round into range), around the keys learnt for cues (namespace draft
+        §104), which keep theirs on every page. */
+    DeckLayout deckLayoutFor (const DeckSpec& spec, bool showKeys, int pads, int page,
+                              const std::vector<int>& learntKeys = {});
 
     /** The Stream Deck+'s eight keys. */
     DeckLayout plusLayout (bool showKeys);

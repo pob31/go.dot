@@ -16171,6 +16171,43 @@ TEST_CASE ("client: the show's key triggers, read once, the key that fires them,
     CHECK (gesture::createKeyTrigger (cue, "F6").command == "trigger.create");
     CHECK (gesture::fireTrigger ("KEYTRG01").command == "trigger.fire");
     CHECK (gesture::releaseTrigger ("KEYTRG01").command == "trigger.release");
+    CHECK (gesture::learnDeckKey (cue).command == "surface.learnKey");
+}
+
+TEST_CASE ("client: a Stream Deck key learnt for a cue is its Key line's, in words, and no computer key fires it (§104)")
+{
+    Rig rig;
+
+    const std::string cue = "B3N8R5TW";
+    const auto s = [] (const char* text) { return osc::Value::string (text); };
+
+    REQUIRE (rig.apply (1, "cli", "surface.create", { s ("streamDeck"), s ("Desk deck"), s ("SDK00001") }).rejected == 0);
+    REQUIRE (rig.apply (2, "cli", "trigger.create", { s (cue.c_str()), s ("deck"), s ("DKTRG001"),
+                                                      s ("surface"), s ("SDK00001"), s ("button"), s ("6") }).rejected == 0);
+
+    const auto snapshot = rig.publish (3);
+    const auto keys = model::readKeyTriggers (*snapshot);
+
+    REQUIRE (keys.size() == 1u);
+    CHECK (keys[0].kind == "deck");
+    CHECK (keys[0].surface == "SDK00001");
+    CHECK (keys[0].button == 6);
+    CHECK (model::triggersForKey (keys, "F6").empty());
+    CHECK (model::triggersForKey (keys, "").empty());
+
+    auto one = model::inspect (*snapshot, cue);
+    model::addKeyLine (one, keys);
+
+    const model::Field* line = nullptr;
+
+    for (const auto& block : one.blocks)
+        for (const auto& field : block.fields)
+            if (field.control == model::Control::keyCapture)
+                line = &field;
+
+    REQUIRE (line != nullptr);
+    CHECK (line->value == "Desk deck key 7");
+    CHECK (line->address == "/godot/trigger/DKTRG001/key");
 }
 
 TEST_CASE ("client: the lists as tabs - a cart says so, GO's list is never one, and new names are free")

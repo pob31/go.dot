@@ -504,11 +504,16 @@ namespace wfg::client::ui
             if (! line->isHeading && line->field.control == model::Control::keyCapture)
             {
                 keyListener = line.get();
-                keyListener->capture.setButtonText ("Press a key - Esc cancels");
+                keyListener->capture.setButtonText ("Press a key or a Stream Deck key - Esc cancels");
                 keyListener->capture.setWantsKeyboardFocus (true);
+                listenedFrom = keyListener->field.value;
 
                 if (keyListener->capture.isShowing())
                     keyListener->capture.grabKeyboardFocus();
+
+                //  And the decks listen with it (§104).
+                if (actions.learnDeckKey)
+                    actions.learnDeckKey (drawnCue);
 
                 return;
             }
@@ -520,6 +525,9 @@ namespace wfg::client::ui
 
         if (line == nullptr)
             return;
+
+        if (actions.learnDeckKey)
+            actions.learnDeckKey ({});
 
         line->capture.setButtonText (keyWords (line->field));
         line->capture.setWantsKeyboardFocus (false);
@@ -998,6 +1006,11 @@ namespace wfg::client::ui
                     break;
 
                 case model::Control::keyCapture:
+                    /*  A DECK'S KEY TAKEN WHILE IT LISTENED (§104): the key it
+                        shows moved, so the listening is over. */
+                    if (keyListener == &line && field.value != listenedFrom)
+                        stopListening();
+
                     //  Its words, unless it is listening; and the cross while there is a key.
                     if (keyListener != &line)
                         line.capture.setButtonText (keyWords (field));
@@ -1183,7 +1196,10 @@ namespace wfg::client::ui
 
     void InspectorComponent::rebuild (const model::Inspection& inspection)
     {
-        //  The key line listening goes with its line (namespace draft §74).
+        //  The key line listening goes with its line (namespace draft §74), and the decks' with it (§104).
+        if (keyListener != nullptr && actions.learnDeckKey)
+            actions.learnDeckKey ({});
+
         keyListener = nullptr;
 
         lines.clear();

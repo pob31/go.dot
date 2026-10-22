@@ -25720,34 +25720,31 @@ namespace wfg::cue
                         } });
 
         //----------------------------------------------------------------------
-        registry.add ({ "go",
-                        "Fires the focused list's standby cue and moves standby to the next one.",
-                        /*  AS MANY IDENTIFIERS AS THE PRESS CREATED. A member
-                            three manual groups deep needs each of those groups
-                            live before it can be their child, so one GO makes
-                            four runs - and the record carries all of them, in
-                            the order they were made, because a replay never
-                            draws one of its own. */
-                        { { "run", 's', true, true } },
-                        true,
-                        [&engine, &runner, &document, &focus]
-                        (CommandContext& context, const std::vector<osc::Value>& args)
-                        {
-                            const auto list = focus.list (document);
+        /*  WHAT A GO DOES TO A LIST: the cue it stands on fired, the pointer on
+            past it, the GO noted for Doh! and the debounce. `go` stands on the
+            focused list's standby; a key trigger's GO from its cue (namespace
+            draft §104, AZA) on that cue, in its own list (AZB). `fired` false
+            with no refusal is the GO that had nothing to fire. */
+        struct GoAnswer
+        {
+            bool fired = false;
+            std::string refusal;
+            std::vector<std::string> made;
+        };
 
-                            if (! list.isValid())
-                                return Outcome::rejected (reason::notInList);
-
+        const auto goOn = [&engine, &runner, &document]
+                          (CommandContext& context, const juce::ValueTree& list, const std::string& standby,
+                           const std::vector<osc::Value>& args) -> GoAnswer
+                          {
+                            GoAnswer answer;
                             const auto listId = list[idProperty].toString().toStdString();
-                            const auto standby = list[juce::Identifier ("standby")]
-                                                     .toString().toStdString();
 
                             /*  GO with nothing in standby is applied and does
                                 nothing. An operator at the end of a list has
                                 not made a mistake, and an R record every time
                                 would bury the rejections that matter. */
                             if (standby.empty())
-                                return Outcome::ok (args);
+                                return answer;
 
                             /*  TOO SOON AFTER THE LAST ONE (PRD §3.7's GO
                                 debounce, a show setting since 2026-09-28): a
@@ -25761,7 +25758,10 @@ namespace wfg::cue
                                 unless the show says otherwise (the author's
                                 default, 2026-09-28); nought is off. */
                             if (runner.goTooSoon (context.tick))
-                                return Outcome::rejected (reason::tooSoon);
+                            {
+                                answer.refusal = reason::tooSoon;
+                                return answer;
+                            }
 
                             /*  THE GO RECORD, OPENED BEFORE THE FIRE (2026-10-01,
                                 namespace draft §24): what Doh! would take back
@@ -25865,9 +25865,41 @@ namespace wfg::cue
                             else
                                 runner.listState().stepped (listId, { context.tick, standby, 'g', serial });
 
+                            answer.fired = true;
+                            answer.made = made;
+                            return answer;
+                          };
+
+        registry.add ({ "go",
+                        "Fires the focused list's standby cue and moves standby to the next one.",
+                        /*  AS MANY IDENTIFIERS AS THE PRESS CREATED. A member
+                            three manual groups deep needs each of those groups
+                            live before it can be their child, so one GO makes
+                            four runs - and the record carries all of them, in
+                            the order they were made, because a replay never
+                            draws one of its own. */
+                        { { "run", 's', true, true } },
+                        true,
+                        [&document, &focus, goOn]
+                        (CommandContext& context, const std::vector<osc::Value>& args)
+                        {
+                            const auto list = focus.list (document);
+
+                            if (! list.isValid())
+                                return Outcome::rejected (reason::notInList);
+
+                            const auto standby = list[juce::Identifier ("standby")].toString().toStdString();
+                            const auto answer = goOn (context, list, standby, args);
+
+                            if (! answer.refusal.empty())
+                                return Outcome::rejected (answer.refusal);
+
+                            if (! answer.fired)
+                                return Outcome::ok (args);
+
                             std::vector<osc::Value> applied;
 
-                            for (const auto& id : made)
+                            for (const auto& id : answer.made)
                                 applied.push_back (osc::Value::string (id));
 
                             return Outcome::ok (applied);
@@ -26411,10 +26443,12 @@ namespace wfg::cue
                         } });
 
         registry.add ({ "trigger.fire",
-                        "A trigger fired its cue. The standby does not move, whatever it was.",
-                        { { "trigger", 's', false }, { "run", 's', true } },
+                        "A trigger fired its cue. The standby does not move, whatever it was - but a key's,"
+                        " the computer's or a Stream Deck's, is a GO from its cue in its own list: the cue"
+                        " fired as GO fires it, and that list's standby moved past it.",
+                        { { "trigger", 's', false }, { "run", 's', true, true } },
                         true,
-                        [&engine, &runner, &document, withRun]
+                        [&engine, &runner, &document, withRun, goOn]
                         (CommandContext& context, const std::vector<osc::Value>& args)
                         {
                             const auto trigger = document.findById (args[0].getString());
@@ -26496,6 +26530,50 @@ namespace wfg::cue
 
                                 return refusal.empty() ? Outcome::ok ({ args[0] })
                                                        : Outcome::rejected (refusal);
+                            }
+
+                            /*  A KEY IS A GO FROM ITS CUE (namespace draft §104;
+                                the author, 2026-10-22: "the assignment starts the
+                                targetted cue and the pointer goes to the next cue
+                                on standby"): a computer key's or a Stream Deck
+                                key's trigger on a cue of a show list puts that
+                                list's standby on the cue - where a park would
+                                land, as a jump cue's does - and does what GO does
+                                there, Doh! and the debounce with it (AZA). Its own
+                                list, whichever one GO acts on (AZB). A cue of a
+                                cart has no standby, and is fired as before. */
+                            const auto kind = document.getAttribute ("/godot/trigger/" + args[0].getString() + "/kind")
+                                                  .value_or (std::string {});
+
+                            if (kind == "key" || kind == "deck")
+                            {
+                                const auto listId = runner.listOfCue (cueId);
+                                juce::ValueTree list;
+
+                                for (const auto& candidate : document.root().getChildWithName (juce::Identifier ("Lists")))
+                                    if (candidate[idProperty].toString().toStdString() == listId)
+                                        list = candidate;
+
+                                if (list.isValid() && list[juce::Identifier ("kind")].toString() != "cart")
+                                {
+                                    const auto landed = nearestStop (list, cueId);
+
+                                    if (landed.empty())
+                                        return Outcome::rejected (reason::notAStop);
+
+                                    std::vector<osc::Value> supplied (args.begin() + 1, args.end());
+                                    const auto answer = goOn (context, list, landed, supplied);
+
+                                    if (! answer.refusal.empty())
+                                        return Outcome::rejected (answer.refusal);
+
+                                    std::vector<osc::Value> applied { args[0] };
+
+                                    for (const auto& id : answer.made)
+                                        applied.push_back (osc::Value::string (id));
+
+                                    return Outcome::ok (applied);
+                                }
                             }
 
                             /*  A TRIGGER ON THE LAST GO'S LIST, AFTER IT, makes

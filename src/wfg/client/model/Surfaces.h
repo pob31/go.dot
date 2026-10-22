@@ -319,6 +319,7 @@ namespace wfg::client::model
     struct DeckKeyRow
     {
         std::string action;
+        std::string trigger;      ///< a learnt key's trigger (§104)
         std::string cue;
         std::string top;
         std::string label;

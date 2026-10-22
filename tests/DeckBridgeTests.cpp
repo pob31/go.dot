@@ -910,3 +910,90 @@ TEST_CASE ("stream deck painter: every model's keys drawn the deck's way")
         CHECK (surface::painter::writePng (sheet, folder + "/streamdeck-" + word + ".png"));
     }
 }
+
+TEST_CASE ("stream deck bridge: a key learnt for a cue keeps it on every page, the cart flowing around it (§104)")
+{
+    Desk desk;
+    desk.fake.number ("/godot/document/revision", 2);
+    desk.fake.text ("/godot/trigger/TRG00001/kind", "deck");
+    desk.fake.text ("/godot/trigger/TRG00001/cue", "CUE00001");
+    desk.fake.text ("/godot/trigger/TRG00001/surface", "SURF0001");
+    desk.fake.number ("/godot/trigger/TRG00001/button", 1);
+    desk.fake.flag ("/godot/trigger/TRG00001/enabled", true);
+    desk.step();
+
+    //  Key 1 is the learnt cue's; the cart's three pads take 0, 2 and 3.
+    CHECK (desk.host.keys[1].label == "Preshow");
+    CHECK (desk.host.keys[1].top == "1");
+    CHECK (desk.host.keys[0].label == "Rain");
+    CHECK (desk.host.keys[2].label == "thunder.wav");
+    CHECK (desk.host.keys[3].label == "Backup tracker");
+
+    const auto keys = surface::painter::key (desk.host.keys[1], 72);
+    CHECK (keys.width == 72);
+    CHECK (desk.table.keysOf ("SURF0001").find ("learnt TRG00001 CUE00001\t1\tPreshow") != std::string::npos);
+
+    //  Pressed, it is its trigger's; let go, its trigger lets go.
+    desk.host.keysDown ("AL12K1A00001", { 1 });
+    desk.step();
+    desk.host.keysDown ("AL12K1A00001", {});
+    desk.step();
+    CHECK (desk.commands() == std::vector<std::string> { "trigger.fire TRG00001", "trigger.release TRG00001" });
+
+    //  Its trigger switched off: the key says so.
+    desk.fake.flag ("/godot/trigger/TRG00001/enabled", false);
+    desk.fake.number ("/godot/document/revision", 3);
+    desk.step();
+    CHECK (desk.host.keys[1].dim);
+    CHECK (desk.host.keys[1].bottom == "off");
+}
+
+TEST_CASE ("stream deck bridge: the Key line learns the next deck key, and a show key is refused while it listens (§104)")
+{
+    Desk desk ("mk2", true);
+    desk.fake.number ("/godot/document/revision", 2);
+    desk.step();
+
+    //  The show's key, while listening: refused, still listening, nothing fired.
+    desk.table.setLearningKey ("CUE00001");
+    desk.host.keysDown ("AL12K1A00001", { 14 });
+    desk.step();
+    desk.host.keysDown ("AL12K1A00001", {});
+    desk.step();
+    CHECK (desk.submitted.empty());
+    CHECK (desk.table.learningKey() == "CUE00001");
+
+    //  An empty key: a deck trigger made on the cue, and the listening over.
+    desk.host.keysDown ("AL12K1A00001", { 6 });
+    desk.step();
+    desk.host.keysDown ("AL12K1A00001", {});
+    desk.step();
+    CHECK (desk.commands() == std::vector<std::string> { "trigger.create CUE00001 deck  surface SURF0001 button 6",
+                                                         "surface.learnKey " });
+    CHECK (desk.table.learningKey().empty());
+
+    //  A cue with a key already, onto a key another cue had: that one is taken
+    //  from it, and the cue's own trigger rewritten as this key.
+    desk.submitted.clear();
+    desk.fake.text ("/godot/trigger/TRG00002/kind", "key");
+    desk.fake.text ("/godot/trigger/TRG00002/cue", "CUE00003");
+    desk.fake.text ("/godot/trigger/TRG00002/key", "F6");
+    desk.fake.text ("/godot/trigger/TRG00003/kind", "deck");
+    desk.fake.text ("/godot/trigger/TRG00003/cue", "CUE00002");
+    desk.fake.text ("/godot/trigger/TRG00003/surface", "SURF0001");
+    desk.fake.number ("/godot/trigger/TRG00003/button", 7);
+    desk.fake.number ("/godot/document/revision", 3);
+    desk.step();
+
+    desk.table.setLearningKey ("CUE00003");
+    desk.host.keysDown ("AL12K1A00001", { 7 });
+    desk.step();
+
+    REQUIRE (desk.submitted.size() == 3);
+    CHECK (desk.commands()[0] == "object.delete TRG00003");
+    CHECK (desk.submitted[1].command == "node.setMany");
+    CHECK (desk.submitted[1].args[0].getString() == "/godot/trigger/TRG00002/kind");
+    CHECK (desk.submitted[1].args[1].getString() == "deck");
+    CHECK (desk.submitted[1].args[5].getString() == "7");
+    CHECK (desk.commands()[2] == "surface.learnKey ");
+}

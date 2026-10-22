@@ -18,6 +18,7 @@
 
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/cue/KeyChord.h>
+#include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/tree/Node.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
@@ -37,7 +38,7 @@ namespace wfg::client::model
             if (address.size() <= prefix.size() + kindRow.size()
                   || address.substr (0, prefix.size()) != prefix
                   || address.substr (address.size() - kindRow.size()) != kindRow
-                  || text (node) != "key")
+                  || (text (node) != "key" && text (node) != "deck"))
                 continue;
 
             KeyTrigger trigger;
@@ -47,6 +48,14 @@ namespace wfg::client::model
             trigger.cue = text (snapshot, base + "cue");
             trigger.key = text (snapshot, base + "key");
             trigger.enabled = flag (snapshot, base + "enabled") != Flag::no;
+            trigger.kind = text (node);
+
+            if (trigger.kind == "deck")
+            {
+                trigger.surface = text (snapshot, base + "surface");
+                trigger.button = static_cast<int> (osc::parseDouble (text (snapshot, base + "button")).value_or (0.0));
+                trigger.surfaceName = text (snapshot, "/godot/surface/" + trigger.surface + "/name");
+            }
 
             out.push_back (std::move (trigger));
         }
@@ -62,7 +71,7 @@ namespace wfg::client::model
             return out;
 
         for (const auto& trigger : triggers)
-            if (trigger.enabled && trigger.key == key)
+            if (trigger.enabled && trigger.kind == "key" && trigger.key == key)
                 out.push_back (trigger.id);
 
         return out;
@@ -87,13 +96,18 @@ namespace wfg::client::model
         field.label = "Key";
         field.control = Control::keyCapture;
         field.writable = true;
-        field.description = "The key that fires this cue, on this computer and on the page: press the"
-                            " button, then the key. A hold member plays while the key is down.";
+        field.description = "The key that fires this cue, on this computer and on the page, or a key of a"
+                            " Stream Deck: press the button, then the key. On a cue of a show list it is a"
+                            " GO from this cue - the cue fires and the standby moves past it. A hold member"
+                            " plays while the key is down.";
 
         if (const auto* trigger = keyTriggerOf (triggers, inspection.cueId))
         {
             field.address = "/godot/trigger/" + trigger->id + "/key";
-            field.value = trigger->key;
+            field.value = trigger->kind == "deck"
+                            ? (trigger->surfaceName.empty() ? std::string ("Stream Deck") : trigger->surfaceName)
+                                + " key " + std::to_string (trigger->button + 1)
+                            : trigger->key;
         }
 
         inspection.blocks.push_back ({ "key", { std::move (field) } });
