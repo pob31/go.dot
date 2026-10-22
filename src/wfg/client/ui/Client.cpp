@@ -3325,7 +3325,14 @@ namespace wfg::client
                     points at it. */
                 const auto footKind = shell->footSubject().kind;
 
-                if (! selection.anchor().empty()
+                /*  NONE OF THESE OPENS WHILE A SURFACE HOLDS THE FOOT (namespace
+                    draft §101): they are asked at every refresh, and one would
+                    take the foot back from the surface as soon as a hand on it
+                    had taken it. A hand on the foot lets the surface go, and
+                    then they open as before. */
+                const auto footFree = ! surfaceHoldsFoot;
+
+                if (footFree && ! selection.anchor().empty()
                       && model::text (*snapshot, "/godot/cue/" + selection.anchor() + "/kind") == "fade"
                       && shutCurveFor != selection.anchor()
                       && footKind != model::Subject::Kind::fade
@@ -3343,7 +3350,7 @@ namespace wfg::client
                     for the fade's reason: what it runs is not a row, and a patch
                     nobody could see until they went looking for it would be a
                     cue nobody could read. Shut, it stays shut for that cue. */
-                if (! selection.anchor().empty()
+                if (footFree && ! selection.anchor().empty()
                       && model::text (*snapshot, "/godot/cue/" + selection.anchor() + "/kind") == "process"
                       && shutCurveFor != selection.anchor()
                       && ! (shell->footSubject().kind == model::Subject::Kind::patch
@@ -3355,7 +3362,7 @@ namespace wfg::client
 
                 /*  AND A SCRIPT CUE ITS CODE (namespace draft §66, AMO): the one
                     place its script is shown, the inspector having none of it. */
-                if (! selection.anchor().empty()
+                if (footFree && ! selection.anchor().empty()
                       && model::text (*snapshot, "/godot/cue/" + selection.anchor() + "/kind") == "script"
                       && shutCurveFor != selection.anchor()
                       && ! (shell->footSubject().kind == model::Subject::Kind::code
@@ -3372,7 +3379,7 @@ namespace wfg::client
                     the rest - a snapshot's every parameter - are the panel's, and
                     were there all along, unseen. A cue of one message has nothing
                     the inspector does not say, and opens nothing. */
-                if (! selection.anchor().empty()
+                if (footFree && ! selection.anchor().empty()
                       && model::text (*snapshot, "/godot/cue/" + selection.anchor() + "/kind") == "osc"
                       && ! model::text (*snapshot, "/godot/cue/" + selection.anchor() + "/messages").empty()
                       && shutCurveFor != selection.anchor()
@@ -3441,9 +3448,20 @@ namespace wfg::client
                     §30.5). Since 2026-10-09 the list's pick aims the surfaces
                     too (just above), so the held foot follows a new pick by
                     way of the aim. When the page comes down the foot goes back
-                    to what it was showing. */
-                const auto page = model::readSurfacePage (*snapshot);
+                    to what it was showing.
+
+                    THE LAST HAND HOLDS IT (namespace draft §101; the author,
+                    2026-10-22: "should release when another device or the main
+                    UI"): the surface whose page a hand moved last, and none
+                    once the window's own hand has changed the foot - until a
+                    surface moves again. That foot is the window's, and is not
+                    put back when the page comes down. */
+                const auto windowMoved = surfaceHoldsFoot && shell->footSubject() != footSurfaceSet;
+                const auto page = model::followSurfaces (surfaceHold, model::readSurfacePages (*snapshot), windowMoved);
                 const auto held = model::footForSurface (page.up, page.word, page.aim);
+
+                if (windowMoved)
+                    surfaceHoldsFoot = false;
 
                 if (held.isOpen())
                 {
@@ -3458,6 +3476,8 @@ namespace wfg::client
                         shell->setFoot (held);
                         menuItemsChanged();
                     }
+
+                    footSurfaceSet = held;
 
                     //  And the band the rotary last turned, ringed on the panel.
                     if (held.kind == model::Subject::Kind::eq && page.edited != lastSurfaceEdit)
@@ -4139,6 +4159,8 @@ namespace wfg::client
                 last wrote - so the ringed band moves only when that does. */
             bool surfaceHoldsFoot = false;
             model::Subject footBeforeSurface;
+            model::Subject footSurfaceSet;          // what the hold last put at the foot (§101)
+            model::SurfaceHold surfaceHold;
             std::string lastSurfaceEdit;
 
             /*  THE PANEL EACH TYPE OF CUE WAS LAST LEFT ON (namespace draft

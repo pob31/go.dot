@@ -47,6 +47,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <utility>
@@ -352,7 +353,34 @@ namespace wfg::client::model
         int count = 1;
         std::string edited;       ///< what it last wrote; empty since it came up
         std::string aim;          ///< /godot/surface/aim, whether or not a page is up
+        int moves = 0;            ///< how often a hand moved it (namespace draft §101)
     };
 
     SurfacePage readSurfacePage (const tree::TreeSnapshot&);
+
+    /** Every surface's page, in the show's order, up or not: `up` and `word`
+        are that surface's own. */
+    std::vector<SurfacePage> readSurfacePages (const tree::TreeSnapshot&);
+
+    /*  WHICH SURFACE HOLDS THE FOOT (namespace draft §101; the author,
+        2026-10-22: "Pressing the toggles on the Streamdeck or the Surface to
+        assign EQ, Sends and so on should release when another device or the
+        main UI. If the device would get disconnected when the Eq panel is
+        selected then we wouldn't be able to exit the foot panel selected on
+        the device."). The last hand wins, as it does for the aim: the surface
+        whose page a hand moved last - a page key, a rotary or a dial - holds
+        the foot while that page is up, and the window's own hand on the foot
+        lets go of it until a surface moves again. A surface first seen, or
+        connected again, has moved nothing: a Stream Deck+ plugged in with its
+        dials on a page does not take the foot. */
+    struct SurfaceHold
+    {
+        std::string surface;                    ///< the surface holding the foot, or empty: the window's own
+        std::map<std::string, int> movesSeen;   ///< each surface's count when last looked at
+    };
+
+    /** The hold after one look at the pages; `windowMoved` is true when the
+        foot is no longer what the hold last put there. Answers the page that
+        holds the foot, or a page not up. */
+    SurfacePage followSurfaces (SurfaceHold&, const std::vector<SurfacePage>&, bool windowMoved);
 }

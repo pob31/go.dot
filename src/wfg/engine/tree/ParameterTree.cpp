@@ -111,7 +111,7 @@ namespace wfg::tree
         bool isPageRow (const std::string& name) noexcept
         {
             return name == "page" || name == "pageIndex" || name == "pageCount" || name == "edited"
-                || name == "keys";
+                || name == "moves" || name == "keys";
         }
 
         Access accessFor (doc::Access access) noexcept
@@ -5054,7 +5054,8 @@ namespace wfg::tree
                 }
 
         /*  WHAT EACH SURFACE'S ROTARIES ARE SHOWING (author, 2026-09-25): its
-            page, which of them, how many, and what it last wrote. Every
+            page, which of them, how many, what it last wrote and how often a
+            hand moved it (namespace draft §101). Every
             publish, because a page moves with no command - the surface's own
             buttons - and the cached half would freeze it. */
         for (const auto& surfaceId : declaredSurfaces)
@@ -5073,6 +5074,7 @@ namespace wfg::tree
                 const auto text = name == "page"      ? page.word
                                 : name == "pageIndex" ? std::to_string (page.index)
                                 : name == "pageCount" ? std::to_string (page.count)
+                                : name == "moves"     ? std::to_string (page.moves)
                                 : name == "keys"      ? (surfaces != nullptr ? surfaces->keysOf (surfaceId)
                                                                              : std::string {})
                                                       : page.edited;

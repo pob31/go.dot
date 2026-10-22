@@ -1127,11 +1127,10 @@ namespace wfg::client::model
     }
 
     //==========================================================================
-    SurfacePage readSurfacePage (const tree::TreeSnapshot& snapshot)
+    std::vector<SurfacePage> readSurfacePages (const tree::TreeSnapshot& snapshot)
     {
-        SurfacePage out;
-        out.aim = text (snapshot, std::string (surfaceAimAddress));
-
+        std::vector<SurfacePage> out;
+        const auto aim = text (snapshot, std::string (surfaceAimAddress));
         const auto order = text (snapshot, std::string (surfaceOrderAddress));
         std::size_t at = 0;
 
@@ -1147,20 +1146,67 @@ namespace wfg::client::model
             at = end == std::string::npos ? order.size() : end;
 
             const auto base = std::string (surfacePrefix) + id + "/";
-            const auto word = text (snapshot, base + "page");
 
-            if (word != "eq" && word != "send" && word != "fx" && word != "loop")
-                continue;
-
-            out.up = true;
-            out.surface = id;
-            out.word = word;
-            out.index = static_cast<int> (osc::parseDouble (text (snapshot, base + "pageIndex")).value_or (0.0));
-            out.count = static_cast<int> (osc::parseDouble (text (snapshot, base + "pageCount")).value_or (1.0));
-            out.edited = text (snapshot, base + "edited");
-            return out;
+            SurfacePage page;
+            page.aim = aim;
+            page.surface = id;
+            page.word = text (snapshot, base + "page");
+            page.up = page.word == "eq" || page.word == "send" || page.word == "fx" || page.word == "loop";
+            page.index = static_cast<int> (osc::parseDouble (text (snapshot, base + "pageIndex")).value_or (0.0));
+            page.count = static_cast<int> (osc::parseDouble (text (snapshot, base + "pageCount")).value_or (1.0));
+            page.edited = text (snapshot, base + "edited");
+            page.moves = static_cast<int> (osc::parseDouble (text (snapshot, base + "moves")).value_or (0.0));
+            out.push_back (std::move (page));
         }
 
         return out;
+    }
+
+    SurfacePage readSurfacePage (const tree::TreeSnapshot& snapshot)
+    {
+        for (auto& page : readSurfacePages (snapshot))
+            if (page.up)
+                return page;
+
+        SurfacePage out;
+        out.aim = text (snapshot, std::string (surfaceAimAddress));
+        return out;
+    }
+
+    SurfacePage followSurfaces (SurfaceHold& hold, const std::vector<SurfacePage>& pages, bool windowMoved)
+    {
+        if (windowMoved)
+            hold.surface.clear();
+
+        std::map<std::string, int> seen;
+
+        for (const auto& page : pages)
+        {
+            /*  A COUNT THAT ROSE is a hand. One first seen is not, and one
+                that fell is a surface started again - reconnected, or
+                declared anew - whose hands have done nothing yet. */
+            const auto before = hold.movesSeen.find (page.surface);
+
+            if (before != hold.movesSeen.end() && page.moves > before->second && page.up)
+                hold.surface = page.surface;
+
+            seen[page.surface] = page.moves;
+        }
+
+        hold.movesSeen = std::move (seen);
+
+        for (const auto& page : pages)
+            if (page.surface == hold.surface && page.up)
+                return page;
+
+        //  Its page put down, its surface gone: the foot is the window's again.
+        hold.surface.clear();
+
+        SurfacePage none;
+
+        if (! pages.empty())
+            none.aim = pages.front().aim;
+
+        return none;
     }
 }

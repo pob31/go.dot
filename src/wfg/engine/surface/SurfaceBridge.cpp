@@ -649,6 +649,7 @@ namespace wfg::surface
             int count = 1;
             std::size_t bank = 0;               // where its button was pressed, and where its light answers
             std::string edited;                 // what the page last wrote
+            int moves = 0;                      // a hand's page presses and turns, counted (§101)
 
             //  What the controls' addresses were made for.
             std::string madeForAim;
@@ -914,6 +915,7 @@ namespace wfg::surface
             page.index = box.paging.index;
             page.count = box.paging.count;
             page.edited = box.paging.edited;
+            page.moves = box.paging.moves;
             table.setPage (box.id, page);
         }
 
@@ -1204,6 +1206,7 @@ namespace wfg::surface
             paging.index = page == Page::show ? 0 : index;
             paging.bank = bank;
             paging.edited.clear();
+            ++paging.moves;
             paging.count = page == Page::show || page == Page::loop ? 1
                          : page == Page::fx ? std::max (1, static_cast<int> (fxPagesOf (aimNow(), box.rotaries()).size()))
                                             : pageCount (controlsOf (page), box.rotaries());
@@ -2041,6 +2044,7 @@ namespace wfg::surface
 
                 composePage (box, aimed);
                 const auto before = box.paging.edited;
+                auto moved = false;
 
                 for (auto& strip : box.strips)
                 {
@@ -2049,6 +2053,8 @@ namespace wfg::surface
 
                     if ((steps == 0 && ! pressed) || strip.control < 0)
                         continue;
+
+                    moved = true;
 
                     if (box.paging.page == Page::eq)
                         eqWrite (box, strip, steps, pressed, submit);
@@ -2060,7 +2066,13 @@ namespace wfg::surface
                         loopWrite (box, strip, steps, pressed, submit);
                 }
 
-                if (box.paging.edited != before)
+                /*  A HAND ON THE PAGE, counted whatever it wrote, so the window
+                    takes its foot back for the surface that moved last - the
+                    same rotary turned again included (namespace draft §101). */
+                if (moved)
+                    ++box.paging.moves;
+
+                if (moved || box.paging.edited != before)
                     publishPage (box);
             }
         }

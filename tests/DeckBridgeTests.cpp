@@ -679,6 +679,60 @@ TEST_CASE ("stream deck bridge: the Send page makes a send a turn up asks for, a
     CHECK (desk.host.keys[5].dim);
 }
 
+TEST_CASE ("stream deck bridge: a Stream Deck+'s page counts what its hands did, and is put down when the deck goes (§101)")
+{
+    /*  The author, 2026-10-22: "If the device would get disconnected when the
+        Eq panel is selected then we wouldn't be able to exit the foot panel
+        selected on the device." The window holds its foot for the surface
+        whose count rose last; a deck plugged in, or plugged in again, has
+        raised nothing, and one gone shows no page at all. */
+    Desk desk ("plus");
+    desk.fake.eqOf ("CUE00001");
+    desk.fake.text ("/godot/surface/aim", "CUE00001");
+    desk.step();
+
+    CHECK (desk.table.pageOf ("SURF0001").word == "send");
+    CHECK (desk.table.pageOf ("SURF0001").moves == 0);
+
+    //  The EQ key: a hand.
+    desk.host.keysDown ("AL12K1A00001", { 1 });
+    desk.step();
+    desk.host.keysDown ("AL12K1A00001", {});
+    desk.step();
+    CHECK (desk.table.pageOf ("SURF0001").word == "eq");
+    CHECK (desk.table.pageOf ("SURF0001").moves == 1);
+
+    //  A turn, and the same dial turned again: two more, the same address written.
+    surface::DeckInput turn;
+    turn.kind = surface::DeckInput::Kind::dialTurns;
+    turn.detents = { 2, 0, 0, 0 };
+    desk.host.input ("AL12K1A00001", turn);
+    desk.step();
+    desk.host.input ("AL12K1A00001", turn);
+    desk.step();
+    CHECK (desk.table.pageOf ("SURF0001").moves == 3);
+    CHECK (desk.table.pageOf ("SURF0001").edited == "/godot/cue/CUE00001/eqHpfFreq");
+
+    //  Unplugged: no page, so nothing holds the window's foot.
+    desk.host.unplug ("AL12K1A00001");
+    desk.step();
+    CHECK (desk.table.pageOf ("SURF0001").word == "show");
+    CHECK (desk.table.pageOf ("SURF0001").moves == 0);
+
+    //  Back: its page again, and no hand yet.
+    desk.host.plug ("AL12K1A00001", "plus");
+    desk.step();
+    desk.step();
+    CHECK (desk.table.pageOf ("SURF0001").word == "eq");
+    CHECK (desk.table.pageOf ("SURF0001").moves == 0);
+
+    //  Switched off in the show: no page either.
+    desk.spec.enabled = false;
+    desk.bridge.declare ({ desk.spec });
+    desk.step();
+    CHECK (desk.table.pageOf ("SURF0001").word == "show");
+}
+
 TEST_CASE ("stream deck bridge: the Neo's screen says what is next and its touch keys turn the cart")
 {
     Desk desk ("neo");

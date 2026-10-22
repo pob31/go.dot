@@ -3637,6 +3637,38 @@ TEST_CASE ("surface bridge: a turn on the EQ page writes the aimed cue's row by 
     CHECK (desk.writes() == std::vector<std::string> { "strip.press STRIP004", "strip.release STRIP004" });
 }
 
+TEST_CASE ("surface bridge: every page key and every hand on a page is counted, the same rotary again included (§101)")
+{
+    /*  What tells the window which surface's hand moved last, so its foot
+        follows that one (the author, 2026-10-22: "should release when another
+        device or the main UI"). A turn of the rotary turned last writes the
+        address already written: the count still rises. */
+    PageDesk desk;
+    desk.aimAt ("CUE00001");
+    CHECK (desk.page().moves == 0);
+
+    desk.press ("PORTBNK1", 0x2c);
+    CHECK (desk.page().word == "eq");
+    CHECK (desk.page().moves == 1);
+
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x12, 0x01 } } });
+    CHECK (desk.page().moves == 2);
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x12, 0x01 } } });
+    CHECK (desk.page().moves == 3);
+    CHECK (desk.page().edited == "/godot/cue/CUE00001/eqB1Freq");
+
+    //  A press on a rotary switches its band: a hand too, once for down and up.
+    desk.press ("PORTBNK1", 0x23);
+    CHECK (desk.page().moves == 4);
+
+    //  `*` puts the page down - counted - and the surface's own page counts no turn.
+    desk.press ("PORTBNK1", 0x36);
+    CHECK (desk.page().word == "show");
+    CHECK (desk.page().moves == 5);
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x12, 0x01 } } });
+    CHECK (desk.page().moves == 5);
+}
+
 namespace
 {
     /*  TWO INSERTS ON CUE00001, as the tree publishes them (2026-09-26): a

@@ -33208,3 +33208,46 @@ advance with thenNext` (QlabWalkTests); `matchMidi: a value may be at least or a
 velocity-sensitive pad` (TriggerTests), and the walk's triggers case with P.U.N.K's pad. Owed: the author's words for the report's and the window's
 sentences (AYD-AYJ, and *then GO next*), and his try of the window's folder, of File > Find missing files
 in a folder... and of La Clairière's vamps.
+
+## 101. A surface lets go of the foot when another hand takes it
+
+**Asked 2026-10-22** by the author: *"Pressing the toggles on the Streamdeck or the Surface to assign EQ,
+Sends and so on should release when another device or the main UI. If the device would get disconnected
+when the Eq panel is selected then we wouldn't be able to exit the foot panel selected on the device."*
+
+What was found. The window put its foot on the page of the first surface, in the show's order, that had
+one up (§30.5), at every refresh, whatever else had moved it: a panel picked by hand went back at once,
+a second surface's page was not shown while the first one's was up, and a fade's, a patch's, a
+script's or an OSC cue's panel opening by itself was overruled each time. A Stream Deck+ has no page
+of its own - its dials are always on Send, EQ, FX or Loop (§95) - so one plugged in held the foot on
+the aimed cue's sends from then on, and one closed, but still plugged in, went on publishing its page.
+
+- **AYP** **The last hand holds the foot** (the author's ask). A surface whose page a hand moves - a
+  page key, a rotary or a dial turned or pressed - takes the foot to its page; another surface whose
+  hand moves later takes it from it; the window's own hand on the foot lets it go, and it stays the
+  window's until a surface moves again. Plugging in a deck, or connecting a surface, moves nothing.
+  Built: `surface/<id>/moves` (`i`, ro, runtime like `page`), a count `SurfaceBridge` raises at every
+  `showPage` and at every tick a hand wrote through a page (`flushPageWrites`), and `DeckBridge` at
+  every page key, every move along the controls and every dial written; a deck's count starts from
+  nought when it is opened. The window reads every surface's page (`model::readSurfacePages`) and
+  `model::followSurfaces` names the surface whose count rose last, while its page is up.
+- **AYQ** **A deck shows a page only while it can be turned** (the author's ask): a Stream Deck unplugged,
+  closed or switched off in the show publishes `show`, so nothing is left holding the foot.
+- **AYR** *(proposed)* **The window's hand is any change of the foot the hold did not make**: a panel
+  button, the menu, a panel shut. That foot stays where the hand put it when the surface's page comes
+  down; the foot a surface took from the window goes back when the surface's page comes down, as
+  before (§30.5). The surface's page stays up: letting go of the foot does not put down its rotaries.
+- **AYS** *(proposed)* **Panels that open by themselves wait while a surface holds the foot** (the fade
+  mixer, a process cue's patch, a script's code, an OSC cue's messages): they are asked at every
+  refresh, and would take the foot back as soon as a hand on the surface had taken it.
+- **AYT** *(proposed)* **The same rotary turned again counts**, so the panel comes back to a hand
+  adjusting after a look elsewhere. Aiming does not count - SELECT on a D700, the deck's aim keys - so
+  stepping through cues does not take the foot from the window; the foot held follows the aim as
+  before.
+
+Tests: `surface bridge: every page key and every hand on a page is counted, the same rotary again
+included (§101)` (SurfaceBridgeTests); `stream deck bridge: a Stream Deck+'s page counts what its hands
+did, and is put down when the deck goes (§101)` (DeckBridgeTests); `client: the foot follows the surface
+a hand moved last, and the window's hand lets it go (§101)` (ClientTests); `surface: each surface's page
+is published every tick` reads `moves` (SurfaceTests). Owed: the author's try with the D700 and a
+Stream Deck+ together, and with a deck pulled out on an EQ page.

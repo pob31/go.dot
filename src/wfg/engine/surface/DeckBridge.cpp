@@ -287,6 +287,7 @@ namespace wfg::surface
             int pageIndex = 0;
             int pageCount = 1;
             std::string edited;
+            int moves = 0;                          // a hand's page keys and dials, counted (§101)
             std::array<Dial, zones> dials {};
             std::array<Control, zones> controls {};
             std::string madeFor;                    // what the controls were made from
@@ -788,6 +789,7 @@ namespace wfg::surface
             deck.edited.clear();
             deck.madeFor.clear();
             deck.dials = {};
+            ++deck.moves;
         }
 
         void showControls (Deck& deck, int index)
@@ -801,6 +803,7 @@ namespace wfg::surface
             deck.pageIndex = next;
             deck.madeFor.clear();
             deck.dials = {};
+            ++deck.moves;
         }
 
         void aimStep (const Deck& deck, int by, const Submit& submit) const
@@ -1171,6 +1174,8 @@ namespace wfg::surface
 
                 if ((steps == 0 && ! pressed) || control.control < 0)
                     continue;
+
+                ++deck.moves;
 
                 switch (deck.page)
                 {
@@ -1665,12 +1670,17 @@ namespace wfg::surface
         {
             SurfaceTable::Page page;
 
-            if (deck.model.has_value() && hasDials (*deck.model))
+            /*  ONLY WHILE THE DECK IS THERE TO TURN (namespace draft §101): a
+                Stream Deck+'s dials are always on some page, and one unplugged,
+                closed or switched off in the show would leave the window's
+                foot held on a page no hand can put down. */
+            if (deck.open && deck.spec.enabled && deck.model.has_value() && hasDials (*deck.model))
             {
                 page.word = std::string (pageWord (deck.page));
                 page.index = deck.pageIndex;
                 page.count = deck.pageCount;
                 page.edited = deck.edited;
+                page.moves = deck.moves;
             }
 
             if (table.pageOf (deck.spec.id) != page)
@@ -1754,6 +1764,7 @@ namespace wfg::surface
             {
                 case DeckEvent::Kind::opened:
                     deck.open = true;
+                    deck.moves = 0;         // opened again, its hands have moved nothing (§101)
                     deck.down.clear();
                     deck.forgetShown();
                     break;

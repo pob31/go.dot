@@ -9780,7 +9780,7 @@ TEST_CASE ("client: a surface's page holds the foot on the aimed cue from the pr
     CHECK_FALSE (model::footForSurface (page.up, page.word, page.aim).isOpen());
 
     //  An EQ page up, not yet turned: the aimed cue's EQ panel already.
-    surfaces.setPage (surfaceId, { "eq", 0, 2, "" });
+    surfaces.setPage (surfaceId, { "eq", 0, 2, "", 0 });
     page = model::readSurfacePage (*rig.publish (5));
     CHECK (page.up);
     CHECK (page.word == "eq");
@@ -9790,7 +9790,7 @@ TEST_CASE ("client: a surface's page holds the foot on the aimed cue from the pr
              == model::Subject { model::Subject::Kind::eq, cue });
 
     //  Turned: still the EQ panel, and the band the rotary is on.
-    surfaces.setPage (surfaceId, { "eq", 0, 2, "/godot/cue/" + cue + "/eqB3Gain" });
+    surfaces.setPage (surfaceId, { "eq", 0, 2, "/godot/cue/" + cue + "/eqB3Gain", 0 });
     page = model::readSurfacePage (*rig.publish (6));
     CHECK (model::footForSurface (page.up, page.word, page.aim)
              == model::Subject { model::Subject::Kind::eq, cue });
@@ -9801,20 +9801,20 @@ TEST_CASE ("client: a surface's page holds the foot on the aimed cue from the pr
     CHECK (model::eqHandleForAddress (cue, "/godot/cue/OTHERCUE/eqB1Gain") == -1);
 
     //  A Send page, the moment it is up: the send mixer.
-    surfaces.setPage (surfaceId, { "send", 0, 1, "" });
+    surfaces.setPage (surfaceId, { "send", 0, 1, "", 0 });
     page = model::readSurfacePage (*rig.publish (7));
     CHECK (model::footForSurface (page.up, page.word, page.aim)
              == model::Subject { model::Subject::Kind::sends, cue });
 
     //  An FX page (2026-09-26), the moment it is up: the cue's chain.
-    surfaces.setPage (surfaceId, { "fx", 1, 3, "" });
+    surfaces.setPage (surfaceId, { "fx", 1, 3, "", 0 });
     page = model::readSurfacePage (*rig.publish (8));
     CHECK (page.word == "fx");
     CHECK (model::footForSurface (page.up, page.word, page.aim)
              == model::Subject { model::Subject::Kind::fx, cue });
 
     //  A Loop page (Phase 9c), the moment it is up: the take it rides.
-    surfaces.setPage (surfaceId, { "loop", 0, 1, "" });
+    surfaces.setPage (surfaceId, { "loop", 0, 1, "", 0 });
     page = model::readSurfacePage (*rig.publish (9));
     CHECK (page.word == "loop");
     CHECK (model::footForSurface (page.up, page.word, page.aim)
@@ -9823,11 +9823,93 @@ TEST_CASE ("client: a surface's page holds the foot on the aimed cue from the pr
     /*  THE PAGE DOWN, the foot the window's own again (the window puts back
         what it showed, Client.cpp); and with the aim let go there is no cue
         for a page to be of. */
-    surfaces.setPage (surfaceId, { "show", 0, 1, "" });
+    surfaces.setPage (surfaceId, { "show", 0, 1, "", 0 });
     page = model::readSurfacePage (*rig.publish (10));
     CHECK_FALSE (page.up);
     CHECK_FALSE (model::footForSurface (page.up, page.word, page.aim).isOpen());
     CHECK_FALSE (model::footForSurface (true, "eq", "").isOpen());
+}
+
+TEST_CASE ("client: the foot follows the surface a hand moved last, and the window's hand lets it go (§101)")
+{
+    /*  The author, 2026-10-22: "Pressing the toggles on the Streamdeck or the
+        Surface to assign EQ, Sends and so on should release when another
+        device or the main UI. If the device would get disconnected when the
+        Eq panel is selected then we wouldn't be able to exit the foot panel
+        selected on the device." */
+    Rig rig ("first-sound");
+    surface::SurfaceTable surfaces;
+    rig.parameters.setSurfaces (&surfaces);
+    surface::registerSurfaceCommands (rig.engine.commands(), rig.document, surfaces);
+
+    REQUIRE (rig.apply (1, "cli", "surface.create", { osc::Value::string ("d700") }).applied == 1);
+    REQUIRE (rig.apply (2, "cli", "surface.create", { osc::Value::string ("streamDeck") }).applied == 1);
+    const auto order = model::text (*rig.publish (3), "/godot/surface/order");
+    const auto d700 = order.substr (0, order.find (' '));
+    const auto deck = order.substr (order.find (' ') + 1);
+    REQUIRE_FALSE (d700.empty());
+    REQUIRE (deck != d700);
+
+    const std::string cue = "B3N8R5TW";
+    REQUIRE (rig.apply (4, "cli", "surface.aim", { osc::Value::string (cue) }).applied == 1);
+
+    model::SurfaceHold hold;
+    std::int64_t tick = 5;
+    const auto look = [&] (bool windowMoved)
+    {
+        return model::followSurfaces (hold, model::readSurfacePages (*rig.publish (tick++)), windowMoved);
+    };
+
+    const auto pages = model::readSurfacePages (*rig.publish (tick++));
+    REQUIRE (pages.size() == 2);
+    CHECK (pages[0].surface == d700);
+    CHECK (pages[1].surface == deck);
+
+    //  A Stream Deck+ plugged in with its dials on the Send page: no hand, no hold.
+    CHECK_FALSE (look (false).up);
+    surfaces.setPage (deck, { "send", 0, 1, "", 0 });
+    CHECK_FALSE (look (false).up);
+    CHECK (hold.surface.empty());
+
+    //  The D700's EQ key: its page holds the foot.
+    surfaces.setPage (d700, { "eq", 0, 2, "", 1 });
+    auto page = look (false);
+    CHECK (page.up);
+    CHECK (page.surface == d700);
+    CHECK (model::footForSurface (page.up, page.word, page.aim) == model::Subject { model::Subject::Kind::eq, cue });
+
+    //  A dial on the deck: the deck's Send page now - the last hand wins.
+    surfaces.setPage (deck, { "send", 0, 1, "/godot/cue/" + cue + "/sends", 1 });
+    page = look (false);
+    CHECK (page.surface == deck);
+    CHECK (model::footForSurface (page.up, page.word, page.aim) == model::Subject { model::Subject::Kind::sends, cue });
+
+    //  The window's hand on the foot: nobody holds it, though both pages are up.
+    page = look (true);
+    CHECK_FALSE (page.up);
+    CHECK (hold.surface.empty());
+    CHECK_FALSE (look (false).up);
+
+    //  Until a surface moves again - the same rotary turned again will do.
+    surfaces.setPage (d700, { "eq", 0, 2, "/godot/cue/" + cue + "/eqB1Gain", 2 });
+    CHECK (look (false).surface == d700);
+    surfaces.setPage (d700, { "eq", 0, 2, "/godot/cue/" + cue + "/eqB1Gain", 3 });
+    CHECK (look (false).surface == d700);
+
+    /*  THE HOLDER'S PAGE DOWN lets go, and the deck still up does not take
+        the foot for having moved nothing since. */
+    surfaces.setPage (d700, { "show", 0, 1, "", 4 });
+    CHECK_FALSE (look (false).up);
+
+    /*  A DECK UNPLUGGED shows no page, so there is nothing left to hold; one
+        plugged in again starts its count from nought, which is no hand. */
+    surfaces.setPage (deck, { "eq", 0, 4, "", 2 });
+    CHECK (look (false).surface == deck);
+    surfaces.setPage (deck, { "show", 0, 1, "", 0 });
+    CHECK_FALSE (look (false).up);
+    surfaces.setPage (deck, { "eq", 0, 4, "", 0 });
+    CHECK_FALSE (look (false).up);
+    CHECK (hold.surface.empty());
 }
 
 TEST_CASE ("client: the wheel over a number turns it by the master dial's law")

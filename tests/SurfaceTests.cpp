@@ -411,8 +411,9 @@ TEST_CASE ("surface: each surface's page is published every tick, from the runti
     CHECK (rig.at (base + "pageIndex") == "0");
     CHECK (rig.at (base + "pageCount") == "1");
     CHECK (rig.at (base + "edited").empty());
+    CHECK (rig.at (base + "moves") == "0");
 
-    rig.surfaces.setPage (d700, { "eq", 1, 2, "/godot/cue/K1CKK1CK/eqB2Gain" });
+    rig.surfaces.setPage (d700, { "eq", 1, 2, "/godot/cue/K1CKK1CK/eqB2Gain", 7 });
 
     /*  NO REBUILD ASKED FOR: the runtime half reads it at the next publish. */
     const auto snapshot = rig.parameters.publish (rig.tick, rig.state);
@@ -420,6 +421,7 @@ TEST_CASE ("surface: each surface's page is published every tick, from the runti
     CHECK (client::model::text (*snapshot, base + "pageIndex") == "1");
     CHECK (client::model::text (*snapshot, base + "pageCount") == "2");
     CHECK (client::model::text (*snapshot, base + "edited") == "/godot/cue/K1CKK1CK/eqB2Gain");
+    CHECK (client::model::text (*snapshot, base + "moves") == "7");
 
     /*  ONE ADDRESS, ONE HALF: every node the walk finds is found once. */
     std::vector<std::string> addresses;

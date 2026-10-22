@@ -154,6 +154,12 @@ namespace wfg::surface
                 to know the surface is adjusting, and which control it moved. */
             std::string edited;
 
+            /** How many times a hand moved the page - a page key, a rotary or
+                dial turned or pressed: what tells the window which surface
+                moved last (namespace draft §101). A page that is up only
+                because a deck is plugged in has moved nothing. */
+            int moves = 0;
+
             bool operator== (const Page&) const = default;
         };
 
