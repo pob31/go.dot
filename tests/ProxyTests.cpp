@@ -49,10 +49,16 @@
 #include <wfg/engine/plugin/ProxyHost.h>
 #include <wfg/engine/plugin/ProxyLane.h>
 #include <wfg/engine/plugin/SharedRegion.h>
+#include <wfg/engine/plugin/WorkgroupShare.h>
 #include <wfg/engine/rt/RtCheck.h>
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_core/juce_core.h>
+
+#if JUCE_MAC
+ #include <juce_audio_devices/juce_audio_devices.h>
+ #include <AudioToolbox/AudioWorkInterval.h>
+#endif
 
 #include <algorithm>
 #include <array>
@@ -525,6 +531,116 @@ TEST_CASE ("proxy: the test child comes up, halves an enabled lane's block, leav
     CHECK_FALSE (juce::File (host.regionPath()).existsAsFile());
     CHECK_FALSE (lanes[0].isBound());
     CHECK (table.statusOf ("PG7N0001").state == "unloaded");
+}
+
+//==============================================================================
+#if JUCE_MAC
+namespace
+{
+    /** Polls the host until the child says it is in the workgroup, or not, or the time is up. */
+    bool waitForWorkgroup (plugin::ProxyHost& host, std::uint32_t in, int milliseconds)
+    {
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds (milliseconds);
+
+        for (;;)
+        {
+            host.poll();
+
+            if (host.header()->inWorkgroup.load() == in)
+                return true;
+
+            if (std::chrono::steady_clock::now() > until)
+                return false;
+
+            std::this_thread::sleep_for (std::chrono::milliseconds (10));
+        }
+    }
+}
+#endif
+
+TEST_CASE ("proxy: the voice child joins the audio workgroup this process shares, follows it, and leaves when nothing is shared")
+{
+    /*  Process-wide, so whatever an earlier case left shared is taken back first. */
+    plugin::shareWorkgroupHandle (nullptr);
+
+    Folder folder;
+    plugin::PluginTable table;
+    plugin::ProxyLane lanes[1];
+    plugin::ProxyHost host (testGainSpec (folder, 1), { &lanes[0] }, &table);
+
+    std::string problem;
+    INFO ("start: " << problem);
+    REQUIRE (host.start (problem));
+    REQUIRE (waitForState (host, "loaded", 5000));
+    CHECK (host.header()->inWorkgroup.load() == 0);
+
+   #if JUCE_MAC
+    /*  Work intervals of the test's own, which a runner with no sound device
+        can make; the child asks once a second, so a few seconds each. */
+    auto* first = AudioWorkIntervalCreate ("Go.dot test", OS_CLOCK_MACH_ABSOLUTE_TIME, nullptr);
+    auto* second = AudioWorkIntervalCreate ("Go.dot test", OS_CLOCK_MACH_ABSOLUTE_TIME, nullptr);
+    REQUIRE (first != nullptr);
+    REQUIRE (second != nullptr);
+
+    CHECK (plugin::shareWorkgroupHandle (first));
+    CHECK (waitForWorkgroup (host, 1, 5000));
+
+    SUBCASE ("nothing shared: it leaves; another shared: it joins that")
+    {
+        CHECK_FALSE (plugin::shareWorkgroupHandle (nullptr));
+        CHECK (waitForWorkgroup (host, 0, 5000));
+
+        CHECK (plugin::shareWorkgroupHandle (second));
+        CHECK (waitForWorkgroup (host, 1, 5000));
+    }
+
+    SUBCASE ("a relaunched child joins it again")
+    {
+        host.killChild();
+        REQUIRE (waitForState (host, "failed", 5000));
+
+        REQUIRE (host.restart (problem));
+        CHECK (host.header()->inWorkgroup.load() == 0);
+        REQUIRE (waitForState (host, "loaded", 5000));
+        CHECK (waitForWorkgroup (host, 1, 5000));
+    }
+
+    /*  THE DEVICE'S OWN, found among CoreAudio's devices by JUCE's equality -
+        on a Mac with an output; a runner without one says so and goes on. */
+    SUBCASE ("an output device's workgroup, as the device layer shares it")
+    {
+        std::unique_ptr<juce::AudioIODeviceType> type (juce::AudioIODeviceType::createAudioIODeviceType_CoreAudio());
+        type->scanForDevices();
+        const auto names = type->getDeviceNames (false);
+        std::unique_ptr<juce::AudioIODevice> device (names.isEmpty() ? nullptr : type->createDevice (names[0], {}));
+
+        if (device != nullptr && device->getWorkgroup())
+        {
+            CHECK_FALSE (plugin::shareWorkgroupHandle (nullptr));
+            CHECK (waitForWorkgroup (host, 0, 5000));
+
+            CHECK (plugin::shareAudioWorkgroup (device->getWorkgroup()));
+            CHECK (waitForWorkgroup (host, 1, 5000));
+        }
+        else
+        {
+            MESSAGE ("no CoreAudio output with a workgroup here: the device's handle is not looked for");
+        }
+    }
+
+    plugin::shareWorkgroupHandle (nullptr);
+    CHECK (waitForWorkgroup (host, 0, 5000));
+
+    host.stop();
+    os_release (first);
+    os_release (second);
+   #else
+    /*  Elsewhere there is nothing to share and nobody is ever in. */
+    CHECK_FALSE (plugin::shareWorkgroupHandle (nullptr));
+    host.poll();
+    CHECK (host.header()->inWorkgroup.load() == 0);
+    host.stop();
+   #endif
 }
 
 //==============================================================================

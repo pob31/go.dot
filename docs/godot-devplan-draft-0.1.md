@@ -868,7 +868,7 @@ once and GO restores a persistent mic; the words match M39's loopback; CI green 
 into — a return track and Tracktion's aux sends) and a media cue's `Insert` made to sound; **inline
 hosting** (PRD §3.18's opt-in) with §3.4's message-thread handover; AU presets; AUv3; curated
 per-plugin parameter maps (the pages draft's §7.2) for the FX page, which takes a mic cue's inserts
-as it takes a media cue's (namespace §17.16); macOS audio workgroups for the child. *(LV2 left this
+as it takes a media cue's (namespace §17.16); macOS audio workgroups for the child *(built 2026-10-22, namespace §107)*. *(LV2 left this
 list on 2026-09-26: built on every platform, with AU on macOS, the scan in the app and the
 mono→stereo widening on the voice inserts — namespace §17.15. The width classes are the rack
 channels' own, built in 9b.3.)*

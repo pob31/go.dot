@@ -188,6 +188,7 @@ namespace wfg::plugin
             header->childReady.store (0, std::memory_order_relaxed);
             header->childFailed.store (0, std::memory_order_relaxed);
             header->catalogueReady.store (0, std::memory_order_relaxed);
+            header->inWorkgroup.store (0, std::memory_order_relaxed);
             std::memset (header->problem, 0, sizeof (header->problem));
         }
 

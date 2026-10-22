@@ -18,6 +18,7 @@
 #include <wfg/engine/audio/AudioSettings.h>
 #include <wfg/engine/audio/OutputTestSignal.h>
 #include <wfg/engine/audio/RecoveryGate.h>
+#include <wfg/engine/plugin/WorkgroupShare.h>
 
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <spatcore/io/DeviceHost.h>
@@ -173,8 +174,13 @@ namespace wfg::audio
             gapThreshold.store (juce::Time::secondsToHighResolutionTicks (std::max (0.010, 3.0 * blockSeconds)),
                                 std::memory_order_relaxed);
 
+            /*  And the plugin children too, across the process boundary
+                (2026-10-22; plugin/WorkgroupShare.h). */
             if (workgroups != nullptr)
+            {
                 workgroups->set (device->getWorkgroup());
+                plugin::shareAudioWorkgroup (device->getWorkgroup());
+            }
         }
 
         /*  The audio thread's: a value raised, never lowered, against a reader
@@ -234,7 +240,10 @@ namespace wfg::audio
                 may call from its own audio thread: a stale workgroup is
                 harmless, a lock there is not. */
             if (workgroups != nullptr)
+            {
                 workgroups->set ({});
+                plugin::shareAudioWorkgroup ({});
+            }
         }
 
         void audioDeviceError (const juce::String&) override
@@ -482,7 +491,10 @@ namespace wfg::audio
         /*  Whatever this driver published goes with it: the tick thread leaves
             the workgroup at its next turn rather than staying in it. */
         if (impl->workgroups != nullptr)
+        {
             impl->workgroups->set ({});
+            plugin::shareAudioWorkgroup ({});
+        }
     }
 
     void DeviceAudioDriver::setWorkgroups (spatcore::rt::AudioWorkgroupCoordinator* coordinator) noexcept

@@ -302,6 +302,8 @@ add_library(wfg_engine STATIC
     wfg/engine/plugin/PluginLoad.cpp
     wfg/engine/plugin/PluginHostChild.h
     wfg/engine/plugin/PluginHostChild.cpp
+    wfg/engine/plugin/WorkgroupShare.h
+    wfg/engine/plugin/WorkgroupShare.cpp
     wfg/engine/plugin/EditorRegion.h
     wfg/engine/plugin/EditorHost.h
     wfg/engine/plugin/EditorHost.cpp
@@ -676,12 +678,14 @@ namespace wfg::app
 endif()
 
 # The Mac's halves of app/FolderIcon.h, app/Raise.h and app/WindowApplication.h,
-# which need AppKit; FolderIcon.cpp and Raise.cpp compile to nothing there.
+# which need AppKit; FolderIcon.cpp and Raise.cpp compile to nothing there. And
+# of plugin/WorkgroupShare.h, Objective-C++ because JUCE's workgroup is.
 if(APPLE)
     target_sources(wfg_engine PRIVATE
         wfg/engine/app/FolderIcon_mac.mm
         wfg/engine/app/Raise_mac.mm
         wfg/engine/app/WindowApplication_mac.mm
+        wfg/engine/plugin/WorkgroupShare_mac.mm
         wfg/engine/video/Displays_mac.mm)
 endif()
 

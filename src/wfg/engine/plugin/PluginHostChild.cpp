@@ -21,6 +21,7 @@
 #include <wfg/engine/plugin/ProcessUtil.h>
 #include <wfg/engine/plugin/SharedRegion.h>
 #include <wfg/engine/plugin/TestGainState.h>
+#include <wfg/engine/plugin/WorkgroupShare.h>
 
 #include <spatcore/rt/RtThreadPriority.h>
 
@@ -81,11 +82,12 @@ namespace wfg::plugin
             a VST3 needs one to initialise, to take state and for whatever it
             times itself with - and this timer stops it when the parent says
             leave or has gone. A plain loop with a stop, because the modal
-            `runDispatchLoopUntil` is compiled out of this build. */
+            `runDispatchLoopUntil` is compiled out of this build. It also asks
+            the parent, at the same pace, what audio workgroup it shares. */
         struct ExitWatch final : juce::Timer
         {
-            ExitWatch (region::Header* headerToWatch, std::int64_t parentToWatch)
-                : header (headerToWatch), parentPid (parentToWatch) {}
+            ExitWatch (region::Header* headerToWatch, std::int64_t parentToWatch, WorkgroupFollower& workgroupToFollow)
+                : header (headerToWatch), parentPid (parentToWatch), workgroup (workgroupToFollow) {}
 
             void timerCallback() override
             {
@@ -96,15 +98,24 @@ namespace wfg::plugin
                     return;
                 }
 
-                if (parentPid > 0 && ++ticks % 10 == 0 && ! process::isAlive (parentPid))
+                /*  The first tick asks for the workgroup at once; then once a
+                    second, as before, the parent's life. */
+                if (ticks++ % 10 != 0)
+                    return;
+
+                if (parentPid > 0 && ticks > 1 && ! process::isAlive (parentPid))
                 {
                     stopTimer();
                     juce::MessageManager::getInstance()->stopDispatchLoop();
+                    return;
                 }
+
+                workgroup.poll();
             }
 
             region::Header* header;
             std::int64_t parentPid;
+            WorkgroupFollower& workgroup;
             int ticks = 0;
         };
 
@@ -127,8 +138,9 @@ namespace wfg::plugin
         /** The lanes of a region, resolved once. */
         struct Lanes
         {
-            Lanes (region::Header& headerToUse, void* base)
+            Lanes (region::Header& headerToUse, void* base, std::int64_t parentPid)
                 : header (headerToUse),
+                  workgroup (parentPid),
                   channels (static_cast<int> (header.channels.load (std::memory_order_relaxed))),
                   maxSamples (static_cast<int> (header.maxSamples.load (std::memory_order_relaxed))),
                   count (static_cast<int> (header.lanes.load (std::memory_order_relaxed))),
@@ -173,6 +185,18 @@ namespace wfg::plugin
                 spatcore::rt::setCurrentThreadAudioPriority (periodMs, periodMs * 0.5);
             }
 
+            /*  THE INTERFACE'S AUDIO WORKGROUP (macOS, 2026-10-22): the worker,
+                at the top of every pass, joins what the parent shares when it
+                changed, and the header says whether it is in - written only
+                when that moves. */
+            void followWorkgroup() noexcept
+            {
+                const auto in = workgroup.keepUp() ? 1u : 0u;
+
+                if (header.inWorkgroup.load (std::memory_order_relaxed) != in)
+                    header.inWorkgroup.store (in, std::memory_order_relaxed);
+            }
+
             /*  THE SPIN POLICY (plan decision 14): hot while any lane is switched
                 in, one-millisecond polls otherwise. */
             void restAfterIdlePass (bool anyRequest) const
@@ -182,6 +206,7 @@ namespace wfg::plugin
             }
 
             region::Header& header;
+            WorkgroupFollower workgroup;
             int channels, maxSamples, count;
             std::vector<region::Lane*> laneOf;
             std::unique_ptr<LaneControl[]> control;
@@ -283,6 +308,7 @@ namespace wfg::plugin
 
                 while (! stop.load (std::memory_order_relaxed))
                 {
+                    lanes.followWorkgroup();
                     auto any = false;
 
                     for (int i = 0; i < lanes.count; ++i)
@@ -370,6 +396,8 @@ namespace wfg::plugin
 
                     lanes.restAfterIdlePass (any);
                 }
+
+                lanes.workgroup.leave();
             }
 
             Lanes& lanes;
@@ -551,6 +579,7 @@ namespace wfg::plugin
 
                 while (! stop.load (std::memory_order_relaxed))
                 {
+                    lanes.followWorkgroup();
                     auto any = false;
 
                     for (int i = 0; i < lanes.count && i < static_cast<int> (instances.size()); ++i)
@@ -645,6 +674,8 @@ namespace wfg::plugin
 
                     lanes.restAfterIdlePass (any);
                 }
+
+                lanes.workgroup.leave();
             }
 
             juce::AudioPluginFormatManager manager;
@@ -828,7 +859,7 @@ namespace wfg::plugin
             its state, and where the loop below runs for its sake. */
         juce::ScopedJuceInitialiser_GUI juceForTheChild;
 
-        Lanes lanes (header, mapping.getData());
+        Lanes lanes (header, mapping.getData(), parentPid);
         std::atomic<bool> stop { false };
         std::thread answering;
         std::unique_ptr<TestGainWorker> testGain;
@@ -928,7 +959,7 @@ namespace wfg::plugin
         juce::initialiseNSApplication();
        #endif
 
-        ExitWatch watch (&header, parentPid);
+        ExitWatch watch (&header, parentPid, lanes.workgroup);
         watch.startTimer (100);
         loader.startTimer (5);
         juce::MessageManager::getInstance()->runDispatchLoop();
@@ -951,6 +982,8 @@ namespace wfg::plugin
 
                 if (! process::isAlive (parentPid))
                     break;
+
+                lanes.workgroup.poll();
             }
 
             std::this_thread::sleep_for (std::chrono::milliseconds (100));

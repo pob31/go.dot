@@ -10372,7 +10372,8 @@ message-thread handover. Not built and given no row, an option nothing reads bei
 
 **LV2**, **AU presets**, **curated per-plugin parameter maps** (the
 pages draft's §7.2, a machine-level library), **a page EQ curve**, and **macOS audio workgroups for
-the child** — a Mac child can be scheduled late, and M31 on the Mac mini says by how much. (A
+the child** — a Mac child can be scheduled late, and M31 on the Mac mini says by how much *(built
+2026-10-22, §107)*. (A
 plugin's own window was on this list until the author asked for it on 2026-09-25; it is §17.13.)
 
 **The live-input rack, rack-channel chains and the shared reverb channel** — Phase 9b, with
@@ -11410,7 +11411,7 @@ chain"*: they need a return track and Tracktion's aux sends, and stay Phase 9b's
 **`Media/Insert` made real** (CP). **A cue taking over a held channel**, moving it to its own
 settings in its fade time *(proposed)*. **A mic cue as a sampler member**, fader-start for a
 microphone *(proposed)*. **Inline hosting**, **AUv3**, **curated parameter maps**, **macOS audio
-workgroups for the child** — as §17.10 left them. And the **loop recording** of §19, built next on
+workgroups for the child** *(built 2026-10-22, §107)* — as §17.10 left them. And the **loop recording** of §19, built next on
 this.
 
 ### 18.12 What was built, against what §18 drew
@@ -33600,3 +33601,74 @@ other shows?*, *A show with changes not saved asks in its own window first, and 
 Tried 2026-10-22 with two `--hosted` windows on scratch shows: the list read the second show then the first;
 asked, the saved show closed at once, the locked one stayed, and the one with an edit showed its save
 question. Owed: the author's try from the menus themselves, and on the Mac and Linux.
+
+## 107. The plugin child in the interface's audio workgroup
+
+**Asked 2026-10-22** by the author, after asking whether the macOS code used workgroups to keep its work on
+the performance cores: *"Let's add it for the plugin host child process."*
+
+What was found. Only the tick thread joined the interface's workgroup (§31.2, TP). The audio callback is
+CoreAudio's own IO thread, already in it, and Tracktion renders on that one thread
+(`getNumberOfCPUsToUseForAudio` is 1), so it has no worker of its own to join. The voice child's worker
+(§17.6), which the audio thread spins on for every block a plugin processes, had the time-constraint policy
+and no workgroup: the gap §17.10 and §18 left open (*"macOS audio workgroups for the child"*). Apple's own
+rule (AudioToolbox's `AudioWorkInterval.h`) is that a thread working to the device's cycle joins the
+device's workgroup, and a thread at a cadence of its own makes a work interval of its own instead. The voice
+child is the first kind.
+
+### 107.1 Decisions
+
+The author's:
+
+- **BAQ** **The voice child joins the workgroup of the interface the show is playing through**, on macOS.
+
+Mine *(proposed)*, the author's to overrule:
+
+- **BAR** **The workgroup crosses as a Mach send right, from a service named for the engine's process.**
+  The engine's first share registers `com.github.pob31.godot.workgroup.<pid>` with launchd
+  (`bootstrap_check_in`, once for the life of the process) and answers on a dispatch queue. The child
+  already knows the engine's process id (`--parent-pid`). Its message thread asks once a second, beside its
+  check that the engine is alive, and sends the generation it last acted on. The answer carries the port
+  only when the workgroup changed since then. A device reopened in an outage (§6.2) is followed within a
+  second, and so is a relaunched child (§17.6's restart).
+- **BAS** **The device's workgroup is found without patching JUCE.** JUCE hands out an `AudioWorkgroup` but
+  not the `os_workgroup_t` behind it. The engine asks CoreAudio for each device's IO-thread workgroup and
+  keeps the one JUCE's equals (JUCE's equality compares handles, and the HAL gives the same object to every
+  ask). That is checked on the Mac mini.
+- **BAT** **The child says whether it is in, true only for what took effect.** The region's header gains
+  `inWorkgroup` (layout version 4), set by the worker from `os_workgroup_join`'s own answer. The worker
+  joins at the top of its pass only when there is something new: a kernel call on a change, as the tick
+  thread makes. Otherwise it does one atomic load and takes no lock (raw `os_workgroup` calls rather than
+  spatcore's coordinator, whose token cannot say whether a join failed). The message thread offers one
+  workgroup at a time and lets go of the old one only once the worker has left it.
+
+Not changed, for the author: the tick thread (TP) runs at 50 Hz, its own cadence, not the device's. By
+Apple's rule above it belongs in a work interval of its own rather than the device's workgroup. Worth
+measuring on the Mac mini before moving it, and the MIDI and MTC threads (raised as the tick thread is,
+§59) with it.
+
+### 107.2 Rows and commands
+
+None. A workgroup is this computer's scheduling, not the show's.
+
+### 107.3 As built
+
+- `plugin/WorkgroupShare.h`: `shareAudioWorkgroup` (the device layer's, beside the tick thread's
+  coordinator: on each start, emptied on a stop and on the driver's end), `shareWorkgroupHandle` (a test's)
+  and `WorkgroupFollower` (the child's: `poll` on the message thread, `keepUp` and `leave` on the worker).
+  The Mac's half is `WorkgroupShare_mac.mm`, Objective-C++ because JUCE's workgroup is. Everyone else's
+  compiles to nothing and reports nobody in.
+- The child: `Lanes` holds the follower. Both workers, the test child's and the real host's, keep up at
+  the top of every pass and leave on their way out. `ExitWatch` asks at its first tick and then once a
+  second. ProxyHost clears `inWorkgroup` with the other child fields at a launch.
+
+### 107.4 Stages
+
+| stage | what | commit |
+|---|---|---|
+| WG.1 | the share, the follower, the header's flag (ProxyTests: joins, follows a change, leaves, a relaunched child joins again, a real output's workgroup found) | |
+
+Tried 2026-10-22 on the Mac mini (macOS 15.8): a standalone probe handed the default output's workgroup to a
+child process that joined it, and the test above passed there with the Mac's own output. Owed: the author's
+bench, a plugin-heavy show at a small buffer on the Mac with and without, which is M31's question asked
+again.

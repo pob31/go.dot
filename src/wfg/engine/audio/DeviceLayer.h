@@ -233,7 +233,9 @@ namespace wfg::audio
         /*  THE INTERFACE'S AUDIO WORKGROUP (macOS; 2026-10-06), published into
             `coordinator` each time the device starts and emptied when it stops,
             so the tick thread joins the workgroup of the device that is
-            actually running (TickThread::setWorkgroups). Elsewhere the handle
+            actually running (TickThread::setWorkgroups) - and shared with the
+            plugin children, which join it from their own process
+            (plugin/WorkgroupShare.h, 2026-10-22). Elsewhere the handle
             is empty. Message thread, before `open`; the coordinator must
             outlive this driver. */
         void setWorkgroups (spatcore::rt::AudioWorkgroupCoordinator* coordinator) noexcept;

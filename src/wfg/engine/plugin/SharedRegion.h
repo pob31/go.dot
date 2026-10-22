@@ -58,8 +58,9 @@ namespace wfg::plugin::region
 
     /** Bumped whenever a structure below changes shape. */
     /*  3 since 2026-09-26: the plugin's main widths and the layout in words in
-        the header, the latency after a cue's state on each lane. */
-    constexpr std::uint32_t version = 3;
+        the header, the latency after a cue's state on each lane. 4 since
+        2026-10-22: whether the worker is in the interface's audio workgroup. */
+    constexpr std::uint32_t version = 4;
 
     /** The most parameters a plugin may expose through the proxy; a plugin
         with more has the rest neither published nor written. */
@@ -119,6 +120,11 @@ namespace wfg::plugin::region
             cue of a given width goes through it (LaneMapping.h). */
         std::atomic<std::uint32_t> inputs;
         std::atomic<std::uint32_t> outputs;
+
+        /*  Child to parent: one while the worker is in the audio interface's
+            workgroup the parent shares (macOS, 2026-10-22; WorkgroupShare.h),
+            nought otherwise - and always nought elsewhere. */
+        std::atomic<std::uint32_t> inWorkgroup;
 
         /** The child's sentence, NUL-terminated, written before `childFailed`. */
         char problem[problemChars];
