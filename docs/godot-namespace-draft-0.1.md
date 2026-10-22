@@ -33271,3 +33271,33 @@ the next.
 Tests: `stream deck bridge: the Stream Deck+'s EQ is five pages - the cuts, then a band a page`
 (DeckBridgeTests); `surface pages: the Stream Deck+'s EQ pages hold every control once, never two bands
 on a page` (SurfacePagesTests). Owed: the author's try on his Stream Deck+.
+
+## 103. An OSC cue's values one under another, and its numbers as wide as the last
+
+**Asked 2026-10-22** by the author: *"in the OSC table, could the column with the row number adapt to the
+largest number displayed? We added user adjustable width, but the large numbers (a complete WFS-DIY dump
+for 64 inputs is more than 6000 row and you only see "60") the X at the end of the second value slot is
+hidden beyond the curve panel on the right. Could we place the successive values on rows aligned with the
+first value rather than on a long row?"* The messages table (§45, O.5) laid every value of a message
+along its row, so a message of two values was some 800 pixels wide where the foot gives the table two
+fifths of the window; and its numbers' column was a fixed 22 units, two digits.
+
+- **AYW** **A message's values one under another** (the author's ask): the first beside the address, each
+  next one a line down, where the first is. A message is as many lines as it has values (one when it has
+  none), so the table is as wide as one value whatever a message holds. The rows in view are found
+  among lines of several heights (`starts`, the line each message begins on), so a cue of thousands of
+  messages still has components only for those in view (§88).
+- **AYX** **The numbers' column as wide as the cue's last number** (the author's ask): measured in the
+  numbers' own type from as many digits as the last number has, never narrower than before. It is not
+  dragged: it follows the cue.
+- **AYY** *(proposed)* **One edge for the values** (§98): the values are one column now, so the edge after
+  them widens every box by the hand's whole travel. The width kept on this computer (`osc.value`) reads
+  as before.
+- **AYZ** *(proposed)* **Where the buttons went**: the plus that adds a value sits after the last value, on
+  its line; the cross that takes the message away stays at the right end of the message's first line;
+  and a faint rule above each message keeps its values reading as its own.
+
+Tests: `osc messages: a message's values go one under another, and the numbers are as wide as the last
+(§103)`; `osc tables: a column dragged wider by its edge in the head, kept on this computer, a double
+click putting it back (§98)` reads one edge for the values (RunPaneUiTests). Owed: the author's look at a
+whole WFS-DIY dump.

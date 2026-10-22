@@ -107,6 +107,16 @@ namespace wfg::client::ui
         addressBase = kept (actions, addressColumn, addressWidth, addressLeast, addressMost);
         valueBase = kept (actions, valueColumn, valueWidth, valueLeast, valueMost);
 
+        content.painter = [this] (juce::Graphics& g)
+        {
+            const auto row = juce::roundToInt (theme.row * theme.type);
+            g.setColour (Look::colour (theme, "rule").withAlpha (0.5f));
+
+            for (const auto& line : rows)
+                if (line->at > 0 && line->at < starts.size())
+                    g.fillRect (0, static_cast<int> (starts[line->at]) * row, content.getWidth(), 1);
+        };
+
         viewport.setViewedComponent (&content, false);
         viewport.setScrollBarsShown (true, true);
         addAndMakeVisible (viewport);
@@ -216,6 +226,7 @@ namespace wfg::client::ui
         if (shape != drawnShape)
         {
             drawnShape = shape;
+            countLines();
             rebuild();
             return;
         }
@@ -412,10 +423,21 @@ namespace wfg::client::ui
         constexpr std::size_t margin = 8, least = 32;
 
         const auto row = std::max (1, juce::roundToInt (theme.row * theme.type));
-        const auto top = static_cast<std::size_t> (std::max (0, viewport.getViewPositionY() / row));
-        const auto seen = static_cast<std::size_t> (std::max (0, viewport.getHeight() / row)) + 1;
-        const auto count = std::max (least, seen + margin * 2);
         const auto total = reading().rows.size();
+
+        //  The message a line is one of: a message is as many lines as it has values (§103).
+        const auto messageAt = [this, total] (std::size_t line)
+        {
+            const auto past = std::upper_bound (starts.begin(), starts.end(), line);
+            const auto at = static_cast<std::size_t> (past - starts.begin());
+            return std::min (total, at > 0 ? at - 1 : 0);
+        };
+
+        const auto topLine = static_cast<std::size_t> (std::max (0, viewport.getViewPositionY() / row));
+        const auto seenLines = static_cast<std::size_t> (std::max (0, viewport.getHeight() / row)) + 1;
+        const auto top = messageAt (topLine);
+        const auto seen = messageAt (topLine + seenLines) - top + 1;
+        const auto count = std::max (least, seen + margin * 2);
 
         auto from = top > margin ? top - margin : 0;
 
@@ -423,6 +445,19 @@ namespace wfg::client::ui
             from = total > count ? total - count : 0;
 
         return { from, std::min (count, total - std::min (total, from)) };
+    }
+
+    void OscMessagesComponent::countLines()
+    {
+        starts.assign (1, 0);
+        starts.reserve (reading().rows.size() + 1);
+        valued = false;
+
+        for (const auto& message : reading().rows)
+        {
+            starts.push_back (starts.back() + std::max<std::size_t> (1, message.args.size()));
+            valued = valued || ! message.args.empty();
+        }
     }
 
     OscMessagesComponent::Row* OscMessagesComponent::rowAt (std::size_t at) const
@@ -529,51 +564,65 @@ namespace wfg::client::ui
         add.setBounds (head.removeFromRight (scaled (90, theme)).reduced (1, 2));
         viewport.setBounds (area);
 
-        //  As wide as the widest message of the cue, in view or not, so a scroll does not move the columns.
-        widest = 0;
+        /*  THE NUMBERS' COLUMN AS WIDE AS THE CUE'S LAST NUMBER (§103): a
+            whole WFS-DIY dump is thousands of messages, and "6012" showed "60". */
+        const auto digits = static_cast<int> (std::to_string (std::max<std::size_t> (1, reading().rows.size())).size());
+        numberPixels = std::max (scaled (numberWidth, theme),
+                                 juce::GlyphArrangement::getStringWidthInt (Look::font (theme, 11.0f),
+                                                                            juce::String::repeatedString ("0", digits))
+                                   + scaled (gap, theme) * 2);
 
-        for (const auto& message : reading().rows)
-            widest = std::max (widest, message.args.size());
-
+        //  As wide as one value, however many a message has: they go one under another.
         const auto inner = std::max (viewport.getWidth() - scaled (14, theme),
-                                     scaled (numberWidth, theme) + scaled (addressBase, theme)
-                                       + scaled (gap, theme) * 3 + scaled (dropWidth, theme) * 2
-                                       + static_cast<int> (widest + 1) * cellPixels());
+                                     numberPixels + scaled (addressBase, theme)
+                                       + scaled (gap, theme) * 3 + scaled (dropWidth, theme) * 2 + cellPixels());
 
-        content.setSize (inner, std::max (row, static_cast<int> (reading().rows.size()) * row));
-
-        //  Each row where its message sits among all of the cue's.
-        auto y = static_cast<int> (first) * row;
+        content.setSize (inner, std::max (row, static_cast<int> (starts.back()) * row));
 
         for (auto& line : rows)
         {
-            auto strip = juce::Rectangle<int> (0, y, inner, row);
-            const auto take = [&strip, this] (int base)
+            //  Each row where its message sits among all of the cue's, a line a value.
+            const auto y = static_cast<int> (starts[line->at]) * row;
+            const auto lineAt = [y, row, inner] (std::size_t n)
             {
-                auto cut = strip.removeFromLeft (scaled (base, theme));
-                strip.removeFromLeft (scaled (gap, theme));
+                return juce::Rectangle<int> (0, y + static_cast<int> (n) * row, inner, row);
+            };
+
+            auto strip = lineAt (0);
+            const auto take = [this] (juce::Rectangle<int>& from, int pixels)
+            {
+                auto cut = from.removeFromLeft (pixels);
+                from.removeFromLeft (scaled (gap, theme));
                 return cut;
             };
 
-            line->number.setBounds (take (numberWidth));
+            line->number.setBounds (take (strip, numberPixels));
 
-            auto addressCell = take (addressBase);
+            auto addressCell = take (strip, scaled (addressBase, theme));
             line->pick.setBounds (addressCell.removeFromRight (scaled (dropWidth, theme)).reduced (1, 2));
             line->address.setBounds (addressCell.reduced (0, 1));
 
-            for (auto& cell : line->cells)
-            {
-                cell->type.setBounds (take (typeWidth).reduced (0, 1));
-                cell->value.setBounds (take (valueBase).reduced (0, 1));
-                cell->curve.setBounds (take (curveWidth));
-                cell->drop.setBounds (take (dropWidth).reduced (1, 2));
-            }
-
-            line->addArg.setBounds (take (dropWidth).reduced (1, 2));
             line->drop.setBounds (strip.removeFromRight (scaled (dropWidth, theme)).reduced (1, 2));
 
-            y += row;
+            //  The values one under another, each where the first is, the plus after the last.
+            const auto valuesFrom = strip.getX();
+            auto last = strip;
+
+            for (std::size_t n = 0; n < line->cells.size(); ++n)
+            {
+                auto& cell = *line->cells[n];
+                last = n == 0 ? strip : lineAt (n).withLeft (valuesFrom).withRight (strip.getRight());
+
+                cell.type.setBounds (take (last, scaled (typeWidth, theme)).reduced (0, 1));
+                cell.value.setBounds (take (last, scaled (valueBase, theme)).reduced (0, 1));
+                cell.curve.setBounds (take (last, scaled (curveWidth, theme)));
+                cell.drop.setBounds (take (last, scaled (dropWidth, theme)).reduced (1, 2));
+            }
+
+            line->addArg.setBounds (take (last, scaled (dropWidth, theme)).reduced (1, 2));
         }
+
+        content.repaint();
     }
 
     void OscMessagesComponent::paint (juce::Graphics& g)
@@ -586,7 +635,7 @@ namespace wfg::client::ui
 
         //  Laid as the rows are, and moved across with them when they scroll.
         auto strip = head.withX (head.getX() - headScroll()).withWidth (std::max (head.getWidth(), content.getWidth()));
-        strip.removeFromLeft (scaled (numberWidth, theme) + scaled (gap, theme));
+        strip.removeFromLeft (numberPixels + scaled (gap, theme));
         g.drawText ("address", strip.removeFromLeft (scaled (addressBase, theme) + scaled (gap, theme)),
                     juce::Justification::centredLeft, true);
         g.drawText ("values - type, value, curve", strip.removeFromLeft (cellPixels() - scaled (gap, theme)),
@@ -595,9 +644,9 @@ namespace wfg::client::ui
         g.setColour (Look::colour (theme, "rule"));
         g.fillRect (head.getX(), head.getBottom() - 1, head.getWidth(), 1);
 
-        /*  THE EDGES A HAND DRAGS (§98): after the address, and after each
-            value - a short rule in the head, the cursor saying the rest. */
-        for (std::size_t edge = 0; edge <= widest; ++edge)
+        /*  THE EDGES A HAND DRAGS (§98): after the address, and after the
+            values - a short rule in the head, the cursor saying the rest. */
+        for (std::size_t edge = 0; edge <= (valued ? 1u : 0u); ++edge)
             if (const auto x = columnEdge (edge); x >= 0 && x < getWidth())
                 g.fillRect (x, head.getY() + 4, 1, head.getHeight() - 8);
 
@@ -621,14 +670,14 @@ namespace wfg::client::ui
 
     int OscMessagesComponent::columnEdge (std::size_t edge) const
     {
-        //  The address has an edge always; a value's only where some message has that many.
-        if (edge > widest)
+        //  The address has an edge always; the values only where some message has one.
+        if (edge > (valued ? 1u : 0u))
             return -1;
 
-        const auto pastAddress = scaled (numberWidth, theme) + scaled (gap, theme) + scaled (addressBase, theme);
+        const auto pastAddress = numberPixels + scaled (gap, theme) + scaled (addressBase, theme);
         const auto halfGap = scaled (gap, theme) / 2;
         const auto x = edge == 0 ? pastAddress + halfGap
-                                 : pastAddress + scaled (gap, theme) + static_cast<int> (edge) * cellPixels() - halfGap;
+                                 : pastAddress + scaled (gap, theme) + cellPixels() - halfGap;
         return x - headScroll();
     }
 
@@ -636,7 +685,7 @@ namespace wfg::client::ui
     {
         const auto reach = std::max (edgeReach, scaled (edgeReach, theme));
 
-        for (std::size_t edge = 0; edge <= widest; ++edge)
+        for (std::size_t edge = 0; edge <= 1; ++edge)
             if (const auto at = columnEdge (edge); at >= 0 && std::abs (at - x) <= reach)
                 return static_cast<int> (edge);
 
@@ -668,10 +717,8 @@ namespace wfg::client::ui
         if (dragging < 0)
             return;
 
-        /*  THE EDGE FOLLOWS THE HAND: the n-th value's edge moves n boxes' worth
-            when every box widens, so the hand's travel is shared among them. */
-        const auto travel = static_cast<float> (event.x - dragFrom) / theme.type
-                          / static_cast<float> (std::max (1, dragging));
+        //  THE EDGE FOLLOWS THE HAND: the values are one under another (§103), so one box's worth.
+        const auto travel = static_cast<float> (event.x - dragFrom) / theme.type;
         const auto wanted = dragStartBase + juce::roundToInt (travel);
 
         auto& base = dragging == 0 ? addressBase : valueBase;

@@ -30,9 +30,14 @@
     only retyped when a value moves - never under a box somebody is typing in.
 
     ITS COLUMNS ARE DRAGGED WIDER OR NARROWER (namespace draft §98): the edge
-    after the address in the head, and the edge after each value, which widens
+    after the address in the head, and the edge after the values, which widens
     every value's box alike. A double click on an edge puts the column back to
     its own width. Kept on this computer, never in the show.
+
+    A MESSAGE'S VALUES ONE UNDER ANOTHER (namespace draft §103): each value a
+    line of its own, under the first, so the table is as wide as one value
+    however many a message holds; and the numbers' column as wide as the
+    cue's last number needs.
 */
 
 #include <wfg/client/model/DeviceTree.h>
@@ -119,8 +124,8 @@ namespace wfg::client::ui
         void mouseUp (const juce::MouseEvent&) override;
         void mouseDoubleClick (const juce::MouseEvent&) override;
 
-        /*  For a test: where the edge after the address (0) or after the n-th
-            value (n) is in the head, as the component sees it, or -1. */
+        /*  For a test: where the edge after the address (0) or after the values
+            (1) is in the head, as the component sees it, or -1. */
         int columnEdge (std::size_t edge) const;
 
         /*  For a test: the row of a message (its own first) and a value's
@@ -149,6 +154,11 @@ namespace wfg::client::ui
         void refresh();
         void layOut();
 
+        /*  The line each message starts on, a value a line, and one past the
+            last: counted again when a value comes or goes. */
+        void countLines();
+        std::vector<std::size_t> starts { 0 };
+
         /*  The rows in view, and a few either side: [first, first + rows). */
         std::pair<std::size_t, std::size_t> window() const;
         Row* rowAt (std::size_t at) const;
@@ -160,7 +170,8 @@ namespace wfg::client::ui
         /*  The column widths, as drawn: the parts of a value scaled one by one,
             as the rows take them. */
         int cellPixels() const;
-        std::size_t widest = 0;  // values in the cue's widest message, as last laid out
+        int numberPixels = 0;  // the cue's last number and a little, as last laid out
+        bool valued = false;   // some message has a value, so the values have an edge
         int edgeNear (int x) const;
         int headScroll() const;
 
@@ -177,15 +188,23 @@ namespace wfg::client::ui
             void visibleAreaChanged (const juce::Rectangle<int>&) override { if (moved) moved(); }
         };
 
+        /*  THE ROWS' SHEET, with a faint rule above each message, so the
+            values under one read as its own. */
+        struct Sheet final : juce::Component
+        {
+            std::function<void (juce::Graphics&)> painter;
+            void paint (juce::Graphics& g) override { if (painter) painter (g); }
+        };
+
         Port viewport;
         std::size_t first = 0;
-        juce::Component content;
+        Sheet content;
         juce::TextButton add { "+ message" };
         std::vector<std::unique_ptr<Row>> rows;
 
         int addressBase = 0, valueBase = 0;
 
-        /*  A drag on an edge: which (-1 none, 0 the address, n the n-th value),
+        /*  A drag on an edge: which (-1 none, 0 the address, 1 the values),
             where the hand took it and how wide the column was then. */
         int dragging = -1, dragFrom = 0, dragStartBase = 0;
 

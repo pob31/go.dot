@@ -6069,10 +6069,15 @@ TEST_CASE ("osc tables: a column dragged wider by its edge in the head, kept on 
         const auto value = table.valueBox (0, 0)->getWidth();
         const auto firstValue = table.valueBox (0, 0)->getX();
 
-        //  Edges after the address and after each of the two values, none after a third.
+        //  The values one under another (§103): the second where the first is, a line down.
+        REQUIRE (table.valueBox (0, 1) != nullptr);
+        CHECK (table.valueBox (0, 1)->getX() == firstValue);
+        CHECK (table.valueBox (0, 1)->getY() > table.valueBox (0, 0)->getBottom());
+
+        //  An edge after the address and one after the values, however many a message has.
         CHECK (table.columnEdge (0) > 0);
-        CHECK (table.columnEdge (2) > table.columnEdge (1));
-        CHECK (table.columnEdge (3) < 0);
+        CHECK (table.columnEdge (1) > table.columnEdge (0));
+        CHECK (table.columnEdge (2) < 0);
 
         //  The address's edge, fifty to the right: the address fifty wider, the values moved with it.
         drag (table, { table.columnEdge (0), 5 }, 50);
@@ -6080,13 +6085,13 @@ TEST_CASE ("osc tables: a column dragged wider by its edge in the head, kept on 
         CHECK (table.valueBox (0, 0)->getX() == firstValue + 50);
         CHECK (kept[ui::OscMessagesComponent::addressColumn] == 210 + 50);
 
-        //  The second value's edge, forty: shared between the two boxes, twenty each, so the edge follows the hand.
-        const auto secondEdge = table.columnEdge (2);
-        drag (table, { secondEdge, 5 }, 40);
-        CHECK (table.valueBox (0, 0)->getWidth() == value + 20);
-        CHECK (table.valueBox (0, 1)->getWidth() == value + 20);
-        CHECK (table.columnEdge (2) == secondEdge + 40);
-        CHECK (kept[ui::OscMessagesComponent::valueColumn] == 66 + 20);
+        //  The values' edge, forty: every box forty wider, and the edge follows the hand.
+        const auto valuesEdge = table.columnEdge (1);
+        drag (table, { valuesEdge, 5 }, 40);
+        CHECK (table.valueBox (0, 0)->getWidth() == value + 40);
+        CHECK (table.valueBox (0, 1)->getWidth() == value + 40);
+        CHECK (table.columnEdge (1) == valuesEdge + 40);
+        CHECK (kept[ui::OscMessagesComponent::valueColumn] == 66 + 40);
 
         //  Below the head, the same place is a row's: no drag, nothing kept.
         const auto before = kept;
@@ -6105,13 +6110,13 @@ TEST_CASE ("osc tables: a column dragged wider by its edge in the head, kept on 
         again.show (reading);
         REQUIRE (again.addressBox (0) != nullptr);
         CHECK (again.addressBox (0)->getWidth() == address + 50);
-        CHECK (again.valueBox (0, 0)->getWidth() == value + 20);
+        CHECK (again.valueBox (0, 0)->getWidth() == value + 40);
 
         //  A double click on an edge: that column its own width again, and forgotten.
         again.mouseDoubleClick (mouse (again, { again.columnEdge (0), 5 }, 2, false));
         CHECK (again.addressBox (0)->getWidth() == address);
         CHECK (kept.count (ui::OscMessagesComponent::addressColumn) == 0u);
-        CHECK (again.valueBox (0, 0)->getWidth() == value + 20);
+        CHECK (again.valueBox (0, 0)->getWidth() == value + 40);
     }
 
     SUBCASE ("the grid window: the parameters' column, and the channels' all alike")
@@ -9137,6 +9142,78 @@ TEST_CASE ("waveform: a movie's strip and its cuts follow the edit - each slot t
         CHECK (png.writeImageToStream (canvas, out));
         MESSAGE ("wrote " << file.getFullPathName().toStdString());
     }
+}
+
+//==============================================================================
+/*  A MESSAGE'S VALUES ONE UNDER ANOTHER, AND THE NUMBERS AS WIDE AS THE LAST
+    (namespace draft §103). The author, 2026-10-22: a WFS-DIY dump of 64 inputs
+    is more than 6,000 messages, and the numbers' column showed "60"; and a
+    second value's cross was hidden under the curves on the right. */
+TEST_CASE ("osc messages: a message's values go one under another, and the numbers are as wide as the last (§103)")
+{
+    ui::OscMessagesComponent::Actions actions;
+
+    const auto cueOf = [] (int messages)
+    {
+        auto reading = std::make_shared<model::OscMessagesReading>();
+        reading->cueId = "CUE00001";
+
+        for (int n = 0; n < messages; ++n)
+        {
+            model::OscMessageRow row;
+            row.id = n == 0 ? std::string {} : "M" + std::to_string (10000000 + n).substr (1);
+            row.base = n == 0 ? std::string ("/godot/cue/CUE00001/") : "/godot/message/" + row.id + "/";
+            row.address = "/remoteInput/positionX";
+            row.value = n % 2 == 0 ? "i:1 f:0.5 f:2" : "f:0.5";
+            row.args = n % 2 == 0 ? std::vector<model::OscArgument> { { 'i', "1", true, {} }, { 'f', "0.5", true, {} },
+                                                                      { 'f', "2", true, {} } }
+                                  : std::vector<model::OscArgument> { { 'f', "0.5", true, {} } };
+            reading->rows.push_back (std::move (row));
+        }
+
+        return std::shared_ptr<const model::OscMessagesReading> (reading);
+    };
+
+    ui::OscMessagesComponent small (model::Theme {}, actions);
+    small.setSize (800, 400);
+    small.show (cueOf (2));
+
+    ui::OscMessagesComponent big (model::Theme {}, actions);
+    big.setSize (800, 400);
+    big.show (cueOf (6400));
+
+    //  Three values, three lines: the next message starts under the last of them.
+    REQUIRE (small.valueBox (0, 2) != nullptr);
+    REQUIRE (small.addressBox (1) != nullptr);
+    CHECK (small.valueBox (0, 2)->getX() == small.valueBox (0, 0)->getX());
+    CHECK (small.addressBox (1)->getY() > small.valueBox (0, 2)->getY());
+
+    //  Every value's cross where the first one's is, in the table's width and not past it.
+    REQUIRE (small.removeValue (0, 2) != nullptr);
+    CHECK (small.removeValue (0, 2)->getRight() == small.removeValue (0, 0)->getRight());
+    CHECK (small.removeValue (0, 2)->getRight() <= 800);
+    CHECK (small.removeMessage (0)->getRight() <= 800);
+
+    //  Four digits want more room than one: the address starts further right.
+    REQUIRE (big.addressBox (0) != nullptr);
+    CHECK (big.addressBox (0)->getX() > small.addressBox (0)->getX());
+
+    //  Scrolled to the end, lines of two heights and all: the last messages have their rows.
+    auto* port = static_cast<juce::Viewport*> (nullptr);
+
+    for (auto* child : big.getChildren())
+        if (auto* found = dynamic_cast<juce::Viewport*> (child))
+            port = found;
+
+    REQUIRE (port != nullptr);
+    CHECK (port->getViewedComponent()->getHeight() > 6400 * small.addressBox (0)->getHeight());
+    port->setViewPosition (0, port->getViewedComponent()->getHeight() - port->getHeight());
+
+    CHECK (big.rowsMade() < 80u);
+    CHECK (big.addressBox (0) == nullptr);
+    REQUIRE (big.addressBox (6399) != nullptr);
+    REQUIRE (big.valueBox (6398, 2) != nullptr);
+    CHECK (big.valueBox (6398, 2)->getY() < big.addressBox (6399)->getY());
 }
 
 //==============================================================================
