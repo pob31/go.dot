@@ -97,6 +97,7 @@
 #include <wfg/client/model/Scrub.h>
 #include <wfg/client/model/Selection.h>
 #include <wfg/client/model/ColumnWidths.h>
+#include <wfg/client/model/Shows.h>
 #include <wfg/client/model/OscCurves.h>
 #include <wfg/client/model/OscGrid.h>
 #include <wfg/client/model/OscMessages.h>
@@ -16832,6 +16833,26 @@ TEST_CASE ("client: cues copied name their show on the clipboard, and a paste re
     //  A numeric entity in a name reads as the character it stands for.
     CHECK (model::mediaNamesIn ("<Fragment><Media id=\"A\" file=\"caf&#233;.wav\"/></Fragment>")
            == std::vector<std::string> { "caf\xC3\xA9.wav" });
+}
+
+TEST_CASE ("file menu shows: Open recent names a show by its folder, and Close other shows names them (§106)")
+{
+    //  A show by its folder, a .wfg as its folder, either separator, a trailing one too.
+    CHECK (model::showName ("D:\\Shows\\Tuesday") == "Tuesday");
+    CHECK (model::showName ("/Users/po/Shows/Tuesday/") == "Tuesday");
+    CHECK (model::showName ("/Users/po/Shows/Tuesday/Tuesday.WFG") == "Tuesday");
+
+    //  Two of one name each say the folder they are in; the others say only their name.
+    CHECK (model::recentShowLines ({ "D:\\Avignon\\Hamlet", "D:\\Shows\\Tuesday", "/Volumes/Lyon/Hamlet" })
+           == std::vector<std::string> { "Hamlet - Avignon", "Tuesday", "Hamlet - Lyon" });
+    CHECK (model::recentShowLines ({}).empty());
+
+    //  "and" before the last; a Go.dot that does not say which show is counted.
+    CHECK (model::otherShowsNamed ({ "D:\\Shows\\Tuesday" }) == "Tuesday");
+    CHECK (model::otherShowsNamed ({ "D:\\A", "D:\\B", "D:\\C" }) == "A, B and C");
+    CHECK (model::otherShowsNamed ({ "D:\\A", "" }) == "A and another show");
+    CHECK (model::otherShowsNamed ({ "", "" }) == "2 shows");
+    CHECK (model::otherShowsNamed ({ "" }) == "a show");
 }
 
 TEST_CASE ("column widths: kept on this computer, one line a column, a line that does not read passed over (§98)")

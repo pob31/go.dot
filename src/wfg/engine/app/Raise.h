@@ -39,6 +39,13 @@ namespace wfg::app
         and did not refuse. */
     bool raiseProcessWindows (long processId);
 
+    /*  Lets another process put its own window in front - which Windows
+        refuses a process the person is not using - for a moment: what File >
+        Close other shows grants each show it asks, so the one with changes
+        not saved can bring its question forward (namespace draft §106).
+        Nothing to grant on the Mac and Linux. */
+    void letComeForward (long processId);
+
     /*  A visible top-level window whose title begins with `title`, whoever's
         it is, brought to the front: a process cue's patch in Pd's window,
         which belongs to a program Pd started and not to the one Go.dot did

@@ -74,7 +74,8 @@ has stood in front of the thing.
   Performance, a copy of the show or of an earlier night, with a template cue
   list to carry good changes back. Save as copies the sounds only when the copy
   would not find them. A `.wfg` file opens in Go.dot on all three systems, and
-  with nothing given the last show reopens.
+  with nothing given the last show reopens. Each show has its own window; File >
+  Open recent lists the last ten, and Close other shows closes the rest.
 - **Two ways in.** A desktop window, compiled into the same process as the
   engine, which the launchers open; and a web console the engine serves at
   `/ui`, plain HTML and ES modules with no build step, kept as the redundancy

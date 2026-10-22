@@ -238,6 +238,7 @@ Un clic droit sur une cue de la liste, ou sur un port de l'onglet Serial, puis *
 - **Spectacle et représentations.** Le spectacle est l'œuvre ; chaque soir est une représentation, une copie que l'on modifie sans toucher l'original. *File > New performance…*. À la fin, Go.dot liste ce qui a changé, cue par cue, pour reporter les bonnes modifications dans le spectacle.
 - **Problèmes d'interface.** Si l'interface audio disparaît, le spectacle se met en pause et reprend à son retour. Si sa fréquence d'échantillonnage change, Go.dot suit.
 - **Double-clic sur un `.wfg`** pour ouvrir le spectacle (installateur Windows, .deb Linux, macOS).
+- **Plusieurs spectacles à la fois (nouveau).** Chaque spectacle s'ouvre dans sa propre fenêtre. *File > Open recent* liste les dix derniers spectacles ouverts sur cet ordinateur. *File > Close other shows* ferme toutes les autres fenêtres d'un coup : un spectacle aux modifications non enregistrées demande d'abord dans sa propre fenêtre, et un spectacle verrouillé reste ouvert.
 
 ### Deux ordinateurs : un principal et un secours (nouveau)
 

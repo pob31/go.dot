@@ -28,8 +28,11 @@
 
 #include <wfg/engine/app/OpenShows.h>
 #include <wfg/engine/app/Raise.h>
+#include <wfg/engine/app/RecentShows.h>
 
 #include <juce_core/juce_core.h>
+
+#include <algorithm>
 
 using wfg::app::OpenShow;
 
@@ -61,9 +64,11 @@ TEST_CASE ("open shows: a claim is this process's, named in its file, and one at
     auto first = OpenShow::claim (show, entries);
     REQUIRE (first != nullptr);
 
-    //  The file the raise reads names this process, and nothing else.
+    //  The file the raise reads names this process first, then the show (§106).
     const auto entry = OpenShow::entryFor (show, entries);
-    CHECK (entry.loadFileAsString().trim() == juce::String (wfg::app::currentProcessId()));
+    const auto lines = juce::StringArray::fromLines (entry.loadFileAsString());
+    CHECK (lines[0] == juce::String (wfg::app::currentProcessId()));
+    CHECK (lines[1] == show.getFullPathName());
 
     //  A second claim fails while the first holds - in this process too.
     CHECK (OpenShow::claim (show, entries) == nullptr);
@@ -124,4 +129,101 @@ TEST_CASE ("open shows: a show nobody holds is not held, and has no window to ra
 
     //  And the probe let go: the show can still be claimed.
     CHECK (OpenShow::claim (show, entries) != nullptr);
+}
+
+TEST_CASE ("open shows: another window's shows are listed by their locks, never this one's (§106)")
+{
+    Scratch scratch;
+    const auto entries = scratch.folder.getChildFile ("open");
+    const auto mine = scratch.folder.getChildFile ("Mine");
+    const auto stale = scratch.folder.getChildFile ("Crashed");
+    REQUIRE (mine.createDirectory());
+    REQUIRE (stale.createDirectory());
+
+    auto holding = OpenShow::claim (mine, entries);
+    REQUIRE (holding != nullptr);
+
+    //  A file a crash left, its lock free: nobody's show.
+    REQUIRE (OpenShow::entryFor (stale, entries).replaceWithText ("123\n" + stale.getFullPathName()));
+
+    //  This process's own show is not another window's, and asking did not let it go.
+    CHECK (OpenShow::othersOpen (entries).empty());
+    CHECK (OpenShow::claim (mine, entries) == nullptr);
+
+    //  And the probe let the stale one go: it can be claimed.
+    CHECK (OpenShow::claim (stale, entries) != nullptr);
+}
+
+TEST_CASE ("open shows: a request to close is taken once, and a claim clears one left behind (§106)")
+{
+    Scratch scratch;
+    const auto entries = scratch.folder.getChildFile ("open");
+    const auto show = scratch.folder.getChildFile ("Asked");
+    REQUIRE (show.createDirectory());
+
+    const wfg::app::OpenElsewhere asked { OpenShow::entryFor (show, entries).getFileNameWithoutExtension(), 0, show };
+
+    {
+        auto holding = OpenShow::claim (show, entries);
+        REQUIRE (holding != nullptr);
+        CHECK_FALSE (holding->closeAsked());
+
+        CHECK (OpenShow::askToClose (asked, entries));
+        CHECK (holding->closeAsked());
+        CHECK_FALSE (holding->closeAsked());
+
+        //  Let go with a request standing: it goes with the claim.
+        CHECK (OpenShow::askToClose (asked, entries));
+    }
+
+    CHECK_FALSE (entries.getChildFile (asked.key + ".close").exists());
+
+    //  One written while nobody held the show is not the next window's.
+    CHECK (OpenShow::askToClose (asked, entries));
+    auto next = OpenShow::claim (show, entries);
+    REQUIRE (next != nullptr);
+    CHECK_FALSE (next->closeAsked());
+
+    //  A key that is not one names no file.
+    CHECK_FALSE (OpenShow::askToClose ({ "../../somebody", 0, show }, entries));
+}
+
+TEST_CASE ("recent shows: newest first, one line a show, ten kept, and cleared (§106)")
+{
+    namespace recent = wfg::app::recent;
+
+    Scratch scratch;
+    const auto list = scratch.folder.getChildFile ("recent-shows.txt");
+    const auto show = [&scratch] (int n) { return scratch.folder.getChildFile ("Show " + juce::String (n)); };
+
+    CHECK (recent::read (list).empty());
+
+    for (auto n = 1; n <= 12; ++n)
+        REQUIRE (recent::remember (list, show (n)));
+
+    //  The newest first, the two oldest let go.
+    auto shows = recent::read (list);
+    REQUIRE (shows.size() == recent::kept);
+    CHECK (shows.front() == show (12));
+    CHECK (shows.back() == show (3));
+
+    //  Opened again, a show moves to the top rather than being listed twice - whatever its spelling.
+    REQUIRE (recent::remember (list, juce::File (show (5).getFullPathName() + juce::File::getSeparatorString())));
+    shows = recent::read (list);
+    CHECK (shows.size() == recent::kept);
+    CHECK (shows.front().getFullPathName().startsWith (show (5).getFullPathName()));
+    CHECK (std::count_if (shows.begin(), shows.end(), [&] (const juce::File& f) { return f.getFileName() == "Show 5"; }) == 1);
+
+    //  A show not found stays listed (BAK): it may be on a drive not plugged in.
+    CHECK (std::any_of (shows.begin(), shows.end(), [&] (const juce::File& f) { return f == show (11); }));
+
+    //  A line that is not a path is passed over.
+    REQUIRE (list.replaceWithText ("not a path\n" + show (1).getFullPathName() + "\n"));
+    shows = recent::read (list);
+    REQUIRE (shows.size() == 1);
+    CHECK (shows.front() == show (1));
+
+    CHECK (recent::forget (list));
+    CHECK (recent::read (list).empty());
+    CHECK (recent::forget (list));
 }

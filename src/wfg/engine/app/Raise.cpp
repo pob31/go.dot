@@ -105,6 +105,12 @@ namespace wfg::app
         return true;
     }
 
+    void letComeForward (long processId)
+    {
+        if (processId > 0)
+            AllowSetForegroundWindow (static_cast<DWORD> (processId));
+    }
+
     namespace
     {
         struct Titled
@@ -163,6 +169,8 @@ namespace wfg::app
     {
         return false;
     }
+
+    void letComeForward (long) {}
    #endif
 }
 

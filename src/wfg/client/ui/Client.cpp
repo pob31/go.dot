@@ -53,6 +53,7 @@
 #include <wfg/client/model/DeviceTree.h>
 #include <wfg/client/model/Dual.h>
 #include <wfg/client/model/Flags.h>
+#include <wfg/client/model/Shows.h>
 #include <wfg/client/model/Foot.h>
 #include <wfg/client/model/Bindings.h>
 #include <wfg/client/model/ColumnWidths.h>
@@ -161,6 +162,14 @@ namespace wfg::client
             /*  HELP (namespace draft §78, ASQ): which Go.dot this is, a newer one
                 asked about now, whether to ask at launch, and the release page. */
             menuAbout, menuCheckUpdates, menuAskAtLaunch, menuReleasePage,
+
+            /*  FILE > OPEN RECENT'S CLEAR, AND CLOSE OTHER SHOWS (namespace
+                draft §106). */
+            menuForgetRecent, menuCloseOthers,
+
+            /*  THE SHOWS OPEN RECENT OFFERS, newest first, numbered from here
+                (§106): ten at most (app/RecentShows.h), so well short of 1000. */
+            menuRecentFirst = 900,
 
             /*  THE TEMPLATES APPLY TEMPLATE OFFERS, numbered from here in the
                 order the show keeps them (namespace draft §38). */
@@ -1138,6 +1147,9 @@ namespace wfg::client
                     case menuCheckUpdates:
                     case menuAskAtLaunch:
                     case menuReleasePage:
+                    case menuForgetRecent:
+                    case menuCloseOthers:
+                    case menuRecentFirst:
                     case menuApplyTemplateFirst: break;
                 }
 
@@ -1168,6 +1180,18 @@ namespace wfg::client
                 {
                     case menuNew:
                     case menuOpen:      return host.openWindow != nullptr;
+
+                    /*  OPEN RECENT (§106): each show that is there now, but this
+                        window's own. Asked per item by addRecentShows. */
+                    case menuRecentFirst: return host.openWindow != nullptr;
+                    case menuForgetRecent: return host.forgetRecentShows != nullptr && host.recentShows != nullptr
+                                                    && ! host.recentShows().empty();
+
+                    /*  CLOSE OTHER SHOWS (§106): whenever another window holds
+                        one - under the lock too, since closing them is nothing
+                        done to this show, and each locked one stays open. */
+                    case menuCloseOthers: return host.otherShows != nullptr && host.askOtherShowsToClose != nullptr
+                                                   && ! host.otherShows().empty();
 
                     //  From the show, or from a performance used as a template.
                     case menuNewPerformance: return host.openWindow != nullptr && documentFolder().isDirectory();
@@ -1306,6 +1330,42 @@ namespace wfg::client
                 menu.addItem (entry);
             }
 
+            /*  FILE > OPEN RECENT (namespace draft §106): the ten shows this
+                machine opened last, newest first. This window's own is ticked
+                and greyed; one not found now is greyed and stays listed (BAK),
+                for a drive not plugged in tonight. Kept as the menu showed
+                them, so the item picked is the line that was read. */
+            void addRecentShows (juce::PopupMenu& menu)
+            {
+                offeredRecent = host.recentShows ? host.recentShows() : std::vector<std::string> {};
+
+                juce::PopupMenu recent;
+                const auto lines = model::recentShowLines (offeredRecent);
+                const auto here = documentFolder();
+
+                for (std::size_t at = 0; at < offeredRecent.size(); ++at)
+                {
+                    const juce::File listed { juce::String::fromUTF8 (offeredRecent[at].c_str()) };
+                    const auto found = listed.isDirectory();
+                    const auto thisOne = here != juce::File() && listed == here;
+
+                    juce::PopupMenu::Item entry { juce::String::fromUTF8 (lines[at].c_str())
+                                                    + (found ? juce::String() : juce::String (" (not found)")) };
+                    entry.itemID = menuRecentFirst + static_cast<int> (at);
+                    entry.isEnabled = found && ! thisOne && menuItemEnabled (menuRecentFirst);
+                    entry.isTicked = thisOne;
+                    recent.addItem (entry);
+                }
+
+                if (! offeredRecent.empty())
+                {
+                    recent.addSeparator();
+                    addMenuItem (recent, menuForgetRecent, "Clear the list");
+                }
+
+                menu.addSubMenu ("Open recent", recent, ! offeredRecent.empty());
+            }
+
             juce::PopupMenu getMenuForIndex (int index, const juce::String&) override
             {
                 juce::PopupMenu menu;
@@ -1317,6 +1377,7 @@ namespace wfg::client
                     addMenuItem (menu, menuUpdateTemplate, templateAroundThisDocument() ? "Update the show's template..."
                                                                                        : "Make this the show's template");
                     addMenuItem (menu, menuOpen, "Open show...");
+                    addRecentShows (menu);
                     addMenuItem (menu, menuImportAls, "Import Ableton Live set...");
                     addMenuItem (menu, menuImportQlab, "Import QLab workspace...");
                     addMenuItem (menu, menuFindMissing, "Find missing files in a folder...");
@@ -1324,6 +1385,8 @@ namespace wfg::client
                     addMenuItem (menu, menuSave, "Save");
                     addMenuItem (menu, menuSaveAs, "Save as...");
                     addMenuItem (menu, menuRevert, "Revert to saved...");
+                    menu.addSeparator();
+                    addMenuItem (menu, menuCloseOthers, "Close other shows");
 
                     /*  LINUX ONLY: a tarball cannot tell the desktop what a .wfg
                         is, so this copy says so when asked (app/Associate.h).
@@ -1532,6 +1595,11 @@ namespace wfg::client
                             shell->transport.setNotice (juce::String (host.makeTemplate().said));
                         break;
                     case menuOpen:      chooseShowFolder (false); break;
+                    case menuForgetRecent:
+                        if (host.forgetRecentShows)
+                            host.forgetRecentShows();
+                        break;
+                    case menuCloseOthers: askToCloseOtherShows(); break;
                     case menuSave:      save(); break;
                     case menuSaveAs:    if (host.emptyShowAtStart) chooseWhereTheEmptyShowLives();
                                         else chooseSaveAsFolder();
@@ -1608,7 +1676,14 @@ namespace wfg::client
                     case menuRealign:    send (model::eventFor (model::PairAct::realign)); break;
                     case menuAdoptShow:  send (model::eventFor (model::PairAct::adoptShow)); break;
                     default:
-                        if (itemId >= menuApplyTemplateFirst)
+                        if (itemId >= menuRecentFirst && itemId < menuApplyTemplateFirst)
+                        {
+                            const auto at = static_cast<std::size_t> (itemId - menuRecentFirst);
+
+                            if (at < offeredRecent.size())
+                                openInAnotherWindow (juce::File (juce::String::fromUTF8 (offeredRecent[at].c_str())), false);
+                        }
+                        else if (itemId >= menuApplyTemplateFirst)
                         {
                             const auto rows = templatesForAnchor();
                             const auto at = static_cast<std::size_t> (itemId - menuApplyTemplateFirst);
@@ -3682,6 +3757,7 @@ namespace wfg::client
                 followTheSaveBeforeReview();
                 followTheCopy();
                 followTheClose();
+                followTheOtherWindowsAsk();
             }
 
             /*  THE WINDOW GOES ONCE THE SHOW IS CLEAN (WW): saved, or put back
@@ -4766,32 +4842,111 @@ namespace wfg::client
                                           if (safe == nullptr || folder == juce::File())
                                               return;
 
-                                          const auto refused = host.openWindow (folder.getFullPathName().toStdString(),
-                                                                                createNew);
-
-                                          shell->transport.setNotice (refused.empty()
-                                                                        ? "opening " + (folder.hasFileExtension ("wfg") ? folder.getFileNameWithoutExtension()
-                                                                                                                        : folder.getFileName())
-                                                                            + " in a new window"
-                                                                        : juce::String (refused));
-
-                                          /*  THE LAUNCHER'S EMPTY SHOW GIVES WAY (Console.h,
-                                              `emptyShowAtStart`): the show on its way takes
-                                              this window's place while nothing has been done
-                                              here - nothing to save, and nothing to undo, so
-                                              an empty show somebody worked in and saved is
-                                              never closed under them. A refusal leaves it. */
-                                          if (refused.empty() && host.emptyShowAtStart && host.quit
-                                                && ! last.hasSomethingToSave() && last.canUndo == model::Flag::no)
-                                              host.quit();
-
-                                          /*  AND ONE THAT STAYS TAKES ITS SETTINGS OUT OF THE
-                                              WAY (§39): they were about its first moment, and
-                                              left up they sat beside the show just opened as if
-                                              they were that show's. */
-                                          else if (refused.empty() && host.emptyShowAtStart && audioSettings != nullptr)
-                                              audioSettings->closeButtonPressed();
+                                          openInAnotherWindow (folder, createNew);
                                       });
+            }
+
+            /*  The folder chosen, or the show Open recent offered (§106), handed
+                to the console for a window of its own. */
+            void openInAnotherWindow (const juce::File& folder, bool createNew)
+            {
+                if (! host.openWindow)
+                    return;
+
+                const auto refused = host.openWindow (folder.getFullPathName().toStdString(), createNew);
+
+                shell->transport.setNotice (refused.empty()
+                                              ? "opening " + (folder.hasFileExtension ("wfg") ? folder.getFileNameWithoutExtension()
+                                                                                              : folder.getFileName())
+                                                  + " in a new window"
+                                              : juce::String (refused));
+
+                /*  THE LAUNCHER'S EMPTY SHOW GIVES WAY (Console.h,
+                    `emptyShowAtStart`): the show on its way takes
+                    this window's place while nothing has been done
+                    here - nothing to save, and nothing to undo, so
+                    an empty show somebody worked in and saved is
+                    never closed under them. A refusal leaves it. */
+                if (refused.empty() && host.emptyShowAtStart && host.quit
+                      && ! last.hasSomethingToSave() && last.canUndo == model::Flag::no)
+                    host.quit();
+
+                /*  AND ONE THAT STAYS TAKES ITS SETTINGS OUT OF THE
+                    WAY (§39): they were about its first moment, and
+                    left up they sat beside the show just opened as if
+                    they were that show's. */
+                else if (refused.empty() && host.emptyShowAtStart && audioSettings != nullptr)
+                    audioSettings->closeButtonPressed();
+            }
+
+            /*  FILE > CLOSE OTHER SHOWS (namespace draft §106, the author,
+                2026-10-22). One question here, naming them; then each closes in
+                its own window, as its own close would but without asking again
+                (BAM, the author's pick): a saved show at once, one with changes
+                not saved asking Save / Close without / Cancel there, a locked
+                one staying open. This show is not touched, so the lock here
+                does not stop it. */
+            void askToCloseOtherShows()
+            {
+                if (! host.otherShows || ! host.askOtherShowsToClose)
+                    return;
+
+                const auto others = host.otherShows();
+
+                if (others.empty())
+                {
+                    shell->transport.setNotice ("no other show is open");
+                    return;
+                }
+
+                const auto named = juce::String::fromUTF8 (model::otherShowsNamed (others).c_str());
+
+                juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                                .withIconType (juce::MessageBoxIconType::QuestionIcon)
+                                                .withTitle (others.size() == 1 ? "Close the other show?"
+                                                                               : "Close the " + juce::String (static_cast<int> (others.size()))
+                                                                                   + " other shows?")
+                                                .withMessage ("Close " + named + ". Their running cues stop. A show with "
+                                                              "changes not saved asks in its own window first, and a "
+                                                              "locked show stays open.")
+                                                .withButton (others.size() == 1 ? "Close it" : "Close them")
+                                                .withButton ("Cancel")
+                                                .withAssociatedComponent (window.get()),
+                                              [this, safe = juce::Component::SafePointer<ui::MainWindow> (window.get())] (int answer)
+                                              {
+                                                  //  Two buttons: the first answers 1.
+                                                  if (safe == nullptr || answer != 1)
+                                                      return;
+
+                                                  const auto asked = host.askOtherShowsToClose();
+                                                  shell->transport.setNotice (asked == 1 ? juce::String ("the other show was asked to close")
+                                                                                         : juce::String (asked) + " other shows were asked to close");
+                                              });
+            }
+
+            /*  ASKED FROM ANOTHER WINDOW (§106): looked for twice a second, a
+                file beside this show's claim (app/OpenShows.h). A locked show
+                stays, and says why. */
+            void followTheOtherWindowsAsk()
+            {
+                if (! host.closeAsked)
+                    return;
+
+                if (const auto now = juce::Time::getMillisecondCounter(); now - closeAskLooked < 500)
+                    return;
+                else
+                    closeAskLooked = now;
+
+                if (! host.closeAsked())
+                    return;
+
+                if (model::isYes (last.locked))
+                {
+                    shell->transport.setNotice ("another window asked this show to close: it is locked, so it stays open");
+                    return;
+                }
+
+                closeRequested (true);
             }
 
             //======================================================================
@@ -6177,12 +6332,18 @@ namespace wfg::client
                 first whether to bring its changes back (§25, the author: "this
                 should be a question when saving or closing" - closing, not
                 every save, since a tech saves all day). Then the window's own
-                question, as for any document. */
-            void closeRequested()
+                question, as for any document.
+
+                `fromAnotherWindow`: File > Close other shows there (§106), whose
+                one question stands for this window's last - so a show with
+                nothing to ask about closes, and one that has asks in front. */
+            void closeRequested (bool fromAnotherWindow = false)
             {
+                const auto ask = [this, fromAnotherWindow] { askToClose (fromAnotherWindow); };
+
                 if (model::isYes (last.locked) || ! host.compareWithTemplate || ! templateAroundThisDocument())
                 {
-                    askToClose();
+                    ask();
                     return;
                 }
 
@@ -6191,9 +6352,12 @@ namespace wfg::client
 
                 if (! dirty && (! comparison.ok || comparison.changes.empty()))
                 {
-                    askToClose();
+                    ask();
                     return;
                 }
+
+                if (fromAnotherWindow)
+                    bringToFront();
 
                 juce::AlertWindow::showAsync (juce::MessageBoxOptions()
                                                 .withIconType (juce::MessageBoxIconType::QuestionIcon)
@@ -6207,19 +6371,19 @@ namespace wfg::client
                                                 .withButton ("Close without")
                                                 .withButton ("Cancel")
                                                 .withAssociatedComponent (window.get()),
-                                              [this, safe = juce::Component::SafePointer<ui::MainWindow> (window.get())] (int answer)
+                                              [this, ask, safe = juce::Component::SafePointer<ui::MainWindow> (window.get())] (int answer)
                                               {
                                                   if (safe == nullptr)
                                                       return;
 
                                                   if (answer == 1)
-                                                      reviewTemplate ([this] { askToClose(); });
+                                                      reviewTemplate (ask);
                                                   else if (answer == 2)
-                                                      askToClose();
+                                                      ask();
                                               });
             }
 
-            void askToClose()
+            void askToClose (bool fromAnotherWindow = false)
             {
                 using Options = juce::MessageBoxOptions;
 
@@ -6251,6 +6415,10 @@ namespace wfg::client
                     about closes as before. */
                 if (model::isYes (last.dirty))
                 {
+                    //  Asked from another window (§106), the question comes forward with the show it is about.
+                    if (fromAnotherWindow)
+                        bringToFront();
+
                     juce::AlertWindow::showAsync (Options()
                                                     .withIconType (juce::MessageBoxIconType::QuestionIcon)
                                                     .withTitle ("Save the changes to " + juce::String (last.show) + " before closing?")
@@ -6270,6 +6438,15 @@ namespace wfg::client
                                                                                         answer == 1 };
                                                       send (answer == 1 ? gesture::save() : gesture::revert());
                                                   });
+                    return;
+                }
+
+                //  Asked once already, in the window that asked (§106, BAM).
+                if (fromAnotherWindow)
+                {
+                    if (host.quit)
+                        host.quit();
+
                     return;
                 }
 
@@ -6681,6 +6858,10 @@ namespace wfg::client
             };
 
             std::optional<CloseOnceClean> closeOnceClean;
+
+            //  Open recent's shows as the menu last showed them, and when another window's ask was last looked for (§106).
+            std::vector<std::string> offeredRecent;
+            juce::uint32 closeAskLooked = 0;
             std::unique_ptr<ui::TemplateReviewWindow> templateReview;
 
             /*  AN IMPORT UNDER WAY (§29): the scene list while it is open, and

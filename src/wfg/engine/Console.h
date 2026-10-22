@@ -122,6 +122,25 @@ namespace wfg
         /** Where the helpers' shared regions go: the engine's cache, under editor/. */
         std::string pluginWorkFolder;
 
+        /*  FILE > OPEN RECENT (namespace draft §106): the show folders this
+            machine opened last, newest first, ten at most (app/RecentShows.h),
+            and the list emptied. Null when the launch remembers nothing
+            (`--remember`, below), so a driver's window offers no list. */
+        std::function<std::vector<std::string>()> recentShows {};
+        std::function<void()> forgetRecentShows {};
+
+        /*  FILE > CLOSE OTHER SHOWS (§106): the shows other Go.dot windows on
+            this computer hold now - a folder each, or an empty string for a
+            Go.dot that does not say - and the asking, which answers how many
+            were asked. Each closes in its own window (`closeAsked`). Null
+            when this window holds no claim (app/OpenShows.h). */
+        std::function<std::vector<std::string>()> otherShows {};
+        std::function<int()> askOtherShowsToClose {};
+
+        /*  Whether another window has asked this show to close since the last
+            asking: true once per request. Asked by the window's timer. */
+        std::function<bool()> closeAsked {};
+
         /*  THE THIRD READ DOOR (Phase 9c, stage 9c.4): each sampling channel's
             take as a picture - its peaks and every layer's, for the take panel
             at the foot. The media table's shape and its argument: an immutable

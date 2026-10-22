@@ -46,4 +46,6 @@ namespace wfg::app
     {
         return false;
     }
+
+    void letComeForward (long) {}
 }

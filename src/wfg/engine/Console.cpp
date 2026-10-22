@@ -20,6 +20,8 @@
 #include <wfg/engine/app/Associate.h>
 #include <wfg/engine/app/FolderIcon.h>
 #include <wfg/engine/app/OpenShows.h>
+#include <wfg/engine/app/Raise.h>
+#include <wfg/engine/app/RecentShows.h>
 #include <wfg/engine/app/StartupReport.h>
 #include <wfg/engine/app/WindowApplication.h>
 #include <wfg/engine/document/Bundle.h>
@@ -2728,6 +2730,12 @@ namespace
         return engineCacheFolder().getSiblingFile ("last-show.txt");
     }
 
+    //  And the ten before it, newest first, for File > Open recent (app/RecentShows.h).
+    juce::File recentShowsFile()
+    {
+        return engineCacheFolder().getSiblingFile ("recent-shows.txt");
+    }
+
     /*  WHICH MACHINE THIS IS IN A PAIR (namespace draft §58, RD.4, AGC): its
         role, the other machine's addresses and the link's timeout, beside the
         show to reopen and following `--engine-folder` as it does - a fact
@@ -3994,6 +4002,15 @@ namespace
             the empty show, which is what a launch falls back to anyway. */
         if (remember && ! onTheEmptyShow)
         {
+            /*  AND FIRST IN OPEN RECENT (§106). A machine that never had the
+                list starts it from the show it last opened, read before this
+                one takes that line's place. */
+            if (! recentShowsFile().existsAsFile())
+                if (const auto said = lastShowFile().loadFileAsString().trim(); juce::File::isAbsolutePath (said))
+                    wfg::app::recent::remember (recentShowsFile(), juce::File (said));
+
+            wfg::app::recent::remember (recentShowsFile(), target);
+
             lastShowFile().getParentDirectory().createDirectory();
             lastShowFile().replaceWithText (target.getFullPathName());
         }
@@ -9772,7 +9789,56 @@ namespace
 
                 //  Where the window remembers the folder sounds were last picked from.
                 if (remember)
+                {
                     clientHost.rememberIn = lastShowFile().getParentDirectory().getFullPathName().toStdString();
+
+                    //  File > Open recent (§106), from the same folder.
+                    clientHost.recentShows = []
+                    {
+                        std::vector<std::string> shows;
+
+                        for (const auto& show : wfg::app::recent::read (recentShowsFile()))
+                            shows.push_back (show.getFullPathName().toStdString());
+
+                        return shows;
+                    };
+
+                    clientHost.forgetRecentShows = [] { wfg::app::recent::forget (recentShowsFile()); };
+                }
+
+                /*  FILE > CLOSE OTHER SHOWS (§106): the windows that hold a show
+                    on this computer, asked through the files beside their claims
+                    (app/OpenShows.h) - never over the network. */
+                if (openShow != nullptr)
+                {
+                    clientHost.otherShows = []
+                    {
+                        std::vector<std::string> shows;
+
+                        for (const auto& other : wfg::app::OpenShow::othersOpen())
+                            shows.push_back (other.show.getFullPathName().toStdString());
+
+                        return shows;
+                    };
+
+                    clientHost.askOtherShowsToClose = []
+                    {
+                        auto asked = 0;
+
+                        for (const auto& other : wfg::app::OpenShow::othersOpen())
+                        {
+                            //  Granted first, while this window is the one in front (app/Raise.h).
+                            wfg::app::letComeForward (other.processId);
+
+                            if (wfg::app::OpenShow::askToClose (other))
+                                ++asked;
+                        }
+
+                        return asked;
+                    };
+
+                    clientHost.closeAsked = [&openShow] { return openShow->closeAsked(); };
+                }
 
                 //  Where a newer Go.dot is asked about (§78): GitHub's, unless a test names another.
                 if (args.containsOption ("--update-url"))

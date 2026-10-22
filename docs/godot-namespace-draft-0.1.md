@@ -33530,3 +33530,73 @@ Owed: the author's try - a plugin added from a media cue's panel and from a mic 
 and with a cue sounding; Edit... on an insert switched out; Hide unused plugins on a show with a long set; a
 take typed at an hour; pads made from the loop while the take records and after it closed, put in a sampler
 bank and fired from the D700's pads, then Keep.
+
+## 106. File > Open recent, and Close other shows
+
+**Asked 2026-10-22** by the author: *"In the file menu can we add the 10 most recent wfg show files?"* and
+*"Can we add a close other shows?"*
+
+What was found. A launch reopened the one show this machine last opened (`last-show.txt`, §43), and Open
+show... was the only other way in: a dialog each time. Each show is its own process with its own window
+(§14.16), claimed by a system lock and a small file naming the process (`app/OpenShows.h`, a double-click
+on a show already open brings its window forward); nothing let one window ask another to close.
+
+### 106.1 Decisions
+
+The author's, asked 2026-10-22 (the options and their wording mine, AQ's rule):
+
+- **BAK** **A show not found stays in the list**, greyed and marked *(not found)* (offered as "Greyed,
+  kept"): it may be on a drive not plugged in tonight. *Clear the list* ends the submenu.
+- **BAM** **Close other shows asks once, here** (offered as "Ask only if unsaved"), naming the shows; then
+  each closes in its own window as its own close would but without asking again: a saved show at once, one
+  with changes not saved coming forward with its Save and close / Close without saving / Cancel, a locked one
+  staying open and saying so on its transport line. A performance that differs from its show's template
+  still asks that question first (§25).
+
+Mine *(proposed)*, the author's to overrule:
+
+- **BAL** **A show is named by its folder**, a `.wfg` by the folder it is in; two shows of one name in the
+  list each say the folder they sit in (*Hamlet - Avignon*, *Hamlet - Lyon*). This window's own show is
+  ticked and greyed; one open in another window is offered, and picking it brings that window forward
+  (§43's claim).
+- **BAN** **The list is this machine's**, ten shows newest first, in `recent-shows.txt` beside
+  `last-show.txt` and written with it - by a window started with `--remember`, so a driver's window never
+  enters it, and never the launcher's empty show. A machine that had no list starts it from its last show.
+  Two spellings of one folder are one show, folded as the claim folds them.
+- **BAO** **The request is a file, never the network**: `<key>.close` beside the show's claim in Go.dot's
+  own `open` folder, which the holder's window looks for twice a second and takes. Nothing on the wire can
+  close a show - only somebody at this computer. A claim clears a request a crashed holder never took. The
+  claim's file now names the show on a second line, so the question can name it; a Go.dot from before this
+  wrote only the process, and is still asked, counted as *another show*.
+- **BAP** **Under the lock too**: closing the others does nothing to this show. Greyed when no other
+  window holds a show. On Windows the asking window grants each the right to come forward
+  (`AllowSetForegroundWindow`), so the one with changes not saved can put its question in front.
+
+### 106.2 Rows and commands
+
+None. Opening and closing windows are this computer's, not the show's (§14.16's point 1, like Open show...),
+so neither is a command and neither reaches the page.
+
+### 106.3 As built
+
+- **The engine**: `app/RecentShows.h` reads, puts first and clears the list; `OpenShow::othersOpen` lists
+  the shows other processes hold by probing each entry's lock (an entry whose lock is free is a crash's
+  leftover, passed over), `askToClose` leaves the request, `closeAsked` takes it. `ClientHost` gains
+  `recentShows`, `forgetRecentShows`, `otherShows`, `askOtherShowsToClose` and `closeAsked`.
+- **The window**: File > Open recent under Open show..., built each time the menu opens; Close other shows
+  after Revert to saved..., its question naming the shows (`model::otherShowsNamed`). New, Open and Open
+  recent share one opener, so the launcher's empty show still gives way to the show opened from it.
+
+Words mine, for the author to keep or change: *Open recent*, *(not found)*, *Clear the list*, *Close the 2
+other shows?*, *A show with changes not saved asks in its own window first, and a locked show stays open.*,
+*another window asked this show to close: it is locked, so it stays open*.
+
+### 106.4 Stages
+
+| stage | what | commit |
+|---|---|---|
+| RC.1 | the list, the request, the menu items (OpenShowsTests, ClientTests) | |
+
+Tried 2026-10-22 with two `--hosted` windows on scratch shows: the list read the second show then the first;
+asked, the saved show closed at once, the locked one stayed, and the one with an edit showed its save
+question. Owed: the author's try from the menus themselves, and on the Mac and Linux.

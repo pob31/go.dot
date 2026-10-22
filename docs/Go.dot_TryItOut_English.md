@@ -236,6 +236,7 @@ Right-click a cue in the list, or a port in the Serial tab, and choose *Copy for
 - **Show and performances.** A show is the piece; each night is a performance, a copy you can change without touching the original. *File > New performance…*. At the end, Go.dot lists what changed, cue by cue, so you can bring the good changes back into the show.
 - **Interface trouble.** If the audio interface disappears, the show pauses and resumes when it returns. If its sample rate changes, Go.dot follows it.
 - **Double-click a `.wfg`** to open the show (Windows installer, Linux .deb, macOS).
+- **Several shows at once (new).** Each show opens in its own window. *File > Open recent* lists the ten shows this computer opened last. *File > Close other shows* closes every other window in one go: a show with unsaved changes asks first in its own window, and a locked show stays open.
 
 ### Two computers: a main and a backup (new)
 

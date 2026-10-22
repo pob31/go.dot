@@ -77,6 +77,8 @@ add_library(wfg_engine STATIC
     wfg/engine/app/OpenShows.h
     wfg/engine/app/Raise.cpp
     wfg/engine/app/Raise.h
+    wfg/engine/app/RecentShows.cpp
+    wfg/engine/app/RecentShows.h
     wfg/engine/app/StartupReport.cpp
     wfg/engine/app/StartupReport.h
     wfg/engine/app/WindowApplication.cpp
@@ -795,6 +797,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Sections.cpp
     wfg/client/model/ColumnWidths.h
     wfg/client/model/ColumnWidths.cpp
+    wfg/client/model/Shows.h
+    wfg/client/model/Shows.cpp
     wfg/client/model/OscGrid.h
     wfg/client/model/OscGrid.cpp
     wfg/client/model/OscMessages.h

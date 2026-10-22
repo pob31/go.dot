@@ -37,14 +37,31 @@
 
     KEYED BY THE SHOW'S FULL PATH, folded to lower case where the file system
     ignores case, so that two spellings of one folder are one show.
+
+    AND ASKED TO CLOSE FROM ANOTHER WINDOW (namespace draft §106, File > Close
+    other shows): a second small file beside the first, `<key>.close`, which
+    the holder's window looks for and takes. A file and not a socket, so that
+    nothing on the network can close a show - only somebody at this computer.
+    A claim clears a request a crashed holder never took.
 */
 
 #include <juce_core/juce_core.h>
 
 #include <memory>
+#include <vector>
 
 namespace wfg::app
 {
+    /*  A show another process has open, as its file names it. `show` is empty
+        when that process is a Go.dot from before §106, which wrote only the
+        process; it can still be asked to close. */
+    struct OpenElsewhere
+    {
+        juce::String key;
+        long processId = 0;
+        juce::File show;
+    };
+
     class OpenShow final
     {
     public:
@@ -68,6 +85,17 @@ namespace wfg::app
 
         /*  The file naming the process that holds `show`. Public for the tests. */
         static juce::File entryFor (const juce::File& show, const juce::File& entries);
+
+        /*  Every show another process holds now, by the lock and not by the
+            files alone: a file whose lock is free is a crash's leftover. */
+        static std::vector<OpenElsewhere> othersOpen (const juce::File& entries = defaultEntries());
+
+        /*  Leaves the request its holder's window looks for (closeAsked). */
+        static bool askToClose (const OpenElsewhere& other, const juce::File& entries = defaultEntries());
+
+        /*  Whether another window has asked this show to close since the last
+            asking: true once per request, which it takes away. */
+        bool closeAsked();
 
         /*  Lets the show go: the file first, then the lock. */
         ~OpenShow();

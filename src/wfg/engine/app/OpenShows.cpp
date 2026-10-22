@@ -69,6 +69,18 @@ namespace wfg::app
             const std::lock_guard<std::mutex> guard (heldHereMutex);
             return heldHere.count (key.toStdString()) > 0;
         }
+
+        /*  The process an entry names on its first line - the only line a
+            Go.dot before §106 wrote - or nought for one that names nobody. */
+        long processNamedIn (const juce::File& entry)
+        {
+            const auto named = juce::StringArray::fromLines (entry.loadFileAsString())[0].trim();
+
+            if (named.isEmpty() || ! named.containsOnly ("0123456789"))
+                return 0;
+
+            return static_cast<long> (named.getLargeIntValue());
+        }
     }
 
     juce::File OpenShow::defaultEntries()
@@ -110,7 +122,10 @@ namespace wfg::app
             then lost the race would name the wrong window. A file that cannot
             be written costs only the raise, so it is not fatal. */
         entries.createDirectory();
-        open->entry.replaceWithText (juce::String (currentProcessId()));
+        open->entry.replaceWithText (juce::String (currentProcessId()) + "\n" + show.getFullPathName());
+
+        //  A request to close a holder that crashed before taking it is not this window's (§106).
+        open->entry.withFileExtension ("close").deleteFile();
 
         return open;
     }
@@ -123,6 +138,7 @@ namespace wfg::app
             return;
 
         entry.deleteFile();
+        entry.withFileExtension ("close").deleteFile();
         lock.exit();
 
         const std::lock_guard<std::mutex> guard (heldHereMutex);
@@ -149,11 +165,67 @@ namespace wfg::app
 
     bool OpenShow::raiseHolder (const juce::File& show, const juce::File& entries)
     {
-        const auto named = entryFor (show, entries).loadFileAsString().trim();
+        const auto named = processNamedIn (entryFor (show, entries));
+        return named > 0 && raiseProcessWindows (named);
+    }
 
-        if (named.isEmpty() || ! named.containsOnly ("0123456789"))
+    std::vector<OpenElsewhere> OpenShow::othersOpen (const juce::File& entries)
+    {
+        std::vector<OpenElsewhere> others;
+
+        for (const auto& file : entries.findChildFiles (juce::File::findFiles, false, "*.pid"))
+        {
+            const auto key = file.getFileNameWithoutExtension();
+
+            if (isHeldHere (key))
+                continue;
+
+            //  Held or nobody's, the probe lets go at once (heldElsewhere's).
+            {
+                juce::InterProcessLock probe (lockNameOf (key));
+
+                if (probe.enter (0))
+                {
+                    probe.exit();
+                    continue;
+                }
+            }
+
+            OpenElsewhere other;
+            other.key = key;
+            other.processId = processNamedIn (file);
+
+            const auto lines = juce::StringArray::fromLines (file.loadFileAsString());
+
+            if (lines.size() > 1 && juce::File::isAbsolutePath (lines[1].trim()))
+                other.show = juce::File (lines[1].trim());
+
+            others.push_back (other);
+        }
+
+        return others;
+    }
+
+    bool OpenShow::askToClose (const OpenElsewhere& other, const juce::File& entries)
+    {
+        //  A key is sixteen hex digits (keyOf); anything else would name a file of somebody else's.
+        if (other.key.length() != 16 || ! other.key.containsOnly ("0123456789abcdef"))
             return false;
 
-        return raiseProcessWindows (static_cast<long> (named.getLargeIntValue()));
+        return entries.getChildFile (other.key + ".close").replaceWithText ("close");
+    }
+
+    bool OpenShow::closeAsked()
+    {
+        if (! claimed)
+            return false;
+
+        const auto request = entry.withFileExtension ("close");
+
+        if (! request.existsAsFile())
+            return false;
+
+        request.deleteFile();
+        return true;
     }
 }
