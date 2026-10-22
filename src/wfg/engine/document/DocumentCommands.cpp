@@ -1179,6 +1179,33 @@ namespace wfg::doc
                             return fromEdit (edit, withId (args, 5, edit.id));
                         } });
 
+        /*  FROM A CUE'S FX PANEL (namespace draft 105, the author: "add effects
+            straight from the FX panel of a cue"): the plugin made where the
+            cue's chain lives and switched in on it, one step and one undo. Both
+            drawn identifiers ride last, the entry's then the insert's, so a
+            replay makes the same two. */
+        registry.add ({ "cue.plugin",
+                        "Adds a plugin to the chain a cue plays through and switches it in on that cue,"
+                        " in one step: an entry of the show's set for a media cue, a plugin at the end"
+                        " of its rack channel's chain for a mic cue, one of its own chain's for an aux."
+                        " The cue, then name, the scan's identifier, format and path.",
+                        { { "cue", 's', false }, { "name", 's', false }, { "identifier", 's', false },
+                          { "format", 's', false }, { "path", 's', false },
+                          { "plugin", 's', true }, { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto pluginId = args.size() > 5 ? args[5].getString() : std::string {};
+                            const auto fxId = args.size() > 6 ? args[6].getString() : std::string {};
+                            std::string made;
+
+                            const auto edit = document.createCuePlugin (args[0].getString(), args[1].getString(),
+                                                                        args[2].getString(), args[3].getString(),
+                                                                        args[4].getString(), made, pluginId, fxId);
+
+                            return fromEdit (edit, withId (withId (args, 5, made), 6, edit.id));
+                        } });
+
         //----------------------------------------------------------------------
         registry.add ({ "mount.create",
                         "Declares a foreign namespace to be mounted at a prefix.",

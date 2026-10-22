@@ -385,6 +385,8 @@ namespace wfg::client::ui
                 FxPanelComponent::Actions chaining;
                 chaining.set = actions.set;
                 chaining.createFx = actions.createFx;
+                chaining.addPlugin = actions.addPlugin;
+                chaining.load = actions.loadPlugins;
                 chaining.edit = [this] (const std::string& cueId, const std::string& pluginId)
                 {
                     if (actions.editPlugin)

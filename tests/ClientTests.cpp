@@ -10190,7 +10190,14 @@ TEST_CASE ("client: a mic cue is inspected by its input and its channel, and its
     const auto none = model::readFx (*rig.publish (3), "MC000002");
     CHECK (none.present);
     CHECK (none.strips.empty());
-    CHECK (none.notice == "This mic cue plays through no rack channel yet: pick one in the inspector.");
+    CHECK (none.notice == "This mic cue plays through no FX rack yet: pick one in the inspector.");
+
+    //  Hide unused plugins is the cue's own row, a sound's (namespace draft §105).
+    CHECK (fx.canHide);
+    CHECK_FALSE (fx.hideUnused);
+    REQUIRE (rig.apply (3, "window", "node.set", { osc::Value::string ("/godot/cue/MC000002/fxHideUnused"),
+                                                  osc::Value::boolean (true) }).applied == 1);
+    CHECK (model::readFx (*rig.publish (4), "MC000002").hideUnused);
 }
 
 TEST_CASE ("client: a mic cue's chain starts at its input, its path is said against the budget, and its run by its channel")
@@ -16456,7 +16463,7 @@ TEST_CASE ("client: a refusal that is not a missing file is said in its own word
     CHECK (built.meaning.find ("Load now") != std::string::npos);
 
     CHECK (model::readinessMark ("partial", "no-input", "mic").text == "no input");
-    CHECK (model::readinessMark ("partial", "bad-channel", "mic").text == "no channel");
+    CHECK (model::readinessMark ("partial", "bad-channel", "mic").text == "no FX rack");
     CHECK (model::readinessMark ("partial", "bad-width", "mic").text == "wrong width");
 
     //  A missing file is still missing; anything else unknown is not ready, never "missing".

@@ -109,10 +109,12 @@ namespace wfg::client::ui
         }
 
         /*  NOT ON THIS CUE YET: the chain's first switch-in, and the window
-            once the tree shows the insert. */
+            once the tree shows the insert - on a mic cue as on a media cue
+            (namespace draft §105), never on a fade, which switches nothing. */
         const auto subject = model::readEditorSubject (snapshot, cueId, pluginId);
+        const auto kind = model::text (snapshot, "/godot/cue/" + cueId + "/kind");
 
-        if (subject.greyed && model::text (snapshot, "/godot/cue/" + cueId + "/kind") == "media")
+        if (subject.greyed && (kind == "media" || kind == "mic"))
         {
             if (actions.createFx)
                 actions.createFx (cueId, pluginId);

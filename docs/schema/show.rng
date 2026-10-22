@@ -860,6 +860,15 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="fxHideUnused">
+          <a:documentation>Whether the cue-s FX panel leaves out every plugin the cue has not switched in (namespace draft 105; the author-s words, Hide unused plugins). A matter of what the panel shows, never of the sound: a plugin switched out on the cue stays shown, since the cue keeps what was set on it, and the panel says how many it left out.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="initialLevel">
           <a:documentation>sampler member: the level its strip&apos;s fader flies to when it is armed on one, and the trim the clip starts at (author, 2026-09-23). The fader waits there, and a touch on it starts the clip at wherever the fader is by then. A trim on the cue&apos;s own level, as every fader is (PRD 3.9a), so nought - the default - plays the clip at the level it was written at. On a pad it is the level a press without velocity starts at. For a picture the same row, the same rule (namespace draft 49, AAW): its fader waits there, and how solid the picture is follows the fader travel as a DCA reaches it - nought dB and above is the opacity as written, -6 dB about 92 %, -20 dB 75 %, -40 dB 49 %, -120 dB nothing.</a:documentation>
           <data type="double">
@@ -1345,6 +1354,15 @@
           <data type="double">
             <param name="minInclusive">0</param>
           </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="fxHideUnused">
+          <a:documentation>Whether the cue-s FX panel leaves out every plugin the cue has not switched in (namespace draft 105; the author-s words, Hide unused plugins). A matter of what the panel shows, never of the sound: a plugin switched out on the cue stays shown, since the cue keeps what was set on it, and the panel says how many it left out.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
         </attribute>
       </optional>
       <optional>
@@ -4281,6 +4299,15 @@
       <optional>
         <attribute name="eqOn">
           <a:documentation>Whether the EQ of this cue is in the signal at all. Off, every band is skipped and the audio passes untouched - the A/B a designer reaches for. On with every band flat is the same sound and the same bytes, by construction.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="fxHideUnused">
+          <a:documentation>Whether the cue-s FX panel leaves out every plugin the cue has not switched in (namespace draft 105; the author-s words, Hide unused plugins). A matter of what the panel shows, never of the sound: a plugin switched out on the cue stays shown, since the cue keeps what was set on it, and the panel says how many it left out.</a:documentation>
           <choice>
             <value>true</value>
             <value>false</value>

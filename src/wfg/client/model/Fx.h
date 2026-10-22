@@ -105,6 +105,16 @@ namespace wfg::client::model
         bool present() const noexcept { return ! fxId.empty(); }
     };
 
+    /** One plugin this machine's scan found. */
+    struct KnownPluginRow
+    {
+        std::string name;
+        std::string identifier;
+        std::string format;
+        std::string manufacturer;
+        std::string path;
+    };
+
     struct FxReading
     {
         bool present = false;
@@ -142,6 +152,24 @@ namespace wfg::client::model
         /*  ON A FADE (namespace draft §94): the fade whose plugin values are
             counted on each strip. Its switches are not the fade's to throw. */
         std::string fadeId;
+
+        /*  HIDE UNUSED PLUGINS (namespace draft §105, the author's words): an
+            audio or a mic cue's own switch, `fxHideUnused`, which leaves out
+            of its chain every entry it has no insert for. `canHide` says the
+            cue has the row at all - an aux's chain is all its own. */
+        bool canHide = false;
+        bool hideUnused = false;
+
+        /*  A PLUGIN ADDED FROM THE PANEL (namespace draft §105): whether this
+            chain can take one - not a mic cue through no channel - what this
+            machine's scan found to offer, and what Load now needs to know:
+            whether the graph differs from the show, what keeps it waiting
+            (busyWords), and whether the show is locked. */
+        bool canAdd = false;
+        std::vector<KnownPluginRow> known;
+        bool graphChanged = false;
+        std::string busy;
+        bool locked = false;
     };
 
     /*  "Plays as stereo through its inserts, 21 ms late." - or nothing, for a
@@ -218,16 +246,6 @@ namespace wfg::client::model
     /*  ONE ENTRY, by its id, off /godot/plugin/<id>/: the set's or a rack
         channel's alike (Phase 9b), since the two are the same element. */
     PluginRow readPluginEntry (const tree::TreeSnapshot&, const std::string& pluginId);
-
-    /** One plugin this machine's scan found. */
-    struct KnownPluginRow
-    {
-        std::string name;
-        std::string identifier;
-        std::string format;
-        std::string manufacturer;
-        std::string path;
-    };
 
     /** What the last scan found, as the tree lists it; empty when none was run. */
     std::vector<KnownPluginRow> readKnownPlugins (const tree::TreeSnapshot&);

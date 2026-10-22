@@ -4885,6 +4885,116 @@ TEST_CASE ("fx panel: the chain runs file, EQ, the set, out, and a first switch-
         CHECK (made.empty());
     }
 
+    SUBCASE ("Edit... on an insert switched out switches it in, then asks for its window (§105)")
+    {
+        //  Delay: on this cue, switched out.
+        buttonsNamed (panel, "Edit...")[2]->onClick();
+
+        REQUIRE (written.size() == 1);
+        CHECK (written[0] == std::pair<std::string, std::string> ("/godot/fx/FX7N0002/enabled", "true"));
+        REQUIRE (edited.size() == 1);
+        CHECK (edited[0] == std::pair<std::string, std::string> ("CUE00001", "PG7N0003"));
+
+        //  One the cue has not got is the window's to make, which waits for it: the panel sends no create.
+        buttonsNamed (panel, "Edit...")[0]->onClick();
+        CHECK (made.empty());
+        CHECK (edited.size() == 2);
+    }
+
+    SUBCASE ("a plugin is added from the chain's end, and loaded at once only if nothing sounds (§105)")
+    {
+        std::vector<std::pair<std::string, std::string>> added;
+        auto loads = 0;
+
+        ui::FxPanelComponent::Actions adding = actions;
+        adding.addPlugin = [&] (const std::string& cue, const model::KnownPluginRow& row) { added.emplace_back (cue, row.identifier); };
+        adding.load = [&] { ++loads; };
+
+        ui::FxPanelComponent chain (model::Theme {}, adding);
+        chain.setSize (1400, 230);
+
+        auto reading = chainReading ("CUE00001");
+        chain.show (reading);
+        CHECK (buttonsNamed (chain, "Add plugin...").empty());     // not offered where the reading says not
+
+        reading.fx.canAdd = true;
+        reading.fx.known = { { "Comp", "VST3-comp", "VST3", "Maker", "" } };
+        chain.show (reading);
+        REQUIRE (buttonsNamed (chain, "Add plugin...").size() == 1);
+        REQUIRE (buttonsNamed (chain, "Load now").size() == 1);
+        CHECK_FALSE (buttonsNamed (chain, "Load now")[0]->isVisible());
+
+        //  A pick answered for a cue no longer picked adds nothing.
+        chain.add ("CUE00002", reading.fx.known[0]);
+        CHECK (added.empty());
+
+        chain.add ("CUE00001", reading.fx.known[0]);
+        REQUIRE (added.size() == 1);
+        CHECK (added[0] == std::pair<std::string, std::string> ("CUE00001", "VST3-comp"));
+
+        //  The tree shows the graph lagging with nothing sounding: loaded once, at once.
+        reading.fx.graphChanged = true;
+        chain.show (reading);
+        CHECK (loads == 1);
+        chain.show (reading);
+        CHECK (loads == 1);
+        CHECK (buttonsNamed (chain, "Load now")[0]->isVisible());
+
+        //  Something sounding: nothing is loaded, and Load now waits, unlit, saying why.
+        chain.add ("CUE00001", reading.fx.known[0]);
+        reading.fx.busy = "Bed is sounding";
+        chain.show (reading);
+        CHECK (loads == 1);
+        auto* load = buttonsNamed (chain, "Load now")[0];
+        CHECK_FALSE (load->isEnabled());
+        load->onClick();
+        CHECK (loads == 1);
+
+        //  Quiet again, Load now is a hand's to press.
+        reading.fx.busy.clear();
+        chain.show (reading);
+        CHECK (loads == 1);
+        CHECK (load->isEnabled());
+        load->onClick();
+        CHECK (loads == 2);
+
+        //  Not on a fade, which adds nothing.
+        reading.fx.fadeId = "CUE00009";
+        chain.show (reading);
+        CHECK (buttonsNamed (chain, "Add plugin...").empty());
+    }
+
+    SUBCASE ("Hide unused plugins leaves out what the cue has no insert for, and is the cue's own row (§105)")
+    {
+        //  Not offered where the reading says the cue has no such row (an aux's chain is all its own).
+        auto toggles = buttonsNamed (panel, "Hide unused plugins");
+        REQUIRE (toggles.size() == 1);
+        CHECK_FALSE (toggles[0]->isVisible());
+
+        auto offered = chainReading ("CUE00001");
+        offered.fx.canHide = true;
+        panel.show (offered);
+        CHECK (toggles[0]->isVisible());
+        CHECK (buttonsNamed (panel, "in").size() == 5);
+
+        press (*toggles[0], true);
+        REQUIRE (written.size() == 1);
+        CHECK (written[0] == std::pair<std::string, std::string> ("/godot/cue/CUE00001/fxHideUnused", "true"));
+
+        //  The tree agrees: Test gain, which the cue has no insert for, goes; Delay, switched out, stays.
+        offered.fx.hideUnused = true;
+        panel.show (offered);
+        CHECK (toggles[0]->getToggleState());
+        REQUIRE (buttonsNamed (panel, "in").size() == 4);
+        CHECK (buttonsNamed (panel, "Edit...").size() == 3);
+
+        //  On a fade the chain is the target's, shown whole and never switched (§94).
+        offered.fx.fadeId = "CUE00009";
+        panel.show (offered);
+        CHECK_FALSE (toggles[0]->isVisible());
+        CHECK (buttonsNamed (panel, "in").size() == 5);
+    }
+
     SUBCASE ("a long set scrolls sideways rather than squeezing its boxes")
     {
         auto many = chainReading ("CUE00001");
@@ -5057,7 +5167,7 @@ TEST_CASE ("fx panel: on a sampling channel the recorder sits after the plugins 
     auto* take = buttonTipped (panel, "Show the take");
     auto* eq = buttonTipped (panel, "Show this cue's EQ");
     auto* before = buttonTipped (panel, "Open Verb");
-    auto* after = buttonTipped (panel, "Open Test gain");
+    auto* after = buttonTipped (panel, "Switch Test gain in");   // not on this cue yet (§105)
 
     REQUIRE (take != nullptr);
     REQUIRE (eq != nullptr);

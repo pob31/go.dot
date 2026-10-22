@@ -720,6 +720,17 @@ namespace wfg::doc
                                         const std::string& identifier, const std::string& format,
                                         const std::string& path, const std::string& id = {});
 
+        /*  A PLUGIN ADDED FROM A CUE'S CHAIN (namespace draft 105): made where
+            that cue's chain lives - the show's set for a media cue, the end of
+            its rack channel's chain for a mic cue, an aux's own chain - and
+            switched in on the cue, both in the one step. The result's id is
+            the cue's new Fx; `madePlugin` is told the entry's. `bad-value` for
+            a mic cue through no channel, and the two creates' own refusals. */
+        EditResult createCuePlugin (const std::string& cueId, const std::string& name,
+                                    const std::string& identifier, const std::string& format,
+                                    const std::string& path, std::string& madePlugin,
+                                    const std::string& pluginId = {}, const std::string& fxId = {});
+
         /** How many strips a fresh surface of this profile is made with, or
             -1 for a word that is not a profile. */
         static int stripsForProfile (std::string_view profile);

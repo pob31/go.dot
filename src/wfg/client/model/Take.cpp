@@ -60,7 +60,7 @@ namespace wfg::client::model
 
         if (reading.channelId.empty())
         {
-            reading.notice = "This mic cue plays through no rack channel, so there is no take to show.";
+            reading.notice = "This mic cue plays through no FX rack, so there is no take to show.";
             return reading;
         }
 

@@ -1104,6 +1104,11 @@ namespace wfg::client::model
                 }
                 else if (field.name == "channel")
                 {
+                    /*  THE AUTHOR'S WORD FOR IT (namespace draft §105, 2026-10-22):
+                        "channel" alone did not say it was the rack of plugins
+                        the cue plays through. Here and not in labels(), which a
+                        MIDI cue's and a trigger's channel read too. */
+                    field.label = "FX rack";
                     field.control = Control::channelRef;
                     field.choices = { { "", "(none)" } };
 

@@ -94,7 +94,7 @@ Tout ce qui suit est construit. Les sections marquées nouveau sont arrivées ap
 | Courbe de niveau | Dessiner une courbe de volume sur la forme d'onde, ou l'enregistrer depuis un fader | Panneau *Waveform* |
 | Vitesse | De 0 à 20×, en varispeed (la hauteur suit) ou en timestretch (la hauteur reste), fondus de vitesse, et lecture à l'envers ou en aller-retour entre les points d'entrée et de sortie | Inspecteur, *what it does* |
 | EQ | Quatre bandes et deux filtres sur chaque cue | Panneau *EQ* |
-| Plugins | Une chaîne VST3, AU ou LV2 sur chaque cue. Les plugins tournent dans un processus à part : un plugin qui plante rend sa cue muette, pas le spectacle | Panneau *FX* ; *Show settings > Plugins* pour le scan |
+| Plugins | Une chaîne VST3, AU ou LV2 sur chaque cue. Les plugins tournent dans un processus à part : un plugin qui plante rend sa cue muette, pas le spectacle. On en ajoute un depuis le panneau *FX* de la cue elle-même (nouveau) : il est inséré sur cette cue et chargé tout de suite si rien ne joue. *Edit...* insère un plugin en ouvrant sa fenêtre, et *Hide unused plugins* ne montre que ceux que la cue utilise | Panneau *FX* ; *Show settings > Plugins* pour le scan |
 | Envois | Niveaux d'une cue vers les canaux de mixage du spectacle | Panneau *Sends* |
 | Courbes d'envoi | Dessiner le niveau de chaque envoi sur le fichier, comme la courbe de niveau le fait pour le volume | Panneau Waveform, choix de la courbe |
 | Monter un son (nouveau) | Couper un son en sections à la tête de lecture, les réordonner ou en retirer, régler le fondu enchaîné à chaque jointure et un trim par section, puis *Freeze* pour rendre le montage dans un nouveau fichier que la cue joue ; *Unfreeze* ramène les sections. Les courbes et les ranges restent sur le son qu'elles couvrent | Panneau *Waveform*, ligne des sections |
@@ -121,7 +121,7 @@ Tout ce qui suit est construit. Les sections marquées nouveau sont arrivées ap
 
 | Fonction | Ce qu'elle fait | Où |
 | --- | --- | --- |
-| Cues micro | Ouvrir une entrée nommée à travers une tranche de rack avec ses propres plugins | *Add > mic* ; *Show settings > Inputs*, *Rack* |
+| Cues micro | Ouvrir une entrée nommée à travers une tranche de rack avec ses propres plugins, choisie sur la ligne *FX rack* de la cue | *Add > mic* ; *Show settings > Inputs*, *Rack* |
 | Auxiliaires (nouveau) | Un retour de réverbération ou de délai que les cues alimentent par leurs envois : ses propres plugins, son niveau, sa sortie et ses envois, gardés avec le spectacle ; un fondu peut les déplacer le temps de la soirée. Un clic sur le nom d'un auxiliaire dans le panneau des envois d'une cue ouvre l'auxiliaire lui-même | *Show settings > Rack* : + Mono aux, + Stereo aux ; le panneau *sends* d'une cue |
 | Échantillonnage live | Enregistrer du son pendant le spectacle, puis la boucler, la superposer ou l'effacer | Panneau *Take* ; *transport > On a take* |
 | Enregistreur live | Garder l'instant de chaque cue lancée pendant un filage, dans une prise | Ctrl+Maj+R |

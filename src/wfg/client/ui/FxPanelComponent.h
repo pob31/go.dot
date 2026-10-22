@@ -55,6 +55,13 @@
     on the fade - what is turned there, the fade moves - and the switches are
     shown and not thrown, since a fade moves numbers and a switch has none
     between (§26, OY).
+
+    HIDE UNUSED PLUGINS (namespace draft §105, the author's words), a switch
+    of the cue's own at the chain's head: the entries the cue has no insert
+    for are left out, and the sentence after "out" says how many. One switched
+    out stays, since it is the cue's and keeps what was set on it. Not a
+    switch per box: a box hidden by its own switch could never be brought
+    back (the author, 2026-10-22).
 */
 
 #include <wfg/client/model/Foot.h>
@@ -93,6 +100,11 @@ namespace wfg::client::ui
 
             /** A sentence for the panel's head. */
             std::function<void (const juce::String&)> say;
+
+            /*  A PLUGIN ADDED FROM HERE (namespace draft §105): `cue.plugin`
+                for this cue, and `plugin.load` - Load now. */
+            std::function<void (const std::string& cueId, const model::KnownPluginRow&)> addPlugin;
+            std::function<void()> load;
         };
 
         FxPanelComponent (const model::Theme&, Actions);
@@ -115,6 +127,13 @@ namespace wfg::client::ui
         /** How long a first switch-in is trusted before the tree must agree. */
         static constexpr std::uint32_t pendingMs = 2000;
 
+        /** How long after an add the panel waits to see the graph lag, to load it if quiet (§105). */
+        static constexpr std::uint32_t loadWaitMs = 3000;
+
+        /*  A pick in the add box's menu, as the menu's answer hands it on -
+            public so a test can answer for the menu. */
+        void add (const std::string& cueId, const model::KnownPluginRow&);
+
     private:
         struct Box;
         struct Canvas;
@@ -135,6 +154,16 @@ namespace wfg::client::ui
         /** Whether the chain is a fade's target's (namespace draft §94). */
         bool onFade() const noexcept { return ! reading.fx.fadeId.empty(); }
 
+        /** Whether the chain ends in the box a plugin is added from (§105). */
+        bool offersAdd() const noexcept  { return reading.fx.present && reading.fx.canAdd && ! onFade(); }
+
+        /** The add box's menu, under its button. */
+        void chooseToAdd (juce::Component& under);
+
+        /** Whether the cue's Hide unused plugins switch is shown, and on (§105). */
+        bool offersHide() const noexcept { return reading.fx.canHide && ! onFade(); }
+        bool hiding() const noexcept     { return offersHide() && reading.fx.hideUnused; }
+
         int scaled (int base) const;
         int wantedWidth() const;
 
@@ -154,6 +183,12 @@ namespace wfg::client::ui
         std::string creatingFor;
 
         std::map<std::string, std::string> editorWords;
+
+        juce::ToggleButton hideUnused;
+        int hiddenCount = 0;
+
+        //  When an add from here asked for the graph to be loaded; nought for none outstanding.
+        std::uint32_t loadAskedAt = 0;
 
         juce::Viewport viewport;
         std::unique_ptr<Canvas> canvas;

@@ -82,7 +82,7 @@ namespace wfg::client::model
 
         if (prepare == "partial" && error == "not-built")
             return { Icon::missing, "not loaded",
-                     "Not loaded: its rack channel was added since the audio was built - GO will play nothing until"
+                     "Not loaded: its FX rack was added since the audio was built - GO will play nothing until"
                      " Load now, in Show settings > Rack" };
 
         //  A mic cue's own (Phase 9b), put right in its inspector or the rack.
@@ -91,12 +91,12 @@ namespace wfg::client::model
                      "No input: this mic cue takes no named input - GO will play nothing" };
 
         if (prepare == "partial" && error == "bad-channel")
-            return { Icon::missing, "no channel",
-                     "No rack channel: it plays through none, or through one another mic cue uses - GO will play nothing" };
+            return { Icon::missing, "no FX rack",
+                     "No FX rack: it plays through none, or through one another mic cue uses - GO will play nothing" };
 
         if (prepare == "partial" && error == "bad-width")
             return { Icon::missing, "wrong width",
-                     "Wrong width: its input is not as wide as its rack channel takes - GO will play nothing" };
+                     "Wrong width: its input is not as wide as its FX rack takes - GO will play nothing" };
 
         /*  THE FILE IS THERE, AND SAID SO (namespace draft §99, AXU): until 0.1.9
             both of these read "missing", and sent somebody looking for a file

@@ -149,6 +149,10 @@ namespace wfg::client::ui
             /** `fx.create`, when an entry of the set is first switched in on a cue. */
             std::function<void (const std::string& cueId, const std::string& pluginId)> createFx;
 
+            /*  A plugin added from a cue's chain, and Load now (namespace draft §105). */
+            std::function<void (const std::string& cueId, const model::KnownPluginRow&)> addPlugin;
+            std::function<void()> loadPlugins;
+
             /** Open the plugin's own window for this cue, from the chain's Edit... */
             std::function<void (const std::string& cueId, const std::string& pluginId)> editPlugin;
 

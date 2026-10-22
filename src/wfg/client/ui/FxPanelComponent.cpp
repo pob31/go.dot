@@ -32,6 +32,7 @@ namespace wfg::client::ui
         constexpr int linkWidth = 34;     // the arrow between two boxes
         constexpr int endWidth = 40;      // "file" and "out"
         constexpr int margin = 8;
+        constexpr int hideWidth = 104;    // the Hide unused plugins switch, two lines
 
         /** A frequency as a person reads it: 80 Hz, 1.2 kHz. */
         juce::String hertzText (double frequency)
@@ -87,8 +88,10 @@ namespace wfg::client::ui
     {
         /*  THREE KINDS OF LINK: the EQ every voice carries, an entry of the set
             or of the channel's chain, and on a sampling channel the recorder
-            (Phase 9c), which is always in and so has no switch. */
-        enum class Kind { eq, plugin, recorder };
+            (Phase 9c), which is always in and so has no switch. And a fourth
+            that is no link yet: the place at the chain's end where a plugin is
+            added from here (§105), with Load now while the graph lags. */
+        enum class Kind { eq, plugin, recorder, add };
 
         Box (FxPanelComponent& ownerToUse, Kind kindToUse)
             : owner (ownerToUse), kind (kindToUse), isEq (kindToUse == Kind::eq)
@@ -99,7 +102,22 @@ namespace wfg::client::ui
             addAndMakeVisible (inSwitch);
             addAndMakeVisible (door);
 
-            if (kind == Kind::recorder)
+            if (kind == Kind::add)
+            {
+                inSwitch.setVisible (false);
+                door.setButtonText ("Add plugin...");
+                door.onClick = [this] { owner.chooseToAdd (door); };
+
+                load.setButtonText ("Load now");
+                load.setWantsKeyboardFocus (false);
+                load.onClick = [this]
+                {
+                    if (owner.actions.load && owner.reading.fx.busy.empty() && ! owner.reading.fx.locked)
+                        owner.actions.load();
+                };
+                addChildComponent (load);
+            }
+            else if (kind == Kind::recorder)
             {
                 inSwitch.setVisible (false);
                 door.setButtonText ("Open");
@@ -136,8 +154,17 @@ namespace wfg::client::ui
 
                 inSwitch.onClick = [this] { owner.switchPlugin (strip, inSwitch.getToggleState()); };
 
+                /*  EDIT SWITCHES IT IN (namespace draft §105, the author: "engage
+                    the effects at the same time rather than punish the user to
+                    close the popup to enable it and then click edit"). An insert
+                    the cue has not got is made by the window itself, which waits
+                    for it; one switched out is switched in here. Never on a
+                    fade, which switches nothing (§94). */
                 door.onClick = [this]
                 {
+                    if (! owner.onFade() && strip.present() && ! strip.enabled)
+                        owner.switchPlugin (strip, true);
+
                     if (owner.actions.edit)
                         owner.actions.edit (owner.reading.subject.objectId, strip.pluginId);
                 };
@@ -158,6 +185,30 @@ namespace wfg::client::ui
 
         void refresh()
         {
+            if (kind == Kind::add)
+            {
+                const auto& fx = owner.reading.fx;
+
+                door.setEnabled (! fx.locked);
+                door.setTooltip (fx.locked ? juce::String ("The show is locked: unlock it to add a plugin")
+                                           : fx.live || owner.reading.cueKind == "aux"
+                                               ? juce::String ("Add a plugin at the end of this channel's chain,"
+                                                               " switched in on this cue")
+                                               : juce::String ("Add a plugin to the show's set, switched in on"
+                                                               " this cue"));
+
+                //  LOAD NOW WHILE THE GRAPH LAGS THE SHOW, lit only when it can be (the Rack tab's rule).
+                load.setVisible (fx.graphChanged);
+                load.setEnabled (fx.busy.empty() && ! fx.locked);
+                load.setTooltip (! fx.busy.empty() ? juce::String (fx.busy) + ": Load now waits for nothing to sound."
+                                                     " Stop it first - Esc."
+                                                   : juce::String ("Rebuild the audio graph with the plugins as they"
+                                                                   " stand. Only while nothing plays; the sound stops"
+                                                                   " for a moment."));
+                repaint();
+                return;
+            }
+
             inSwitch.setToggleState (isIn(), juce::dontSendNotification);
 
             if (kind == Kind::plugin)
@@ -166,7 +217,8 @@ namespace wfg::client::ui
                                        ? "Whether " + juce::String (strip.name) + " is in this cue's signal"
                                        : "Put " + juce::String (strip.name) + " in this cue's signal "
                                          "- the first switch-in makes the insert");
-                door.setTooltip ("Open " + juce::String (strip.name) + "'s own window for this cue");
+                door.setTooltip (isIn() ? "Open " + juce::String (strip.name) + "'s own window for this cue"
+                                        : "Switch " + juce::String (strip.name) + " in on this cue and open its own window");
             }
 
             /*  ON A FADE the switch is the target's, shown and not thrown, and
@@ -194,14 +246,57 @@ namespace wfg::client::ui
         {
             auto area = inner();
             area.removeFromTop (owner.scaled (20));                          // the name
+
+            if (kind == Kind::add)
+            {
+                door.setBounds (area.removeFromTop (owner.scaled (24)).withWidth (owner.scaled (110)));
+                load.setBounds (area.removeFromBottom (owner.scaled (24)).withWidth (owner.scaled (90)));
+                return;
+            }
             inSwitch.setBounds (area.removeFromTop (owner.scaled (22)).withWidth (owner.scaled (70)));
             door.setBounds (area.removeFromBottom (owner.scaled (24)).withWidth (owner.scaled (90)));
         }
 
         void paint (juce::Graphics& g) override
         {
-            const auto in = isIn();
             const auto bounds = getLocalBounds().toFloat().reduced (0.5f);
+
+            /*  NOT A LINK YET: a dashed outline on the panel's own ground, and
+                - while the graph lags the show - why Load now is or is not lit,
+                in words. */
+            if (kind == Kind::add)
+            {
+                juce::Path outline;
+                outline.addRoundedRectangle (bounds, 4.0f);
+                juce::Path dashed;
+                const float dashes[] = { 4.0f, 3.0f };
+                juce::PathStrokeType (1.0f).createDashedStroke (dashed, outline, dashes, 2);
+                g.setColour (Look::colour (owner.theme, "rule"));
+                g.fillPath (dashed);
+
+                auto area = inner();
+                g.setColour (Look::colour (owner.theme, "ink-dim"));
+                g.setFont (Look::font (owner.theme, 14.0f));
+                g.drawFittedText ("+", area.removeFromTop (owner.scaled (20)), juce::Justification::centredLeft, 1);
+
+                area.removeFromTop (owner.scaled (28));                      // Add plugin...
+                area.removeFromBottom (owner.scaled (28));                   // Load now
+                const auto& fx = owner.reading.fx;
+
+                if (fx.graphChanged)
+                {
+                    g.setFont (Look::font (owner.theme, 12.0f));
+                    g.setColour (Look::colour (owner.theme, fx.busy.empty() ? "ink-dim" : "waiting"));
+                    g.drawFittedText (fx.busy.empty() ? juce::String ("Not in the audio yet: Load now builds it in.")
+                                                      : juce::String (fx.busy) + ": Load now waits for"
+                                                        " nothing to sound.",
+                                      area, juce::Justification::topLeft, juce::jmax (1, area.getHeight() / owner.scaled (16)));
+                }
+
+                return;
+            }
+
+            const auto in = isIn();
 
             /*  IN IS A RAISED BOX WITH A BRIGHTER EDGE, out is a recessed one
                 with the rule's - and the switch's tick says it in the one
@@ -307,6 +402,7 @@ namespace wfg::client::ui
 
         juce::ToggleButton inSwitch;
         juce::TextButton door;
+        juce::TextButton load;      // the add box's Load now (§105)
     };
 
     //==============================================================================
@@ -371,8 +467,13 @@ namespace wfg::client::ui
                 to add a plugin goes after them rather than instead of them. */
             /*  AND WHAT THE INSERTS DO TO THE CUE (2026-09-26): how wide it
                 comes out, how late - where no sentence about the set is due. */
-            const auto said = owner.reading.fx.notice.empty() ? model::chainWords (owner.reading.fx)
-                                                               : owner.reading.fx.notice;
+            auto said = owner.reading.fx.notice.empty() ? model::chainWords (owner.reading.fx)
+                                                         : owner.reading.fx.notice;
+
+            //  And what Hide unused plugins left out (§105), so an empty-looking chain is not a mystery.
+            if (owner.hiddenCount > 0)
+                said += (said.empty() ? "" : "\n") + std::to_string (owner.hiddenCount)
+                          + (owner.hiddenCount == 1 ? " unused plugin hidden" : " unused plugins hidden");
 
             if (! said.empty())
             {
@@ -395,6 +496,18 @@ namespace wfg::client::ui
         : theme (themeToUse), actions (std::move (actionsToUse))
     {
         canvas = std::make_unique<Canvas> (*this);
+
+        hideUnused.setButtonText ("Hide unused plugins");
+        hideUnused.setTooltip ("Leave out of this cue's chain every plugin it has not switched in."
+                               " Kept with the cue.");
+        hideUnused.setWantsKeyboardFocus (false);
+        hideUnused.onClick = [this]
+        {
+            if (actions.set && offersHide())
+                actions.set ("/godot/cue/" + reading.subject.objectId + "/fxHideUnused",
+                             hideUnused.getToggleState() ? "true" : "false");
+        };
+        canvas->addChildComponent (hideUnused);
 
         viewport.setViewedComponent (canvas.get(), false);
         viewport.setScrollBarsShown (false, true);
@@ -423,10 +536,14 @@ namespace wfg::client::ui
     std::string FxPanelComponent::shapeOf() const
     {
         std::string out = reading.subject.objectId + "!" + (reading.fx.present ? "1" : "0")
-                            + (reading.fx.recorder ? "!take" : "");
+                            + (reading.fx.recorder ? "!take" : "") + (hiding() ? "!hide" : "")
+                            + (offersHide() ? "!offer" : "") + (offersAdd() ? "!add" : "");
 
+        /*  Hiding, whether the cue has an entry changes which boxes there are;
+            a pending first switch-in counts as having it. */
         for (const auto& strip : reading.fx.strips)
-            out += "|" + strip.pluginId + ":" + strip.side;
+            out += "|" + strip.pluginId + ":" + strip.side
+                     + (hiding() && (strip.present() || pending (strip.pluginId)) ? "+" : "");
 
         return out;
     }
@@ -449,6 +566,25 @@ namespace wfg::client::ui
             if (strip.present())
                 creating.erase (strip.pluginId);
 
+        /*  LOAD AT ONCE IF QUIET (the author's choice, §105): the first pass
+            that shows the graph lagging after an add from here loads it when
+            nothing sounds; when something does, Load now stays lit for a
+            hand instead, saying what it waits for. Asked once per add. */
+        if (loadAskedAt != 0)
+        {
+            if (juce::Time::getMillisecondCounter() - loadAskedAt > loadWaitMs)
+            {
+                loadAskedAt = 0;
+            }
+            else if (reading.fx.graphChanged)
+            {
+                loadAskedAt = 0;
+
+                if (reading.fx.busy.empty() && ! reading.fx.locked && actions.load)
+                    actions.load();
+            }
+        }
+
         if (const auto drawn = shapeOf(); drawn != shape)
         {
             shape = drawn;
@@ -458,6 +594,60 @@ namespace wfg::client::ui
         {
             refresh();
         }
+    }
+
+    //==============================================================================
+    /*  THIS MACHINE'S PLUGINS, as a menu under the button: the Rack tab's -
+        the scan's list, grouped by maker when it is long, which is how
+        somebody looks for one. */
+    void FxPanelComponent::chooseToAdd (juce::Component& under)
+    {
+        if (reading.fx.locked || ! offersAdd())
+            return;
+
+        const auto& known = reading.fx.known;
+        juce::PopupMenu menu;
+
+        if (known.empty())
+            menu.addItem (-1, "Nothing scanned yet: scan in Show settings, Plugins.", false);
+        else if (known.size() <= 24)
+        {
+            for (std::size_t at = 0; at < known.size(); ++at)
+                menu.addItem (static_cast<int> (at) + 1,
+                              juce::String (known[at].name) + "  (" + juce::String (known[at].format) + ")");
+        }
+        else
+        {
+            std::map<std::string, juce::PopupMenu> makers;
+
+            for (std::size_t at = 0; at < known.size(); ++at)
+                makers[known[at].manufacturer.empty() ? std::string ("Unknown maker") : known[at].manufacturer]
+                    .addItem (static_cast<int> (at) + 1,
+                              juce::String (known[at].name) + "  (" + juce::String (known[at].format) + ")");
+
+            for (auto& [maker, items] : makers)
+                menu.addSubMenu (juce::String (maker), items);
+        }
+
+        menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&under),
+                            [safe = juce::Component::SafePointer<FxPanelComponent> (this),
+                             cueId = reading.subject.objectId, offered = known] (int chosen)
+                            {
+                                if (safe == nullptr || chosen <= 0 || chosen > static_cast<int> (offered.size()))
+                                    return;
+
+                                safe->add (cueId, offered[static_cast<std::size_t> (chosen - 1)]);
+                            });
+    }
+
+    void FxPanelComponent::add (const std::string& cueId, const model::KnownPluginRow& plugin)
+    {
+        //  The menu answers later: the pick may have moved on, and then nothing is added.
+        if (cueId != reading.subject.objectId || ! offersAdd() || reading.fx.locked || ! actions.addPlugin)
+            return;
+
+        actions.addPlugin (cueId, plugin);
+        loadAskedAt = std::max<std::uint32_t> (1, juce::Time::getMillisecondCounter());
     }
 
     void FxPanelComponent::setEditorWords (std::map<std::string, std::string> words)
@@ -474,6 +664,7 @@ namespace wfg::client::ui
     void FxPanelComponent::rebuild()
     {
         boxes.clear();
+        hiddenCount = 0;
 
         /*  NO CHAIN, NO CANVAS: the sentence saying why is painted by the
             panel itself, and a canvas left on top would cover it. */
@@ -483,6 +674,12 @@ namespace wfg::client::ui
         {
             const auto plugin = [this] (const model::FxStrip& strip)
             {
+                if (hiding() && ! strip.present() && ! pending (strip.pluginId))
+                {
+                    ++hiddenCount;
+                    return;
+                }
+
                 auto box = std::make_unique<Box> (*this, Box::Kind::plugin);
                 box->strip = strip;
                 boxes.push_back (std::move (box));
@@ -507,6 +704,10 @@ namespace wfg::client::ui
                 if (! reading.fx.recorder || strip.side != "before")
                     plugin (strip);
 
+            //  WHERE THE NEXT ONE GOES, at the end (§105): not on a fade, which adds nothing.
+            if (offersAdd())
+                boxes.push_back (std::make_unique<Box> (*this, Box::Kind::add));
+
             for (auto& box : boxes)
                 canvas->addAndMakeVisible (*box);
         }
@@ -529,6 +730,9 @@ namespace wfg::client::ui
 
         for (auto& box : boxes)
             box->refresh();
+
+        hideUnused.setVisible (reading.fx.present && offersHide());
+        hideUnused.setToggleState (hiding(), juce::dontSendNotification);
 
         canvas->repaint();
         repaint();
@@ -591,7 +795,8 @@ namespace wfg::client::ui
         return scaled (margin) + sourceWidth()
                + count * (scaled (linkWidth) + scaled (boxWidth))
                + scaled (linkWidth) + scaled (endWidth) + scaled (margin)
-               + (reading.fx.notice.empty() && model::chainWords (reading.fx).empty() ? 0 : scaled (360));
+               + (reading.fx.notice.empty() && model::chainWords (reading.fx).empty() && hiddenCount == 0
+                    ? 0 : scaled (360));
     }
 
     int FxPanelComponent::sourceWidth() const
@@ -599,7 +804,8 @@ namespace wfg::client::ui
         const auto said = juce::String (reading.fx.source);
         const auto wide = juce::GlyphArrangement::getStringWidthInt (Look::font (theme, 12.0f), said) + scaled (8);
 
-        return juce::jmax (scaled (endWidth), wide);
+        //  Room above "file" for the cue's Hide unused plugins switch, on two lines (§105).
+        return juce::jmax (scaled (offersHide() ? hideWidth : endWidth), wide);
     }
 
     void FxPanelComponent::layOut()
@@ -614,6 +820,8 @@ namespace wfg::client::ui
 
         auto x = scaled (margin) + sourceWidth();
         const auto height = juce::jmax (0, canvas->getHeight() - 2 * scaled (4));
+
+        hideUnused.setBounds (scaled (margin), scaled (4), sourceWidth(), scaled (40));
 
         for (auto& box : boxes)
         {

@@ -425,6 +425,79 @@ TEST_CASE ("plugin set: an Fx is one entry switched in on one media cue, made on
 }
 
 //==============================================================================
+TEST_CASE ("plugin set: cue.plugin adds where the cue's chain lives and switches it in, one step (§105)")
+{
+    /*  The author, 2026-10-22: "add effects straight from the FX panel of a
+        cue (mic or media)". A media cue's goes into the show's set, a mic
+        cue's at the end of its rack channel's chain; either way the cue gets
+        its Fx, and one undo takes both back. Both drawn identifiers ride on
+        the record, the entry's then the insert's, so a replay makes the same. */
+    Rig rig;
+
+    REQUIRE (rig.apply ("list.create", { osc::Value::string ("Main") }).applied == 1);
+    const auto listId = rig.lastApplied().back();
+    REQUIRE (rig.apply ("cue.create", { osc::Value::string (listId), osc::Value::int32 (0),
+                                        osc::Value::string ("media"), osc::Value::string ("Tone") }).applied == 1);
+    const auto mediaId = rig.lastApplied().back();
+    REQUIRE (rig.apply ("cue.create", { osc::Value::string (listId), osc::Value::int32 (1),
+                                        osc::Value::string ("mic"), osc::Value::string ("Voice") }).applied == 1);
+    const auto micId = rig.lastApplied().back();
+    REQUIRE (rig.apply ("channel.create", { osc::Value::string ("mono"), osc::Value::string ("CH000001") }).applied == 1);
+
+    const auto added = [] (const std::string& cueId)
+    {
+        std::vector<osc::Value> args { osc::Value::string (cueId) };
+
+        for (auto& word : entry ("Test gain", "godot:test-gain", "VST3", ""))
+            args.push_back (word);
+
+        return args;
+    };
+
+    SUBCASE ("a media cue's goes into the set")
+    {
+        REQUIRE (rig.apply ("cue.plugin", added (mediaId)).applied == 1);
+        const auto record = rig.lastApplied();
+        REQUIRE (record.size() == 7u);
+        const auto pluginId = record[5];
+        const auto fxId = record[6];
+
+        CHECK (rig.at ("/godot/plugin/order") == pluginId);
+        CHECK (rig.at ("/godot/fx/" + fxId + "/plugin") == pluginId);
+        CHECK (rig.at ("/godot/fx/" + fxId + "/cue") == mediaId);
+        CHECK (rig.at ("/godot/fx/" + fxId + "/enabled") == "true");
+
+        //  One step: one undo takes the insert and the entry back together.
+        REQUIRE (rig.apply ("undo").applied == 1);
+        CHECK (rig.at ("/godot/plugin/order").empty());
+        CHECK_FALSE (rig.exists ("/godot/fx/" + fxId + "/plugin"));
+    }
+
+    SUBCASE ("a mic cue's goes at the end of its channel's chain, never into the set")
+    {
+        //  Through no channel there is nowhere to put it, and nothing is made.
+        CHECK (rig.apply ("cue.plugin", added (micId)).rejected == 1);
+        CHECK (rig.at ("/godot/plugin/order").empty());
+
+        REQUIRE (rig.apply ("node.set", { osc::Value::string ("/godot/cue/" + micId + "/channel"),
+                                          osc::Value::string ("CH000001") }).applied == 1);
+        REQUIRE (rig.apply ("cue.plugin", added (micId)).applied == 1);
+        const auto record = rig.lastApplied();
+        REQUIRE (record.size() == 7u);
+
+        CHECK (rig.at ("/godot/slot/CH000001/plugins") == record[5]);
+        CHECK (rig.at ("/godot/plugin/order").empty());
+        CHECK (rig.at ("/godot/fx/" + record[6] + "/cue") == micId);
+    }
+
+    SUBCASE ("refused where a cue plays nothing, or is not there")
+    {
+        CHECK (rig.apply ("cue.plugin", added (listId)).rejected == 1);
+        CHECK (rig.apply ("cue.plugin", added ("XX000000")).rejected == 1);
+        CHECK (rig.at ("/godot/plugin/order").empty());
+    }
+}
+
 TEST_CASE ("rack: a channel's plugins are its own chain, published beside the set's and never in its order")
 {
     /*  Phase 9b (namespace draft 18.2 and 18.3, decision BX). `channel.plugin`

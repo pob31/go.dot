@@ -33382,3 +33382,103 @@ Owed: the author's try - a show list's cue given a key and a Stream Deck key fro
 pressed (the cue fires, the standby moves past it), Doh! after; a cart of more cues than keys with a
 learnt key on it, paged. The words "Press a key or a Stream Deck key - Esc cancels" and "<name> key 7" are
 mine, for the author to keep or change.
+
+## 105. The FX panel adds, switches in on Edit and hides; a longer take, and pads that play it
+
+**Asked 2026-10-22** by the author, five things at once:
+
+1. *"Do you think we can add effects straight from the FX panel of a cue (mic or media)?"*
+2. *"Do you think we can extend the Live sampler range to longer? Can we play from a live sampler while
+   it's recording?"*
+3. *"In the mic cue's settings, and maybe not only, the FX channel in the inspector only shows "channel"
+   which doesn't make it obvious this is the FX rack. Maybe "FX Rack" is more straight forward then
+   "channel"."*
+4. *"In the FX foot panel can pressing the edit button of an effect slot engage the effects at the same
+   time rather than punish the user to close the popup to enable it and then click edit."*
+5. *"Can we have also a "Hide" button in the FX foot panel. This is cue specific."*
+
+What was found. A plugin reached a cue's chain only through *Show settings*: the Plugins tab's Add for the
+show's set, the Rack tab's menu for a rack channel's chain - and then Load now, which is refused while
+anything sounds (§17.15, AX). Edit... on a media cue's entry it had no insert for already made the insert
+and waited for it before opening the window (§17.13), but on an insert switched out it opened the window
+on a plugin the cue did not hear, and on a mic cue it opened nothing. The panel drew the show's whole set
+on every media cue. The longest take was a menu of 10 s to 10 min (§19.2), memory set aside at Load now;
+a take is heard only through its own channel's loop.
+
+### 105.1 Decisions
+
+The author's, asked 2026-10-22 (the options and their wording mine, AQ's rule):
+
+- **AZK** **The mic cue's `channel` row reads "FX rack"** (the author's word), and so do the sentences a mic
+  cue says about it - the FX panel's, the take panel's, the readiness marks (*no FX rack*) and `wfg
+  validate`'s. Only there: `labels()` is shared with a MIDI cue's and a trigger's `channel`, which are MIDI
+  channels, and the Rack tab keeps calling its rows rack channels.
+- **AZL** **Edit... switches the insert in** (the author's ask): one switched out is switched in as the window
+  is asked for; one the cue has not got is made by the window, which waits for it - on a mic cue now as on a
+  media cue. Never on a fade, which switches nothing (§94).
+- **AZM** **"Hide unused plugins", a switch of the cue's own** (the author's words, and his reason against a
+  switch per box: *"you can't unhide a hidden cue if the button is part of the tile for the effect"*): a
+  sound's row `fxHideUnused`, kept with the show.
+- **AZN** **A plugin is added from the chain's end** (the author's ask): a media cue's into the show's set, a
+  mic cue's at the end of its rack channel's chain, an aux's into its own - and switched in on the cue.
+- **AZO** **Loaded at once if nothing sounds** (offered as "Load at once if quiet"): otherwise Load now in the
+  add box, lit when it can be and saying what it waits for.
+- **AZP** **The longest take is typed** (offered as "Any length, typed"), not picked from a menu.
+- **AZQ** **Pads play a slice of the live take** (offered as "Fire pads from the live take"), **a slice each
+  pad keeps** - an in and an out in the take, kept in the show although the take is tonight's.
+- **AZR** **A take pad is a media cue whose sound is a take** rather than a file, so a sampler member, a cart
+  cue and a key all play one, with level, EQ, plugins and sends as any sound.
+- **AZS** **Keep moves the pads onto the kept file**, with the same slices, in one undo, so they play after
+  the show is closed and opened again.
+- **AZT** **A pad hears the take and its layers mixed**, as the loop sounds and Keep writes it.
+
+Mine *(proposed)*, the author's to overrule:
+
+- **AZU** **What "unused" means**: an entry the cue has no insert for. One it has switched out stays shown,
+  since the cue keeps what was set on it and a box that vanished as it was switched out would leave the
+  hand that did it nothing to switch back. The sentence after "out" says how many were left out. Not on a
+  fade, whose chain is its target's, drawn whole.
+- **AZV** **One command, `cue.plugin`**, makes the entry and the insert in one step, so one undo takes both
+  back; both drawn identifiers ride on the record. A mic cue through no channel is refused before anything is
+  made.
+- **AZW** **The load is asked once per add**, on the first pass within three seconds that shows the graph
+  lagging; an add made while something sounds is never loaded later by itself, since a rebuild the hand did
+  not ask for would stop the sound for a moment at a moment nobody chose.
+
+### 105.2 Rows and commands
+
+| Address | Type | Access | Notes |
+|---|---|---|---|
+| `/godot/cue/<id>/fxHideUnused` | `T`, false | rw, show | a media or a mic cue's: its FX panel leaves out what it has no insert for |
+
+`cue.plugin <cue> <name> <identifier> <format> <path> [plugin] [fx]` - a known plugin added where the cue's
+chain lives and switched in on it (AZN, AZV).
+
+### 105.3 As built
+
+- **The label**: `offerTheInputsAndChannels` sets the mic cue's `channel` field's label; the sentences are
+  `readFx`'s, `readTake`'s, `readinessMark`'s and `ShowDocument`'s validation.
+- **Edit...**: the plugin box's door writes `enabled` true first on a switched-out insert; `PluginEditors::edit`
+  makes the insert and waits for it on a mic cue as on a media cue.
+- **Hide**: `readFx` reads `canHide` and `hideUnused`; the panel's switch sits above the chain's source, which
+  is drawn wider to hold it on two lines, and the shape it compares counts which entries the cue has, so a
+  first switch-in is not hidden while the tree catches up.
+- **Add**: `readFx` reads what the add box needs - the scan's list, `plugin/changed`, `busyWords`, the lock.
+  The box is the last of the chain, dashed; its menu is the Rack tab's (by maker past 24); the menu's
+  answer adds nothing when the pick has moved on. `ShowDocument::createCuePlugin` asks what can be refused
+  before writing.
+
+Words mine, for the author to keep or change: *Add plugin...*, *Not in the audio yet: Load now builds it
+in.*, *... is sounding: Load now waits for nothing to sound.*, *2 unused plugins hidden*, and the panel
+tooltips.
+
+### 105.4 Stages
+
+| stage | what | commit |
+|---|---|---|
+| FX.A-FX.D | FX rack; Edit switches in; Hide unused plugins; add from the panel and load if quiet (PluginSetTests, RunPaneUiTests, ClientTests, MicTests) | |
+| FX.E | the longest take typed | |
+| FX.F | pads on the live take | |
+
+Owed: the author's try - a plugin added from a media cue's panel and from a mic cue's, with nothing playing
+and with a cue sounding; Edit... on an insert switched out; Hide unused plugins on a show with a long set.

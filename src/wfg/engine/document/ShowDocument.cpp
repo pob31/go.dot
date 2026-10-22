@@ -5888,6 +5888,36 @@ namespace wfg::doc
         return insertObject (channel, endOfSequence, "Plugin", id, attributes);
     }
 
+    EditResult ShowDocument::createCuePlugin (const std::string& cueId, const std::string& name,
+                                              const std::string& identifier, const std::string& format,
+                                              const std::string& path, std::string& madePlugin,
+                                              const std::string& pluginId, const std::string& fxId)
+    {
+        const auto cue = findById (cueId);
+
+        if (! cue.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        if (! isSoundingCue (cue))
+            return EditResult::failed (reason::typeMismatch);
+
+        //  Asked before anything is written, so a refusal leaves no entry behind.
+        const auto channelId = cue.hasType ("Channel") ? cueId : cue["channel"].toString().toStdString();
+
+        if (cue.hasType ("Mic") && channelId.empty())
+            return EditResult::failed (reason::badValue);
+
+        const auto entry = cue.hasType ("Media")
+                             ? createPlugin (name, identifier, format, path, pluginId)
+                             : createChannelPlugin (channelId, name, identifier, format, path, pluginId);
+
+        if (! entry.ok)
+            return entry;
+
+        madePlugin = entry.id;
+        return createFx (cueId, entry.id, fxId);
+    }
+
     //==============================================================================
     void ShowDocument::collectIds (const juce::ValueTree& node, std::vector<std::string>& out) const
     {
@@ -7501,7 +7531,7 @@ namespace wfg::doc
                                                " or it plays nothing");
 
                 if (channelId.empty())
-                    problems.push_back (here + ": plays through no rack channel - pick one, or it plays"
+                    problems.push_back (here + ": plays through no FX rack - pick one, or it plays"
                                                " nothing");
 
                 const auto channel = channelId.empty() ? juce::ValueTree() : document.findById (channelId);

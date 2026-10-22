@@ -226,6 +226,22 @@ namespace wfg::client::model
 
         out.present = true;
 
+        if (kind == "media" || kind == "mic")
+        {
+            out.canHide = true;
+            out.hideUnused = isYes (flag (snapshot, "/godot/cue/" + cueId + "/fxHideUnused"));
+        }
+
+        /*  WHAT ADDING FROM THE PANEL NEEDS (§105), read before the sentences
+            below return early: a chain with nothing in it is the one most in
+            want of a plugin. A mic cue through no channel has nowhere to put
+            one. */
+        out.canAdd = kind != "mic" || ! text (snapshot, "/godot/cue/" + cueId + "/channel").empty();
+        out.known = readKnownPlugins (snapshot);
+        out.graphChanged = readSetChanged (snapshot);
+        out.busy = busyWords (snapshot);
+        out.locked = isYes (flag (snapshot, "/godot/document/locked"));
+
         /*  WHOSE PLUGINS: the show's set for a media cue, which every voice
             carries in `plugins/order`; and for a mic cue the rack channel it
             plays through (Phase 9b, decision BX), in that channel's order. */
@@ -249,7 +265,7 @@ namespace wfg::client::model
 
             if (channel.empty())
             {
-                out.notice = "This mic cue plays through no rack channel yet: pick one in the inspector.";
+                out.notice = "This mic cue plays through no FX rack yet: pick one in the inspector.";
                 return out;
             }
 

@@ -230,6 +230,12 @@ namespace wfg::client::gesture
                                const std::string& identifier, const std::string& format,
                                const std::string& path);
 
+    /*  FROM A CUE'S FX PANEL (namespace draft 105): `cue.plugin`, a known
+        plugin added where the cue's chain lives and switched in on it. */
+    Event createCuePlugin (const std::string& cueId, const std::string& name,
+                           const std::string& identifier, const std::string& format,
+                           const std::string& path);
+
     /** `eq.reset`: a media cue's EQ back to flat, one transaction (Phase 9a). */
     Event eqReset (const std::string& cueId);
 

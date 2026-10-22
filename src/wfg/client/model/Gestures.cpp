@@ -193,6 +193,16 @@ namespace wfg::client::gesture
                    osc::Value::string (path) } };
     }
 
+    Event createCuePlugin (const std::string& cueId, const std::string& name,
+                           const std::string& identifier, const std::string& format,
+                           const std::string& path)
+    {
+        return { origin::window, "cue.plugin",
+                 { osc::Value::string (cueId), osc::Value::string (name),
+                   osc::Value::string (identifier), osc::Value::string (format),
+                   osc::Value::string (path) } };
+    }
+
     Event eqReset (const std::string& cueId)
     {
         return { origin::window, "eq.reset", { osc::Value::string (cueId) } };

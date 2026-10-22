@@ -766,6 +766,10 @@ namespace wfg::client
                     the EQ box shows the same cue's EQ in this same foot. */
                 footActions.createFx = [this] (const std::string& cueId, const std::string& pluginId)
                                        { send (gesture::createFx (cueId, pluginId)); };
+                footActions.addPlugin = [this] (const std::string& cueId, const model::KnownPluginRow& plugin)
+                                        { send (gesture::createCuePlugin (cueId, plugin.name, plugin.identifier,
+                                                                          plugin.format, plugin.path)); };
+                footActions.loadPlugins = [this] { send (gesture::loadPlugins()); };
 
                 /*  THE TAKE PANEL'S FIVE PRESSES (Phase 9c): the take verbs,
                     as the D700's Rec and a transport cue send them. */

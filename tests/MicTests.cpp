@@ -276,7 +276,7 @@ TEST_CASE ("mic: wfg validate says, before the show, each reason a mic cue would
         const auto said = rig.problemsAbout ("Mic[MC000002]");
         REQUIRE (said.size() == 2u);
         CHECK (said[0].find ("takes no input") != std::string::npos);
-        CHECK (said[1].find ("plays through no rack channel") != std::string::npos);
+        CHECK (said[1].find ("plays through no FX rack") != std::string::npos);
     }
 
     SUBCASE ("a shared channel")

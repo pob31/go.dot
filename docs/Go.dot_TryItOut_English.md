@@ -92,7 +92,7 @@ Everything below is built. Sections marked new arrived after v0.1 and need the n
 | Level lane | Draw a volume curve over the waveform, or record it from a fader | *Waveform* panel |
 | Speed | 0 to 20×, as varispeed (pitch follows) or timestretch (pitch held), fades of speed, and playback backwards or bouncing between its in and out points | Inspector, *what it does* |
 | EQ | Four bands and two filters on every cue | *EQ* panel |
-| Plugins | A VST3, AU or LV2 chain on every cue. Plugins run in a separate process, so a crashing plugin silences its cue, not the show | *FX* panel; *Show settings > Plugins* to scan |
+| Plugins | A VST3, AU or LV2 chain on every cue. Plugins run in a separate process, so a crashing plugin silences its cue, not the show. Add one from the cue's own *FX* panel (new): it is switched in on that cue and loaded at once when nothing is playing. *Edit...* switches a plugin in as it opens its window, and *Hide unused plugins* shows only the ones the cue uses | *FX* panel; *Show settings > Plugins* to scan |
 | Sends | Levels from a cue into the show's mix channels | *Sends* panel |
 | Send lanes | Draw each send's level over the file, as the level lane does for volume | Waveform panel, lane picker |
 | Editing a sound (new) | Cut a sound into sections at the playhead, drag them into a new order or remove them, drag a join to set its crossfade, type a trim for a section, then *Freeze* to bounce the edit to a new file the cue plays; *Unfreeze* brings the sections back. Lanes and ranges stay on the sound they sit on | *Waveform* panel, the sections row |
@@ -119,7 +119,7 @@ Everything below is built. Sections marked new arrived after v0.1 and need the n
 
 | Feature | What it does | Where |
 | --- | --- | --- |
-| Mic cues | Bring a named input up through a rack channel with its own plugins | *Add > mic*; *Show settings > Inputs*, *Rack* |
+| Mic cues | Bring a named input up through a rack channel with its own plugins, picked on the cue's *FX rack* line | *Add > mic*; *Show settings > Inputs*, *Rack* |
 | Aux channels (new) | A reverb or delay return the cues send into: its own plugins, level, output and sends, kept with the show; a fade can move them for the night. Click an aux's name in a cue's sends panel to open the aux itself | *Show settings > Rack*: + Mono aux, + Stereo aux; a cue's *sends* panel |
 | Live sampling | Record sound during the show, then loop it, overdub it or clear it | *Take* panel; *transport > On a take* |
 | Live recorder | Keep the moment of every cue you fire during a run, as a take | Ctrl+Shift+R |
