@@ -31,6 +31,7 @@
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
 #include <wfg/engine/audio/Looper.h>
+#include <wfg/engine/audio/TakeVoice.h>
 #include <wfg/engine/audio/TakePictures.h>
 #include <wfg/engine/audio/TakeWriter.h>
 #include <wfg/engine/rt/RtCheck.h>
@@ -222,6 +223,200 @@ TEST_CASE ("looper: a take is recorded and closed to the sample, and loops from 
     const auto expected = std::sin (1.57079632679 * t / fade) * identify (100 + fade / 2, 0)
                             + std::cos (1.57079632679 * t / fade) * identify (5100 + fade / 2, 0);
     CHECK (rig.at (into) == doctest::Approx (expected).epsilon (1.0e-4));
+}
+
+TEST_CASE ("looper: a pad reads the take below the record head, and its closed layers, never the one being laid (§105)")
+{
+    /*  Namespace draft §105, AZQ-AZT: a pad on the take hears the take and its
+        closed layers mixed, and never past the record head - read here as a
+        voice's audio thread would, between the looper's blocks. */
+    Rig rig (1.0);
+    std::array<float, 64> left {}, right {};
+
+    //  Nothing recorded: nothing to read, and the head says so.
+    CHECK (rig.looper.readLive (0, 64, left.data(), right.data()) == 0);
+    CHECK (left[10] == doctest::Approx (0.0f));
+
+    //  Recording from 100: what is down is read sample for sample; past the head, silence.
+    rig.post (Verb::record, 100);
+    rig.runTo (2100, identify);
+    const auto head = rig.looper.readLive (1950, 64, left.data(), right.data());
+    CHECK (head == 2000);
+    CHECK (left[0] == doctest::Approx (identify (2050, 0)));       // take sample 1950, input sample 2050
+    CHECK (right[0] == doctest::Approx (identify (2050, 1)));
+    CHECK (left[49] == doctest::Approx (identify (2099, 0)));      // the last one recorded
+    CHECK (left[50] == doctest::Approx (0.0f));                     // the head: not yet
+
+    //  Closed at 5100: the head is the take's length, and it stays there while the loop plays.
+    rig.post (Verb::loop, 5100);
+    rig.runTo (6000, identify);
+    CHECK (rig.looper.readLive (4990, 64, left.data(), right.data()) == 5000);
+    CHECK (left[9] == doctest::Approx (identify (5099, 0)));
+    CHECK (left[10] == doctest::Approx (0.0f));                     // the post-roll is no part of the take
+
+    //  A layer being laid is not heard by a pad until it is closed; then it is, on top of the take.
+    rig.post (Verb::record, 6000);
+    rig.runTo (12000, [] (std::int64_t, int) { return 0.25f; });
+    rig.looper.readLive (2500, 1, left.data(), right.data());
+    CHECK (left[0] == doctest::Approx (identify (2600, 0)));
+
+    rig.post (Verb::loop, 12000);
+    rig.runTo (12600, [] (std::int64_t, int) { return 0.0f; });
+    REQUIRE (rig.looper.layerCount() == 1);
+    rig.looper.readLive (2500, 1, left.data(), right.data());
+    CHECK (left[0] == doctest::Approx (identify (2600, 0) + 0.25f));
+}
+
+namespace
+{
+    /*  A VOICE PLAYING A SLICE, block by block from `from` to `to` in blocks of
+        128 under the real-time check: what it added, as the voice's chain would
+        receive it, and whether it was still playing after each block. */
+    struct Heard
+    {
+        std::vector<float> left, right;
+        std::vector<bool> playing;
+        std::int64_t from = 0;
+
+        float l (std::int64_t sample) const { return left[static_cast<std::size_t> (sample - from)]; }
+        float r (std::int64_t sample) const { return right[static_cast<std::size_t> (sample - from)]; }
+    };
+
+    Heard play (audio::TakeVoice& voice, std::int64_t from, std::int64_t to,
+                const std::function<void (std::int64_t)>& atBlock = {}, bool mono = false)
+    {
+        Heard heard;
+        heard.from = from;
+
+        for (auto block = from; block < to; block += 128)
+        {
+            if (atBlock)
+                atBlock (block);
+
+            std::array<float, 128> left {}, right {};
+
+            {
+                const rt::ScopedRealtimeCheck ours { rt::Region::ours };
+                voice.process (left.data(), mono ? nullptr : right.data(), 128, block);
+            }
+
+            heard.left.insert (heard.left.end(), left.begin(), left.end());
+            heard.right.insert (heard.right.end(), right.begin(), right.end());
+            heard.playing.push_back (voice.isPlaying());
+        }
+
+        return heard;
+    }
+
+    /*  A closed take of five thousand samples, input sample s recorded at take sample s - 100. */
+    void recordFiveThousand (Rig& rig)
+    {
+        rig.post (Verb::record, 100);
+        rig.post (Verb::loop, 5100);
+        rig.runTo (6000, identify);
+        REQUIRE (rig.looper.length() == 5000);
+    }
+}
+
+TEST_CASE ("take voice: a pad plays its slice of the take from its launch's sample, once, and says when it is done (§105)")
+{
+    Rig rig (1.0);
+    recordFiveThousand (rig);
+
+    audio::TakeVoice voice;
+    CHECK_FALSE (voice.hasSource());
+    voice.setSource (&rig.looper, 1000, 2000, 1);
+    CHECK (voice.hasSource());
+    CHECK_FALSE (voice.isPlaying());
+
+    voice.launchAt (10000);
+    CHECK (voice.isPlaying());                                     // from the launch, before a sample has played
+
+    const auto heard = play (voice, 9984, 11264);
+    const auto edge = audio::TakeVoice::edgeSamples;
+
+    //  Nothing before its sample; then the slice, sample for sample once it has risen.
+    CHECK (heard.l (9999) == doctest::Approx (0.0f));
+    CHECK (std::abs (heard.l (10000)) < std::abs (identify (1100, 0)));
+    CHECK (heard.l (10000 + edge + 10) == doctest::Approx (identify (1100 + edge + 10, 0)));
+    CHECK (heard.r (10500) == doctest::Approx (identify (1600, 1)));
+    CHECK (heard.l (10999 - edge - 1) == doctest::Approx (identify (2099 - edge - 1, 0)));
+
+    //  Falling into its out, then nothing - and no longer playing.
+    CHECK (std::abs (heard.l (10999)) < std::abs (identify (2099, 0)));
+    CHECK (heard.l (11000) == doctest::Approx (0.0f));
+    CHECK_FALSE (heard.playing.back());
+    CHECK_FALSE (voice.isPlaying());
+}
+
+TEST_CASE ("take voice: a second pass crossfades into the in point, and nought passes plays on until it is stopped (§105)")
+{
+    Rig rig (1.0);
+    recordFiveThousand (rig);
+
+    audio::TakeVoice voice;
+    voice.setSource (&rig.looper, 1000, 2000, 2);
+    voice.launchAt (10000);
+
+    const auto heard = play (voice, 10000, 12288);
+    const auto fade = audio::TakeVoice::crossfadeSamples;
+
+    //  The second pass picks up after the crossfade it began inside the first.
+    CHECK (heard.l (11000 + 100) == doctest::Approx (identify (1000 + fade + 100 + 100, 0)));
+    CHECK_FALSE (voice.isPlaying());
+
+    //  For ever, until a stop at a sample: it falls over the edge from there, and is done.
+    audio::TakeVoice endless;
+    endless.setSource (&rig.looper, 1000, 2000, 0);
+    endless.launchAt (20000);
+
+    const auto stopped = play (endless, 20000, 26400, [&endless] (std::int64_t block)
+    {
+        if (block == 25632)               // 20000 and 44 blocks of 128
+            endless.stopAt (25700);
+    });
+
+    CHECK (std::abs (stopped.l (25000)) > 0.0f);
+    CHECK (std::abs (stopped.l (25700 + audio::TakeVoice::edgeSamples + 1)) < 1.0e-9f);
+    CHECK_FALSE (endless.isPlaying());
+}
+
+TEST_CASE ("take voice: a kill is silence at the next block, a stop before the launch plays nothing, and one side folds two (§105)")
+{
+    Rig rig (1.0);
+    recordFiveThousand (rig);
+
+    audio::TakeVoice voice;
+    voice.setSource (&rig.looper, 0, 5000, 0);
+    voice.launchAt (0);
+
+    const auto killed = play (voice, 0, 512, [&voice] (std::int64_t block)
+    {
+        if (block == 256)
+            voice.kill();
+    });
+
+    CHECK (std::abs (killed.l (200)) > 0.0f);
+    CHECK (killed.l (300) == doctest::Approx (0.0f));
+    CHECK_FALSE (voice.isPlaying());
+
+    //  Launched for later, stopped before: nothing at all, and done.
+    voice.launchAt (2000);
+    voice.stopAt (1000);
+    const auto never = play (voice, 512, 3072);
+    CHECK (std::all_of (never.left.begin(), never.left.end(), [] (float v) { return std::abs (v) < 1.0e-9f; }));
+    CHECK_FALSE (voice.isPlaying());
+
+    //  On a voice one wide, the two sides at half each - here a side and its negative: nothing.
+    voice.launchAt (4000);
+    const auto mono = play (voice, 4000, 4512, {}, true);
+    CHECK (mono.l (4200) == doctest::Approx (0.0f));
+    CHECK (voice.isPlaying());
+
+    //  And with no source, nothing plays and the launch is said done at the next block.
+    voice.clearSource();
+    play (voice, 4512, 4640);
+    CHECK_FALSE (voice.isPlaying());
 }
 
 TEST_CASE ("looper: at a wrap on a sine it steps no further than the sine does, where a hard join would jump")

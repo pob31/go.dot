@@ -98,6 +98,10 @@ namespace wfg::client::model
         }
 
         bool hasTake() const noexcept   { return state != "empty"; }
+
+        /*  A PAD FROM THE LOOP (namespace draft §105): a change of the show, so
+            not under the lock; any take there is, recording or closed. */
+        bool mayPad() const noexcept    { return present && hasTake() && ! locked; }
         bool isRecording() const noexcept { return state == "recording"; }
         bool layersFull() const noexcept { return maxLayers > 0 && layers >= maxLayers; }
 

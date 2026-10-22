@@ -330,6 +330,9 @@ add_library(wfg_engine STATIC
     wfg/engine/audio/Looper.cpp
     wfg/engine/audio/LooperPlugin.h
     wfg/engine/audio/LooperPlugin.cpp
+    wfg/engine/audio/TakeReaderPlugin.h
+    wfg/engine/audio/TakeReaderPlugin.cpp
+    wfg/engine/audio/TakeVoice.h
     wfg/engine/audio/TakePictures.h
     wfg/engine/audio/TakePictures.cpp
     wfg/engine/audio/TakeWriter.h

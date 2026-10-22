@@ -223,6 +223,19 @@ namespace wfg::audio
             take's end. */
         void copyTake (int layers, std::int64_t from, int frames, float* left, float* right) const noexcept;
 
+        /*  WHAT A PAD ON THE TAKE HEARS (namespace draft §105, AZQ-AZT): the
+            take and its closed layers mixed, as the loop sums them, `frames`
+            samples from `from` - and nothing at or past the record head, so a
+            pad never plays what has not been recorded yet. Returns that head:
+            how much of the take there is, which grows while it records.
+
+            ANOTHER AUDIO THREAD's, a voice's, while this one's own writes on:
+            it reads only what the last block published with its release - the
+            take below the head, and the layers already closed. The one race
+            left is a closed layer's falling tail and an Undo's fade, ten
+            milliseconds each, which read as the sample before or after. */
+        std::int64_t readLive (std::int64_t from, int frames, float* left, float* right) const noexcept WFG_AUDIO_THREAD;
+
         /*  WHETHER THE CLOSED TAKE AND ITS LAYERS ARE WRITTEN AND STILL:
             closed - looping, held, or laying a pass in a slot of its own - and
             no closed layer's tail still falling. Published with the block, so

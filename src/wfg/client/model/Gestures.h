@@ -249,6 +249,10 @@ namespace wfg::client::gesture
         it (Phase 9c, §19.8). */
     Event takeKeep (const std::string& channelId, bool asCue, const std::string& afterCue);
 
+    /*  `take.pad <channel> <after>`: a media cue after `afterCue` that plays the
+        live take between the loop's points (namespace draft §105, AZR). */
+    Event takePad (const std::string& channelId, const std::string& afterCue);
+
     /*  RECORDING A CUE'S LANES FROM THE FADERS (namespace draft §34):
         `lane.arm` - the faders flip to the cue, empty flips them back;
         `lane.rec` - a panel strip's REC arms or disarms its lane; `lane.free`;

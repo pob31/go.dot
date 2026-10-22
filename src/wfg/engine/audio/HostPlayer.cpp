@@ -115,6 +115,20 @@ namespace wfg::audio
             graph moves - the gate stays shut until the launch. */
         if (request.live)
             audioHost.setRackSource (request.track, request.firstInput, request.inputWidth);
+        else if (! request.takeChannel.empty())
+        {
+            /*  A PAD ON THE LIVE TAKE (namespace draft §105, AZR): the voice
+                plays the slice instead of its clips, and a channel with no
+                take tonight is said, as a missing file is. */
+            if (! audioHost.setTrackTake (request.track, request.takeChannel, request.takeIn,
+                                          request.takeOut, request.takeLoops))
+            {
+                engine.submit (origin::engine, "run.failed",
+                               { osc::Value::string (request.runId),
+                                 osc::Value::string (cue::runError::noTake) });
+                return;
+            }
+        }
         else if (! audioHost.setTrackRanges (request.track, request.mediaFile, ranges,
                                              request.startOffset, request.stretch,
                                              request.startSlot, request.sliceOffset))
@@ -198,6 +212,10 @@ namespace wfg::audio
         if (audioHost.isRackTrack (track))
             return openLive (track, sample, 0.0);
 
+        //  A pad on the take: its voice, at the sample itself (§105).
+        if (audioHost.isTakeTrack (track))
+            return audioHost.launchTrackTake (track, sample);
+
         /*  The tick thread, and the whole of what GO does to the audio side:
             one sample turned into a beat through the anchor, then two stores. */
         return audioHost.launchTrackAt (track, slot, audioHost.beatsAtSample (sample));
@@ -218,6 +236,9 @@ namespace wfg::audio
             return true;
         }
 
+        if (audioHost.isTakeTrack (track))
+            audioHost.stopTrackTake (track, -1);
+
         return audioHost.stopTrack (track);
     }
 
@@ -225,6 +246,9 @@ namespace wfg::audio
     {
         if (audioHost.isRackTrack (track))
             return stop (track);
+
+        if (audioHost.isTakeTrack (track))
+            return audioHost.stopTrackTake (track, sample);
 
         return audioHost.stopTrackAt (track, slot, audioHost.beatsAtSample (sample));
     }

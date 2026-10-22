@@ -412,6 +412,21 @@ namespace wfg::audio
         /** Whether this track is a rack channel's rather than a voice. Any thread. */
         bool isRackTrack (int trackIndex) const noexcept;
 
+        /*  A PAD ON THE LIVE TAKE (namespace draft §105, AZR): the voice given
+            a sampling channel's take to play from `inSeconds` to `outSeconds`
+            of it, so many passes (nought for ever) - in place of its clips,
+            until the next file is armed on it. Message thread, the voice
+            silent; false when the channel has no take set aside tonight. */
+        bool setTrackTake (int trackIndex, const std::string& channelId,
+                           double inSeconds, double outSeconds, int loops);
+
+        /*  Whether the voice plays a take now; and its launch, stop (-1 for the
+            next block) and kill, at samples of Go.dot's count. Tick thread;
+            atomics. */
+        bool isTakeTrack (int trackIndex) const noexcept;
+        bool launchTrackTake (int trackIndex, std::int64_t sample) noexcept;
+        bool stopTrackTake (int trackIndex, std::int64_t sample) noexcept;
+
         /*  Whether a rack channel's gate lets anything through - open, or still
             ramping shut. False for a voice. Any thread. */
         bool isRackPassing (int trackIndex) const noexcept;

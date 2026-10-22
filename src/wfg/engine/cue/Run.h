@@ -250,6 +250,11 @@ namespace wfg::cue
         /** The cue names a file the bundle does not have. */
         inline constexpr const char* mediaMissing = "media-missing";
 
+        /*  A PAD ON A TAKE THERE IS NONE OF (namespace draft §105): the channel
+            it names records no take tonight - no recorder, none set aside, or
+            no such channel. */
+        inline constexpr const char* noTake = "no-take";
+
         /*  THE FILE IS THERE AND IS NOT AUDIO this build can decode (namespace
             draft §99, AXU): said apart from a missing one, because the remedy
             is a different file, not finding this one. */
@@ -402,6 +407,11 @@ namespace wfg::cue
             exactly as a hosted session does. PR 5.8 reads it for the timbre
             lookup; nothing publishes it yet. */
         std::string media;
+
+        /*  A PAD ON THE LIVE TAKE (namespace draft §105, AZR): the sampling
+            channel whose take it plays instead of a file, copied at the first
+            arm beside `media` and for its reason. Empty for a file. */
+        std::string take;
 
         std::string state { runState::armed };
 

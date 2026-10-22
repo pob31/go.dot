@@ -633,9 +633,55 @@ namespace wfg::cue
         }
     }
 
+    std::string Runner::takeChannelOf (const juce::ValueTree& cue)
+    {
+        return cue.hasType ("Media") ? cue.getProperty ("take").toString().toStdString() : std::string {};
+    }
+
+    RangeSpec Runner::takeSliceOf (const juce::ValueTree& cue) const
+    {
+        RangeSpec slice;
+        slice.loops = 1;
+
+        for (const auto& child : cue)
+        {
+            if (child.getType().toString() != "Range")
+                continue;
+
+            const auto id = child[idProperty].toString().toStdString();
+            const auto value = [this, &id] (const char* name)
+            {
+                return document.getAttribute ("/godot/range/" + id + "/" + name).value_or (std::string {});
+            };
+
+            slice.id = id;
+            slice.in = osc::parseDouble (value ("in")).value_or (0.0);
+            slice.out = osc::parseDouble (value ("out")).value_or (0.0);
+
+            //  rangesOf's reading: an absent row is one pass, never for ever.
+            const auto loops = value ("loops");
+            slice.loops = loops.empty() ? 1 : std::atoi (loops.c_str());
+
+            //  To the end is the whole take as far as it goes at the launch.
+            if (value ("toEnd") == "true")
+                slice.out = 0.0;
+
+            break;
+        }
+
+        return slice;
+    }
+
     std::vector<RangeSpec> Runner::rangesOf (const juce::ValueTree& cue) const
     {
         std::vector<RangeSpec> out;
+
+        /*  A PAD ON THE LIVE TAKE HAS NO RANGES FOR THE LAUNCHER (§105): its
+            slice is its voice's to play, and every boundary, wrap and slice
+            move the launcher's ranges bring would be placed on clips it does
+            not play. */
+        if (! takeChannelOf (cue).empty())
+            return out;
 
         for (const auto& child : cue)
         {
@@ -4427,11 +4473,22 @@ namespace wfg::cue
         ArmRequest request;
         request.runId = run.id;
         request.track = run.track;
-        request.mediaFile = mediaPathOf (run.media);
+        request.mediaFile = run.take.empty() ? mediaPathOf (run.media) : std::string {};
         request.levelDb = levelDb;
         request.routing = routing;
         request.ranges = rangesOf (cue);
         request.stretch = run.stretch;
+
+        /*  A PAD ON THE LIVE TAKE (namespace draft §105, AZR): the channel and
+            the slice, for its voice; `ranges` came back empty for it. */
+        if (! run.take.empty())
+        {
+            const auto slice = takeSliceOf (cue);
+            request.takeChannel = run.take;
+            request.takeIn = slice.in;
+            request.takeOut = slice.out;
+            request.takeLoops = slice.loops;
+        }
 
         /*  WHAT THE SLOTS WILL HOLD, kept on the run (namespace draft §33): the
             clips are written with these and never again while the cue sounds,
@@ -5644,7 +5701,11 @@ namespace wfg::cue
             named no file at its first arm, whose later arm may still read one. */
         bool waitingForRender = false;
 
-        if (run->media.empty())
+        //  A PAD ON THE LIVE TAKE (§105): its channel, and no file looked for.
+        if (run->media.empty() && run->take.empty())
+            run->take = takeChannelOf (cue);
+
+        if (run->media.empty() && run->take.empty())
         {
             /*  THE FILE THE CUE PLAYS (namespace draft §55, ADM): its own, or
                 the render of its open edit - none yet is a run that fails
@@ -5686,8 +5747,8 @@ namespace wfg::cue
             is still reading the next line. */
         const auto file = mediaPathOf (named);
 
-        if (named.empty()
-              || (! mediaFolder.empty() && ! juce::File (juce::String (file)).existsAsFile()))
+        if (run->take.empty()
+              && (named.empty() || (! mediaFolder.empty() && ! juce::File (juce::String (file)).existsAsFile())))
         {
             engine.submit (origin::engine, "run.failed",
                            { osc::Value::string (runId),

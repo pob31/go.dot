@@ -2796,6 +2796,104 @@ TEST_CASE ("rack: a gap in the blocks brings the input back over the de-click ra
     host.stop();
 }
 
+TEST_CASE ("sampling: a pad on a voice plays a slice of the live take through the voice's own output, and is done at its out (§105)")
+{
+    /*  Namespace draft §105, AZR: a voice given a sampling channel's take
+        plays the slice at the head of its own chain - here to the second
+        output, the channel looping on the first - from its launch's sample,
+        once, and is no longer playing at its out. */
+    ScopedStorage storage;
+    audio::AudioHost host { storage.path() };
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 64;
+    settings.outputChannels = 2;
+    settings.inputChannels = 2;
+    REQUIRE (host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 2;
+
+    audio::RackChannelSpec channel;
+    channel.id = "SM000002";
+    channel.name = "Pads";
+    channel.takeSeconds = 1.0;
+    channel.layers = 1;
+    spec.rack.push_back (channel);
+    REQUIRE (host.buildEdit (spec));
+    CHECK (host.inspectNodeIds().ok());
+
+    const auto rack = host.rackTrackOf ("SM000002");
+    auto take = host.takeOf ("SM000002");
+    REQUIRE (take != nullptr);
+
+    //  THE CHANNEL: its input to the first output, its gate open - a mic cue's arm and launch.
+    {
+        auto* matrix = host.trackMatrix (rack);
+        REQUIRE (matrix != nullptr);
+        matrix->setLevelDb (0.0f);
+        matrix->setGain (0, 0, 1.0f);
+        matrix->snapToTargets();
+        host.setRackSource (rack, 0, 1);
+        host.openRackGate (rack, -1);
+    }
+
+    LastSamples sink;
+    host.setBlockSink (&sink);
+
+    const std::vector<float> steady (64, 0.5f), silent (64, 0.0f);
+    const float* input[] { steady.data(), silent.data() };
+    const float* quiet[] { silent.data(), silent.data() };
+    const auto run = [&host] (const float* const* inputs, int blocks)
+    {
+        for (int i = 0; i < blocks; ++i)
+            host.processBlock (inputs, 2);
+    };
+
+    //  A tenth of a second and more of a steady half, recorded and closed.
+    REQUIRE (take->post ({ audio::Looper::Verb::record, -1, 0, 0 }));
+    run (input, 100);
+    REQUIRE (take->post ({ audio::Looper::Verb::loop, -1, 0, 0 }));
+    run (quiet, 20);
+    REQUIRE (take->state() == audio::TakeState::looping);
+
+    //  THE VOICE: to the second output only, given the slice - and refused a channel with no take.
+    {
+        auto* matrix = host.trackMatrix (0);
+        REQUIRE (matrix != nullptr);
+        matrix->setLevelDb (0.0f);
+        matrix->setGain (0, 1, 1.0f);
+        matrix->snapToTargets();
+    }
+
+    CHECK_FALSE (host.setTrackTake (0, "NQNQNQNQ", 0.0, 0.05, 1));
+    CHECK_FALSE (host.isTakeTrack (0));
+    REQUIRE (host.setTrackTake (0, "SM000002", 0.0, 0.05, 1));
+    CHECK (host.isTakeTrack (0));
+    CHECK_FALSE (host.isTrackPlaying (0));
+
+    //  Nothing on the second output before the launch's sample; the take's half once it has risen.
+    run (quiet, 5);
+    CHECK (sink.last[1].load() == doctest::Approx (0.0f));
+
+    REQUIRE (host.launchTrackTake (0, host.clock().samplesElapsed() + 640));
+    CHECK (host.isTrackPlaying (0));
+    run (quiet, 5);
+    CHECK (sink.last[1].load() == doctest::Approx (0.0f));
+    run (quiet, 10);
+    CHECK (sink.last[1].load() == doctest::Approx (0.5f).epsilon (0.001));
+
+    //  A twentieth of a second is under forty blocks: then silence, and done.
+    run (quiet, 40);
+    CHECK (sink.last[1].load() == doctest::Approx (0.0f));
+    CHECK_FALSE (host.isTrackPlaying (0));
+
+    host.setBlockSink (nullptr);
+    host.stop();
+}
+
 TEST_CASE ("sampling: a take recorded through the plugin before the recorder loops through the plugin after, and a rebuild keeps it")
 {
     /*  Phase 9c, stage 9c.2 (namespace draft 19.2, decision BZ). A rack

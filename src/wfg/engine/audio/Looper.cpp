@@ -714,6 +714,39 @@ namespace wfg::audio
         }
     }
 
+    std::int64_t Looper::readLive (std::int64_t from, int frames, float* left, float* right) const noexcept
+    {
+        //  Paired with publish()'s release: what it published, and every sample written before it.
+        (void) publishedSettled.load (std::memory_order_acquire);
+
+        const auto head = std::min (publishedLength.load (std::memory_order_relaxed), takeSamples);
+        const auto top = slots > 0 ? std::clamp (publishedLayers.load (std::memory_order_relaxed), 0, slots - 1) : -1;
+        const auto second = channelsHeld > 1 ? 1 : 0;
+
+        for (int n = 0; n < frames; ++n)
+        {
+            const auto at = from + n;
+            auto leftSum = 0.0f, rightSum = 0.0f;
+
+            if (at >= 0 && at < head)
+            {
+                for (int slot = 0; slot <= top; ++slot)
+                {
+                    if (! isFresh (slot, at))
+                        continue;
+
+                    leftSum += samplesOf (slot, 0)[at];
+                    rightSum += samplesOf (slot, second)[at];
+                }
+            }
+
+            left[n] = leftSum;
+            right[n] = rightSum;
+        }
+
+        return std::max<std::int64_t> (0, head);
+    }
+
     bool Looper::isSettled() const noexcept
     {
         return publishedSettled.load (std::memory_order_acquire);

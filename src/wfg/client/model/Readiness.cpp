@@ -115,6 +115,12 @@ namespace wfg::client::model
                      std::string ("Missing: the file is not in the show's media, or Go.dot cannot read it - GO will ")
                          + (picture (kind) ? "show nothing" : "play nothing") };
 
+        //  A pad on the live take whose channel records none tonight (namespace draft §105). Words mine.
+        if (prepare == "partial" && error == "no-take")
+            return { Icon::missing, "no take",
+                     "No take: its FX rack records no take tonight - give it a recorder in Show settings > Rack,"
+                     " and Load now - GO will play nothing" };
+
         //  Any other refusal: said as not ready, never as a file that is missing.
         if (prepare == "partial" && ! error.empty())
             return { Icon::missing, "not ready",

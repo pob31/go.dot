@@ -20,6 +20,8 @@
 #include <wfg/engine/document/Sequence.h>
 
 #include <cmath>
+#include <string>
+#include <vector>
 
 namespace wfg::cue
 {
@@ -61,6 +63,44 @@ namespace wfg::cue
         else                         return false;
 
         return true;
+    }
+
+    namespace
+    {
+        void padsOn (const juce::ValueTree& node, const std::string& channelId, std::vector<std::string>& out)
+        {
+            if (node.hasType ("Media") && node.getProperty ("take").toString().toStdString() == channelId)
+                out.push_back (node.getProperty ("id").toString().toStdString());
+
+            for (const auto& child : node)
+                padsOn (child, channelId, out);
+        }
+
+        /*  THE PADS ON A TAKE MOVED ONTO ITS KEPT FILE (namespace draft §105,
+            AZS): each one's file the kept one, its take none, and two wide if
+            nothing said how wide. The refusal's reason, or nothing. */
+        std::string movePadsOnto (doc::ShowDocument& document, const std::string& channelId, const std::string& file)
+        {
+            std::vector<std::string> pads;
+            padsOn (document.root(), channelId, pads);
+
+            for (const auto& id : pads)
+            {
+                const auto base = "/godot/cue/" + id + "/";
+
+                if (const auto set = document.setAttribute (base + "file", file); ! set.ok)
+                    return set.reason;
+
+                if (const auto set = document.setAttribute (base + "take", ""); ! set.ok)
+                    return set.reason;
+
+                if (document.getAttribute (base + "channels").value_or ("0") == "0")
+                    if (const auto set = document.setAttribute (base + "channels", "2"); ! set.ok)
+                        return set.reason;
+            }
+
+            return {};
+        }
     }
 
     void registerTakeCommands (CommandRegistry& registry, TakeTable& takes, RunTable& runs,
@@ -188,6 +228,107 @@ namespace wfg::cue
                             return Outcome::ok (args);
                         } });
 
+        /*  A PAD ON THE LIVE TAKE (namespace draft §105, AZQ, AZR): a media cue
+            after the one given - or the one sounding on the channel - whose
+            sound is this channel's take, its slice a range at the loop's points
+            as they stand, played once, routed as a kept take is. While the take
+            still records its points are nought and nought, and the pad is the
+            whole take as far as it has gone when it is fired. The points and
+            the identifiers drawn ride on the record, so a replay - which has
+            no take - makes the same cue. */
+        registry.add ({ "take.pad",
+                        "A media cue after the one given, or the one sounding on the channel, that plays a slice"
+                        " of the channel's live take - the loop's points as they stand, or in and out given - once.",
+                        { { "channel", 's', false }, { "after", 's', true }, { "in", 'd', true }, { "out", 'd', true },
+                          { "cue", 's', true }, { "range", 's', true }, { "route", 's', true } },
+                        true,
+                        [&takes, &runs, &document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto channelId = args[0].getString();
+                            const auto channel = samplingChannelOf (document, channelId);
+
+                            if (! channel.declared)
+                                return Outcome::rejected (reason::unknownId);
+
+                            if (! channel.samples())
+                                return Outcome::rejected (reason::badValue);
+
+                            if (document.isLocked())
+                                return Outcome::rejected (reason::locked);
+
+                            const auto& take = takes.of (channelId);
+                            const auto given = [&args] (std::size_t index)
+                            {
+                                return args.size() > index ? args[index].getString() : std::string {};
+                            };
+
+                            const auto in = args.size() > 2 ? args[2].getFloat64() : take.loopIn;
+                            const auto out = args.size() > 3 ? args[3].getFloat64() : take.loopOut;
+
+                            auto afterCue = given (1);
+
+                            if (afterCue.empty())
+                                if (const auto* holder = runs.holderOf (channelId))
+                                    afterCue = holder->cue;
+
+                            const auto after = afterCue.empty() ? juce::ValueTree() : document.findById (afterCue);
+                            const auto parent = after.isValid() ? after.getParent() : juce::ValueTree {};
+                            const auto parentId = parent.isValid() ? parent.getProperty ("id").toString().toStdString()
+                                                                   : std::string {};
+
+                            if (parentId.empty())
+                                return Outcome::rejected (reason::unknownId);
+
+                            auto position = 0;
+
+                            for (const auto& child : parent)
+                            {
+                                if (child == after)
+                                    break;
+
+                                if (doc::isSequenceChild (child))
+                                    ++position;
+                            }
+
+                            const auto name = (channel.name.empty() ? channelId : channel.name) + " pad";
+                            const auto cue = document.createCue (parentId, position + 1, "media", name, given (4));
+
+                            if (! cue.ok)
+                                return Outcome::rejected (cue.reason);
+
+                            const auto base = "/godot/cue/" + cue.id + "/";
+
+                            for (const auto& [row, value] : { std::pair<const char*, std::string> { "take", channelId },
+                                                              std::pair<const char*, std::string> { "channels", "2" } })
+                                if (const auto set = document.setAttribute (base + row, value); ! set.ok)
+                                    return Outcome::rejected (set.reason);
+
+                            //  THE SLICE, when there is one: no range is the whole take.
+                            std::string rangeId;
+
+                            if (out > in)
+                            {
+                                const auto range = document.createRange (cue.id, in, out, given (5));
+
+                                if (! range.ok)
+                                    return Outcome::rejected (range.reason);
+
+                                rangeId = range.id;
+                            }
+
+                            const auto route = document.defaultMediaRoute (cue.id, 2, given (6));
+
+                            if (! route.ok)
+                                return Outcome::rejected (route.reason);
+
+                            //  WHAT IT TOOK AND DREW, in the record, so a replay - which has no take - makes the same.
+                            std::vector<osc::Value> applied { args[0], osc::Value::string (afterCue),
+                                                              osc::Value::float64 (in), osc::Value::float64 (out),
+                                                              osc::Value::string (cue.id), osc::Value::string (rangeId),
+                                                              osc::Value::string (route.id) };
+                            return Outcome::ok (applied);
+                        } });
+
         registry.add ({ "take.kept",
                         "The writer made a kept take a file in the show's media, or says why it could not - so a"
                         " replay knows the name it found - and for a Keep as cue, the media cue, range and route"
@@ -205,6 +346,17 @@ namespace wfg::cue
                             const auto file = args[1].getString();
                             const auto error = args[2].getString();
                             const auto request = takes.kept (channelId, file, error);
+
+                            /*  THE PADS ON THIS TAKE MOVE ONTO THE FILE (namespace
+                                draft §105, AZS): each media cue playing it plays
+                                the kept file instead, its slice - its first range -
+                                unchanged, since the file is the take from its first
+                                sample. In this same step, so one undo takes the
+                                Keep back whole; not under the lock, which refuses
+                                every edit - the pads then go on reading the take. */
+                            if (error.empty() && ! file.empty() && ! document.isLocked())
+                                if (const auto moved = movePadsOnto (document, channelId, file); ! moved.empty())
+                                    return Outcome::rejected (moved);
 
                             if (! error.empty() || ! request.has_value() || ! request->asCue)
                                 return Outcome::ok (args);
@@ -281,6 +433,12 @@ namespace wfg::cue
                             counted ("cue");
 
                             if (const auto set = document.setAttribute ("/godot/cue/" + cue.id + "/file", file); ! set.ok)
+                                return Outcome::rejected (set.reason);
+
+                            /*  TWO WIDE, as a take is (§105): written into the cue as
+                                an import writes it, so a send or a direct out knows
+                                how many channels it routes. */
+                            if (const auto set = document.setAttribute ("/godot/cue/" + cue.id + "/channels", "2"); ! set.ok)
                                 return Outcome::rejected (set.reason);
 
                             const auto range = document.createRange (cue.id, request->loopIn, request->loopOut, given (4, "range"));

@@ -10495,6 +10495,40 @@ TEST_CASE ("client: a sampling channel says its recorder, what it sets aside, an
     CHECK (model::secondsWords (10) == "10 s");
     CHECK (model::secondsWords (90) == "1 min 30 s");
     CHECK (model::secondsWords (600) == "10 min");
+
+    /*  A PAD ON THE LIVE TAKE (namespace draft §105, AZR): a media cue's
+        "live take" is a menu of the channels that record, and a mic cue's
+        channel reads "FX rack" (AZK). */
+    const auto listId = model::readTransport (*rig.publish (11)).listId;
+    REQUIRE_FALSE (listId.empty());
+    REQUIRE (rig.apply (11, "window", "cue.create", { V::string (listId), V::int32 (0), V::string ("media"),
+                                                     V::string ("Pad") }).applied == 1);
+    REQUIRE (rig.apply (12, "window", "cue.create", { V::string (listId), V::int32 (1), V::string ("mic"),
+                                                     V::string ("Voice") }).applied == 1);
+    const auto order = model::text (*rig.publish (13), "/godot/list/" + listId + "/order");
+    const auto media = model::createdAt (order, 0);
+    const auto mic = model::createdAt (order, 1);
+
+    const auto fieldOf = [&rig] (std::int64_t tick, const std::string& cueId, const std::string& name)
+    {
+        model::Field found;
+
+        for (const auto& block : model::inspect (*rig.publish (tick), cueId).blocks)
+            for (const auto& field : block.fields)
+                if (field.name == name)
+                    found = field;
+
+        return found;
+    };
+
+    const auto take = fieldOf (14, media, "take");
+    CHECK (take.label == "live take");
+    CHECK (take.control == model::Control::channelRef);
+    REQUIRE (take.choices.size() == 2u);
+    CHECK (take.choices[1].first == "K1000001");
+    CHECK (take.choices[1].second == "Loops \xc2\xb7 take");
+
+    CHECK (fieldOf (15, mic, "channel").label == "FX rack");
 }
 
 //==============================================================================

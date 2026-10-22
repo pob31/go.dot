@@ -20,8 +20,16 @@ namespace wfg::client::ui
     TakePanelComponent::TakePanelComponent (const model::Theme& themeToUse, Actions actionsToUse)
         : theme (themeToUse), actions (std::move (actionsToUse))
     {
-        for (auto* button : { &rec, &loop, &overdub, &undo, &clear, &keep, &keepAsCue })
+        for (auto* button : { &rec, &loop, &overdub, &undo, &clear, &keep, &keepAsCue, &pad })
             addAndMakeVisible (*button);
+
+        /*  A PAD ON THE LIVE TAKE (namespace draft §105, AZQ-AZR): a cue after
+            this one that plays the take between the loop's points as they
+            stand - the whole take while it still records - and goes on reading
+            it until Keep moves it onto the file. */
+        pad.onClick = [this] { if (take.present && actions.pad) actions.pad (take.channelId, take.cueId); };
+        pad.setTooltip ("Add a cue after this one that plays the live take between the loop's points -"
+                        " put it in a sampler bank, a cart or on a key");
 
         /*  KEEP (§19.8): the take made a file in the show's media; as a cue, a
             media cue after this one that loops it between the points. */
@@ -80,6 +88,7 @@ namespace wfg::client::ui
         //  A change of the show, which the lock refuses; the file alone is not one.
         keep.setEnabled (take.mayKeep());
         keepAsCue.setEnabled (take.mayKeep() && ! take.locked);
+        pad.setEnabled (take.mayPad());
     }
 
     void TakePanelComponent::pressed (const char* verb)
@@ -106,6 +115,8 @@ namespace wfg::client::ui
         keepAsCue.setBounds (strip.removeFromRight (juce::roundToInt (96.0 * theme.type)));
         strip.removeFromRight (gap);
         keep.setBounds (strip.removeFromRight (width));
+        strip.removeFromRight (gap);
+        pad.setBounds (strip.removeFromRight (juce::roundToInt (104.0 * theme.type)));
     }
 
     juce::Rectangle<int> TakePanelComponent::wordsArea() const
@@ -113,7 +124,7 @@ namespace wfg::client::ui
         const auto row = juce::roundToInt (theme.row * theme.type);
         auto strip = getLocalBounds().removeFromTop (row).reduced (10, 0);
         strip.setLeft (clear.getRight() + juce::roundToInt (12.0 * theme.type));
-        strip.setRight (keep.getX() - juce::roundToInt (12.0 * theme.type));
+        strip.setRight (pad.getX() - juce::roundToInt (12.0 * theme.type));
         return strip;
     }
 

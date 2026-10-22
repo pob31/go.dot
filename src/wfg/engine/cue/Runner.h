@@ -319,6 +319,16 @@ namespace wfg::cue
         int firstInput = -1;
         int inputWidth = 1;
 
+        /*  A PAD ON THE LIVE TAKE (namespace draft §105, AZR): no file - the
+            sampling channel whose take it plays, and the slice, its first
+            range's in, out and passes (nought for ever; an out not after the in
+            is the whole take). `ranges` is empty: the slice is the voice's to
+            play, not the launcher's. */
+        std::string takeChannel;
+        double takeIn = 0.0;
+        double takeOut = 0.0;
+        int takeLoops = 1;
+
         /*  THE CUE'S MODE (namespace draft §22.2): timestretch when true, the
             speed then changing how long the sound takes and not its pitch;
             varispeed when false. Read at the arm and applied there, because a
@@ -2076,6 +2086,13 @@ namespace wfg::cue
             after the end of the loop the arm made, which would play the loop's
             first moments again. */
         std::vector<RangeSpec> rangesOf (const juce::ValueTree& cue) const;
+
+        /*  A PAD ON THE LIVE TAKE (namespace draft §105, AZR): the sampling
+            channel a media cue plays instead of its file, empty for none; and
+            its slice, the first range as written - which `rangesOf` does not
+            hand the launcher for such a cue, the slice being its voice's. */
+        static std::string takeChannelOf (const juce::ValueTree& cue);
+        RangeSpec takeSliceOf (const juce::ValueTree& cue) const;
 
         /*  HOW LONG WHAT THE CUE PLAYS IS, for its ranges' ends: the log's
             lengths, which a replay reads too, else the lengths learned since -

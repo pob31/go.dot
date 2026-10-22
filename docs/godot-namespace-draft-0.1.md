@@ -33451,6 +33451,22 @@ Mine *(proposed)*, the author's to overrule:
   take was not set aside: 564 GB is more than this computer can spare - a shorter take or fewer layers*. The
   graph is built as the show asks all the same, so it does not read as differing from it. What the system
   refuses even under the line (`std::bad_alloc`) is said in the same words.
+- **AZY** **A pad is made from the Take panel, *Pad from loop***: a media cue after the mic cue, its `take`
+  the channel, its slice a range at the loop's points as they stand, played once, two wide and routed as a
+  kept take is (`take.pad`). While the take still records its points are nought and nought, and the pad is
+  then the whole take - as far as it has gone when the pad is fired, so it never chases the record head. A
+  media cue's *live take* row, a menu of the channels that record, makes any sound a pad the same way.
+- **AZZ** **A pad's slice is its first range, its voice's to play**: the launcher sees no ranges for it (its
+  boundaries, wraps and slice moves are placed on clips a pad does not play), so a second range, the start
+  offset, the speed, reverse, a level lane on file time and a paused bed's place are not a pad's. It rises
+  and falls over two milliseconds at its ends and a stop, and a pass followed by another crossfades into it
+  over ten, as the take's own loop does.
+- **BAA** **A pad's voice reads the take from another track's audio thread** behind what the recorder
+  published with its last block - the take below the record head and the closed layers. Its one race is a
+  closed layer's falling tail and an Undo's fade, ten milliseconds each, read as the sample before or after.
+- **BAB** **A channel with no take tonight fails the pad's run `no-take`**, said as *no take* on the cue as a
+  missing file is - no recorder, none set aside (AZX), or no such channel. A take that is there and empty
+  plays silence.
 
 ### 105.2 Rows and commands
 
@@ -33458,6 +33474,11 @@ Mine *(proposed)*, the author's to overrule:
 |---|---|---|---|
 | `/godot/cue/<id>/fxHideUnused` | `T`, false | rw, show | a media or a mic cue's: its FX panel leaves out what it has no insert for |
 | `/godot/slot/<id>/takeSeconds` | `d`, 0 s (0..86400) | rw, show | was 0..600 (§19.5): typed, up to a day (AZP) |
+| `/godot/cue/<id>/take` | `s`, empty | rw, show | a media cue's: the sampling channel whose take it plays instead of its file (AZR) |
+
+`take.pad <channel> [after] [in] [out] [cue] [range] [route]` - a pad after the cue given, or the one
+sounding on the channel, at the loop's points or those given (AZY); what it took and drew rides on the
+record, so a replay, which has no take, makes the same cue. A run's error gains `no-take` (BAB).
 
 `cue.plugin <cue> <name> <identifier> <format> <path> [plugin] [fx]` - a known plugin added where the cue's
 chain lives and switched in on it (AZN, AZV).
@@ -33482,7 +33503,18 @@ chain lives and switched in on it (AZN, AZV).
   `prepare` would set aside, asked first by `refreshTakes`, which keeps the running total under half of
   `SystemStats::getMemorySizeInMegabytes`.
 
-Words mine, for the author to keep or change: *Type a length...*, *The longest take*, *Add plugin...*, *Not in the audio yet: Load now builds it
+- **The pad**: `Looper::readLive` is what a pad hears (BAA). Every voice carries a `TakeReaderPlugin` ahead
+  of its EQ, handing each block to the voice's `TakeVoice` - the slice from the arm, the launch, stop and
+  kill from the tick thread, each with a serial so it lands on the launch it was meant for, and `isPlaying`
+  until the last sample, which is the Runner's edge. `HostPlayer` arms a request with `takeChannel` through
+  `AudioHost::setTrackTake`, and launches, stops and kills such a voice there; a file armed on the voice
+  takes it back. The Runner reads a Media cue's `take` (`takeChannelOf`), copies it to the run beside
+  `media`, looks for no file, and hands the slice (`takeSliceOf`) where `rangesOf` hands the launcher
+  nothing; a pad's source is two wide (`sourceChannelsOf`). Keep's `take.kept` moves every pad on the take
+  onto the file in its own step, and a Keep as cue is now written two wide too, so a send or a direct out
+  on it knows what it routes.
+
+Words mine, for the author to keep or change: *Pad from loop*, *live take*, *no take*, *<channel> pad*, *Type a length...*, *The longest take*, *Add plugin...*, *Not in the audio yet: Load now builds it
 in.*, *... is sounding: Load now waits for nothing to sound.*, *2 unused plugins hidden*, and the panel
 tooltips.
 
@@ -33492,7 +33524,9 @@ tooltips.
 |---|---|---|
 | FX.A-FX.D | FX rack; Edit switches in; Hide unused plugins; add from the panel and load if quiet (PluginSetTests, RunPaneUiTests, ClientTests, MicTests) | |
 | FX.E | the longest take typed, never more than half the machine (LooperTests, ProxyTests, ClientTests) | |
-| FX.F | pads on the live take | |
+| FX.F | pads on the live take (LooperTests, ProxyTests, TakeTests, ClientTests) | |
 
 Owed: the author's try - a plugin added from a media cue's panel and from a mic cue's, with nothing playing
-and with a cue sounding; Edit... on an insert switched out; Hide unused plugins on a show with a long set.
+and with a cue sounding; Edit... on an insert switched out; Hide unused plugins on a show with a long set; a
+take typed at an hour; pads made from the loop while the take records and after it closed, put in a sampler
+bank and fired from the D700's pads, then Keep.

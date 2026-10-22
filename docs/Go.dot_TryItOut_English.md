@@ -121,7 +121,7 @@ Everything below is built. Sections marked new arrived after v0.1 and need the n
 | --- | --- | --- |
 | Mic cues | Bring a named input up through a rack channel with its own plugins, picked on the cue's *FX rack* line | *Add > mic*; *Show settings > Inputs*, *Rack* |
 | Aux channels (new) | A reverb or delay return the cues send into: its own plugins, level, output and sends, kept with the show; a fade can move them for the night. Click an aux's name in a cue's sends panel to open the aux itself | *Show settings > Rack*: + Mono aux, + Stereo aux; a cue's *sends* panel |
-| Live sampling | Record sound during the show, then loop it, overdub it or clear it. A take can be as long as you type, up to a day (new) | *Take* panel; *transport > On a take*; *Show settings > Rack* for its length |
+| Live sampling | Record sound during the show, then loop it, overdub it or clear it. A take can be as long as you type, up to a day (new). *Pad from loop* makes a cue that plays a slice of the take, even while it records: put it in a sampler bank, a cart or on a key; *Keep* later moves it onto the kept file (new) | *Take* panel; *transport > On a take*; *Show settings > Rack* for its length |
 | Live recorder | Keep the moment of every cue you fire during a run, as a take | Ctrl+Shift+R |
 
 ### Talking to the rest of the rig

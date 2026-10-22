@@ -3558,6 +3558,15 @@ block of a loop with sixteen layers costs 56 µs of its 2667; a wrap on a sine s
 the sine does; and a take starts on the sample Rec was placed at. What waits for the bench is the
 D700's own buttons and the page's law for a point.
 
+*Added at the author's direction, 2026-10-22 (namespace draft §105):* the longest take is typed, up to a
+day, and the takes together are given no more than half the computer's memory, a channel past that line
+recording nothing and saying why. And a take plays from **pads**: a media cue may name a sampling
+channel's take instead of a file, and plays a slice of it - its first range, kept in the show though the
+take is tonight's - as a sampler member, a cart cue or a key plays any sound, through its own EQ,
+plugins and sends. A pad hears the take and its closed layers mixed and never past the record head, so
+one can fire while the take still records; *Pad from loop* on the take's panel makes one at the loop's
+points; and Keep moves every pad on the take onto the kept file, its slice unchanged, in one step.
+
 ### 3.32 Doh! — taking back the last GO
 
 *Added in 0.8, at the author's direction (2026-09-30), with his answers of that evening and of

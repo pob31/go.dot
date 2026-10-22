@@ -1052,6 +1052,12 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="take">
+          <a:documentation>The sampling channel whose live take this cue plays instead of its file, by identifier (namespace draft 105, AZR): a pad on the take, which a sampler bank, a cart or a key plays as any sound. Its first range is the slice it keeps, seconds into the take (AZQ) - with none, the whole take. It hears the take and its closed layers mixed, and never past the record head while the take records (AZT). Keep moves it onto the kept file, the slice unchanged (AZS). Empty plays its file.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="velocity">
           <a:documentation>sampler member: whether the velocity of a press sets the level the clip starts at (author, 2026-09-23). Off, a press starts at the member&apos;s initialLevel, which is where its fader already is. On, a press at 127 starts at 0 dB and a press at one at velocityFloor, in a straight line between them in dB. For a picture the level is how solid it starts, along the fader travel.</a:documentation>
           <choice>

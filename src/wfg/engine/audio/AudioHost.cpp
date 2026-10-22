@@ -24,6 +24,7 @@
 #include <wfg/engine/audio/LiveInputPlugin.h>
 #include <wfg/engine/audio/Looper.h>
 #include <wfg/engine/audio/LooperPlugin.h>
+#include <wfg/engine/audio/TakeReaderPlugin.h>
 #include <wfg/engine/audio/ProxyPlugin.h>
 #include <wfg/engine/audio/LoopVoice.h>
 #include <wfg/engine/audio/RateVoice.h>
@@ -349,6 +350,7 @@ namespace wfg::audio
             engine->getPluginManager().createBuiltInType<ProxyPlugin>();
             engine->getPluginManager().createBuiltInType<LiveInputPlugin>();
             engine->getPluginManager().createBuiltInType<LooperPlugin>();
+            engine->getPluginManager().createBuiltInType<TakeReaderPlugin>();
             engine->getPluginManager().createBuiltInType<AuxTapPlugin>();
             engine->getPluginManager().createBuiltInType<AuxInputPlugin>();
 
@@ -474,6 +476,7 @@ namespace wfg::audio
             rateVoices.clear();
             slotLoops.clear();
             loopVoices.clear();
+            takeVoices.clear();
             context = nullptr;
 
             /*  THE TAKES, with no graph left to reach them (Phase 9c, §19.2). */
@@ -629,6 +632,27 @@ namespace wfg::audio
                                                             te::DeleteExistingClips::yes))
                             makeClipPlayAtItsOwnRate (*clip);
                     }
+                }
+
+                /*  A PAD ON THE LIVE TAKE, AT THE HEAD (namespace draft §105,
+                    AZR): every voice can play a slice of a take instead of its
+                    clips, ahead of everything a file goes through. Adds
+                    nothing until an arm gives it a slice. */
+                takeVoices.push_back (std::make_unique<TakeVoice>());
+
+                auto readerPlugin = track->pluginList.insertPlugin (
+                    TakeReaderPlugin::create (spec.channelsPerTrack), -1);
+
+                if (auto* reader = dynamic_cast<TakeReaderPlugin*> (readerPlugin.get()))
+                    reader->bind (takeVoices.back().get(), &tapView);
+                else
+                {
+                    error = "the take reader would not insert";
+                    edit.reset();
+                    matrices.clear();
+                    trackLanes.clear();
+                    eqs.clear();
+                    return false;
                 }
 
                 /*  THE EQ, BEFORE THE OUTPUT STAGE (Phase 9a, decision AD): one
@@ -1543,6 +1567,7 @@ namespace wfg::audio
             rateVoices.clear();
             slotLoops.clear();
             loopVoices.clear();
+            takeVoices.clear();
             stretchLimit.store (0.0, std::memory_order_relaxed);
             stretchInputLatency.store (0, std::memory_order_relaxed);
             stretchOutputLatency.store (0, std::memory_order_relaxed);
@@ -2096,6 +2121,10 @@ namespace wfg::audio
             const juce::File file { juce::String (mediaFile) };
             refusal = AudioHost::ArmRefusal::none;
 
+            //  A FILE ARMED ON THE VOICE: it plays its clips again, not a take (§105).
+            if (auto* voice = takeVoiceOf (trackIndex))
+                voice->clearSource();
+
             if (edit == nullptr || ! file.existsAsFile())
             {
                 error = "there is no graph, or \"" + mediaFile + "\" is not a file";
@@ -2524,6 +2553,10 @@ namespace wfg::audio
             costs two heap allocations. */
         bool isTrackPlaying (int trackIndex) const
         {
+            //  A pad on the take sounds until its voice has played its last sample (§105).
+            if (const auto* voice = takeVoiceOf (trackIndex); voice != nullptr && voice->isPlaying())
+                return true;
+
             for (int slot = 0; slot < editSlots; ++slot)
             {
                 const auto at = handleIndex (trackIndex, slot);
@@ -2702,6 +2735,16 @@ namespace wfg::audio
             last question, and the answer must still be there. Made by buildEdit
             and let go by stop, like the handles, never while a block runs. */
         std::vector<std::unique_ptr<RateVoice>> rateVoices;
+
+        /*  A PAD ON THE LIVE TAKE PER VOICE (§105), read by the voice's
+            TakeReaderPlugin; made with the voices and let go of after the Edit. */
+        std::vector<std::unique_ptr<TakeVoice>> takeVoices;
+
+        TakeVoice* takeVoiceOf (int trackIndex) const noexcept
+        {
+            return trackIndex >= 0 && trackIndex < static_cast<int> (takeVoices.size())
+                     ? takeVoices[static_cast<std::size_t> (trackIndex)].get() : nullptr;
+        }
         std::vector<std::unique_ptr<SlotSpeed>> slotSpeeds;
         std::atomic<double> stretchLimit { 0.0 };
 
@@ -2973,6 +3016,56 @@ namespace wfg::audio
         return impl->keptTakes();
     }
 
+    bool AudioHost::setTrackTake (int trackIndex, const std::string& channelId,
+                                  double inSeconds, double outSeconds, int loops)
+    {
+        auto* voice = impl->takeVoiceOf (trackIndex);
+        const auto take = impl->takeFor (channelId);
+
+        if (voice == nullptr || take == nullptr)
+            return false;
+
+        /*  IN SAMPLES OF THE TAKE, at the rate the take was set aside at. The
+            take outlives this voice's hold on it: the store lets go of it only
+            in buildEdit, after the Edit - and with it this voice - is gone. */
+        const auto rate = take->shape().sampleRate > 0.0 ? take->shape().sampleRate : 48000.0;
+        const auto inTake = [rate] (double seconds)
+        {
+            return static_cast<std::int64_t> (std::llround (std::max (0.0, seconds) * rate));
+        };
+
+        voice->setSource (take.get(), inTake (inSeconds), inTake (outSeconds), loops);
+        return true;
+    }
+
+    bool AudioHost::isTakeTrack (int trackIndex) const noexcept
+    {
+        const auto* voice = impl->takeVoiceOf (trackIndex);
+        return voice != nullptr && voice->hasSource();
+    }
+
+    bool AudioHost::launchTrackTake (int trackIndex, std::int64_t sample) noexcept
+    {
+        auto* voice = impl->takeVoiceOf (trackIndex);
+
+        if (voice == nullptr || ! voice->hasSource())
+            return false;
+
+        voice->launchAt (sample);
+        return true;
+    }
+
+    bool AudioHost::stopTrackTake (int trackIndex, std::int64_t sample) noexcept
+    {
+        auto* voice = impl->takeVoiceOf (trackIndex);
+
+        if (voice == nullptr || ! voice->isPlaying())
+            return false;
+
+        voice->stopAt (sample);
+        return true;
+    }
+
     void AudioHost::setRackSource (int trackIndex, int firstInput, int width) noexcept
     {
         if (auto* stage = impl->liveInputOf (trackIndex))
@@ -3040,7 +3133,14 @@ namespace wfg::audio
             ten-sample fade still reaches the chain after the reset, which is
             what the level is for: silence at the output stage a tick on,
             whatever the chain was seeded with or could not let go of. */
-        const auto stopped = impl->stopEverySlot (trackIndex);
+        auto stopped = impl->stopEverySlot (trackIndex);
+
+        //  A pad on the take: silence at the next block (§105).
+        if (auto* voice = impl->takeVoiceOf (trackIndex); voice != nullptr && voice->isPlaying())
+        {
+            voice->kill();
+            stopped = true;
+        }
 
         auto* matrix = trackMatrix (trackIndex);
         const auto alreadySilent = matrix != nullptr && matrix->levelDb() <= CueMatrix::silenceDb;

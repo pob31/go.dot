@@ -88,7 +88,7 @@ namespace wfg::client::model
                     fades. The speed and its mode sit after where the file
                     starts: two more things said about how the file is played
                     (namespace draft §22.7). */
-                { "media",   { "file", "lockedTo", "channels", "directOut",
+                { "media",   { "file", "take", "lockedTo", "channels", "directOut",
                                "level", "startOffset", "rate", "rateMode", "delay", "delayBy",
                                "dca", "dcaCurve", "dcaOffset", "strip",
                                "initialLevel", "release",
@@ -252,6 +252,8 @@ namespace wfg::client::model
                 //  A SOUND'S RANGES, HOW THEY WRAP (§69, AOJ): the implementer's words, for the author.
                 { "rangeJoin", "range wraps" },
                 { "rangeJoinLength", "wrap crossfade" },
+                //  A PAD ON THE LIVE TAKE (namespace draft §105, AZR): the implementer's words, for the author.
+                { "take", "live take" },
             };
 
             return table;
@@ -1119,6 +1121,17 @@ namespace wfg::client::model
                             field.choices.push_back ({ channel.id, channel.name + " \xc2\xb7 "
                                                                       + channel.classWord() });
                 }
+                else if (field.name == "take")
+                {
+                    /*  THE TAKE A PAD PLAYS (namespace draft §105, AZR): every
+                        rack channel that records one, by name. */
+                    field.control = Control::channelRef;
+                    field.choices = { { "", "(none - its file)" } };
+
+                    for (const auto& channel : readRack (snapshot).channels)
+                        if (channel.samples() && ! channel.aux)
+                            field.choices.push_back ({ channel.id, channel.name + " \xc2\xb7 take" });
+                }
                 else if (field.name == "aux")
                 {
                     /*  THE AUX A FADE MOVES (namespace draft §93), instead of a
@@ -1960,6 +1973,7 @@ namespace wfg::client::model
             {
                 fitToTheRig (snapshot, cueId, decided);
                 offerTheStrips (snapshot, cueId, decided);
+                offerTheInputsAndChannels (snapshot, decided);      // its live take (§105)
             }
 
             //  A picture's strip, a menu as a sound's is (namespace draft §49).

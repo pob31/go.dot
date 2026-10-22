@@ -849,6 +849,85 @@ TEST_CASE ("take: Keep as cue makes a media cue after the one sounding there, lo
     CHECK (rig.take().kept == "takes/Looper take 1.wav");
 }
 
+TEST_CASE ("take: a pad from the loop plays the live take's slice, arms with no file, and Keep moves it onto the file (§105)")
+{
+    /*  Namespace draft §105, AZQ-AZS: Pad from loop makes a media cue after
+        the mic cue, whose sound is the channel's take and whose slice is a
+        range at the loop's points; it arms with the slice for its voice and
+        no file - never failing for one - and Keep moves it onto the kept file,
+        the slice unchanged, in Keep's own step. */
+    Rig rig;
+    REQUIRE (rig.fireAndLaunch ("TK000002") != nullptr);
+    REQUIRE (rig.applied ("take.record", { text (looper) }));
+    REQUIRE (rig.applied ("take.record", { text (looper) }));
+    rig.audio.reports.push_back ({ looper, "pressed", 2.5 });
+    rig.tickOnce();
+    rig.tickOnce();
+    REQUIRE (rig.applied ("node.set", { text ("/godot/slot/TK000011/loopIn"), osc::Value::float64 (0.5) }));
+    REQUIRE (rig.applied ("node.set", { text ("/godot/slot/TK000011/loopOut"), osc::Value::float64 (2.0) }));
+
+    //  Not on a channel with no recorder, and not under the lock.
+    CHECK_FALSE (rig.refusal ("take.pad", { text ("TK000013") }).empty());
+    REQUIRE (rig.applied ("node.set", { text ("/godot/document/locked"), osc::Value::boolean (true) }));
+    CHECK (rig.refusal ("take.pad", { text (looper) }).find ("locked") != std::string::npos);
+    REQUIRE (rig.applied ("node.set", { text ("/godot/document/locked"), osc::Value::boolean (false) }));
+
+    REQUIRE (rig.applied ("take.pad", { text (looper) }));
+    const auto record = rig.appliedWith ("take.pad");
+    REQUIRE (record.size() == 7u);
+    CHECK (record[1] == "TK000002");
+    const auto pad = record[4];
+    const auto range = record[5];
+
+    //  AFTER THE MIC CUE, playing the take between the points, once, two wide.
+    const auto order = client::model::words (rig.at ("/godot/list/TK000001/order"));
+    const auto mic = std::find (order.begin(), order.end(), "TK000002");
+    REQUIRE (mic != order.end());
+    REQUIRE (mic + 1 != order.end());
+    CHECK (*(mic + 1) == pad);
+    CHECK (rig.at ("/godot/cue/" + pad + "/kind") == "media");
+    CHECK (rig.at ("/godot/cue/" + pad + "/take") == looper);
+    CHECK (rig.at ("/godot/cue/" + pad + "/file").empty());
+    CHECK (rig.at ("/godot/cue/" + pad + "/channels") == "2");
+    CHECK (rig.at ("/godot/range/" + range + "/in") == "0.5");
+    CHECK (rig.at ("/godot/range/" + range + "/out") == "2");
+    CHECK (rig.at ("/godot/range/" + range + "/loops") == "1");
+
+    //  FIRED: armed with the take and the slice, no file and no ranges for the launcher - and not failed for a file.
+    rig.audio.arms.clear();
+    REQUIRE (rig.applied ("cue.fire", { text (pad) }));
+    const auto* run = rig.runOf (pad);
+    REQUIRE (run != nullptr);
+    CHECK (run->state != cue::runState::failed);
+    CHECK (run->take == looper);
+
+    const auto arm = std::find_if (rig.audio.arms.begin(), rig.audio.arms.end(),
+                                   [run] (const cue::ArmRequest& each) { return each.runId == run->id; });
+    REQUIRE (arm != rig.audio.arms.end());
+    CHECK (arm->takeChannel == looper);
+    CHECK (arm->mediaFile.empty());
+    CHECK (arm->ranges.empty());
+    CHECK (arm->takeIn == doctest::Approx (0.5));
+    CHECK (arm->takeOut == doctest::Approx (2.0));
+    CHECK (arm->takeLoops == 1);
+    CHECK_FALSE (arm->routing.empty());
+
+    //  KEEP MOVES IT ONTO THE FILE, its slice as it was - and one undo puts it back on the take.
+    REQUIRE (rig.applied ("take.keep", { text (looper) }));
+    rig.tickOnce();
+    rig.audio.kept.push_back ({ looper, "takes/Looper take 1.wav", "" });
+    rig.tickOnce();
+    rig.tickOnce();
+
+    CHECK (rig.at ("/godot/cue/" + pad + "/file") == "takes/Looper take 1.wav");
+    CHECK (rig.at ("/godot/cue/" + pad + "/take").empty());
+    CHECK (rig.at ("/godot/range/" + range + "/in") == "0.5");
+
+    REQUIRE (rig.applied ("undo"));
+    CHECK (rig.at ("/godot/cue/" + pad + "/take") == looper);
+    CHECK (rig.at ("/godot/cue/" + pad + "/file").empty());
+}
+
 TEST_CASE ("take: Keep as cue names what it makes from the channel and the file, alike on two machines")
 {
     /*  Namespace draft §58, AFX, RD.2: each machine of a pair records its own

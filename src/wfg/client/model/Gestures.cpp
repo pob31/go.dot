@@ -244,6 +244,11 @@ namespace wfg::client::gesture
                  { osc::Value::string (channelId), osc::Value::boolean (asCue), osc::Value::string (afterCue) } };
     }
 
+    Event takePad (const std::string& channelId, const std::string& afterCue)
+    {
+        return { origin::window, "take.pad", { osc::Value::string (channelId), osc::Value::string (afterCue) } };
+    }
+
     Event aimSurfaces (const std::string& cueId)
     {
         return { origin::window, "surface.aim", { osc::Value::string (cueId) } };

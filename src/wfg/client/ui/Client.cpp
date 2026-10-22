@@ -776,6 +776,8 @@ namespace wfg::client
                 footActions.pressTake = [this] (const std::string& verb, const std::string& channelId)
                                         { send (gesture::takePress (verb, channelId)); };
 
+                footActions.padTake = [this] (const std::string& channelId, const std::string& afterCue)
+                                      { send (gesture::takePad (channelId, afterCue)); };
                 footActions.keepTake = [this] (const std::string& channelId, bool asCue, const std::string& afterCue)
                                        { send (gesture::takeKeep (channelId, asCue, afterCue)); };
 

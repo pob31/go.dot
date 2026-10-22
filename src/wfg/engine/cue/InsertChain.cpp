@@ -144,6 +144,11 @@ namespace wfg::cue
         if (cue.hasType ("Channel"))
             return schema.text (cue, "rackChannel", "class") == "stereo" ? 2 : 1;
 
+        /*  A PAD ON THE LIVE TAKE (namespace draft §105): a take is two wide,
+            whatever the file it does not play says. */
+        if (cue.hasType ("Media") && cue.getProperty ("take").toString().isNotEmpty())
+            return 2;
+
         return static_cast<int> (schema.integer (cue, "media", "channels"));
     }
 

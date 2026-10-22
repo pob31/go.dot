@@ -54,6 +54,9 @@ namespace wfg::client::ui
             /** `take.keep`: the take made a file, and with `asCue` a cue after this one that loops it. */
             std::function<void (const std::string& channelId, bool asCue, const std::string& afterCue)> keep;
 
+            /** `take.pad`: a cue after this one that plays the live take between the loop's points (§105). */
+            std::function<void (const std::string& channelId, const std::string& afterCue)> pad;
+
             /** A press on an edge: that point on the surfaces' master dial. */
             std::function<void (const std::string& address)> dial;
 
@@ -100,7 +103,8 @@ namespace wfg::client::ui
         std::shared_ptr<const audio::TakePictureSet> pictures;
 
         juce::TextButton rec { "Rec" }, loop { "Loop" }, overdub { "Overdub" },
-                         undo { "Undo" }, clear { "Clear" }, keep { "Keep" }, keepAsCue { "Keep as cue" };
+                         undo { "Undo" }, clear { "Clear" }, keep { "Keep" }, keepAsCue { "Keep as cue" },
+                         pad { "Pad from loop" };
 
         Edge hover = Edge::none;
         Edge grabbed = Edge::none;

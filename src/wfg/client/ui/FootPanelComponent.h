@@ -206,6 +206,7 @@ namespace wfg::client::ui
 
             /** `take.keep`, from the take panel's Keep and Keep as cue (Phase 9c). */
             std::function<void (const std::string& channelId, bool asCue, const std::string& afterCue)> keepTake;
+            std::function<void (const std::string& channelId, const std::string& afterCue)> padTake;   // §105
         };
 
         FootPanelComponent (const model::Theme&, Actions);

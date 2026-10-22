@@ -364,6 +364,7 @@ namespace wfg::client::ui
                 taking.set = actions.set;
                 taking.press = actions.pressTake;
                 taking.keep = actions.keepTake;
+                taking.pad = actions.padTake;
                 taking.dial = actions.dial;
                 taking.say = [this] (const juce::String& sentence)
                 {
