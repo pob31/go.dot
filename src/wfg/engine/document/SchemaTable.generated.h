@@ -33,6 +33,7 @@
 namespace wfg::doc::generated
 {
     inline constexpr std::string_view enum_engine_clock[] = { "dummy", "device" };
+    inline constexpr std::string_view enum_engine_thermal[] = { "nominal", "fair", "serious", "critical" };
     inline constexpr std::string_view enum_engine_spaceMouse[] = { "off", "searching", "connected", "driver" };
     inline constexpr std::string_view enum_pair_role[] = { "none", "main", "backup" };
     inline constexpr std::string_view enum_pair_state[] = { "alone", "following", "leading", "bothSending", "waiting" };
@@ -271,6 +272,22 @@ namespace wfg::doc::generated
           "", 1.0, false, "park",
           "",
           "Whether the tick thread - the show's clock, which every launch, fade and cursor waits on - runs at real-time priority: TIME_CRITICAL on Windows, a time-constraint policy and the interface's audio workgroup on macOS, SCHED_FIFO on Linux. False where the system refused it, typically Linux without real-time rights; the show's clock then runs at the priority of everything else on the machine." },
+        { "engine", "lowPower",
+          ValueType::boolean, 'T', false, Access::read, Kind::state, Persist::none, Scope::show,
+          true, "false",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 1.0, false, "park",
+          "",
+          "Whether this computer is in Low Power Mode (macOS; namespace draft 108): its processor is capped, and a show heavy with plugins or video can fall behind. Read once a second on the message thread. No app can switch it off - the fix is the Battery settings of the Mac. False elsewhere." },
+        { "engine", "thermal",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
+          true, "nominal",
+          false, 0.0, false, 0.0,
+          enum_engine_thermal, 4,
+          "", 1.0, false, "park",
+          "",
+          "How hot this computer says it is (macOS; namespace draft 108), in the system-s own four steps: from serious it has slowed its processor for heat. Read once a second on the message thread. Nominal elsewhere." },
         { "engine", "audioGaps",
           ValueType::integer, 'i', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "0",

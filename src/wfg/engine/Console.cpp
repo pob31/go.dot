@@ -19,6 +19,7 @@
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/app/Associate.h>
 #include <wfg/engine/app/FolderIcon.h>
+#include <wfg/engine/app/MachinePower.h>
 #include <wfg/engine/app/OpenShows.h>
 #include <wfg/engine/app/Raise.h>
 #include <wfg/engine/app/RecentShows.h>
@@ -3450,6 +3451,12 @@ namespace
 
         const juce::ScopedJuceInitialiser_GUI juceForTheVerb;
 
+        /*  LATENCY-CRITICAL TO THE SYSTEM for as long as it serves (namespace
+            draft §108, app/MachinePower.h): never napped, its timers never
+            coalesced, and the computer not put to sleep under a show that is
+            only waiting for its next GO. The Mac's; nothing elsewhere. */
+        const wfg::app::LatencyCritical latencyCritical { "Go.dot is running a show" };
+
         useEngineFolderOption (args);
 
         //  Not const: a show handed over at launch takes its place (below, `--yield-to-opened`).
@@ -4855,6 +4862,26 @@ namespace
         state.documentName = target.getFileNameWithoutExtension().toStdString();
         state.documentDirty = wfg::doc::isDirty (document, session);
         state.presetsFolder = presetScanner.folder();
+
+        /*  WHAT HOLDS THIS COMPUTER BACK, asked of the system once a second
+            on this thread (namespace draft §108) and read by the tick thread
+            into the state above: two atomics between them. Declared with the
+            state, so it lives as long as what reads it. */
+        struct PowerWatch final : juce::Timer
+        {
+            PowerWatch() { timerCallback(); startTimer (1000); }
+            ~PowerWatch() override { stopTimer(); }
+
+            void timerCallback() override
+            {
+                const auto power = wfg::app::readMachinePower();
+                lowPower.store (power.lowPowerMode, std::memory_order_relaxed);
+                thermal.store (static_cast<int> (power.thermal), std::memory_order_relaxed);
+            }
+
+            std::atomic<bool> lowPower { false };
+            std::atomic<int> thermal { 0 };
+        } powerWatch;
 
         /*  In the FIRST snapshot and not only from the first tick on, because
             the first snapshot is what a client reads the moment the port
@@ -8384,6 +8411,9 @@ namespace
                                 state.lateness = ticks.lateness();
                                 state.latenessMax = ticks.latenessMax();
                                 state.tickRealtime = ticks.hasElevatedPriority();
+                                state.lowPowerMode = powerWatch.lowPower.load (std::memory_order_relaxed);
+                                state.thermal = wfg::app::wordOf (static_cast<wfg::app::Thermal> (
+                                                    powerWatch.thermal.load (std::memory_order_relaxed)));
                                 state.audioGaps = audioGapsSeen.load (std::memory_order_relaxed);
                                 state.audioGapMax = audioGapMaxSeen.load (std::memory_order_relaxed);
                                 state.audioCallbackMax = audioCallbackMaxSeen.load (std::memory_order_relaxed);

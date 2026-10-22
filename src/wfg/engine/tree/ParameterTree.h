@@ -119,6 +119,13 @@ namespace wfg::tree
         std::int64_t audioGaps = 0, audioGapMax = 0, audioCallbackMax = 0;
         std::int64_t logPending = 0;
 
+        /*  WHAT THE SYSTEM SAYS HOLDS THIS COMPUTER BACK (macOS; namespace
+            draft §108): Low Power Mode caps the processor, and the thermal
+            state - nominal, fair, serious, critical - says it has been slowed
+            for heat from `serious`. Unhindered elsewhere. */
+        bool lowPowerMode = false;
+        std::string thermal = "nominal";
+
         /** The SpaceMouse reader's word and the puck's name (O.11). */
         std::string spaceMouse = "off";
         std::string spaceMouseName;

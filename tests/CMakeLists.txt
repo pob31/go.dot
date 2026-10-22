@@ -70,6 +70,7 @@ add_executable(wfg_tests
     OscValueTests.cpp
     OpenShowsTests.cpp
     FolderIconTests.cpp
+    MachinePowerTests.cpp
     AssociateTests.cpp
     TemplateTests.cpp
     AutoNameTests.cpp

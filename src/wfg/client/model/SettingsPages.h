@@ -30,6 +30,12 @@
 
 namespace wfg::client::model::settingsPages
 {
+    /*  NOT A PAGE: where a problem of the computer itself is said to belong
+        (namespace draft §108) - Low Power Mode, a Mac slowed for heat - which
+        no page of Show settings puts right. The main window's warning opens
+        the system's own settings instead. */
+    inline constexpr const char* thisComputer = "This computer";
+
     //  Show.
     inline constexpr const char* playback = "Playback";
     inline constexpr const char* templates = "Templates";

@@ -322,6 +322,22 @@ namespace wfg::client::model
     {
         std::vector<Problem> out;
 
+        /*  THE COMPUTER ITSELF, HELD BACK BY ITS OWN SYSTEM (namespace draft
+            §108): Low Power Mode caps the processor; a Mac hot enough has
+            slowed it. Said first and put right in the system's own settings,
+            which is what the sentence names; nothing in the show needs either
+            by key, so no cue wears it - it is every cue's at once. */
+        if (yes (snapshot, "/godot/engine/lowPower"))
+            out.push_back ({ pageName::thisComputer, "lowPower", "low power",
+                             "This computer is in Low Power Mode: its processor is capped, and a show heavy with"
+                             " plugins or video can fall behind - System Settings, Battery." });
+
+        if (const auto thermal = text (snapshot, "/godot/engine/thermal"); thermal == "serious" || thermal == "critical")
+            out.push_back ({ pageName::thisComputer, "thermal", "too hot",
+                             std::string ("This computer is too hot and has slowed its processor")
+                               + (thermal == "critical" ? " hard" : "")
+                               + ": let it cool, or move it out of the heat - nothing in Go.dot puts this right." });
+
         /*  THE AUDIO INTERFACE: none while it is being applied - which is
             Apply's own "Restarting audio..." - and otherwise any reason it is
             not running, when something needs it to. */
@@ -716,8 +732,9 @@ namespace wfg::client::model
     //==============================================================================
     std::vector<PageProblems> byPage (const std::vector<Problem>& problems)
     {
-        //  In the settings window's own order, the files last.
+        //  The computer itself first, then the settings window's own order, the files last.
         static const char* const order[] {
+            pageName::thisComputer,
             pageName::playback, pageName::templates, pageName::redundancy,
             pageName::audioInterface, pageName::outputs, pageName::outputPatch, pageName::inputs, pageName::inputPatch,
             pageName::rack, pageName::plugins,
@@ -763,6 +780,7 @@ namespace wfg::client::model
             { pageName::network, Icon::osc }, { pageName::midi, Icon::midi },
             { pageName::surfaces, Icon::surface }, { pageName::timecode, Icon::timecode },
             { pageName::serial, Icon::serial }, { pageName::redundancy, Icon::warning },
+            { pageName::thisComputer, Icon::warning },
             { "", Icon::missing }
         };
 

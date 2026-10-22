@@ -4322,6 +4322,8 @@ namespace wfg::tree
             else if (name == "analysisRebuilds")
                                                text = std::to_string (analysis.rebuilds());
             else if (name == "tickRealtime")   text = state.tickRealtime ? "true" : "false";
+            else if (name == "lowPower")       text = state.lowPowerMode ? "true" : "false";
+            else if (name == "thermal")        text = state.thermal;
             else if (name == "audioGaps")      text = std::to_string (state.audioGaps);
             else if (name == "audioGapMax")    text = std::to_string (state.audioGapMax);
             else if (name == "audioCallbackMax")

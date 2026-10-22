@@ -448,3 +448,43 @@ TEST_CASE ("problems: every cue of the show whose file is missing, in any list, 
     CHECK (missing[0] == std::pair<std::string, std::string> { "MOV1", "sub/clip.mov" });
     CHECK (missing[1] == std::pair<std::string, std::string> { "SND1", "thunder.wav" });
 }
+
+TEST_CASE ("problems: this computer held back by its own system is said first, and no cue wears it (§108)")
+{
+    /*  The author, 2026-10-22: "Is there a way to make sure the CPU on the
+        mac stays on full power...?" - what no app can switch off is said
+        where the show is run: Low Power Mode, and a Mac slowed for heat. */
+    const auto snapshot = snapshotOf ({
+        { "/godot/engine/lowPower", yes() },
+        { "/godot/engine/thermal", word ("serious") },
+        { "/godot/cue/M1/kind", word ("media") },
+        { "/godot/audio/status", word ("stopped") },
+    });
+
+    const auto index = model::indexObjects (snapshot);
+    const auto problems = model::machineProblems (snapshot, index);
+    const auto pages = model::byPage (problems);
+
+    REQUIRE (pages.size() == 2);
+    CHECK (pages[0].page == page::thisComputer);
+    CHECK (pages[0].icon == model::Icon::warning);
+    CHECK (pages[0].sentences.size() == 2);
+    CHECK (pages[1].page == page::audioInterface);
+
+    CHECK (anySays (problems, "This computer is in Low Power Mode: its processor is capped, and a show heavy with plugins or video can fall behind - System Settings, Battery."));
+    CHECK (anySays (problems, "This computer is too hot and has slowed its processor: let it cool, or move it out of the heat - nothing in Go.dot puts this right."));
+
+    //  Every cue's at once, so none wears it: the sound cue is marked for the interface alone.
+    const auto needs = model::needsOf (snapshot, { cueRow ("M1", "media") }, index);
+    const auto marks = model::cueProblems (needs, problems);
+    REQUIRE (marks.count ("M1") == 1);
+    CHECK (marks.at ("M1").text == "no audio");
+
+    //  Fair is the system's "slightly warm, nothing done": not a problem. Critical says so.
+    const auto fair = snapshotOf ({ { "/godot/engine/thermal", word ("fair") } });
+    CHECK (model::machineProblems (fair, model::indexObjects (fair)).empty());
+
+    const auto critical = snapshotOf ({ { "/godot/engine/thermal", word ("critical") } });
+    CHECK (anySays (model::machineProblems (critical, model::indexObjects (critical)),
+                    "This computer is too hot and has slowed its processor hard: let it cool, or move it out of the heat - nothing in Go.dot puts this right."));
+}

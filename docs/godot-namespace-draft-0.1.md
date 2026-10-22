@@ -80,6 +80,8 @@ commands `ACCESS 2`. Booleans are `T`/`F` nodes (an `i` 0/1 written to one is ac
 | `/godot/engine/lateness` | `i` | last tick's lateness in samples |
 | `/godot/engine/latenessMax` | `i` | since start |
 | `/godot/engine/tickRealtime` | `T` | whether the tick thread got real-time priority (§31, TO) |
+| `/godot/engine/lowPower` | `T` | whether this computer is in Low Power Mode - its processor capped (macOS; §108) |
+| `/godot/engine/thermal` | `s` | `nominal` \| `fair` \| `serious` \| `critical` - from `serious` the system has slowed the processor for heat (macOS; §108) |
 | `/godot/engine/audioGaps` | `i` | gaps between the interface's calls for sound, since start (§31, TT) |
 | `/godot/engine/audioGapMax` | `i` | the longest, in samples |
 | `/godot/engine/audioCallbackMax` | `i` | the longest Go.dot took to answer one call, in samples |
@@ -33672,3 +33674,61 @@ Tried 2026-10-22 on the Mac mini (macOS 15.8): a standalone probe handed the def
 child process that joined it, and the test above passed there with the Mac's own output. Owed: the author's
 bench, a plugin-heavy show at a small buffer on the Mac with and without, which is M31's question asked
 again.
+
+## 108. This computer held back, said; the processes declared latency-critical
+
+**Asked 2026-10-22** by the author: *"Is there a way to make sure the CPU on the mac stays on full power and
+the cores used are the performance ones?"* - then, of the two things offered: *"Let's do 1 and 2."*
+
+What was found. Apple pins nothing: no thread affinity on Apple silicon, no frequency governor. What decides
+the core is the thread's class - a real-time or user-interactive thread goes to the performance cores, a
+utility or background one is confined to the efficiency cores - and every thread that makes or times the
+sound already has the real-time class (§31, §107). What an app cannot override but can read are **Low Power
+Mode**, which caps the processor, and the **thermal state**, which slows it once the machine is hot; and
+what it can switch off is the system's own throttling of a process it takes for idle - App Nap, timer
+coalescing, idle sleep under a show that is only waiting for its next GO. Neither JUCE nor Go.dot said
+anything to the system; nothing showed the two states.
+
+### 108.1 Decisions
+
+The author's: **BAU** both built - the processes declared latency-critical, and the two states said.
+
+Mine *(proposed)*, the author's to overrule:
+
+- **BAV** **The engine, the plugin child and the video renderer each declare themselves latency-critical**
+  (`NSProcessInfo beginActivity`, `NSActivityLatencyCritical | NSActivityUserInitiated`) for as long as
+  they run: never napped, timers never coalesced, no automatic termination, and **the computer does not
+  idle-sleep while a show is open** - the display may. The editor helper does not: a plugin's window is
+  not latency-critical.
+- **BAW** **Both states are the engine's rows**, `/godot/engine/lowPower` and `/godot/engine/thermal`,
+  asked of the system once a second on the message thread and carried by the tick thread's publish like
+  `tickRealtime`. Unhindered everywhere but the Mac.
+- **BAX** **Said as a problem of "This computer"** (§64's machine problems), first among the warnings on
+  the title line, with the warning icon: *low power* - "This computer is in Low Power Mode: its processor
+  is capped, and a show heavy with plugins or video can fall behind - System Settings, Battery." - and
+  *too hot* from `serious` ("has slowed its processor"; `critical`: "hard"), "let it cool, or move it out
+  of the heat - nothing in Go.dot puts this right." `fair` is the system's "slightly warm, nothing done"
+  and says nothing. No cue wears either: it is every cue's at once, and a mark on each would be noise.
+  Pressing the warning opens the Mac's Battery settings, since no page of Show settings puts it right;
+  the settings window shows no tab for it.
+
+### 108.2 Rows and commands
+
+Two read-only engine rows (BAW). No command.
+
+### 108.3 As built
+
+`app/MachinePower.h`: `LatencyCritical` (RAII, `declared()` true only where the system took it),
+`readMachinePower()`, `Thermal` and `wordOf`; `MachinePower_mac.mm` the Mac's half, `MachinePower.cpp`
+everyone else's. The serve verb holds the declaration beside its JUCE initialiser and a one-second
+`PowerWatch` timer beside its `EngineState`; the children hold theirs after their own initialiser.
+`model/Problems`: `settingsPages::thisComputer`, first in `byPage`; `TransportComponent` opens
+`x-apple.systempreferences:com.apple.Battery-Settings.extension` for it on the Mac.
+
+### 108.4 Stages
+
+| stage | what | commit |
+|---|---|---|
+| MP.1 | the declaration, the rows, the warning (MachinePowerTests, ProblemsTests) | |
+
+Owed: the author's look at the warning with Low Power Mode switched on, on the Mac mini or a laptop.

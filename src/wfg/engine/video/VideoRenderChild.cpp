@@ -16,6 +16,7 @@
 
 #include <wfg/engine/video/VideoRenderChild.h>
 
+#include <wfg/engine/app/MachinePower.h>
 #include <wfg/engine/plugin/ProcessUtil.h>
 #include <wfg/engine/video/Compositor.h>
 #include <wfg/engine/video/Displays.h>
@@ -4590,6 +4591,11 @@ namespace wfg::video
             therefore the message thread: where the windows live and where the
             session's passes run. Each window draws on its context's own. */
         juce::ScopedJuceInitialiser_GUI juceForTheRenderer;
+
+        /*  NEVER NAPPED, its timers never coalesced (app/MachinePower.h): to
+            the system a renderer with no dock icon looks like nothing anyone
+            is using. */
+        const wfg::app::LatencyCritical latencyCritical { "Go.dot is showing video" };
 
        #if JUCE_MAC
         juce::initialiseNSApplication();

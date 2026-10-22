@@ -22,6 +22,7 @@
 #include <wfg/engine/plugin/SharedRegion.h>
 #include <wfg/engine/plugin/TestGainState.h>
 #include <wfg/engine/plugin/WorkgroupShare.h>
+#include <wfg/engine/app/MachinePower.h>
 
 #include <spatcore/rt/RtThreadPriority.h>
 
@@ -858,6 +859,11 @@ namespace wfg::plugin
             is therefore the message thread: where a plugin is made and takes
             its state, and where the loop below runs for its sake. */
         juce::ScopedJuceInitialiser_GUI juceForTheChild;
+
+        /*  NEVER NAPPED, its timers never coalesced (app/MachinePower.h): a
+            child with no window of its own looks idle to the system, and its
+            worker answers the audio thread. */
+        const app::LatencyCritical latencyCritical { "Go.dot is playing a plugin" };
 
         Lanes lanes (header, mapping.getData(), parentPid);
         std::atomic<bool> stop { false };
