@@ -55,6 +55,7 @@
 #include <wfg/client/model/Eq.h>
 #include <wfg/client/model/Foot.h>
 #include <wfg/client/model/Theme.h>
+#include <wfg/client/ui/MenuHold.h>
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -265,6 +266,7 @@ namespace wfg::client::ui
             numbers and takes it out - the press of its gain rotary. */
         std::array<juce::ToggleButton, audio::EqSettings::numBands> bandToggles;
         juce::ComboBox lowShape, highShape;
+        MenuHold lowShapeHold, highShapeHold;
         juce::TextButton flat;
         std::vector<std::unique_ptr<Box>> boxes;
 

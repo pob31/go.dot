@@ -140,6 +140,20 @@ namespace wfg::tree
             `ROLE`, so a client names it and a later round retargets by it. */
         std::string role;
 
+        /*  A PART OF THE TREE THAT TAKES WHAT IT DOES NOT LIST (the author,
+            2026-10-24: "For the EOS preset, the cues can be decimal"), from
+            `GODOT.OPEN`: an address under this node that the file names no
+            node for goes out as the cue spells it, as an opaque device's
+            does - a description can list cue 98 and never cue 98.1.
+
+            AND A LEVEL THAT MAY BE LEFT OUT, from `GODOT.SKIP`: the parts
+            under this node are optional, and an address that leaves one out
+            goes on as though under the first of them - an Eos cue fired in
+            the console's current list, `/eos/cue/98.1/fire`, beside one in a
+            list named, `/eos/cue/2/98.1/fire`. Read by the menus only. */
+        bool open = false;
+        bool skips = false;
+
         /*  HOW THE NODE IS SPELLED ON THE RCP WIRE (namespace draft §57, AFH;
             DP.7), from `GODOT.RCP`: the verb - `set`, or a scene recall's
             own - and how many of the address's trailing segments are the
@@ -276,6 +290,8 @@ namespace wfg::tree
 
         const std::string& description() const noexcept                { return about().description; }
         const std::string& role() const noexcept                       { return about().role; }
+        bool open() const noexcept                                     { return about().open; }
+        bool skips() const noexcept                                    { return about().skips; }
         const std::string& rcpVerb() const noexcept                    { return about().rcpVerb; }
         int rcpIndexes() const noexcept                                { return about().rcpIndexes; }
         const std::string& lineTemplate() const noexcept               { return about().lineTemplate; }

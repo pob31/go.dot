@@ -359,6 +359,54 @@ namespace wfg::client::model
         return chosen;
     }
 
+    std::optional<Drop> firstPlaceFor (const std::vector<Row>& rows, std::size_t at, const Row& dragged, double fraction)
+    {
+        if (at >= rows.size())
+            return std::nullopt;
+
+        const auto& over = rows[at];
+
+        /*  THE LOWER PART OF A HEADER'S EMPTY BAND - one the list grew while
+            the hand is over the group, which a section's own band never is -
+            or the upper part of the group's first member. */
+        const auto belowEmptyHeader = over.rowKind == RowKind::band && over.section == Section::header
+                                      && over.sectionId.empty() && over.count == 0 && fraction > onBandBottom;
+        const auto aboveFirstMember = over.rowKind == RowKind::cue && ! over.derived && over.section == Section::member
+                                      && over.indexInParent == 0 && fraction < onBandTop;
+
+        if (! belowEmptyHeader && ! aboveFirstMember)
+            return std::nullopt;
+
+        const auto* group = ownRowOf (over.parent, rows);
+
+        if (group == nullptr || ! group->isGroup)
+            return std::nullopt;
+
+        Drop drop;
+
+        //  Not a group into itself, nor into one it holds; and a sampler only what it takes (§39).
+        const auto ancestors = ancestorsOf (group->id, rows);
+
+        if (group->id == dragged.id || std::find (ancestors.begin(), ancestors.end(), dragged.id) != ancestors.end())
+            return drop;
+
+        if (cue::isSampler (cue::GroupMode { group->mode, group->advance }) && ! samplerTakes (dragged)
+              && dragged.parent != group->id)
+        {
+            drop.refused = notForASampler (dragged);
+            return drop;
+        }
+
+        //  Already the first member: nothing to move.
+        if (dragged.parent == group->id && dragged.section == Section::member && dragged.indexInParent == 0)
+            return drop;
+
+        drop.kind = DropKind::after;
+        drop.container = group->id;
+        drop.index = 0;
+        return drop;
+    }
+
     Drop dropAtDepth (const std::vector<Row>& rows, std::size_t at, const Row& dragged,
                       double fraction, int depth, int* landed)
     {
@@ -366,6 +414,15 @@ namespace wfg::client::model
             return {};
 
         const auto& over = rows[at];
+
+        //  The gap above a group's members: its first place (2026-10-24).
+        if (auto first = firstPlaceFor (rows, at, dragged, fraction))
+        {
+            if (landed != nullptr)
+                *landed = over.depth;
+
+            return *first;
+        }
 
         //  A member on its own group's header band: the mark, and not a move (§30, QZ).
         if (auto mark = headerMarkFor (over, dragged, rows))
@@ -646,7 +703,10 @@ namespace wfg::client::model
         switch (drop.kind)
         {
             case DropKind::none:    return drop.refused;
-            case DropKind::after:   return "after " + name + timelineNote;
+            /*  A GROUP'S FIRST PLACE (firstPlaceFor) is the one "after" at
+                position nought, and is named for the group. */
+            case DropKind::after:   return (drop.index == 0 && over.isGroup && over.id == drop.container
+                                              ? "first in " : "after ") + name + timelineNote;
             case DropKind::into:    return "into " + name + timelineNote;
             case DropKind::target:  return "aim " + name + " at it";
             /*  A MARK, AND NOT A MOVE, SAID AS ONE (§30, QZ): the author
@@ -666,6 +726,10 @@ namespace wfg::client::model
     {
         if (drop.kind == DropKind::preset || drop.kind == DropKind::header || drop.kind == DropKind::footer)
             if (const auto* group = ownRowOf (drop.cueId, rows))
+                return *group;
+
+        if (drop.kind == DropKind::after && drop.index == 0)
+            if (const auto* group = ownRowOf (drop.container, rows); group != nullptr && group->isGroup)
                 return *group;
 
         return over;

@@ -501,6 +501,58 @@ TEST_CASE ("mount: a write to an opaque device goes as it was typed, and to a de
     }
 }
 
+TEST_CASE ("mount: under a part the description says is open, an address it does not list goes as typed")
+{
+    /*  The author, 2026-10-24: "For the EOS preset, the cues can be decimal."
+        A description lists cue 1 and never cue 98.1; GODOT.OPEN on /cue says
+        the part takes more than it lists, as an opaque device takes anything,
+        and GODOT.SKIP is read for the menus. A part not open is checked still. */
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    MountTable mounts;
+    MountDeclaration eos;
+    eos.id = "EOSOPEN1";
+    eos.prefix = "/eos";
+    eos.namespaceFile = "namespaces/eos.json";
+    eos.port = 3032;
+
+    REQUIRE (mounts.load (eos, R"JSON({"FULL_PATH": "/", "CONTENTS": {
+        "cue": {"FULL_PATH": "/cue", "GODOT": {"OPEN": true, "SKIP": true}, "CONTENTS": {
+            "1": {"FULL_PATH": "/cue/1", "CONTENTS": {
+                "1": {"FULL_PATH": "/cue/1/1", "CONTENTS": {
+                    "fire": {"FULL_PATH": "/cue/1/1/fire", "TYPE": "f", "ACCESS": 2}}}}}}},
+        "sub": {"FULL_PATH": "/sub", "CONTENTS": {
+            "1": {"FULL_PATH": "/sub/1", "TYPE": "f", "ACCESS": 3, "VALUE": [0.0]}}}}})JSON").ok);
+
+    REQUIRE (mounts.nodeAt ("/eos/cue") != nullptr);
+    CHECK (mounts.nodeAt ("/eos/cue")->open());
+    CHECK (mounts.nodeAt ("/eos/cue")->skips());
+    CHECK_FALSE (mounts.nodeAt ("/eos/cue/1")->open());
+    CHECK_FALSE (mounts.nodeAt ("/eos/sub")->open());
+
+    //  A listed cue is a node, checked and kept as ever.
+    CHECK (mounts.write ("/eos/cue/1/1/fire", osc::Value::float32 (1.0f)).ok);
+    CHECK (mounts.valueOf ("/eos/cue/1/1/fire") != nullptr);
+
+    //  A decimal cue, in a list and in the current one: as typed, nothing kept.
+    for (const auto* address : { "/eos/cue/1/98.1/fire", "/eos/cue/98.1/fire", "/eos/cue/1/fire" })
+    {
+        INFO (address);
+        const auto written = mounts.write (address, osc::Value::float32 (1.0f));
+        CHECK (written.ok);
+        CHECK (written.mountId == "EOSOPEN1");
+        REQUIRE (written.values.size() == 1u);
+        CHECK (written.values.front().isFloat32());
+        CHECK (mounts.valueOf (address) == nullptr);
+    }
+
+    //  Outside the open part the description still says what the console has.
+    const auto refused = mounts.write ("/eos/sub/98.1", osc::Value::float32 (1.0f));
+    CHECK_FALSE (refused.ok);
+    CHECK (refused.reason == reason::badAddress);
+    CHECK_FALSE (mounts.write ("/eos/nothing", osc::Value::float32 (1.0f)).ok);
+}
+
 TEST_CASE ("mount: a retyped port keeps the nodes and the values")
 {
     INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));

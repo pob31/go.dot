@@ -680,6 +680,9 @@ namespace wfg::tree
 
         Node* findNode (const std::string& address);
 
+        /** Whether a part above `address` says it takes what it does not list (GODOT.OPEN). */
+        bool underOpenPart (const std::string& address);
+
         /** A change of shape: the version moves and the written set is let go. */
         void bumpShape();
 

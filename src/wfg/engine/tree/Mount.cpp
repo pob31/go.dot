@@ -492,6 +492,13 @@ namespace wfg::tree
             //  The role, a word; anything else there is not one (AFM).
             out.role = stringProperty (*godot, "ROLE");
 
+            //  What the part takes beyond what it lists, and whether its level may be left out (2026-10-24).
+            if (const auto* open = property (*godot, "OPEN"); open != nullptr && open->isBool())
+                out.open = open->asBool();
+
+            if (const auto* skips = property (*godot, "SKIP"); skips != nullptr && skips->isBool())
+                out.skips = skips->asBool();
+
             //  And the RCP spelling, where the file gives one (AFH, DP.7).
             if (const auto* rcp = property (*godot, "RCP"); rcp != nullptr)
             {
@@ -1162,6 +1169,15 @@ namespace wfg::tree
         return nullptr;
     }
 
+    bool MountTable::underOpenPart (const std::string& address)
+    {
+        for (auto end = address.rfind ('/'); end != std::string::npos && end > 0; end = address.rfind ('/', end - 1))
+            if (const auto* part = findNode (address.substr (0, end)); part != nullptr && part->open())
+                return true;
+
+        return false;
+    }
+
     MountTable::WriteResult MountTable::write (const std::string& address, const osc::Values& values)
     {
         auto* node = findNode (address);
@@ -1187,10 +1203,17 @@ namespace wfg::tree
                 An address under no device at all is still `bad-address`: it
                 is a cue aimed at nothing, which is what the target menu and
                 validate both exist to catch. */
+            /*  AND UNDER AN OPEN PART OF A DESCRIBED ONE (GODOT.OPEN,
+                2026-10-24) it is not a mistake either: the file said that
+                part takes more than it lists - a decimal Eos cue - and the
+                value goes out as an opaque device's would. */
             const auto owner = mountOf (address);
             const auto* declaration = declarationOf (owner);
 
-            if (declaration == nullptr || ! declaration->opaque())
+            if (declaration == nullptr)
+                return { false, reason::badAddress, {}, {} };
+
+            if (! declaration->opaque() && ! underOpenPart (address))
                 return { false, reason::badAddress, {}, {} };
 
             return { true, {}, owner, values };

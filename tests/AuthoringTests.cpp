@@ -1253,7 +1253,7 @@ TEST_CASE ("preset command: a device from the Eos preset is reached over a conne
     CHECK (rig.attribute ("/godot/mount/" + deviceId + "/transport") == "tcp");
     CHECK (rig.attribute ("/godot/mount/" + deviceId + "/framing") == "length");
     CHECK (rig.attribute ("/godot/mount/" + deviceId + "/port") == "3032");
-    CHECK (rig.attribute ("/godot/mount/" + deviceId + "/preset") == "etc-eos-osc@1");
+    CHECK (rig.attribute ("/godot/mount/" + deviceId + "/preset") == "etc-eos-osc@2");
     CHECK (mounts.isLoaded (deviceId));
     CHECK (mounts.problemOf (deviceId).empty());
     REQUIRE (mounts.declarationOf (deviceId) != nullptr);

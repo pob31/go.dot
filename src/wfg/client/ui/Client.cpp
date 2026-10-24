@@ -318,6 +318,19 @@ namespace wfg::client
                 //  A box opened in the list holds a closed inspector shut; an open one stays.
                 listActions.editingBegan    = [this] { inspectorHeld = shell->panel() != ui::Shell::Panel::inspector; };
                 listActions.pickAll         = [this] { selection.all (show.rows()); inspectNow(); };
+
+                /*  THE ARROWS STEPPING THE PICK (the author, 2026-10-24): a plain
+                    click on the next or previous cue, with no double-click to
+                    wait out, and the row kept in view. */
+                listActions.pickStep        = [this] (int direction)
+                                              {
+                                                  const auto stepped = selection.step (direction, show.rows());
+                                                  aimAtPick();
+                                                  inspectNow();
+
+                                                  if (! stepped.empty())
+                                                      shell->cues.revealCue (stepped);
+                                              };
                 listActions.removeChosen    = [this] { removeChosen(); };
 
                 //  The right-click's three, as the Edit menu does them.

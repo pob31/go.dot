@@ -33974,3 +33974,105 @@ values. `model::CanvasRow::curve` and `curveWord`; the Video tab's seventh cell.
 Owed: the author's look on the window's panel and the D700 - a DCA riding two outputs and a canvas, turned
 with nothing playing, then with a marked movie playing; and whether "Curve" is the word for the Video tab's
 column.
+
+## 110. Six niggles of 2026-10-24: the list while editing, the arrows, Eos cue numbers, menus, a group's first place
+
+**Asked 2026-10-24** by the author, six in a row:
+
+1. *"In editing mode when a cue is modified the view jumps to the standby play head which leads to a lot of
+   scrolling back to the place where editing. Could we limit the jumping to the show mode?"*
+2. *"When the last selection with the mouse pointer is a cue for editing (not the standby playhead
+   repositionning) then if the user uses the up and down arrow, change the selected cue. ... But in editing
+   mode if the last mouse action is a standby playhead position, then the arrows jump to the previous or
+   next standby position."*
+3. *"For the EOS preset, the cues can be decimal."* His cues are like `/eos/cue/98.1/fire`.
+4. *"I'm not sure what the first digit is for (selection from 1 to 4 and then fire in the menu after
+   /eos/cue) In QLab there is a toggle to specify the user, i this it? If not specified, then a [skip] item
+   would allow to not specify the user."*
+5. *"sometimes selecting an item in a dropdown menu doesn't register and you have to click again (and
+   eventually once again)"*
+6. *"When dragging an item to be the first item of a group, the green target line appears briefly and then
+   the header opens and the target to place as the first item disappears."*
+
+### 110.1 What each one is, before its names
+
+1. **The list scrolled itself to the standby every time the show changed**, because a rebuild re-asked
+   where the pointer was and brought it into view. Open for editing, it now stays where the hand is; it
+   still follows the pointer when the pointer moves, and when another list is shown. Under the lock it
+   behaves as before, and locking brings the pointer back into view once.
+2. **The arrows follow the last click on a row.** A click that picks a cue makes ↑ / ↓ pick the previous or
+   next cue; a click in the grey column, which parks the pointer, gives them back to the standby. Before
+   any click, and always under the lock, they move the standby.
+3. **The Eos preset listed only whole cue numbers** - cues 1 to 200 of lists 1 to 4 - and a described
+   device refuses an address its description does not list, so `/eos/cue/98.1/fire` could not be sent. Its
+   cue part now says it takes more than it lists: an address under `/eos/cue` that the file does not name
+   goes out exactly as the cue spells it, as an undescribed device's would.
+4. **The first number is the cue list, not the user.** Eos reads `/eos/cue/<list>/<cue>/fire` as a cue of
+   that list and `/eos/cue/<cue>/fire` as a cue of the console's current list - the author's form. The
+   OSC user is another thing, `/eos/user` in the preset. The menu of lists now ends with **[skip]** (his
+   word), which leaves the list out: then the cues, then *fire*. A decimal cue typed into the address is
+   shown in the cue menu as what is picked.
+5. **The menus lost a pick to the poll.** JUCE delivers a ComboBox pick in two steps - the popup shuts and
+   the item is selected, then `onChange` runs one message later and reads what is selected then - and the
+   panels re-select every menu from the tree at tick rate. A pass between the two put the engine's old
+   value back, and the pick was sent as the old value. A menu is now left alone while its popup is open and
+   for 750 ms after a pass last saw it open.
+6. **A group's first place had no target.** The line under an open group's title means *after the group*,
+   and a hand reaching the title grows the header's empty band under it, which is *into the header* all
+   through. The lower part of that band, and the upper part of the first member's row, now mean *first in
+   the group*, drawn as a line under the band or the title and said "first in *Scene*".
+
+### 110.2 Decisions
+
+The author's: all six asked for as above; **[skip]** is his word.
+
+Mine *(proposed)*, the author's to overrule:
+
+- **BBQ** **A rebuild reveals the standby only under the lock**; a moved pointer or another list always
+  does; locking reveals it once.
+- **BBR** **The arrows' owner is the last click on a row**: a pick (a plain, shift, ctrl/⌘ or right-click
+  that picks) or a park (the gutter). A click on empty space changes nothing. A step picks one cue alone, as
+  a plain click would, from the anchor, in the order the list draws (a shut section is stepped over, a
+  derived header line skipped); with nothing picked, down picks the first cue and up the last; at an end
+  the pick stays. The inspector follows at once - no double-click to wait out - and the row is kept in view.
+  Shift with an arrow is not built.
+- **BBS** **`GODOT.OPEN`** (bool) on a described node: an address under it that names no node is sent as
+  typed - no type coerced, nothing stored, as an opaque device's (§57). Read in `MountTable::write` only, so
+  everything else that asks for a node (anticipation, readback, curves' ranges) treats such an address as it
+  treats an opaque device's. On the Eos preset `/eos/cue` only; the submasters, macros and palettes keep
+  their checks.
+- **BBT** **`GODOT.SKIP`** (bool) on a described node: the level under it may be left out, and an address
+  that leaves it out goes on as though under its first part. Read by the menus only. An address reads as
+  skipped when its part at that level is none the level lists, or when the part after it fits under the
+  skip and not under that part: `/eos/cue/3/fire` is cue 3 of the current list, `/eos/cue/3/5/fire` cue 5 of
+  list 3. [skip] writes the first cue down to its leaf, `/eos/cue/1/fire`; past a skip every choice writes
+  down to its first leaf, so the address is whole and reads back as it was picked. The foot panel's nested
+  menu has a [skip] submenu too.
+- **BBU** **A part typed under an open one is shown as picked**, added to its menu, and the menus after it
+  read as its first sibling's do.
+- **BBV** **The Eos preset is version 2**: a show's copy is offered the update in its Kind cell.
+- **BBW** **The menu hold is 750 ms after a pass last saw the popup open** (`ui/MenuHold.h`), on the
+  inspector's every menu, Show settings' Timecode menus, a deck's two menus, the pair's role and the EQ
+  panel's two shapes. A pick the engine refuses shows until the hold ends.
+- **BBX** **A group's first place** is `object.move` into the group at position nought, offered on the lower
+  part of the header's grown band and the upper part of the first member's row; refused into a sampler for
+  what it does not take, nothing for a group into itself or a cue already first. A section's own band, with
+  cues in it, keeps meaning *into the section*.
+
+### 110.3 As built
+
+`ui/CueListComponent`: `show` reveals the standby when it moved, when the list changed, or under the lock;
+`setEditable (false)` reveals it; `arrowsPick` is set by a pick and cleared by a park, and the plain arrows
+call the new `Actions::pickStep` while editable. `model::Selection::step`; the window's `pickStep` picks,
+aims a load to time, opens the inspector now and reveals the row. `NodeShape::open` and `skips` from
+`GODOT.OPEN` and `GODOT.SKIP`; `MountTable::underOpenPart`. `model::pathSteps` and `treeMenu` read the two
+(`Walk`); `scripts/presets/etc_eos.py` marks `/eos/cue`, version 2. `ui/MenuHold`. `model::firstPlaceFor`,
+called first by `dropAtDepth`; `describe` says "first in"; a band row draws the insert line.
+
+Tests: RunPaneUiTests (the list stays while editing, comes back locked; the arrows' owner; a group's first
+place; the menu hold), ClientTests (the pick's step; the Eos preset's menus), MountTests (an open part),
+AuthoringTests (the preset's version), C and fr_FR. Both tester guides say what the arrows do.
+
+Owed: the author's try in the window - an edit far from the standby, the arrows after each kind of click,
+`/eos/cue/98.1/fire` against the console, a menu picked quickly in the inspector, a cue dragged to a
+group's first place.

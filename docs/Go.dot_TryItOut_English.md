@@ -57,7 +57,7 @@ A show is a folder that contains one or more `.wfg` files plus a `media/` folder
 3. **Add sounds.** Drag WAV, AIFF, FLAC or Ogg files onto the cue list. Each becomes a media cue named after its file. Drop one on an existing cue to replace its file.
 4. **Add other cues** from the *Add* row above the list: `memo`, `media`, `mic`, `video`, `fade`, `transport`, `osc`, `midi`, `process`, `script`, `group`. The ones with a ▾ open a short menu of kinds.
 5. **Shape each cue** in the inspector on the right: name, pre-wait, post-wait, follow, level. The buttons at the top of the inspector open the panels at the foot of the window: *Waveform*, *EQ*, *FX*, *Sends*, *Curve*, *Timeline*.
-6. **Run it.** The grey column at the far left of the cue list holds the pointer: the cue marked ▶ there is the standby, the one GO fires next. Its row is lit amber and its name stands beside the GO button. Click that column on any cue to move the ▶ there, or use ↑ / ↓. Until a cue holds it, the top of the list says "no standby" and GO has nothing to fire. Hover or click the ▶ at the top of the column for a reminder. Press **Space** for GO.
+6. **Run it.** The grey column at the far left of the cue list holds the pointer: the cue marked ▶ there is the standby, the one GO fires next. Its row is lit amber and its name stands beside the GO button. Click that column on any cue to move the ▶ there, or use ↑ / ↓. While the show is unlocked, a click on a cue's row picks it for editing and ↑ / ↓ then step from cue to cue; a click in the grey column gives them back to the ▶. Until a cue holds it, the top of the list says "no standby" and GO has nothing to fire. Hover or click the ▶ at the top of the column for a reminder. Press **Space** for GO.
 7. **Save** with Ctrl+S (⌘S on a Mac). Autosave runs anyway.
 
 ### The keys that matter during a show
@@ -65,7 +65,7 @@ A show is a folder that contains one or more `.wfg` files plus a `media/` folder
 | Key | What it does |
 | --- | --- |
 | Space | GO — fire the standby cue |
-| ↑ / ↓ | Move standby to the previous / next cue |
+| ↑ / ↓ | Move standby to the previous / next cue; unlocked, after a click on a cue's row, pick the previous / next cue |
 | Esc | Stop everything gracefully: fade out over the panic time (1 s by default), run the groups' endings |
 | Esc twice (within 0.75 s) | Drop everything at once, no endings |
 | F9 | **Doh!** — take back the last GO |

@@ -117,6 +117,37 @@ namespace wfg::client::model
         anchorId.clear();
     }
 
+    const std::string& Selection::step (int direction, const std::vector<Row>& rows)
+    {
+        const auto count = static_cast<int> (rows.size());
+        const auto pickable = [&rows] (int at)
+        {
+            const auto& row = rows[static_cast<std::size_t> (at)];
+            return row.rowKind == RowKind::cue && ! row.derived && ! row.id.empty();
+        };
+
+        //  From the anchor's own row, or from beyond the end the step comes in at.
+        auto from = direction > 0 ? -1 : count;
+
+        for (auto at = 0; at < count && ! anchorId.empty(); ++at)
+            if (pickable (at) && rows[static_cast<std::size_t> (at)].id == anchorId)
+            {
+                from = at;
+                break;
+            }
+
+        const auto by = direction > 0 ? 1 : -1;
+
+        for (auto at = from + by; at >= 0 && at < count; at += by)
+            if (pickable (at))
+            {
+                set (rows[static_cast<std::size_t> (at)].id);
+                break;
+            }
+
+        return anchorId;
+    }
+
     void Selection::retain (const std::vector<Row>& rows)
     {
         chosen.erase (std::remove_if (chosen.begin(), chosen.end(),

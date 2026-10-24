@@ -3108,6 +3108,55 @@ TEST_CASE ("client: a dragged row lands after, into or on, and a cue can be name
     CHECK (model::resolveCueRef ("", rows).empty());
 }
 
+TEST_CASE ("client: the arrows step the pick through the cues as drawn, past bands and a cue drawn twice, and stop at the ends")
+{
+    /*  The author, 2026-10-24: with a cue picked for editing, up and down
+        change which cue is picked. Rows as the list draws them: a band, and a
+        derived line of D under it - D's own row comes later. */
+    const auto cue = [] (const char* id, bool derived = false)
+    {
+        model::Row row;
+        row.rowKind = model::RowKind::cue;
+        row.id = id;
+        row.derived = derived;
+        return row;
+    };
+
+    model::Row band;
+    band.rowKind = model::RowKind::band;
+    band.bandKey = "G:header";
+
+    const std::vector<model::Row> rows { cue ("A"), band, cue ("D", true), cue ("B"), cue ("C"), cue ("D") };
+
+    model::Selection picked;
+
+    //  Nothing picked: down takes the first cue, up the last.
+    CHECK (picked.step (+1, rows) == "A");
+    picked.clear();
+    CHECK (picked.step (-1, rows) == "D");
+
+    //  Down from A: past the band and D's derived line, to B; then C, then D's own row.
+    picked.set ("A");
+    CHECK (picked.step (+1, rows) == "B");
+    CHECK (picked.step (+1, rows) == "C");
+    CHECK (picked.step (+1, rows) == "D");
+    CHECK (picked.ids() == std::vector<std::string> { "D" });
+
+    //  At the end it stays; up from D's own row is C, not the derived line above B.
+    CHECK (picked.step (+1, rows) == "D");
+    CHECK (picked.step (-1, rows) == "C");
+    CHECK (picked.step (-1, rows) == "B");
+    CHECK (picked.step (-1, rows) == "A");
+    CHECK (picked.step (-1, rows) == "A");
+
+    //  Several picked: the step goes from the anchor and leaves one picked.
+    picked.set ("B");
+    picked.click ("C", false, true, rows);
+    REQUIRE (picked.anchor() == "C");
+    CHECK (picked.step (+1, rows) == "D");
+    CHECK (picked.ids() == std::vector<std::string> { "D" });
+}
+
 //==============================================================================
 TEST_CASE ("client: a click picks one, shift extends from the anchor, ctrl toggles, and a band is skipped")
 {
@@ -14216,6 +14265,127 @@ TEST_CASE ("client: a described device's tree is one menu per part of the addres
         CHECK (model::pathSteps (*later, model::readDevices (*later), "/sensor/x").empty());
         CHECK (model::pathSteps (*later, model::readDevices (*later), "/nowhere/x").empty());
     }
+}
+
+TEST_CASE ("client: the Eos preset's cue menus offer [skip] for the current list, and show a decimal cue typed in the address")
+{
+    /*  The author, 2026-10-24: "/eos/cue/98.1/fire" - a decimal cue, fired in
+        the console's current list. The preset's /eos/cue is OPEN and SKIPs
+        (scripts/presets/etc_eos.py): its lists may be left out, which the
+        menus offer as [skip], and a cue it does not list is shown as typed. */
+    Rig rig;
+    const auto file = juce::File (juce::String (WFG_REPO_ROOT) + "/presets/devices/etc-eos-osc.json");
+    REQUIRE (file.existsAsFile());
+
+    const auto created = rig.document.createMount ("/eos", "namespaces/etc-eos-osc-v2.json");
+    REQUIRE (created.ok);
+
+    tree::MountDeclaration eos;
+    eos.id = created.id;
+    eos.prefix = "/eos";
+    eos.namespaceFile = "namespaces/etc-eos-osc-v2.json";
+    eos.port = 3032;
+    REQUIRE (rig.mounts.load (eos, file.loadFileAsString().toStdString()).ok);
+
+    const auto snapshot = rig.publish (1);
+    const auto devices = model::readDevices (*snapshot);
+
+    const auto labels = [] (const model::PathStep& step)
+    {
+        std::vector<std::string> out;
+        for (const auto& [key, label] : step.choices)
+            out.push_back (label);
+        return out;
+    };
+
+    const auto keyFor = [] (const model::PathStep& step, const std::string& label)
+    {
+        for (const auto& [key, shown] : step.choices)
+            if (shown == label)
+                return key;
+        return std::string {};
+    };
+
+    const std::string opens = " \xe2\x80\xba";
+
+    SUBCASE ("the lists' menu: the four lists, the fire by number, and [skip] last, writing cue 1 of the current list")
+    {
+        const auto steps = model::pathSteps (*snapshot, devices, "/eos/cue");
+        REQUIRE (steps.size() == 2u);
+        CHECK (steps[0].picked == "/eos/cue");
+        CHECK (steps[1].picked.empty());
+        CHECK (labels (steps[1]) == std::vector<std::string> { "1" + opens, "2" + opens, "3" + opens, "4" + opens,
+                                                               "fire", "[skip]" + opens });
+        CHECK (keyFor (steps[1], "[skip]" + opens) == "/eos/cue/1/fire");
+    }
+
+    SUBCASE ("a cue of the current list: [skip] picked, then the cue, then fire; each cue's key whole")
+    {
+        const auto steps = model::pathSteps (*snapshot, devices, "/eos/cue/3/fire");
+        REQUIRE (steps.size() == 4u);
+        CHECK (steps[1].picked == "/eos/cue/1/fire");          // [skip]'s own key
+        CHECK (steps[2].picked == "/eos/cue/3/fire");
+        CHECK (steps[3].picked == "/eos/cue/3/fire");
+        CHECK (keyFor (steps[2], "98" + opens) == "/eos/cue/98/fire");
+        CHECK (keyFor (steps[2], "3" + opens) == "/eos/cue/3/fire");
+    }
+
+    SUBCASE ("a decimal cue of the current list: [skip], the cue as typed among the rest, fire")
+    {
+        const auto steps = model::pathSteps (*snapshot, devices, "/eos/cue/98.1/fire");
+        REQUIRE (steps.size() == 4u);
+        CHECK (steps[1].picked == "/eos/cue/1/fire");
+        CHECK (steps[2].picked == "/eos/cue/98.1/fire");
+        CHECK (keyFor (steps[2], "98.1" + opens) == "/eos/cue/98.1/fire");
+        CHECK (steps[3].picked == "/eos/cue/98.1/fire");
+    }
+
+    SUBCASE ("a list named: the list, the cue - a decimal as typed - and fire, no [skip] picked")
+    {
+        const auto whole = model::pathSteps (*snapshot, devices, "/eos/cue/2/5/fire");
+        REQUIRE (whole.size() == 4u);
+        CHECK (whole[1].picked == "/eos/cue/2");
+        CHECK (whole[2].picked == "/eos/cue/2/5");
+        CHECK (whole[3].picked == "/eos/cue/2/5/fire");
+
+        const auto decimal = model::pathSteps (*snapshot, devices, "/eos/cue/2/98.1/fire");
+        REQUIRE (decimal.size() == 4u);
+        CHECK (decimal[1].picked == "/eos/cue/2");
+        CHECK (decimal[2].picked == "/eos/cue/2/98.1");
+        CHECK (decimal[3].picked == "/eos/cue/2/98.1/fire");
+    }
+
+    SUBCASE ("the fire by number is the lists' own, not a skipped cue")
+    {
+        const auto steps = model::pathSteps (*snapshot, devices, "/eos/cue/fire");
+        REQUIRE (steps.size() == 2u);
+        CHECK (steps[1].picked == "/eos/cue/fire");
+    }
+
+    SUBCASE ("a part not open is not taken as typed: the menus stop at it, as before")
+    {
+        const auto steps = model::pathSteps (*snapshot, devices, "/eos/sub/98.1");
+        REQUIRE (steps.size() == 2u);
+        CHECK (steps[1].picked.empty());
+    }
+
+    SUBCASE ("the nested menu of a further message has [skip] too, its cues fired in the current list")
+    {
+        const auto items = model::treeMenu (*snapshot, devices, "/eos/cue/1/1/fire");
+        const auto cue = std::find_if (items.begin(), items.end(), [] (const model::TreeMenuItem& item) { return item.label == "cue"; });
+        REQUIRE (cue != items.end());
+        REQUIRE_FALSE (cue->children.empty());
+        CHECK (cue->children.back().label == "[skip]");
+
+        const auto& skipped = cue->children.back().children;
+        REQUIRE (skipped.size() >= 3u);
+        CHECK (skipped[2].label == "3");
+        REQUIRE (skipped[2].children.size() == 1u);
+        CHECK (skipped[2].children[0].address == "/eos/cue/3/fire");
+    }
+
+    //  And what the menus show is what the engine sends.
+    CHECK (rig.mounts.write ("/eos/cue/98.1/fire", osc::Value::float32 (1.0f)).ok);
 }
 
 TEST_CASE ("client: a described device with several roots walks from the root the address is under")

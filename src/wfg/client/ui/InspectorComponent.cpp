@@ -18,6 +18,7 @@
 
 #include <wfg/client/ui/KeyNames.h>
 #include <wfg/client/ui/Look.h>
+#include <wfg/client/ui/MenuHold.h>
 
 #include <wfg/engine/osc/OscValue.h>
 
@@ -184,6 +185,7 @@ namespace wfg::client::ui
         NumberBox box;                      ///< editable in place, for text and numbers
         juce::ToggleButton toggle;          ///< a `T` row is a switch, not a word to type
         juce::ComboBox choice;              ///< a closed set of values is a choice, not typing
+        MenuHold menuHold;                  ///< the poll leaves `choice` alone while a hand is in it
 
         /*  THE LOOP CONTROL, which is three questions and one integer: does it
             repeat at all, for ever or a set number of times, and how many.
@@ -894,6 +896,12 @@ namespace wfg::client::ui
 
                 line.box.hideEditor (true);
             }
+
+            /*  NOR WHILE A HAND IS IN ITS MENU, or has just picked from it
+                (MenuHold.h): the pick is on its way, and the old value put
+                back now is what `onChange` would send. */
+            if (line.menuHold.holds (line.choice))
+                return;
 
             switch (line.field.control)
             {

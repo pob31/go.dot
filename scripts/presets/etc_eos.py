@@ -20,7 +20,8 @@ The source is ETC's Eos Family Operations Manual, its Open Sound Control
 chapter: the console takes OSC over TCP on port 3032 framed as OSC 1.0, a
 four-byte length before each packet (or SLIP, OSC 1.1, on 3037), and over UDP
 on the ports set in its show control settings. Under /eos: a cue fired by its
-list and number (/eos/cue/<list>/<cue>/fire), the keys by their names
+list and number (/eos/cue/<list>/<cue>/fire) or in the console's current
+list (/eos/cue/<cue>/fire), the keys by their names
 (/eos/key/go_0, /eos/key/stop...), a submaster's level as a float 0 to 1
 and its bump, a macro, a preset or a palette fired by number, a channel's or
 a group's level, the command line whole (/eos/cmd) or in parts, the OSC user
@@ -28,6 +29,11 @@ this connection acts as, the OSC faders, and /eos/ping. Many take a float as
 a button edge, 1 down and 0 up. --lists (4) cue lists with --cues (200) each,
 --subs (40), --macros (100), --channels (200), --groups (100), --presets
 (50) and --faders (10) banks of 10 bound what is described.
+
+A cue number is a decimal on the console - 98.1 - and a description can only
+list whole ones, so /eos/cue is OPEN: an address under it that the file does
+not list goes out as the cue spells it (namespace draft §110). And it SKIPs:
+its level of lists may be left out, which the menus offer as [skip].
 
 Run from anywhere: `python3 scripts/presets/etc_eos.py`.
 """
@@ -77,6 +83,9 @@ def main():
             "fire": fired(cp + "/fire", "cue %d of list %d" % (c, l), "scene.recall"),
         })))
     cue_lists["CONTENTS"]["fire"] = command("/eos/cue/fire", "Fire a cue of the active list by number.", "f", "scene.recall", span(0.0, 9999.999))
+    cue_lists["DESCRIPTION"] = ("The cue lists, each of its cues; a cue of the console's current list without the list, "
+                                "/eos/cue/98.1/fire, and a decimal cue typed into the address, which goes out as typed.")
+    cue_lists["GODOT"] = {"OPEN": True, "SKIP": True}
 
     keys = container("/eos/key", "The console's keys, by name; a float is the button edge, 1 down and 0 up.", {
         name: command("/eos/key/" + name, "Press the %s key." % name.replace("_", " "), "f",
@@ -138,7 +147,7 @@ def main():
                         "number, the keys, submasters, macros, presets and palettes, channel and group levels, the command line, the OSC "
                         "user and faders. %d lists of %d cues, %d submasters, %d macros, %d channels." % (args.lists, args.cues, args.subs, args.macros, args.channels),
                 "etc-eos-osc", "ETC", "Eos family (OSC over TCP)", SOURCES, "scripts/presets/etc_eos.py",
-                transport="tcp", wire="osc", framing="length", port=3032, contents=contents,
+                transport="tcp", wire="osc", framing="length", port=3032, version=2, contents=contents,
                 readback="subscribe", subscribe="/eos/subscribe 1")
     write(tree, "etc-eos-osc", args.out)
     return 0

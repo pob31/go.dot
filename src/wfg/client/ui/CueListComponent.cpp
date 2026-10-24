@@ -441,10 +441,16 @@ namespace wfg::client::ui
     //  Editing in place
     void CueListComponent::setEditable (bool editableToUse)
     {
+        const auto locking = editable && ! editableToUse;
         editable = editableToUse;
 
         if (! editable && editing())
             cancelEdit();
+
+        /*  LOCKED, THE POINTER IS BROUGHT BACK INTO VIEW, once: open for
+            editing the list stayed where the hand was working (see `show`). */
+        if (locking && standbyRow >= 0 && standbyRow < static_cast<int> (rows.size()))
+            revealRows (standbyRow, standbyRow);
     }
 
     CueListComponent::Cells CueListComponent::cellsFor (const model::Row& entry, int width, int height) const
@@ -757,7 +763,8 @@ namespace wfg::client::ui
             `rebuilds()` counts walks, so it moves for every reason the rows
             can change - an edit, a different list, a fold - and asks this view
             one question instead of three. */
-        const auto structureMoved = model.rebuilds() != drawnWalk || model.list() != drawnList
+        const auto listMoved = model.list() != drawnList;
+        const auto structureMoved = model.rebuilds() != drawnWalk || listMoved
                                  || stepsVersion != drawnSteps;
         const auto hintWas = hintsNoStandby();
 
@@ -831,6 +838,7 @@ namespace wfg::client::ui
         if (standbyId != standby || structureMoved)
         {
             const auto wasAt = standbyRow;
+            const auto pointerMoved = standbyId != standby;
 
             standby = standbyId;
             standbyRow = model.indexOf (standbyId);
@@ -849,8 +857,17 @@ namespace wfg::client::ui
                 A GROUP IS BROUGHT INTO VIEW WHOLE, as much of it as fits (the
                 author, 2026-10-21: "if a group is selected next we only see
                 the title and not the contents of it"): its title and every
-                row under it, and one longer than the window from its title. */
-            if (standbyRow >= 0 && list.getHeight() > 0)
+                row under it, and one longer than the window from its title.
+
+                A REBUILD ALONE BRINGS IT BACK ONLY UNDER THE LOCK (the author,
+                2026-10-24: "In editing mode when a cue is modified the view
+                jumps to the standby play head which leads to a lot of
+                scrolling back to the place where editing"). Open for editing,
+                an edit leaves the list where the hand is working; the pointer
+                moving, or another list shown, still brings it into view. */
+            const auto reveal = pointerMoved || listMoved || ! editable;
+
+            if (reveal && standbyRow >= 0 && list.getHeight() > 0)
             {
                 auto last = standbyRow;
 
@@ -948,6 +965,19 @@ namespace wfg::client::ui
                 g.fillRect (0, 0, width, height);
                 g.setColour (tone);
                 g.drawRect (0, 0, width, height, 1);
+            }
+
+            /*  AND A GROUP'S FIRST PLACE UNDER IT (model::firstPlaceFor): the
+                line at the members' indent, as under a cue's row. */
+            else if (row == dropRow && dropWouldInsert)
+            {
+                const auto from = dropDepth < 0
+                                    ? 0
+                                    : juce::jlimit (0, width - 2,
+                                                    railsOrigin() + dropDepth * juce::roundToInt (theme.type * 7.0) * 2);
+
+                g.setColour (Look::colour (theme, dropTone.c_str()));
+                g.fillRect (from, height - 2, width - from, 2);
             }
 
             return;
@@ -1465,7 +1495,10 @@ namespace wfg::client::ui
             const auto cueId = entry.rowKind == model::RowKind::cue ? entry.id : std::string {};
 
             if (! cueId.empty() && std::find (chosen.begin(), chosen.end(), cueId) == chosen.end() && actions.pick)
+            {
                 actions.pick (cueId, false, false);
+                arrowsPick = true;
+            }
 
             popUpMenu (cueId, ! cueId.empty() || ! chosen.empty());
             return;
@@ -1569,6 +1602,7 @@ namespace wfg::client::ui
             if (actions.pick)
                 actions.pick (entry.id, event.mods.isShiftDown(), event.mods.isCommandDown());
 
+            arrowsPick = true;
             return;
         }
 
@@ -1595,6 +1629,8 @@ namespace wfg::client::ui
 
             return;
         }
+
+        arrowsPick = false;
 
         if (actions.park)
             actions.park (target);
@@ -1925,6 +1961,14 @@ namespace wfg::client::ui
 
         if (depthOut != nullptr)
             *depthOut = landed;
+
+        /*  A GROUP'S FIRST PLACE TAKEN FROM ITS FIRST MEMBER'S TOP (model::
+            firstPlaceFor): the line goes above that row, which is under the
+            one before it - the title, or the header's band. */
+        if (drop.kind == model::DropKind::after && drop.index == 0 && rowOut > 0
+              && rows[static_cast<std::size_t> (rowOut)].rowKind == model::RowKind::cue
+              && rows[static_cast<std::size_t> (rowOut)].parent == drop.container)
+            --rowOut;
 
         return drop;
     }
@@ -2729,11 +2773,9 @@ namespace wfg::client::ui
 
     bool CueListComponent::keyPressed (const juce::KeyPress& key)
     {
-        /*  THE ARROWS MOVE THE POINTER, not a selection: this list has no
-            selection yet (M5), and the thing the author needs to judge at M3
-            is whether the standby is unmistakable - which cannot be judged
-            without moving it. Down is next, up is previous, exactly as the
-            page binds them and as gestures/commands.json records. */
+        /*  THE ARROWS MOVE THE POINTER: down is next, up is previous, exactly
+            as the page binds them and as gestures/commands.json records -
+            unless a pick has taken them, below. */
         /*  CTRL/⌘-ARROWS MOVE THE PRESET, plain arrows the pointer (author,
             2026-09-18: "ctrl+upArrow and downArrow, since this way we can
             move the preload/preset up or down nested groups"). Asked before
@@ -2750,15 +2792,26 @@ namespace wfg::client::ui
             return true;
         }
 
+        /*  OPEN FOR EDITING, AFTER A CLICK THAT PICKED, THE ARROWS STEP THE
+            PICK (the author, 2026-10-24: "This is handier when editing cues
+            than making the playhead jump to the previous/next standby
+            position"). A click in the gutter gives them back to the pointer,
+            and under the lock they are the pointer's whatever was clicked. */
+        const auto stepPick = editable && arrowsPick && actions.pickStep != nullptr;
+
         if (key == juce::KeyPress (juce::KeyPress::downKey))
         {
-            if (actions.standbyNext) actions.standbyNext();
+            if (stepPick)                  actions.pickStep (+1);
+            else if (actions.standbyNext)  actions.standbyNext();
+
             return true;
         }
 
         if (key == juce::KeyPress (juce::KeyPress::upKey))
         {
-            if (actions.standbyPrevious) actions.standbyPrevious();
+            if (stepPick)                      actions.pickStep (-1);
+            else if (actions.standbyPrevious)  actions.standbyPrevious();
+
             return true;
         }
 

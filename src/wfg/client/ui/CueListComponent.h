@@ -70,6 +70,11 @@ namespace wfg::client::ui
         {
             std::function<void()> standbyNext;
             std::function<void()> standbyPrevious;
+
+            /*  THE ARROWS STEP THE PICK instead, +1 down and -1 up, while the
+                show is open for editing and the last click on a row picked a
+                cue rather than parked the pointer (the author, 2026-10-24). */
+            std::function<void (int direction)> pickStep;
             std::function<void (const std::string&)> park;
             std::function<void()> go;
 
@@ -385,6 +390,12 @@ namespace wfg::client::ui
             a held F would flag and unflag the picked cues as fast as it
             repeated. Shut by the first press, opened by `keyStateChanged`. */
         bool flagKeyDown = false;
+
+        /*  WHAT THE LAST CLICK ON A ROW DID (the author, 2026-10-24): picked a
+            cue, so the plain arrows step the pick while the show is open for
+            editing, or parked the pointer, so they move the standby - which
+            is what they do before any click, and always under the lock. */
+        bool arrowsPick = false;
         std::string standby;
         int standbyRow = -1;
 

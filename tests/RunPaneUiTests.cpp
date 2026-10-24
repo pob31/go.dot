@@ -5,6 +5,7 @@
 #include <wfg/client/ui/InspectorComponent.h>
 #include <wfg/client/ui/KeyNames.h>
 #include <wfg/client/ui/ListTabsComponent.h>
+#include <wfg/client/ui/MenuHold.h>
 #include <wfg/client/ui/EqPanelComponent.h>
 #include <wfg/client/ui/FxPanelComponent.h>
 #include <wfg/client/ui/PicturePanelComponent.h>
@@ -615,6 +616,280 @@ TEST_CASE ("cue list: a standby that moves onto a group brings the group into vi
     cues.show (show, memos.back(), {});
     CHECK (onScreen (indexOf (memos.back())));
     CHECK (view->getViewPositionY() <= before);
+}
+
+TEST_CASE ("cue list: open for editing an edit leaves the list where it is; under the lock it brings the standby back, and locking does once")
+{
+    /*  The author, 2026-10-24: "In editing mode when a cue is modified the
+        view jumps to the standby play head which leads to a lot of scrolling
+        back to the place where editing. Could we limit the jumping to the
+        show mode?" Forty memos in a list a few rows high, parked on the first. */
+    wfg::doc::ShowDocument document;
+    const auto list = document.createList ("Main");
+    REQUIRE (list.ok);
+
+    std::vector<std::string> memos;
+
+    for (int at = 0; at < 40; ++at)
+        memos.push_back (document.createCue (list.id, at, "memo", "Memo " + std::to_string (at)).id);
+
+    wfg::Engine engine;
+    wfg::cue::RunTable runs;
+    wfg::tree::MountTable mounts;
+    wfg::tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
+    wfg::tree::EngineState state;
+    std::int64_t tick = 0;
+
+    model::ShowModel show;
+
+    const auto edit = [&] (const std::string& name)
+    {
+        REQUIRE (document.setAttribute ("/godot/cue/" + memos[30] + "/name", name).ok);
+        parameters.markStale();
+        state.documentRevision = document.revision();
+        const auto snapshot = parameters.publish (++tick, state);
+        REQUIRE (snapshot != nullptr);
+        REQUIRE (show.refresh (*snapshot, list.id));
+    };
+
+    edit ("Memo 30");
+
+    const model::Theme theme;
+    ui::CueListComponent cues (theme, {});
+    cues.setSize (900, 300);
+    cues.show (show, memos.front(), {});
+
+    juce::ListBox* box = nullptr;
+
+    for (auto* child : cues.getChildren())
+        if (auto* found = dynamic_cast<juce::ListBox*> (child))
+            box = found;
+
+    REQUIRE (box != nullptr);
+    auto* view = box->getViewport();
+    REQUIRE (view != nullptr);
+    REQUIRE (view->getViewPositionY() == 0);
+
+    //  Scrolled down to where the hand is working, and the memo there renamed: the list stays.
+    const auto working = 25 * box->getRowHeight();
+    view->setViewPosition (0, working);
+    REQUIRE (view->getViewPositionY() == working);
+
+    const auto rebuilds = show.rebuilds();
+    edit ("Renamed");
+    REQUIRE (show.rebuilds() != rebuilds);
+    cues.show (show, memos.front(), {});
+    CHECK (view->getViewPositionY() == working);
+
+    //  The pointer moving still brings it into view, open for editing too.
+    cues.show (show, memos[1], {});
+    CHECK (view->getViewPositionY() <= box->getRowHeight() * 2);
+
+    //  Locked: the standby is brought back once, the moment the lock comes on.
+    view->setViewPosition (0, working);
+    cues.setEditable (false);
+    CHECK (view->getViewPositionY() <= box->getRowHeight() * 2);
+
+    //  And under the lock a rebuild brings it back, as it always has.
+    view->setViewPosition (0, working);
+    edit ("Renamed again");
+    cues.show (show, memos[1], {});
+    CHECK (view->getViewPositionY() <= box->getRowHeight() * 2);
+}
+
+TEST_CASE ("cue list: after a click that picks, the arrows step the pick; after one in the gutter, or under the lock, they move the standby")
+{
+    /*  The author, 2026-10-24: "When the last selection with the mouse
+        pointer is a cue for editing ... if the user uses the up and down
+        arrow, change the selected cue ... in editing mode if the last mouse
+        action is a standby playhead position, then the arrows jump to the
+        previous or next standby position." */
+    wfg::doc::ShowDocument document;
+    const auto list = document.createList ("Main");
+    REQUIRE (list.ok);
+    const auto first = document.createCue (list.id, 0, "memo", "Doors").id;
+    REQUIRE (document.createCue (list.id, 1, "memo", "Preshow").ok);
+
+    wfg::Engine engine;
+    wfg::cue::RunTable runs;
+    wfg::tree::MountTable mounts;
+    wfg::tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
+    parameters.markStale();
+    wfg::tree::EngineState state;
+    const auto snapshot = parameters.publish (0, state);
+    REQUIRE (snapshot != nullptr);
+
+    model::ShowModel show;
+    REQUIRE (show.refresh (*snapshot, list.id));
+
+    int firstRow = -1;
+
+    for (std::size_t at = 0; at < show.rows().size(); ++at)
+        if (show.rows()[at].id == first && show.rows()[at].rowKind == model::RowKind::cue)
+            firstRow = static_cast<int> (at);
+
+    REQUIRE (firstRow >= 0);
+
+    std::vector<std::string> heard;
+    ui::CueListComponent::Actions actions;
+    actions.park = [&] (const std::string&) { heard.push_back ("park"); };
+    actions.pick = [&] (const std::string&, bool, bool) { heard.push_back ("pick"); };
+    actions.standbyNext = [&] { heard.push_back ("standby next"); };
+    actions.standbyPrevious = [&] { heard.push_back ("standby previous"); };
+    actions.pickStep = [&] (int direction) { heard.push_back (direction > 0 ? "pick next" : "pick previous"); };
+
+    const model::Theme theme;
+    ui::CueListComponent cues (theme, actions);
+    cues.setSize (900, 200);
+    cues.show (show, {}, {});
+
+    juce::ListBox* box = nullptr;
+
+    for (auto* child : cues.getChildren())
+        if (auto* found = dynamic_cast<juce::ListBox*> (child))
+            box = found;
+
+    REQUIRE (box != nullptr);
+    auto* rows = box->getListBoxModel();
+    REQUIRE (rows != nullptr);
+
+    const auto unit = juce::roundToInt (theme.type * 7.0);
+    const auto pad = unit / 2;
+
+    const auto click = [rows, box] (int row, float x)
+    {
+        const auto source = juce::Desktop::getInstance().getMainMouseSource();
+        const auto now = juce::Time::getCurrentTime();
+        const juce::Point<float> at { x, 4.0f };
+        const juce::ModifierKeys left { juce::ModifierKeys::leftButtonModifier };
+        const juce::MouseEvent event (source, at, left, juce::MouseInputSource::defaultPressure,
+                                      0.0f, 0.0f, 0.0f, 0.0f, box, box, now, at, now, 1, false);
+        rows->listBoxItemClicked (row, event);
+    };
+
+    const auto down = juce::KeyPress (juce::KeyPress::downKey);
+    const auto up = juce::KeyPress (juce::KeyPress::upKey);
+
+    //  Before any click: the standby, as ever.
+    CHECK (cues.keyPressed (down));
+    CHECK (heard == std::vector<std::string> { "standby next" });
+
+    //  A click on the row picks, and the arrows step the pick.
+    heard.clear();
+    click (firstRow, static_cast<float> (pad + 8 * unit));
+    CHECK (cues.keyPressed (down));
+    CHECK (cues.keyPressed (up));
+    CHECK (heard == std::vector<std::string> { "pick", "pick next", "pick previous" });
+
+    //  A click in the gutter parks, and gives the arrows back to the standby.
+    heard.clear();
+    click (firstRow, static_cast<float> (pad + 2 * unit));
+    CHECK (cues.keyPressed (up));
+    CHECK (heard == std::vector<std::string> { "park", "standby previous" });
+
+    //  Picked again - the next row, so it is not a double-click - then locked: the arrows are the standby's.
+    heard.clear();
+    click (firstRow + 1, static_cast<float> (pad + 8 * unit));
+    cues.setEditable (false);
+    CHECK (cues.keyPressed (down));
+    CHECK (heard == std::vector<std::string> { "pick", "standby next" });
+
+    //  Unlocked, the pick still holds them.
+    heard.clear();
+    cues.setEditable (true);
+    CHECK (cues.keyPressed (down));
+    CHECK (heard == std::vector<std::string> { "pick next" });
+}
+
+TEST_CASE ("cue list: a group's first place is under its header's empty band and over its first member, and a drop there makes the cue its first")
+{
+    /*  The author, 2026-10-24: "When dragging an item to be the first item of
+        a group, the green target line appears briefly and then the header
+        opens and the target to place as the first item disappears." A group
+        of two with no header, a cue before it and one after. */
+    wfg::doc::ShowDocument document;
+    const auto list = document.createList ("Main");
+    REQUIRE (list.ok);
+    REQUIRE (document.createCue (list.id, 0, "memo", "Before").ok);
+    const auto group = document.createCue (list.id, 1, "group", "Scene").id;
+    REQUIRE (! group.empty());
+    const auto one = document.createCue (group, 0, "memo", "One").id;
+    REQUIRE (document.createCue (group, 1, "memo", "Two").ok);
+    const auto after = document.createCue (list.id, 2, "memo", "After").id;
+
+    wfg::Engine engine;
+    wfg::cue::RunTable runs;
+    wfg::tree::MountTable mounts;
+    wfg::tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
+    parameters.markStale();
+    wfg::tree::EngineState state;
+    const auto snapshot = parameters.publish (0, state);
+    REQUIRE (snapshot != nullptr);
+
+    model::ShowModel show;
+    REQUIRE (show.refresh (*snapshot, list.id));
+
+    int title = -1;
+
+    for (std::size_t at = 0; at < show.rows().size(); ++at)
+        if (show.rows()[at].id == group && show.rows()[at].rowKind == model::RowKind::cue)
+            title = static_cast<int> (at);
+
+    REQUIRE (title >= 0);
+    REQUIRE (show.rows()[static_cast<std::size_t> (title + 1)].id == one);
+
+    std::string said;
+    std::vector<std::string> moved;
+    ui::CueListComponent::Actions actions;
+    actions.say = [&] (const juce::String& words) { if (words.isNotEmpty()) said = words.toStdString(); };
+    actions.move = [&] (const std::string& id, const std::string& parent, int index)
+                   { moved.push_back (id + " " + parent + " " + std::to_string (index)); };
+
+    const model::Theme theme;
+    ui::CueListComponent cues (theme, actions);
+    cues.setSize (900, 600);
+    cues.show (show, {}, {});
+
+    juce::ListBox* box = nullptr;
+
+    for (auto* child : cues.getChildren())
+        if (auto* found = dynamic_cast<juce::ListBox*> (child))
+            box = found;
+
+    REQUIRE (box != nullptr);
+    auto& target = static_cast<juce::DragAndDropTarget&> (cues);
+    const auto h = box->getRowHeight();
+
+    const auto at = [&] (int row, double fraction)
+    {
+        return juce::DragAndDropTarget::SourceDetails (juce::var (juce::String (after)), nullptr,
+                                                       juce::Point<int> (300, box->getY() + row * h
+                                                                                + juce::roundToInt (fraction * h)));
+    };
+
+    //  On the title: the header's empty band grows under it, and its middle is the header.
+    target.itemDragEnter (at (title, 0.5));
+    target.itemDragMove (at (title + 1, 0.5));
+    CHECK (said == "into Scene's header");
+
+    //  Its lower part: the group's first place.
+    target.itemDragMove (at (title + 1, 0.85));
+    CHECK (said == "first in Scene");
+
+    //  And the top of the first member, one row further down under the band: the same place.
+    target.itemDragMove (at (title + 2, 0.5));
+    CHECK (said == "after One");
+    target.itemDragMove (at (title + 2, 0.1));
+    CHECK (said == "first in Scene");
+
+    target.itemDropped (at (title + 2, 0.1));
+    CHECK (moved == std::vector<std::string> { after + " " + group + " 0" });
+
+    //  From the band's lower part too.
+    moved.clear();
+    target.itemDragEnter (at (title, 0.5));
+    target.itemDropped (at (title + 1, 0.85));
+    CHECK (moved == std::vector<std::string> { after + " " + group + " 0" });
 }
 
 TEST_CASE ("cue list: a drag anywhere inside a group keeps its footer's band to drop on, and its title shows the header's too")
@@ -10023,4 +10298,20 @@ TEST_CASE ("inspector: a right-click on a number binds a control to it, for the 
 
     //  A word is no number to bind.
     CHECK_FALSE (inspector.bindMenuFor (name).has_value());
+}
+
+TEST_CASE ("menus: the poll leaves a menu be while it is open and for a moment after, then catches up")
+{
+    /*  The author, 2026-10-24: "sometimes selecting an item in a dropdown menu
+        doesn't register and you have to click again". MenuHold.h: a pass that
+        put the engine's value back between the popup shutting and `onChange`
+        made the pick send the old value. */
+    ui::MenuHold hold;
+    CHECK_FALSE (hold.holds (false, 1000));      // never opened: the poll's
+
+    CHECK (hold.holds (true, 2000));             // open
+    CHECK (hold.holds (true, 2400));
+    CHECK (hold.holds (false, 2420));            // shut, the pick on its way
+    CHECK (hold.holds (false, 2400 + ui::MenuHold::holdMs - 1));
+    CHECK_FALSE (hold.holds (false, 2400 + ui::MenuHold::holdMs));
 }

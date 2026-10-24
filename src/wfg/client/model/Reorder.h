@@ -209,6 +209,19 @@ namespace wfg::client::model
     Drop dropAtDepth (const std::vector<Row>& rows, std::size_t at, const Row& dragged,
                       double fraction, int depth, int* landed = nullptr);
 
+    /*  A GROUP'S FIRST PLACE (the author, 2026-10-24: "When dragging an item
+        to be the first item of a group, the green target line appears briefly
+        and then the header opens and the target to place as the first item
+        disappears"). The line under an open group's title is "after the
+        group", and the hand reaching the title grows the header's empty band
+        under it, which is "into the header" all through - so the gap the eye
+        reads as the group's first place had nothing behind it. It is the
+        lower part of that empty band, and the upper part of the first
+        member's row: `object.move` into the group at position nought. Nothing
+        when `rows[at]` is neither; a `none` drop, refused or not, where the
+        move cannot be. Said "first in" the group (`describe`). */
+    std::optional<Drop> firstPlaceFor (const std::vector<Row>& rows, std::size_t at, const Row& dragged, double fraction);
+
     /*  WHERE A FILE DROPPED FROM OUTSIDE THE WINDOW MAKES ITS CUES (author,
         2026-09-25: "Drag and dropping a media file on a group places the new
         media cue after the group and requires moving it into the group

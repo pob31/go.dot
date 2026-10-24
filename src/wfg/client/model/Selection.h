@@ -58,6 +58,14 @@ namespace wfg::client::model
 
         void clear();
 
+        /*  THE NEXT CUE ROW AFTER THE ANCHOR, `direction` +1, or the one
+            before it, -1, picked alone as a plain click would - in the order
+            the list draws them, so a shut section is stepped over. A derived
+            line is skipped, being a cue drawn a second time. With nothing
+            picked, down picks the first cue and up the last; at an end the
+            pick stays. Returns what is now the anchor. */
+        const std::string& step (int direction, const std::vector<Row>& rows);
+
         /*  Drops what the show no longer has: after a delete, an undo or a
             revert the ids that went are not picked any more. */
         void retain (const std::vector<Row>& rows);

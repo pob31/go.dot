@@ -25,6 +25,7 @@
 #include <cctype>
 #include <cstddef>
 #include <map>
+#include <set>
 
 namespace wfg::client::model
 {
@@ -148,18 +149,40 @@ namespace wfg::client::model
 
         using Children = std::map<std::string, std::map<std::string, bool>>;   // parent -> name -> holds others
 
+        /*  THE TREE AS THE MENUS READ IT: what each part holds, and the parts
+            that take what they do not list (GODOT.OPEN) or whose level may be
+            left out (GODOT.SKIP) - the author, 2026-10-24, for an Eos cue that
+            is a decimal and one fired without its list. */
+        struct Walk
+        {
+            Children children;
+            std::set<std::string> open, skips;
+        };
+
+        bool isUnder (const std::string& at, const std::string& root)
+        {
+            return at.size() > root.size() + 1 && at.compare (0, root.size(), root) == 0 && at[root.size()] == '/';
+        }
+
         /*  EVERY NODE UNDER THE ROOT, AND EVERY LEVEL ABOVE IT: a leaf registers
             itself with its parent and each ancestor with its own, so a level the
             description never declared as a container still reads as one. */
-        Children childrenUnder (const tree::TreeSnapshot& snapshot, const std::string& root)
+        Walk walkUnder (const tree::TreeSnapshot& snapshot, const std::string& root)
         {
-            Children children;
+            Walk walk;
+            auto& children = walk.children;
 
             for (const auto* node : snapshot.all())
             {
                 const auto& at = node->address;
 
-                if (at.size() <= root.size() + 1 || at.compare (0, root.size(), root) != 0 || at[root.size()] != '/')
+                if (at == root || isUnder (at, root))
+                {
+                    if (node->open())  walk.open.insert (at);
+                    if (node->skips()) walk.skips.insert (at);
+                }
+
+                if (! isUnder (at, root))
                     continue;
 
                 auto parent = root;
@@ -174,7 +197,7 @@ namespace wfg::client::model
                 }
             }
 
-            return children;
+            return walk;
         }
 
         std::vector<std::pair<std::string, bool>> sortedNames (const std::map<std::string, bool>& names)
@@ -185,12 +208,71 @@ namespace wfg::client::model
             return sorted;
         }
 
-        std::vector<TreeMenuItem> itemsUnder (const Children& children, const std::string& parent)
+        //  The first of what `parent` holds, as a person counts; empty when it holds nothing.
+        std::string firstUnder (const Children& children, const std::string& parent)
         {
-            std::vector<TreeMenuItem> items;
             const auto found = children.find (parent);
 
-            if (found == children.end())
+            if (found == children.end() || found->second.empty())
+                return {};
+
+            return sortedNames (found->second).front().first;
+        }
+
+        /*  FROM `described` DOWN THROUGH EACH FIRST PART TO A LEAF, as the parts
+            to add: "/fire" under an Eos cue. What a choice past a skipped level
+            writes, so the address it leaves is whole and reads back the way it
+            was picked - "/eos/cue/3" alone would read as list 3. */
+        std::string firstLeafTail (const Children& children, const std::string& described)
+        {
+            std::string tail;
+            auto at = described;
+
+            for (std::size_t depth = 0; depth < 64; ++depth)
+            {
+                const auto first = firstUnder (children, at);
+
+                if (first.empty())
+                    break;
+
+                tail += "/" + first;
+                at += "/" + first;
+            }
+
+            return tail;
+        }
+
+        //  Whether `described` or a part above it takes what it does not list.
+        bool openAt (const Walk& walk, const std::string& described)
+        {
+            for (auto at = described; ! at.empty(); at = at.substr (0, at.rfind ('/')))
+                if (walk.open.count (at) > 0)
+                    return true;
+
+            return false;
+        }
+
+        bool holds (const Children& children, const std::string& parent, const std::string& name)
+        {
+            const auto found = children.find (parent);
+            return found != children.end() && found->second.count (name) > 0;
+        }
+
+        //  The author's word for leaving a level out (2026-10-24).
+        constexpr const char* skipWord = "[skip]";
+        constexpr const char* opens = " \xe2\x80\xba";
+
+        /*  `described` is where the file's tree is read, `real` what the
+            address says: the same until a level is skipped, when the menu goes
+            on reading under that level's first part while the address leaves
+            it out. */
+        std::vector<TreeMenuItem> itemsUnder (const Walk& walk, const std::string& described, const std::string& real,
+                                              bool afterSkip)
+        {
+            std::vector<TreeMenuItem> items;
+            const auto found = walk.children.find (described);
+
+            if (found == walk.children.end())
                 return items;
 
             for (const auto& [name, holdsOthers] : sortedNames (found->second))
@@ -199,12 +281,23 @@ namespace wfg::client::model
                 item.label = name;
 
                 if (holdsOthers)
-                    item.children = itemsUnder (children, parent + "/" + name);
+                    item.children = itemsUnder (walk, described + "/" + name, real + "/" + name, afterSkip);
                 else
-                    item.address = parent + "/" + name;
+                    item.address = real + "/" + name;
 
                 items.push_back (std::move (item));
             }
+
+            if (walk.skips.count (described) > 0 && ! afterSkip)
+                if (const auto first = firstUnder (walk.children, described); ! first.empty())
+                {
+                    TreeMenuItem item;
+                    item.label = skipWord;
+                    item.children = itemsUnder (walk, described + "/" + first, real, true);
+
+                    if (! item.children.empty())
+                        items.push_back (std::move (item));
+                }
 
             return items;
         }
@@ -219,35 +312,105 @@ namespace wfg::client::model
         if (root.empty())
             return {};
 
-        const auto children = childrenUnder (snapshot, root);
+        const auto walk = walkUnder (snapshot, root);
+        const auto& children = walk.children;
         const auto wanted = address.size() > root.size() + 1 ? partsOf (address.substr (root.size() + 1))
                                                              : std::vector<std::string> {};
         std::vector<PathStep> steps;
-        auto parent = root;
+        auto described = root;
+        auto real = root;
+        auto afterSkip = false;
 
-        for (std::size_t level = 0;; ++level)
+        for (std::size_t level = 0; steps.size() < 64;)
         {
-            const auto found = children.find (parent);
+            const auto found = children.find (described);
 
             if (found == children.end() || found->second.empty())
                 break;
 
+            const auto part = level < wanted.size() ? wanted[level] : std::string {};
+
+            /*  A CHOICE'S KEY: the address it writes. Past a skipped level a
+                part that holds others writes down to its first leaf, so the
+                address stays whole and is read back as it was picked. */
+            const auto keyOf = [&] (const std::string& name, bool holdsOthers, const std::string& under)
+            {
+                return real + "/" + name + (afterSkip && holdsOthers ? firstLeafTail (children, under) : std::string {});
+            };
+
             PathStep step;
 
             for (const auto& [name, holdsOthers] : sortedNames (found->second))
-                step.choices.push_back ({ parent + "/" + name, name + (holdsOthers ? " \xe2\x80\xba" : "") });
+                step.choices.push_back ({ keyOf (name, holdsOthers, described + "/" + name),
+                                          name + (holdsOthers ? opens : "") });
 
-            const auto picked = level < wanted.size() ? found->second.find (wanted[level]) : found->second.end();
+            /*  [skip], WHERE THE LEVEL MAY BE LEFT OUT (GODOT.SKIP): it writes
+                the first of what the level's first part holds, down to a leaf
+                - an Eos cue 1 in the current list, "/eos/cue/1/fire". The
+                address reads as skipped when its part here is none the level
+                lists, or when what follows it fits under a skip and not under
+                that part: "/eos/cue/3/fire" is cue 3, "/eos/cue/3/5/fire" cue
+                5 of list 3. */
+            const auto first = firstUnder (children, described);
+            const auto shape = described + "/" + first;
+            const auto skippable = ! afterSkip && walk.skips.count (described) > 0 && ! first.empty()
+                                   && ! firstUnder (children, shape).empty();
 
-            if (picked != found->second.end())
-                step.picked = parent + "/" + picked->first;
+            if (skippable)
+            {
+                const auto firstInside = firstUnder (children, shape);
+                const auto skipKey = real + "/" + firstInside + firstLeafTail (children, shape + "/" + firstInside);
+                step.choices.push_back ({ skipKey, std::string (skipWord) + opens });
+
+                auto skipped = false;
+
+                if (! part.empty())
+                {
+                    if (! holds (children, described, part))
+                        skipped = true;
+                    else if (level + 1 < wanted.size())
+                        skipped = ! holds (children, described + "/" + part, wanted[level + 1])
+                                  && holds (children, shape + "/" + part, wanted[level + 1]);
+                }
+
+                if (skipped)
+                {
+                    step.picked = skipKey;
+                    steps.push_back (std::move (step));
+                    described = shape;
+                    afterSkip = true;
+                    continue;
+                }
+            }
+
+            auto partHoldsOthers = false;
+            auto next = described;
+
+            if (const auto listed = found->second.find (part); ! part.empty() && listed != found->second.end())
+            {
+                partHoldsOthers = listed->second;
+                next = described + "/" + part;
+                step.picked = keyOf (part, partHoldsOthers, next);
+            }
+            else if (! part.empty() && openAt (walk, described))
+            {
+                /*  A PART TYPED THAT THE FILE DOES NOT LIST, under an open one:
+                    a decimal cue. Shown as picked, among the rest, and the
+                    menus after it read as its first sibling's do. */
+                partHoldsOthers = found->second.at (first);
+                next = shape;
+                step.picked = keyOf (part, partHoldsOthers, next);
+                step.choices.push_back ({ step.picked, part + (partHoldsOthers ? opens : "") });
+            }
 
             steps.push_back (std::move (step));
 
-            if (picked == found->second.end() || ! picked->second)
+            if (steps.back().picked.empty() || ! partHoldsOthers)
                 break;
 
-            parent += "/" + picked->first;
+            real += "/" + part;
+            described = next;
+            ++level;
         }
 
         return steps;
@@ -258,7 +421,7 @@ namespace wfg::client::model
                                         const std::string& address)
     {
         const auto root = describedRootOf (address, devices);
-        return root.empty() ? std::vector<TreeMenuItem> {} : itemsUnder (childrenUnder (snapshot, root), root);
+        return root.empty() ? std::vector<TreeMenuItem> {} : itemsUnder (walkUnder (snapshot, root), root, root, false);
     }
 
     std::vector<std::string> valueOptions (const tree::TreeSnapshot& snapshot, const std::string& address)

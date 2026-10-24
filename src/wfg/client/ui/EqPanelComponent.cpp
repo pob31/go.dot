@@ -370,10 +370,14 @@ namespace wfg::client::ui
             bandToggles[static_cast<std::size_t> (band)].setToggleState (s.band[band].on,
                                                                           juce::dontSendNotification);
 
-        lowShape.setSelectedId (s.band[0].shape == audio::EqSettings::Shape::lowShelf ? 2 : 1,
-                                juce::dontSendNotification);
-        highShape.setSelectedId (s.band[3].shape == audio::EqSettings::Shape::highShelf ? 2 : 1,
-                                 juce::dontSendNotification);
+        //  Neither shape while a hand is in its menu or has just picked (MenuHold.h).
+        if (! lowShapeHold.holds (lowShape))
+            lowShape.setSelectedId (s.band[0].shape == audio::EqSettings::Shape::lowShelf ? 2 : 1,
+                                    juce::dontSendNotification);
+
+        if (! highShapeHold.holds (highShape))
+            highShape.setSelectedId (s.band[3].shape == audio::EqSettings::Shape::highShelf ? 2 : 1,
+                                     juce::dontSendNotification);
 
         for (auto& box : boxes)
         {

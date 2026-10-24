@@ -2,6 +2,7 @@
    SPDX-License-Identifier: GPL-3.0-or-later */
 #include <wfg/client/ui/ShowSettingsWindow.h>
 #include <wfg/client/ui/Look.h>
+#include <wfg/client/ui/MenuHold.h>
 #include <wfg/client/ui/Icons.h>
 #include <wfg/client/ui/WarpEditorPanel.h>
 #include <wfg/client/model/Bindings.h>
@@ -3859,20 +3860,24 @@ namespace wfg::client::ui
                 const auto picked = deck.id != surfaceId;
                 surfaceId = deck.id;
 
-                if (picked || decksNow != deckMenu)
+                //  Neither menu while a hand is in it or has just picked (MenuHold.h).
+                const auto deckHeld = ! picked && deckHold.holds (deckBox);
+                const auto cartHeld = ! picked && cartHold.holds (cartBox);
+
+                if (! deckHeld && (picked || decksNow != deckMenu))
                 {
                     deckMenu = std::move (decksNow);
                     fill (deckBox, deckMenu);
                 }
 
-                if (picked || cartsNow != cartMenu)
+                if (! cartHeld && (picked || cartsNow != cartMenu))
                 {
                     cartMenu = std::move (cartsNow);
                     fill (cartBox, cartMenu);
                 }
 
-                select (deckBox, deckMenu, deck.device);
-                select (cartBox, cartMenu, deck.cart);
+                if (! deckHeld) select (deckBox, deckMenu, deck.device);
+                if (! cartHeld) select (cartBox, cartMenu, deck.cart);
                 showKeysButton.setToggleState (deck.showKeys, juce::dontSendNotification);
 
                 if (! brightness.isMouseButtonDown())
@@ -4005,6 +4010,7 @@ namespace wfg::client::ui
             std::function<void (Event)> send;
 
             juce::ComboBox deckBox, cartBox;
+            MenuHold deckHold, cartHold;
             juce::ToggleButton showKeysButton { "Show keys" };
             juce::Label brightnessLabel;
             juce::Slider brightness;
@@ -8798,10 +8804,10 @@ namespace wfg::client::ui
             {
                 shown = sync;
 
-                fill (mtc, mtcChoices, ports, sync.mtcOut);
-                fill (ltc, ltcChoices, std::move (outputs), sync.ltcOut);
-                fill (mtcIn, mtcInChoices, std::move (ports), sync.mtcIn);
-                fill (ltcIn, ltcInChoices, std::move (inputs), sync.ltcIn);
+                fill (mtc, mtcHold, mtcChoices, ports, sync.mtcOut);
+                fill (ltc, ltcHold, ltcChoices, std::move (outputs), sync.ltcOut);
+                fill (mtcIn, mtcInHold, mtcInChoices, std::move (ports), sync.mtcIn);
+                fill (ltcIn, ltcInHold, ltcInChoices, std::move (inputs), sync.ltcIn);
 
                 auto rateId = 0;
                 const auto& rates = model::rateChoices();
@@ -8810,7 +8816,7 @@ namespace wfg::client::ui
                     if (rates[at].first == sync.frameRate)
                         rateId = static_cast<int> (at) + 1;
 
-                if (rate.getSelectedId() != rateId)
+                if (! rateHold.holds (rate) && rate.getSelectedId() != rateId)
                     rate.setSelectedId (rateId, juce::dontSendNotification);
 
                 /*  Not while it is being typed into, or a refresh would take the
@@ -8911,9 +8917,13 @@ namespace wfg::client::ui
                 Surfaces tab marks one: the show names it, and a menu that
                 dropped it would make choosing anything else look like a
                 correction rather than a change. */
-            static void fill (juce::ComboBox& box, std::vector<model::SyncChoice>& held,
+            static void fill (juce::ComboBox& box, MenuHold& hold, std::vector<model::SyncChoice>& held,
                               std::vector<model::SyncChoice> offered, const std::string& current)
             {
+                //  Not while a hand is in it or has just picked (MenuHold.h); the next pass catches up.
+                if (hold.holds (box))
+                    return;
+
                 const auto known = std::any_of (offered.begin(), offered.end(),
                                                 [&current] (const model::SyncChoice& choice) { return choice.id == current; });
 
@@ -9028,6 +9038,7 @@ namespace wfg::client::ui
             juce::TextEditor level;
             juce::Label comingIn, ltcInLabel, mtcInLabel, ltcHeard, mtcHeard;
             juce::ComboBox ltcIn, mtcIn;
+            MenuHold rateHold, mtcHold, ltcHold, ltcInHold, mtcInHold;
             Number tolerance, jumpPast, catchUp, crossfade;
         };
 
@@ -9171,8 +9182,8 @@ namespace wfg::client::ui
 
                 const auto roleId = pair.role == "main" ? 2 : pair.role == "backup" ? 3 : pair.role == "none" ? 1 : 0;
 
-                //  Not while its list is open under the hand.
-                if (! role.isPopupActive() && role.getSelectedId() != roleId)
+                //  Not while its list is open under the hand, nor just after a pick (MenuHold.h).
+                if (! roleHold.holds (role) && role.getSelectedId() != roleId)
                     role.setSelectedId (roleId, juce::dontSendNotification);
 
                 /*  Not while it is being typed into, or a refresh at the window's
@@ -9371,6 +9382,7 @@ namespace wfg::client::ui
             juce::Label intro, roleLabel, peersLabel, timeoutLabel, timeoutUnit, peersExplanation, timeoutExplanation,
                         nowHeading, actsHeading;
             juce::ComboBox role;
+            MenuHold roleHold;
             juce::TextEditor peers, timeout;
 
             //  As many as `PairReading::lines` says at most; the ones a seat does not use, hidden.
