@@ -157,6 +157,15 @@ namespace
             levels.push_back ({ track, levelDb });
         }
 
+        //  Each logical output channel's gain, as the tick last handed it over (§38, §109).
+        void setOutputGainDb (int firstChannel, int width, double gainDb) override
+        {
+            for (int channel = firstChannel; channel < firstChannel + width; ++channel)
+                outputGains[channel] = gainDb;
+        }
+
+        std::map<int, double> outputGains;
+
         /*  A voice's speed (namespace draft §22.4): every breakpoint placed, in
             the order it was placed. */
         struct RatePoint { int track; std::int64_t sample; double speed; };
@@ -13883,6 +13892,81 @@ TEST_CASE ("live: under the lock a DCA mark's sound offset rides live - heard, w
         CHECK (rig.runs.find (run)->level == doctest::Approx (before));
         CHECK (rig.published (offset) == "0");
         CHECK (rig.steps() == steps);
+    }
+}
+
+TEST_CASE ("live: under the lock an output's trim and a canvas's curve ride live - heard, written to nothing, kept or let go on unlock (§109, BBN)")
+{
+    LiveRig rig;
+    rig.runner.setDcas (&rig.dcas);
+
+    const auto band = rig.document.createDca ("Band").id;
+    REQUIRE (rig.document.setAttribute ("/godot/bus/" + rig.main + "/dca", band).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/bus/" + rig.main + "/trim", "-3").ok);
+
+    const auto stage = rig.document.createCanvas ("Stage");
+    REQUIRE (stage.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/canvas/" + stage.id + "/dca", band).ok);
+
+    const auto trim = "/godot/bus/" + rig.main + "/trim";
+    const auto curve = "/godot/canvas/" + stage.id + "/dcaCurve";
+
+    rig.tickOnce();
+    CHECK (rig.audio.outputGains[0] == doctest::Approx (-3.0));
+
+    rig.lock (true);
+    const auto steps = rig.steps();
+
+    //  A KNOB'S TURN ON A LOCKED SHOW, both at once: heard on the next tick, the show untouched, no step.
+    REQUIRE (rig.engine.submit ("surface:SURF0001", "node.setMany",
+                                { osc::Value::string (trim), osc::Value::float64 (-4.5),
+                                  osc::Value::string (curve), osc::Value::float64 (30.0) }));
+    CHECK (rig.tickOnce().applied == 1);
+    rig.tickOnce();
+
+    CHECK (rig.audio.outputGains[0] == doctest::Approx (-4.5));
+    CHECK (rig.audio.outputGains[1] == doctest::Approx (-4.5));
+    CHECK (rig.saved (trim) == "-3");
+    CHECK (rig.saved (curve) == "0");
+    CHECK (rig.steps() == steps);
+
+    //  WHAT A CLIENT SEES: the values riding, at their own addresses, counted on the bar.
+    CHECK (rig.published (trim) == "-4.5");
+    CHECK (rig.published (curve) == "30");
+    CHECK (rig.published ("/godot/document/live") == "2");
+
+    SUBCASE ("Keep, once unlocked, writes both as one undo step")
+    {
+        rig.lock (false);
+        CHECK (rig.submitAndTick ("live.keep").applied == 1);
+        CHECK (rig.saved (trim) == "-4.5");
+        CHECK (rig.saved (curve) == "30");
+        CHECK (rig.live.empty());
+        CHECK (rig.steps() == steps + 1);
+
+        CHECK (rig.submitAndTick ("undo").applied == 1);
+        CHECK (rig.saved (trim) == "-3");
+        CHECK (rig.saved (curve) == "0");
+    }
+
+    SUBCASE ("Discard lets the output go back to its saved trim")
+    {
+        rig.lock (false);
+        CHECK (rig.submitAndTick ("live.drop").applied == 1);
+        rig.tickOnce();
+
+        CHECK (rig.live.empty());
+        CHECK (rig.audio.outputGains[0] == doctest::Approx (-3.0));
+        CHECK (rig.published (trim) == "-3");
+        CHECK (rig.published (curve) == "0");
+        CHECK (rig.steps() == steps);
+    }
+
+    SUBCASE ("a trim lower than a mark's offset may go is held, as the trim's row allows")
+    {
+        CHECK (rig.set (trim, osc::Value::float64 (-60.0)).applied == 1);
+        REQUIRE (rig.live.rowOf (rig.main, "trim") != nullptr);
+        CHECK (*rig.live.rowOf (rig.main, "trim") == "-60");
     }
 }
 

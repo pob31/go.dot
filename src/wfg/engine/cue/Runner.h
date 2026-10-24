@@ -3814,6 +3814,7 @@ namespace wfg::cue
 
         std::vector<OutputGainSource> outputGainSources;
         std::uint64_t outputGainsRevision = 0;
+        std::uint64_t outputGainsLayer = 0;   // the live layer's revision it was read at (§109, BBN)
         bool outputGainsRead = false;
 
         /*  WHERE LTC PLAYS AND HOW LOUD (namespace draft §59, AHH, AHI), read
@@ -3999,6 +4000,7 @@ namespace wfg::cue
 
         std::vector<CanvasLevelSource> canvasLevelSources;
         std::uint64_t canvasLevelsRevision = 0;
+        std::uint64_t canvasLevelsLayer = 0;  // the live layer's revision it was read at (§109, BBN)
         bool canvasLevelsRead = false;
         std::vector<std::pair<std::string, double>> canvasLevelsSent;
 

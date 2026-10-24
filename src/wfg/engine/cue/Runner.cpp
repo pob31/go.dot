@@ -7951,12 +7951,17 @@ namespace wfg::cue
             return;
 
         /*  READ ONCE PER SHOW REVISION, as a cue's chain is: an output's
-            channels, its trim and its mark change only by an edit. */
-        if (! outputGainsRead || outputGainsRevision != document.showRevision())
+            channels, its trim and its mark change only by an edit - or, under
+            the lock, by a knob's turn riding its trim live (namespace draft
+            §109, BBN), which moves the live layer's revision instead. */
+        const auto layer = liveLayer != nullptr ? liveLayer->revision() : 0;
+
+        if (! outputGainsRead || outputGainsRevision != document.showRevision() || outputGainsLayer != layer)
         {
             outputGainSources.clear();
             outputGainsRead = true;
             outputGainsRevision = document.showRevision();
+            outputGainsLayer = layer;
 
             if (const auto audioNode = document.root().getChildWithName ("Audio"); audioNode.isValid())
             {
@@ -7969,6 +7974,12 @@ namespace wfg::cue
                     source.firstChannel = static_cast<int> (bus.getProperty ("firstChannel", 0));
                     source.width = static_cast<int> (bus.getProperty ("width", 1));
                     source.trimDb = static_cast<double> (bus.getProperty ("trim", 0.0));
+
+                    //  What a locked show rides first: the trim heard until somebody keeps it or lets it go.
+                    if (liveLayer != nullptr)
+                        if (const auto* riding = liveLayer->rowOf (bus[idProperty].toString().toStdString(), "trim"))
+                            source.trimDb = osc::parseDouble (*riding).value_or (source.trimDb);
+
                     source.dcaChain = dcaNestingFrom (bus.getProperty ("dca").toString().toStdString());
                     outputGainSources.push_back (std::move (source));
                 }
@@ -20519,11 +20530,15 @@ namespace wfg::cue
         if (videoSink == nullptr)
             return;
 
-        if (! canvasLevelsRead || canvasLevelsRevision != document.showRevision())
+        //  And when the live layer moves: a canvas's curve rides it under the lock (§109, BBN).
+        const auto layer = liveLayer != nullptr ? liveLayer->revision() : 0;
+
+        if (! canvasLevelsRead || canvasLevelsRevision != document.showRevision() || canvasLevelsLayer != layer)
         {
             canvasLevelSources.clear();
             canvasLevelsRead = true;
             canvasLevelsRevision = document.showRevision();
+            canvasLevelsLayer = layer;
 
             for (const auto& canvas : document.root().getChildWithName ("Canvases"))
             {
@@ -20531,6 +20546,10 @@ namespace wfg::cue
                 source.id = canvas[idProperty].toString().toStdString();
                 source.level = std::clamp (static_cast<double> (canvas.getProperty ("level", 100.0)) / 100.0, 0.0, 1.0);
                 source.curve = osc::parseDouble (canvas.getProperty ("dcaCurve").toString().toStdString()).value_or (0.0);
+
+                if (liveLayer != nullptr)
+                    if (const auto* riding = liveLayer->rowOf (source.id, "dcaCurve"))
+                        source.curve = osc::parseDouble (*riding).value_or (source.curve);
                 source.dcaChain = dcaNestingFrom (canvas.getProperty ("dca").toString().toStdString());
 
                 if (! source.id.empty())

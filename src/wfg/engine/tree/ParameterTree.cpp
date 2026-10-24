@@ -3138,8 +3138,15 @@ namespace wfg::tree
                             continue;
 
                         const doc::Attribute attribute { element, row };
+
+                        /*  A CANVAS'S CURVE as a locked show rides it (§109,
+                            BBN), at the address a client reads it at. */
+                        const auto* ridingCurve = isCanvases && row->name == "dcaCurve" && liveEdits != nullptr
+                                                    ? liveEdits->rowOf (id, "dcaCurve")
+                                                    : nullptr;
+
                         nodes.push_back (makeLeaf (base + "/" + std::string (row->name), *row,
-                                                   storedText (attribute, object)));
+                                                   ridingCurve != nullptr ? *ridingCurve : storedText (attribute, object)));
                     }
 
                     /*  AN OUTPUT'S ZONES (namespace draft 40, WY): its children,
@@ -3260,9 +3267,14 @@ namespace wfg::tree
                         if (name == "laneRide")
                             continue;
 
-                        const auto text = name == "usage"    ? analysis.usageOf (id)
-                                        : name == "overlaps" ? analysis.overlapsOf (id)
-                                                             : storedText (attribute, bus);
+                        /*  AND ITS TRIM as a locked show rides it (§109, BBN). */
+                        const auto* ridingTrim = name == "trim" && liveEdits != nullptr ? liveEdits->rowOf (id, "trim")
+                                                                                        : nullptr;
+
+                        const auto text = name == "usage"       ? analysis.usageOf (id)
+                                        : name == "overlaps"    ? analysis.overlapsOf (id)
+                                        : ridingTrim != nullptr ? *ridingTrim
+                                                                : storedText (attribute, bus);
 
                         nodes.push_back (makeLeaf (base + "/" + name, *row, text));
                     }

@@ -80,13 +80,31 @@ namespace wfg::cue
 
         /*  WHAT A CUE'S DCA MARK CARRIES rides live under the lock as its EQ
             does (namespace draft §50, ABQ): the knob above a DCA strip turned in
-            a show is heard and seen at once, and kept or let go on unlock. */
+            a show is heard and seen at once, and kept or let go on unlock. And
+            what that knob moves on an output and a canvas the DCA rides - the
+            output's trim, the canvas's curve (§109, BBN) - by the same rule. */
         bool isMarkRow (const Parts& parts)
         {
-            return parts.owner == "cue" && (parts.row == "dcaCurve" || parts.row == "dcaOffset");
+            return (parts.owner == "cue" && (parts.row == "dcaCurve" || parts.row == "dcaOffset"))
+                   || (parts.owner == "bus" && parts.row == "trim")
+                   || (parts.owner == "canvas" && parts.row == "dcaCurve");
         }
 
-        //  A cue's own row held live: its EQ's, or its DCA mark's.
+        /*  The owner word a row held live is kept under, from what its
+            identifier names now: identifiers are the show's, one space for
+            every object, so the layer keys its rows by them alone. */
+        std::string ownerOf (const juce::ValueTree& node)
+        {
+            if (node.hasType ("Bus"))
+                return "bus";
+
+            if (node.hasType ("Canvas"))
+                return "canvas";
+
+            return "cue";
+        }
+
+        //  An object's own row held live: a cue's EQ's or its DCA mark's, an output's trim, a canvas's curve.
         bool isCueRow (const Parts& parts)
         {
             return isEqRow (parts) || isMarkRow (parts);
@@ -562,8 +580,9 @@ namespace wfg::cue
             since been given a send into that bus, that one takes the values. A
             cue or a bus deleted since is skipped. */
         registry.add ({ "live.keep",
-                        "Writes the EQ, send, plugin and DCA mark changes ridden live while the show was locked into"
-                        " the show, as one undo step. Refused while the show is locked.",
+                        "Writes the EQ, send, plugin and DCA mark changes, and the output trims and canvas curves,"
+                        " ridden live while the show was locked into the show, as one undo step. Refused while the"
+                        " show is locked.",
                         {},
                         true,
                         [&document, &live] (CommandContext&, const std::vector<osc::Value>& args)
@@ -571,13 +590,17 @@ namespace wfg::cue
                             if (document.isLocked())
                                 return Outcome::rejected (reason::locked);
 
-                            for (const auto& [cueId, riding] : live.allRows())
+                            for (const auto& [id, riding] : live.allRows())
                             {
-                                if (! document.findById (cueId).isValid())
+                                const auto node = document.findById (id);
+
+                                if (! node.isValid())
                                     continue;
 
+                                const auto owner = ownerOf (node);
+
                                 for (const auto& [row, text] : riding)
-                                    document.setAttribute ("/godot/cue/" + cueId + "/" + row, text);
+                                    document.setAttribute ("/godot/" + owner + "/" + id + "/" + row, text);
                             }
 
                             for (const auto& [sendId, send] : live.allSends())
