@@ -3296,6 +3296,15 @@ marks the factors multiplying - a sampler member's hand a factor of its own - an
 the press no longer resetting the DCA to nought on a desk. *Built 2026-10-09* (namespace draft §50.7), on the D700, a
 Mackie desk and the window's panel, in the inspector and under the lock.
 
+*Decided 2026-10-24, at the author's direction* (namespace draft §109). **The knob
+reaches the outputs and canvases a DCA rides** as well: its sound offset moves each
+output's trim, its picture curve each canvas's own curve - a canvas's DCA now has
+one - each by the same detents from its own value, so several keep their
+differences. A turn moves the playing cues' marks and these together, each place
+counting as the DCA's fader already does. Proposed (§6.9): the canvas's row, the
+outputs and canvases reached with nothing playing, a mark set where an output is
+moved, both riding live under the lock. *Built 2026-10-24* (namespace draft §109.5).
+
 ### 3.29 Persistent cues — a section that is checked, not fired
 
 *Added in 0.8, at the author's direction (2026-09-07). How the user sets them up
@@ -4446,7 +4455,8 @@ calls ABT-ACB in §50.2 are the author's to overrule:
 - **Templates and the `mix` part carrying the mapping.**
 
 What the work leaves out: a curve on an output's or a canvas's DCA, which keep the straight travel; a
-curve of its own on a sampler member's hand; one setting per DCA a mark reaches.
+curve of its own on a sampler member's hand; one setting per DCA a mark reaches. *(A canvas's curve, and
+the knob on an output's trim, were decided and built 2026-10-24, namespace draft §109.)*
 
 Added 2026-10-09 *(proposed)*, with process cues (§3.21, namespace draft §51). The implementer's calls
 ACG-ACU in §51.2 are the author's to overrule:
@@ -4677,6 +4687,18 @@ draft §74). The implementer's calls from AQR in §74.2 are the author's to over
 
 What the work leaves out: a key or a note running a command; touch and write; update-cue; MIDI curves
 and clips; 2D paths; the Stream Deck.
+
+Added 2026-10-24 *(proposed)*, with the knob above a DCA strip reaching outputs and canvases (§3.28,
+namespace draft §109). The implementer's calls BBK-BBP in §109.2 are the author's to overrule:
+
+- **`canvas/dcaCurve`** (%, -100 to 100) by the cue mark's curve law, before the canvas's level.
+- **Outputs and canvases reached whether or not anything plays**, after the cues' marks, in the Outputs
+  and Video tabs' order; the value shown a cue's first.
+- **A cue's mark set, an output or a canvas moved** by the detents from its own, each in its row's range -
+  a trim down to -120 dB.
+- **Both riding live under the lock**, a trim typed under the lock too.
+- **A DCA strip's opacity through the first canvas's curve** when no picture cue plays.
+- **A Curve cell on the Video tab.**
 
 ### 6.10 Protocol implementation order (§3.16)
 

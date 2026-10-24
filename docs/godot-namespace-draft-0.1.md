@@ -21597,6 +21597,8 @@ pasted as a cue would be a cue with no file and no name.
   each output whose DCA also marks a cue routed to it, by a direct out or a send: *"Music also trims 3
   cues played through Front: there it counts twice."* Only a cue's own mark is read; a group's mark
   over it is not.
+- *(2026-10-24, §109.)* The knob above the DCA's strip moves the output's trim, by its detents from the
+  trim's own value, and the trim rides live under the lock (BBI, BBM, BBN).
 
 ### 38.8 What S8 built
 
@@ -21615,6 +21617,8 @@ pasted as a cue would be a cue with no file and no name.
   times the level, through the same arithmetic.
 - **The Video tab** has a Level cell typed in place and a DCA cell chosen from a menu of the show's
   DCAs on each canvas.
+- *(2026-10-24, §109.)* **`canvas/dcaCurve`** bends the DCA's factor before the level multiplies it, as a
+  cue mark's curve does (BBK); a Curve cell after the DCA (BBP); the knob above the DCA's strip moves it.
 
 ### 38.9 What S4 and S5 built
 
@@ -23677,7 +23681,8 @@ Mine, proposed:
   picture under them, on the offset those with a sound. The value shown is the nearest mark of the run
   that started last; a turn sets every one of them to that value moved by the detents, clamped, a mark
   reached twice written once, as **one `node.setMany`** (§30.11). With nothing playing, nothing is
-  written.
+  written. *(Amended 2026-10-24, §109: a turn also moves the outputs and canvases the DCA rides, each from
+  its own value, whether or not anything plays - BBI, BBJ, BBL, BBM.)*
 - **ABZ** **The screen and the ring.** With nothing playing the strip is as today - "dca", "dca AV", an
   empty ring - and a press or a turn says `pic --` or `snd --` for a second. With something playing,
   the D700's third row says `pic +20` or `snd -3.5`, the MCU's second `p +20` or `s -3.5`, a `*` after
@@ -23727,9 +23732,9 @@ picture the curve twice.
 
 ### 50.6 Not built
 
-*(Proposed, PRD §6.9.)* A curve on an output's or a canvas's DCA, which keep the straight travel (§38); a
-curve of its own on a sampler member's hand; one setting per DCA the mark reaches (the option ABM did not
-take).
+*(Proposed, PRD §6.9.)* A curve of its own on a sampler member's hand; one setting per DCA the mark
+reaches (the option ABM did not take). A curve on a canvas's DCA, and the knob moving an output's trim,
+were built 2026-10-24 (§109).
 
 ### 50.7 Built so far
 
@@ -33886,3 +33891,86 @@ Linux: the author's look at a stock Ubuntu desktop (a user in neither group): `r
 `rtkit`, `powerprofilesctl list-holds` and `systemd-inhibit --list` should show Go.dot while a show is
 open, and `chrt -p` on the ALSA thread should say SCHED_RR or SCHED_FIFO; and with power-saver chosen,
 the warning.
+
+## 109. The knob above a DCA strip reaches outputs and canvases
+
+**Asked 2026-10-24** by the author: *"I have the impression audio and video outputs with a DCA assigned to
+them doesn't offer the offset or curve. Each audio output has already an attenuation. Video outputs could
+each have a curve. Adjustments are relative increments if there are several outputs of the same type
+assigned to a DCA."*
+
+He was right. The knob above a DCA strip (§50) wrote only the marks of cues playing under its DCA (ABY),
+and with nothing playing it wrote nothing. An output's DCA and its trim (§38.7) and a canvas's DCA (§38.8)
+were never reached, and a canvas's DCA had no curve at all (§50.6 listed it as not built).
+
+### 109.1 What it is, before its names
+
+The knob above a DCA strip now also turns **the outputs and the canvases its DCA rides**, playing or not.
+On the sound's offset it moves each **output's trim** - the attenuation every output already had on the
+Outputs tab, no new number. On the picture's curve it moves each **canvas's curve**, a new number on the
+Video tab that bends how the DCA's fader brings that canvas in, exactly as a cue's picture curve does.
+With several outputs, or several canvases, each **moves by the same amount from where it was**: an output
+at -3 dB and one at -6 dB, turned up a detent, sit at -2.5 and -5.5. When cues are playing under the DCA
+too, a turn moves their marks as before *and* the outputs and canvases, in one undo step.
+
+### 109.2 Decisions
+
+The author's (2026-10-24), each the option I recommended, the words of each option mine:
+
+- **BBI** **The offset moves each output's trim; a canvas gets a curve the knob's curve moves.** Several
+  outputs or canvases under one DCA each move by the same detents, keeping their differences.
+- **BBJ** **Both move, each place counts**: a turn moves the playing cues' marks as before and the outputs
+  and canvases the DCA rides. A sound marked with the DCA and played through an output on it takes the
+  turn twice, as it already takes the fader twice (WQ). The screen shows a playing cue's value first.
+
+Mine *(proposed)*, the author's to overrule:
+
+- **BBK** **`canvas/dcaCurve`**, %, -100 to 100, resting straight, by ABU's law: the trims of the canvas's
+  DCA and every DCA it sits inside summed in dB, made a factor along the fader's travel, curved, then
+  times the canvas's level. Read by nothing while the canvas has no DCA.
+- **BBL** **Outputs and canvases are reached whether or not anything plays**, after the cues' marks:
+  outputs in channel order (ties by identifier, as the Outputs tab lists them), then canvases in the
+  show's order. The value shown is the first cue's mark, else the first output or canvas; a `*` when any
+  the mode moves disagree. A trim below -24 dB fills the ring's lower half and no more.
+- **BBM** **A cue's mark is set** to the shown value moved by the detents (ABY, unchanged); **an output or
+  a canvas is moved** from its own: a trim by 0.5 dB a detent within -120 to +12, the trim's own range; a
+  curve by 2 % within -100 to 100. So a mark at the end of its range still lets an output move. All of it
+  is one `node.setMany`, one undo step.
+- **BBN** **Under the lock an output's trim and a canvas's curve ride live and unsaved**, kept as one step
+  or let go on unlock, as a mark's do (ABQ). A trim typed in the Outputs tab under the lock rides too.
+- **BBO** **A DCA strip's level words** (§80): with no picture cue playing, the opacity is through the
+  first canvas's curve the DCA rides, where it was straight.
+- **BBP** **The Video tab has a Curve cell** after each canvas's DCA, typed in place, greyed with no DCA.
+
+### 109.3 The row
+
+| Row | Owner | Type | Range | Default | Read where |
+|---|---|---|---|---|---|
+| `dcaCurve` | `canvas` | `d`, % | -100..100 | 0 | the canvas's DCA factor (BBK) |
+
+No command: the knob writes `bus/trim` and `canvas/dcaCurve` through `node.setMany`, beside the marks.
+
+### 109.4 As built
+
+`engine/surface/DcaKnob`: `DcaMark` gains `place` (`cue`, `output`, `canvas`) and its `cue` became `id`;
+`dcaMarksPlaying` became `dcaMarksUnder`, which appends the places after the cues' marks; `knobWrites`
+takes the detents rather than a target; `KnobReading` carries the shown mark's place so `knobTurned` holds
+it to that row's range; `dcaLevelWords` judges what plays by the cues' marks alone. `SurfaceBridge` passes
+the detents; the window's panel keeps the detents since it was taken and sends from the marks as they were
+then. `Runner::followCanvasLevels` curves the factor; it and `applyOutputLevels` re-read when the live layer
+moves. `LiveEdits` takes `bus/trim` and `canvas/dcaCurve` beside a mark's rows, keyed by identifier, and
+`live.keep` writes each under the owner its identifier names; the parameter tree publishes the riding
+values. `model::CanvasRow::curve` and `curveWord`; the Video tab's seventh cell.
+
+### 109.5 Stages
+
+| stage | what | commit |
+|---|---|---|
+| KO.1 | the canvas's curve, seen; the Video tab's cell (VideoTests, ClientTests) | 60ef9847 |
+| KO.2 | the knob reaches outputs and canvases (SurfaceBridgeTests, RunPaneUiTests) | 3109a51d |
+| KO.3 | both ride live under the lock (GoTests) | f605c1b9 |
+| KO.4 | this section; §38.7, §38.8, §50.2, §50.6; PRD §3.28, §6.9; both tester guides | |
+
+Owed: the author's look on the window's panel and the D700 - a DCA riding two outputs and a canvas, turned
+with nothing playing, then with a marked movie playing; and whether "Curve" is the word for the Video tab's
+column.
