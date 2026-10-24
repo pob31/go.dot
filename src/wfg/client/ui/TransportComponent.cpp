@@ -220,18 +220,46 @@ namespace wfg::client::ui
         const auto errorNow = ! reading.writeError.empty() ? "write failed: " + text (reading.writeError)
                                                            : text (reading.errorLine());
 
+        /*  AND A REFUSAL FADES (errorHoldMs): a sentence that is news, keyed on
+            the record too, so the same refusal said again is said afresh. A
+            write that failed and the clock gone are no news but a state, and
+            stand while they are true. */
+        const auto lasts = ! reading.writeError.empty() || reading.status == "noClock";
+        const auto key = errorNow + "\n" + text (reading.lastError);
+
+        if (key != errorKey)
+        {
+            errorKey = key;
+            errorSince = juce::Time::getMillisecondCounter();
+            errorFaded = false;
+            errorLabel.setAlpha (1.0f);
+        }
+
+        const auto said = errorFaded && ! lasts ? juce::String() : errorNow;
+
+        if (said.isNotEmpty() && ! lasts)
+        {
+            if (! isTimerRunning())
+                startTimerHz (30);
+        }
+        else
+        {
+            stopTimer();
+            errorLabel.setAlpha (1.0f);
+        }
+
         /*  ANY NEWER SENTENCE ON THE LINE TAKES IT BACK FROM THE DOH NOTICE
             (D4's review, OP) - a write that failed, the audio gone, a moved
             clock, as much as a refusal: standing in front of the line, the
             notice hid them all for as long as it stood. Only what the report
             put there gives way; a sentence set since is not this rule's. */
-        const auto lineMoved = shownOnce && errorNow != errorLabel.getText();
-        errorLabel.setText (errorNow, juce::dontSendNotification);
+        const auto lineMoved = shownOnce && said != errorLabel.getText();
+        errorLabel.setText (said, juce::dontSendNotification);
 
         /*  The whole record is still one hover away: what the strip drops is
             the tick and the sequence, which an operator who just pressed the
             thing does not need and a reader of the log does. */
-        errorLabel.setTooltip (text (reading.lastError));
+        errorLabel.setTooltip (said.isEmpty() ? juce::String() : text (reading.lastError));
 
         /*  WARNINGS SIT ON THE FOOT LINE, where a theme's refusal also lands:
             both are things the engine or the file said about this session that
@@ -494,6 +522,38 @@ namespace wfg::client::ui
         noticeLabel.setTooltip ({});
         dohShown.clear();
         settleFoot();
+    }
+
+    void TransportComponent::timerCallback()
+    {
+        const auto age = juce::Time::getMillisecondCounter() - errorSince;
+
+        if (age < errorHoldMs)
+        {
+            errorLabel.setAlpha (1.0f);
+            return;
+        }
+
+        if (age < errorHoldMs + errorFadeMs)
+        {
+            errorLabel.setAlpha (1.0f - static_cast<float> (age - errorHoldMs) / static_cast<float> (errorFadeMs));
+            return;
+        }
+
+        //  Gone, until the line has something new to say.
+        stopTimer();
+        errorFaded = true;
+        errorLabel.setText ({}, juce::dontSendNotification);
+        errorLabel.setTooltip ({});
+        errorLabel.setAlpha (1.0f);
+    }
+
+    void TransportComponent::ageErrorForTest (juce::uint32 ms)
+    {
+        errorSince -= ms;
+
+        if (isTimerRunning())
+            timerCallback();
     }
 
     void TransportComponent::showDohNotice (const juce::String& notice)

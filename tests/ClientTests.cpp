@@ -43,6 +43,7 @@
 #include "TestSupport.h"
 
 #include <initializer_list>
+#include <limits>
 #include <optional>
 
 #include <wfg/client/model/Curve.h>
@@ -14181,6 +14182,12 @@ TEST_CASE ("client: a trim's words, the render's words, and every section gestur
     }
 
     CHECK (gesture::freezeEdit ("C1").command == "media.freeze");
+
+    //  Several cues dragged together are one `object.moveMany` (§111); one is still `object.move`.
+    CHECK (gesture::moveObjects ({ "C1" }, "L1", 0).command == "object.move");
+    CHECK (gesture::moveObjects ({ "C1", "C2" }, "G1", 2).command == "object.moveMany");
+    CHECK (gesture::moveObjects ({ "C1", "C2" }, "G1", 2).args[0].getString() == "C1 C2");
+    CHECK (gesture::moveObjects ({ "C1", "C2" }, "G1", -1).args[2].getInt32() == std::numeric_limits<std::int32_t>::max());
     CHECK (gesture::unfreezeEdit ("C1").command == "media.unfreeze");
 }
 

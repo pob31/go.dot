@@ -71,6 +71,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
@@ -480,6 +481,87 @@ TEST_CASE ("undo: a move inside one parent and a move to another both come back"
         CHECK (rig.document.findById (firstCue).getParent() == list);
         CHECK (list.indexOf (rig.document.findById (firstCue)) == 0);
         CHECK (rig.document.findById (theGroup).getNumChildren() == 1);
+    }
+}
+
+TEST_CASE ("undo: several cues moved at once land together in their order, all or none, and come back in one step")
+{
+    /*  The author, 2026-10-24: "Moving several items into a group in one go
+        doesn't work. I have to move them one by one even if several are
+        selected when dragging" (namespace draft §111). A list of A, B, C, a
+        group G holding X, and D. */
+    Rig rig;
+
+    REQUIRE (rig.apply (0, "list.create", { text ("Main"), text (mainList) }).applied == 1);
+
+    const auto make = [&rig] (std::int64_t tick, const std::string& parent, int at, const char* kind, const char* name)
+    {
+        REQUIRE (rig.apply (tick, "cue.create", { text (parent), osc::Value::int32 (at), text (kind), text (name) }).applied == 1);
+        return rig.lastAppliedArg (4);
+    };
+
+    const auto a = make (1, mainList, 0, "memo", "A");
+    const auto b = make (2, mainList, 1, "memo", "B");
+    const auto c = make (3, mainList, 2, "memo", "C");
+    const auto g = make (4, mainList, 3, "group", "G");
+    const auto x = make (5, g, 0, "memo", "X");
+    const auto d = make (6, mainList, 4, "memo", "D");
+
+    const auto childrenOf = [&rig] (const std::string& parent)
+    {
+        std::vector<std::string> ids;
+
+        for (const auto& child : rig.document.findById (parent))
+            if (child.hasProperty ("id"))
+                ids.push_back (child["id"].toString().toStdString());
+
+        return ids;
+    };
+
+    REQUIRE (childrenOf (mainList) == std::vector<std::string> { a, b, c, g, d });
+
+    SUBCASE ("into a group at its first place: together, in the order given, one step")
+    {
+        REQUIRE (rig.apply (10, "object.moveMany", { text (a + " " + c), text (g), osc::Value::int32 (0) }).applied == 1);
+        CHECK (childrenOf (g) == std::vector<std::string> { a, c, x });
+        CHECK (childrenOf (mainList) == std::vector<std::string> { b, g, d });
+        CHECK (rig.undoName() == "object.moveMany");
+
+        REQUIRE (rig.document.undo (doc::UndoDomain::document) == std::string ("object.moveMany"));
+        CHECK (childrenOf (mainList) == std::vector<std::string> { a, b, c, g, d });
+        CHECK (childrenOf (g) == std::vector<std::string> { x });
+    }
+
+    SUBCASE ("at a group's end")
+    {
+        REQUIRE (rig.apply (10, "object.moveMany", { text (b + " " + d), text (g),
+                                                     osc::Value::int32 (std::numeric_limits<std::int32_t>::max()) }).applied == 1);
+        CHECK (childrenOf (g) == std::vector<std::string> { x, b, d });
+    }
+
+    SUBCASE ("within their own list, before the member at the position, from above and below it")
+    {
+        //  Position 4 is D's: A and C go just before it, and B, G keep their order.
+        REQUIRE (rig.apply (10, "object.moveMany", { text (a + " " + c), text (mainList), osc::Value::int32 (4) }).applied == 1);
+        CHECK (childrenOf (mainList) == std::vector<std::string> { b, g, a, c, d });
+
+        //  D and G back to the top, in that order.
+        REQUIRE (rig.apply (11, "object.moveMany", { text (d + " " + g), text (mainList), osc::Value::int32 (0) }).applied == 1);
+        CHECK (childrenOf (mainList) == std::vector<std::string> { d, g, b, a, c });
+    }
+
+    SUBCASE ("one the parent cannot take refuses them all, and nothing moves")
+    {
+        //  The group into itself.
+        CHECK (rig.apply (10, "object.moveMany", { text (a + " " + g), text (g), osc::Value::int32 (0) }).applied == 0);
+        CHECK (childrenOf (mainList) == std::vector<std::string> { a, b, c, g, d });
+        CHECK (childrenOf (g) == std::vector<std::string> { x });
+
+        //  A cue named twice, an unknown one, and none.
+        CHECK (rig.apply (11, "object.moveMany", { text (a + " " + a), text (g), osc::Value::int32 (0) }).applied == 0);
+        CHECK (rig.apply (12, "object.moveMany", { text (a + " ZZZZZZZZ"), text (g), osc::Value::int32 (0) }).applied == 0);
+        CHECK (rig.apply (13, "object.moveMany", { text (""), text (g), osc::Value::int32 (0) }).applied == 0);
+        CHECK (childrenOf (g) == std::vector<std::string> { x });
     }
 }
 

@@ -34076,3 +34076,52 @@ AuthoringTests (the preset's version), C and fr_FR. Both tester guides say what 
 Owed: the author's try in the window - an edit far from the standby, the arrows after each kind of click,
 `/eos/cue/98.1/fire` against the console, a menu picked quickly in the inspector, a cue dragged to a
 group's first place.
+
+## 111. Several cues dragged at once; a refusal that fades
+
+**Asked 2026-10-24** by the author: *"Moving several items into a group in one go doesn't work. I have to
+move them one by one even if several are selected when dragging and the target is right. Same for header
+and footer."* And: *"Can the errors reported next to the session name fade out after a while. There are
+some that stay for a while and you can['t] tell what caused them or if they're stale."*
+
+### 111.1 What each one is, before its names
+
+1. **A drag carried one cue.** The list said which cue the hand held and the window moved that one, so
+   the others picked with it stayed where they were. Now, when the cue dragged is one of several picked,
+   all of them go - into a group, after a cue, into a header, a footer or the persistent section, made
+   first when it is not there - together, in the order the list showed them, and one Undo brings them
+   back.
+2. **The line beside the show's name kept the last refusal** until another replaced it, so a refusal from
+   an hour ago read like one from now. It now stands whole for 8 seconds, fades over 2, and goes; the same
+   refusal said again is shown afresh. What is still true stays while it is: a save that failed, the audio
+   clock gone.
+
+### 111.2 Decisions
+
+The author's: both, as asked.
+
+Mine *(proposed)*, the author's to overrule:
+
+- **BBY** **`object.moveMany <ids> <parent> <index>`**: the cues space-separated, all asked first - each
+  as `object.move` would ask it, against the one parent - then moved in the order given to land together
+  before the member holding position `index` now (the first from there that is not one of them), or at
+  the end. All of them or none; one record, one step to undo. Cues only; a cue named twice is refused.
+- **BBZ** **A drag carries every picked cue no picked group holds**, in the order the list draws them,
+  when the cue dragged is one of them and more than one is picked; otherwise the one dragged. What the
+  drop does is still judged on the cue the hand holds, and the engine refuses the set whole if one of the
+  others cannot go there. The foot says "3 cues into Scene's footer".
+- **BCA** **A refusal holds 8 s and fades over 2 s** (`TransportComponent::errorHoldMs`, `errorFadeMs`),
+  keyed on the whole record, so the next refusal - the same words or not - starts again. The clock moved
+  and the show followed (§6.2) fades too. A failed save and a lost clock do not fade.
+
+### 111.3 As built
+
+`ShowDocument::moveMany`, the shared `moveRefused` that `move` now asks too; `object.moveMany` in
+DocumentCommands. `gesture::moveObjects`; the window's `carried`, which `move`, `moveIntoRole` and
+`moveIntoPersistent` read, and `FooterMove` carrying several cues while the section is made.
+`TransportComponent` is a timer while a refusal stands. Tests: UndoTests (together, in order, into a
+group's first place and end, within a list from above and below, one step, all or none), ClientTests (the
+gesture), RunPaneUiTests (the fade), C and fr_FR.
+
+Owed: the author's try - several cues dragged into a group, a header that does not exist yet, and a
+refusal left to fade.

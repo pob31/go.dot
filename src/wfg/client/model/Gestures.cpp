@@ -480,6 +480,21 @@ namespace wfg::client::gesture
                    osc::Value::int32 (index == -1 ? std::numeric_limits<std::int32_t>::max() : index) } };
     }
 
+    Event moveObjects (const std::vector<std::string>& ids, const std::string& parent, int index)
+    {
+        if (ids.size() == 1)
+            return moveObject (ids.front(), parent, index);
+
+        std::string joined;
+
+        for (const auto& id : ids)
+            joined += (joined.empty() ? "" : " ") + id;
+
+        return { origin::window, "object.moveMany",
+                 { osc::Value::string (joined), osc::Value::string (parent),
+                   osc::Value::int32 (index == -1 ? std::numeric_limits<std::int32_t>::max() : index) } };
+    }
+
     Event saveAs (const std::string& folder, bool withMedia)
     {
         if (withMedia)

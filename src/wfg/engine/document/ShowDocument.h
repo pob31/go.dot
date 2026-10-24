@@ -750,6 +750,14 @@ namespace wfg::doc
             reading the two numbers as one cost. */
         EditResult move (const std::string& id, const std::string& newParentId, int newIndex);
 
+        /*  SEVERAL CUES MOVED AS ONE (the author, 2026-10-24: "Moving several
+            items into a group in one go doesn't work"): every one asked first,
+            then all moved into `newParentId`, together and in the order given,
+            before the member that holds position `newIndex` now - or at the
+            end. One command, so one step to undo. Cues only; a cue named twice
+            is refused. */
+        EditResult moveMany (const std::vector<std::string>& ids, const std::string& newParentId, int newIndex);
+
         /*  COPY AND PASTE (author, 2026-09-18), as two halves that never
             touch: `fragmentOf` is a READ - copies of these cues as canonical
             XML, nothing in the show moved - and `paste` is the write, the

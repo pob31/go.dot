@@ -269,11 +269,11 @@ namespace wfg::client
                                               };
                 listActions.presetStep      = [this] (int direction) { ladderStep (direction); };
                 listActions.moveToFooter    = [this] (const std::string& cueId, const std::string& group)
-                                              { moveIntoRole (cueId, group, "footer"); };
+                                              { moveIntoRole (carried (cueId), group, "footer"); };
                 listActions.moveToHeader    = [this] (const std::string& cueId, const std::string& group)
-                                              { moveIntoRole (cueId, group, "header"); };
+                                              { moveIntoRole (carried (cueId), group, "header"); };
                 listActions.moveToPersistent = [this] (const std::string& cueId, const std::string& listId)
-                                               { moveIntoPersistent (cueId, listId); };
+                                               { moveIntoPersistent (carried (cueId), listId); };
 
                 //  A cell edited in place is one `node.set`, as a field in the inspector is.
                 listActions.setValue        = [this] (const std::string& address, const std::string& text)
@@ -375,8 +375,15 @@ namespace wfg::client
                                                       Nothing is blocked, the two cues sum
                                                       in the meantime, and undo is one
                                                       gesture away. */
-                                                  rememberOutsOf (id);
-                                                  send (gesture::moveObject (id, parent, index));
+                                                  /*  AND EVERY PICKED CUE WITH IT, when the one
+                                                      dragged is one of several picked (the author,
+                                                      2026-10-24): one `object.moveMany`. */
+                                                  const auto ids = carried (id);
+
+                                                  for (const auto& each : ids)
+                                                      rememberOutsOf (each);
+
+                                                  send (gesture::moveObjects (ids, parent, index));
                                               };
                 listActions.setTarget       = [this] (const std::string& aimed, const std::string& at)
                                               {
@@ -1850,7 +1857,7 @@ namespace wfg::client
                     const auto ancestors = model::ancestorsOf (id, show.rows());
 
                     if (direction < 0 && current.empty() && ! ancestors.empty())
-                        moveIntoRole (id, ancestors.front(), "footer");
+                        moveIntoRole ({ id }, ancestors.front(), "footer");
                 }
             }
 
@@ -1871,7 +1878,38 @@ namespace wfg::client
                 make it and remember to move once it lands. Two copies of that
                 would be two things to keep in step, and the header's was the
                 one that did not exist. */
-            void moveIntoRole (const std::string& cueId, const std::string& group,
+            /*  WHAT A DRAG CARRIES (the author, 2026-10-24: "Moving several items
+                into a group in one go doesn't work"): the cue dragged, or - when
+                it is one of several picked - every picked cue no picked group
+                holds, in the order the list draws them, so they land as they
+                stood. */
+            std::vector<std::string> carried (const std::string& dragged) const
+            {
+                if (! selection.contains (dragged) || selection.size() < 2)
+                    return { dragged };
+
+                auto ids = selection.outermost (show.rows());
+                const auto& rows = show.rows();
+                const auto drawnAt = [&rows] (const std::string& id)
+                {
+                    for (std::size_t at = 0; at < rows.size(); ++at)
+                        if (rows[at].rowKind == model::RowKind::cue && rows[at].id == id && ! rows[at].derived)
+                            return at;
+
+                    return rows.size();
+                };
+
+                std::stable_sort (ids.begin(), ids.end(),
+                                  [&drawnAt] (const std::string& a, const std::string& b) { return drawnAt (a) < drawnAt (b); });
+                return ids;
+            }
+
+            juce::String countedWords (const std::vector<std::string>& cueIds) const
+            {
+                return cueIds.size() == 1 ? juce::String() : juce::String (static_cast<int> (cueIds.size())) + " cues ";
+            }
+
+            void moveIntoRole (const std::vector<std::string>& cueIds, const std::string& group,
                                const std::string& role)
             {
                 if (refusedWhileLocked() || latest == nullptr)
@@ -1884,13 +1922,13 @@ namespace wfg::client
                     const auto members = static_cast<int> (model::words (
                         model::text (*latest, "/godot/cue/" + group + "/" + role + "Order")).size());
 
-                    send (gesture::moveObject (cueId, section, members));
-                    shell->transport.setNotice ("into " + nameOf (group) + "'s " + role);
+                    send (gesture::moveObjects (cueIds, section, members));
+                    shell->transport.setNotice (countedWords (cueIds) + "into " + nameOf (group) + "'s " + role);
                     return;
                 }
 
                 send (gesture::groupRole (group, role));
-                footerMoves.push_back ({ cueId, group, role, 0 });
+                footerMoves.push_back ({ cueIds, group, role, 0 });
                 shell->transport.setNotice ("making " + nameOf (group) + "'s " + role);
             }
 
@@ -1904,7 +1942,7 @@ namespace wfg::client
                 WHAT MAY GO IN WAS ASKED BEFORE THIS (`model::dropFor`, which
                 refuses in words what the section would ignore), so nothing
                 here makes a section for a cue that will not be put in it. */
-            void moveIntoPersistent (const std::string& cueId, const std::string& listId)
+            void moveIntoPersistent (const std::vector<std::string>& cueIds, const std::string& listId)
             {
                 if (refusedWhileLocked() || latest == nullptr || listId.empty())
                     return;
@@ -1916,13 +1954,13 @@ namespace wfg::client
                     const auto members = static_cast<int> (model::words (
                         model::text (*latest, "/godot/list/" + listId + "/persistentOrder")).size());
 
-                    send (gesture::moveObject (cueId, section, members));
-                    shell->transport.setNotice ("into the persistent section");
+                    send (gesture::moveObjects (cueIds, section, members));
+                    shell->transport.setNotice (countedWords (cueIds) + "into the persistent section");
                     return;
                 }
 
                 send (gesture::listPersistent (listId));
-                footerMoves.push_back ({ cueId, listId, "persistent", 0 });
+                footerMoves.push_back ({ cueIds, listId, "persistent", 0 });
                 shell->transport.setNotice ("making the persistent section");
             }
 
@@ -1931,7 +1969,8 @@ namespace wfg::client
                 which `group` then names and whose node is the list's. */
             struct FooterMove
             {
-                std::string cueId, group, role;
+                std::vector<std::string> cueIds;
+                std::string group, role;
                 int waited = 0;
 
                 bool ofList() const { return role == "persistent"; }
@@ -1969,7 +2008,7 @@ namespace wfg::client
                     if (! footer.empty())
                     {
                         const auto members = static_cast<int> (model::words (model::text (snapshot, job.address() + "Order")).size());
-                        send (gesture::moveObject (job.cueId, footer, members));
+                        send (gesture::moveObjects (job.cueIds, footer, members));
                         shell->transport.setNotice (movedWords (job));
                         continue;
                     }

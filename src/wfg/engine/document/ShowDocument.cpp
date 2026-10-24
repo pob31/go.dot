@@ -164,6 +164,42 @@ namespace wfg::doc
             return timeGroupRefuses (parent, node.getType().toString().toStdString(), groupModeOf (node));
         }
 
+        /*  WHY `node` MAY NOT GO INTO `newParent`, or nothing: what the parent
+            may hold, a sampler's and a time group's own rules (with their
+            exception for a reorder among their own members), and never a group
+            into itself. Asked by `move` and, for every cue first, by
+            `moveMany`; it reads the tree and changes nothing. */
+        const char* moveRefused (const juce::ValueTree& node, const juce::ValueTree& newParent)
+        {
+            const auto* parentElement =
+                Schema::instance().element (newParent.getType().toString().toStdString());
+
+            if (parentElement == nullptr
+                || ! parentElement->mayContain (node.getType().toString().toStdString()))
+                return reason::badAddress;
+
+            //  Unless it is the sampler it is already in: a reorder among its own members (§39).
+            if (samplerRefuses (newParent, node) && node.getParent() != newParent)
+                return reason::badAddress;
+
+            /*  NOR INTO A TIME GROUP what a time group may not hold (namespace draft
+                §60, AIK), with the sampler's exception for a reorder among its own.
+                Its `at` is not judged again: a member moved in from a group reading
+                another source keeps what was written, and `warnings()` says when
+                that no longer reads. */
+            if (timeGroupRefuses (newParent, node) && node.getParent() != newParent)
+                return reason::badAddress;
+
+            /*  A group cannot be moved inside itself. Without this the tree stops
+                being a tree: the subtree detaches with the node and is never seen
+                again, and the identifiers in it stay reserved forever. */
+            for (auto ancestor = newParent; ancestor.isValid(); ancestor = ancestor.getParent())
+                if (ancestor == node)
+                    return reason::badAddress;
+
+            return nullptr;
+        }
+
         /*  THE SOURCE A MEMBER'S TIME IS READ UNDER (AIL): its time group's
             `timeSource`, the table's default where nobody wrote one - or
             nothing, for a cue that is not a time group's member, whose `at`
@@ -6129,31 +6165,8 @@ namespace wfg::doc
         if (newIndex < 0)
             return EditResult::failed (reason::badAddress);
 
-        const auto* parentElement =
-            Schema::instance().element (newParent.getType().toString().toStdString());
-
-        if (parentElement == nullptr
-            || ! parentElement->mayContain (node.getType().toString().toStdString()))
-            return EditResult::failed (reason::badAddress);
-
-        //  Unless it is the sampler it is already in: a reorder among its own members (§39).
-        if (samplerRefuses (newParent, node) && node.getParent() != newParent)
-            return EditResult::failed (reason::badAddress);
-
-        /*  NOR INTO A TIME GROUP what a time group may not hold (namespace draft
-            §60, AIK), with the sampler's exception for a reorder among its own.
-            Its `at` is not judged again: a member moved in from a group reading
-            another source keeps what was written, and `warnings()` says when
-            that no longer reads. */
-        if (timeGroupRefuses (newParent, node) && node.getParent() != newParent)
-            return EditResult::failed (reason::badAddress);
-
-        /*  A group cannot be moved inside itself. Without this the tree stops
-            being a tree: the subtree detaches with the node and is never seen
-            again, and the identifiers in it stay reserved forever. */
-        for (auto ancestor = newParent; ancestor.isValid(); ancestor = ancestor.getParent())
-            if (ancestor == node)
-                return EditResult::failed (reason::badAddress);
+        if (const auto* refused = moveRefused (node, newParent))
+            return EditResult::failed (refused);
 
         auto oldParent = node.getParent();
 
@@ -6322,6 +6335,97 @@ namespace wfg::doc
                     keepSoundsAfter (movie, "startOffset");
 
         return EditResult::succeeded (id);
+    }
+
+    EditResult ShowDocument::moveMany (const std::vector<std::string>& ids, const std::string& newParentId,
+                                       int newIndex)
+    {
+        if (auto refusal = refuseIfLocked())
+            return *refusal;
+
+        if (ids.empty() || newIndex < 0)
+            return EditResult::failed (ids.empty() ? reason::badValue : reason::badAddress);
+
+        const auto newParent = findById (newParentId);
+
+        if (! newParent.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        /*  EVERY ONE ASKED FIRST, so the set moves whole or not at all: the
+            answer for each depends on the cue and the parent alone, and the
+            parent is the same for all of them. Cues only - a range or a
+            section is a part of its own cue and moves by `object.move`. */
+        std::vector<juce::ValueTree> nodes;
+
+        for (const auto& id : ids)
+        {
+            const auto node = findById (id);
+
+            if (! node.isValid())
+                return EditResult::failed (reason::unknownId);
+
+            if (ownerForElement (node.getType().toString().toStdString()) != "cue"
+                  || std::find (nodes.begin(), nodes.end(), node) != nodes.end())
+                return EditResult::failed (reason::badValue);
+
+            if (const auto* refused = moveRefused (node, newParent))
+                return EditResult::failed (refused);
+
+            nodes.push_back (node);
+        }
+
+        /*  THEY LAND TOGETHER, IN THE ORDER GIVEN, before the member that holds
+            `newIndex` now - the first from there on that is not one of them -
+            or at the end. Each is one `move` to the position that puts it just
+            before that member: the member's own, or one less for a cue already
+            above it in the same parent, which `move` lands after the member
+            holding the position it is given. */
+        const auto membersOf = [&newParent]
+        {
+            std::vector<juce::ValueTree> members;
+
+            for (const auto& child : newParent)
+                if (isSequenceChild (child))
+                    members.push_back (child);
+
+            return members;
+        };
+
+        juce::ValueTree before;
+
+        {
+            const auto members = membersOf();
+
+            for (auto at = static_cast<std::size_t> (newIndex); at < members.size() && ! before.isValid(); ++at)
+                if (std::find (nodes.begin(), nodes.end(), members[at]) == nodes.end())
+                    before = members[at];
+        }
+
+        for (std::size_t n = 0; n < nodes.size(); ++n)
+        {
+            const auto members = membersOf();
+            const auto here = std::find (members.begin(), members.end(), nodes[n]);
+            const auto from = here == members.end() ? -1 : static_cast<int> (here - members.begin());
+            const auto stop = before.isValid()
+                                ? static_cast<int> (std::find (members.begin(), members.end(), before) - members.begin())
+                                : static_cast<int> (members.size());
+
+            auto position = stop;
+
+            if (from >= 0 && from < stop)
+                --position;
+
+            if (from == position)
+                continue;
+
+            /*  Asked first, every one, so a refusal here cannot be: should one
+                come all the same, what moved stays moved inside this one step,
+                and the set says it was refused. */
+            if (const auto moved = move (ids[n], newParentId, position); ! moved.ok)
+                return moved;
+        }
+
+        return EditResult::succeeded (ids.front());
     }
 
     //==============================================================================

@@ -143,6 +143,11 @@ namespace wfg::client::gesture
         `index` is a member position in `parent`, or -1 for the end. */
     Event moveObject (const std::string& id, const std::string& parent, int index);
 
+    /*  SEVERAL CUES DRAGGED TOGETHER (the author, 2026-10-24; namespace draft
+        §111): `object.moveMany`, one step to undo, landing together in the
+        order given; one cue is `moveObject`. `index` as `moveObject`'s. */
+    Event moveObjects (const std::vector<std::string>& ids, const std::string& parent, int index);
+
     /*  FIRES ONE NAMED CUE, without touching standby - which is what a button
         on a surface does, and what the waveform panel's play button does when
         somebody wants to HEAR the region they are placing (author, 2026-09-21:

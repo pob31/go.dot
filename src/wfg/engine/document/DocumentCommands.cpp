@@ -1391,6 +1391,22 @@ namespace wfg::doc
                                              args);
                         } });
 
+        /*  SEVERAL CUES DRAGGED AT ONCE (namespace draft §111): one record,
+            one step to undo, all of them or none. */
+        registry.add ({ "object.moveMany",
+                        "Moves several cues, space-separated, into a parent at a position, together and in"
+                        " that order: all of them or none, one step to undo.",
+                        { { "ids", 's', false }, { "parent", 's', false },
+                          { "index", 'i', false } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            return fromEdit (document.moveMany (splitWords (args[0].getString()),
+                                                                args[1].getString(),
+                                                                args[2].getInt32()),
+                                             args);
+                        } });
+
         //----------------------------------------------------------------------
         /*  The value write, and the only one. PRD §4.11 wants every action to be
             a named command; a property edit is `node.set` against the address

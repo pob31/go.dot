@@ -6947,6 +6947,73 @@ TEST_CASE ("transport: the Doh notice is shown once when the report arrives, who
     CHECK (shown()->getText() == "standby.set refused: not-a-stop");
 }
 
+TEST_CASE ("transport: a refusal beside the show's name fades after a while and goes; the same one again is said afresh; a failed save stays")
+{
+    /*  The author, 2026-10-24: "Can the errors reported next to the session
+        name fade out after a while. There are some that stay for a while and
+        you can['t] tell what caused them or if they're stale." */
+    const model::Theme theme;
+    ui::TransportComponent transport (theme, ui::TransportComponent::Actions {});
+    transport.setSize (1200, transport.preferredHeight());
+
+    const auto line = [&transport] () -> juce::Label*
+    {
+        for (auto* child : transport.getChildren())
+            if (auto* label = dynamic_cast<juce::Label*> (child))
+                if (label->getText().contains ("refused") || label->getText().startsWith ("write failed"))
+                    return label;
+
+        return nullptr;
+    };
+
+    model::TransportReading reading;
+    reading.tick = "1100";
+    reading.status = "running";
+    reading.lastError = "1100 31 window not-a-stop standby.set";
+    transport.show (reading);
+    REQUIRE (line() != nullptr);
+    auto* label = line();
+    CHECK (label->getText() == "standby.set refused: not-a-stop");
+    CHECK (label->getAlpha() == doctest::Approx (1.0));
+
+    //  Whole for a while; the engine's next readings do not start it again.
+    transport.ageErrorForTest (ui::TransportComponent::errorHoldMs - 1000);
+    reading.tick = "1400";
+    transport.show (reading);
+    CHECK (label->getText() == "standby.set refused: not-a-stop");
+    CHECK (label->getAlpha() == doctest::Approx (1.0));
+
+    //  Then fading...
+    transport.ageErrorForTest (1000 + ui::TransportComponent::errorFadeMs / 2);
+    CHECK (label->getAlpha() > 0.2f);
+    CHECK (label->getAlpha() < 0.8f);
+    CHECK (label->getText() == "standby.set refused: not-a-stop");
+
+    //  ...and gone, and still gone as the readings go on.
+    transport.ageErrorForTest (ui::TransportComponent::errorFadeMs);
+    CHECK (label->getText().isEmpty());
+    CHECK (label->getTooltip().isEmpty());
+    reading.tick = "1900";
+    transport.show (reading);
+    CHECK (label->getText().isEmpty());
+
+    //  The same refusal again - a newer record - is said afresh.
+    reading.lastError = "1950 40 window not-a-stop standby.set";
+    transport.show (reading);
+    CHECK (label->getText() == "standby.set refused: not-a-stop");
+    CHECK (label->getAlpha() == doctest::Approx (1.0));
+
+    //  A save that failed is not news but a state: it stays.
+    reading.writeError = "disk full";
+    transport.show (reading);
+    CHECK (label->getText() == "write failed: disk full");
+    transport.ageErrorForTest (ui::TransportComponent::errorHoldMs + ui::TransportComponent::errorFadeMs + 5000);
+    reading.tick = "2600";
+    transport.show (reading);
+    CHECK (label->getText() == "write failed: disk full");
+    CHECK (label->getAlpha() == doctest::Approx (1.0));
+}
+
 /*  THE DOH NOTICE GIVES WAY, AND FOLLOWS THE FOCUS (2026-10-03, D4's review):
     standing in front of the line, it hid every later sentence the line has
     besides a refusal - a write that failed, the audio gone - for as long as it

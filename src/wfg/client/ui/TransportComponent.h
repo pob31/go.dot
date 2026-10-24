@@ -58,7 +58,8 @@
 
 namespace wfg::client::ui
 {
-    class TransportComponent final : public juce::Component
+    class TransportComponent final : public juce::Component,
+                                     private juce::Timer
     {
     public:
         /*  One per gesture, each ending in exactly one engine command - which
@@ -146,12 +147,30 @@ namespace wfg::client::ui
             Shell forwards this as it forwards the presses. */
         bool keyStateChanged (bool isKeyDown) override;
 
+        /*  A REFUSAL FADES (the author, 2026-10-24: "Can the errors reported
+            next to the session name fade out after a while. There are some
+            that stay for a while and you can['t] tell what caused them or if
+            they're stale"): whole for `errorHoldMs`, fading over `errorFadeMs`,
+            then gone until another is said - the same one said again too. What
+            is still true stays: a save that failed, the audio clock gone. */
+        static constexpr juce::uint32 errorHoldMs = 8000;
+        static constexpr juce::uint32 errorFadeMs = 2000;
+
+        /** The refusal's age moved on by `ms`, as the clock would, for a test. */
+        void ageErrorForTest (juce::uint32 ms);
+
     private:
         Actions actions;
         model::Theme theme;
         model::TransportReading last;
         bool shownOnce = false;
         bool bannerShowing = false;
+
+        //  What the refusal line said, and when it began to say it; whether it has faded.
+        juce::String errorKey;
+        juce::uint32 errorSince = 0;
+        bool errorFaded = false;
+        void timerCallback() override;
 
         /*  THE PAIR (RD.11): what this computer is, in the author's words
             (AGM), on the title line after the show's name and the lock, and
