@@ -34125,3 +34125,24 @@ gesture), RunPaneUiTests (the fade), C and fr_FR.
 
 Owed: the author's try - several cues dragged into a group, a header that does not exist yet, and a
 refusal left to fade.
+
+## 112. The lane's scale without a corner
+
+**Asked 2026-10-25** by the author, of a lane on Hecube whose line bent between two points: *"Can't the
+scale be more progressive than with a sharp change like this. It looks broken like this. No problem if it
+doesn't follow the fader curve precisely."*
+
+The lane is drawn on the fader's throw (§20, DD): four points - silence at the bottom, -60 dB a fifth of
+the way up, unity at 0.85, +12 at the top - joined by straight lines. What plays between two lane points
+is straight in dB, so a ramp crossing -60 was drawn as two straight pieces with a corner where the throw
+changes slope: his from about -89 to -20 dB bent 42 % of the way along. Only the picture; the level never
+jumped.
+
+**BCB** *(proposed)* **The lane's height is the same four points joined by a curve with no corner** - a
+monotone cubic, Fritsch and Carlson's, its slope at -60 and at unity the harmonic mean of the lines either
+side - and its inverse by halving. The faders keep their throw; a lane's unity, its silence and its -60
+stay where a fader's are, and between them the lane may sit a little off a fader's height for the same
+level. A section's trim handle, drawn on the same scale, follows. Nothing heard changes.
+
+As built: `model::laneHeightFor` and `laneLevelForHeight` (model/Lane.cpp). ClientTests (the four points,
+the same slope either side of -60 and unity, rising everywhere, its own inverse), C and fr_FR.

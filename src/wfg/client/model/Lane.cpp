@@ -23,6 +23,7 @@
 #include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cmath>
 #include <cstddef>
@@ -103,14 +104,78 @@ namespace wfg::client::model
         return points.back().levelDb;
     }
 
+    namespace
+    {
+        /*  THE FADER'S FOUR POINTS (model/Fader.cpp), level then height, and
+            the slope the curve has at each: a monotone cubic through them
+            (Fritsch and Carlson's) - at an inner point the harmonic mean of
+            the two lines either side, at an end that end's line - so it rises
+            all the way, meets every point and turns no corner anywhere. */
+        struct Knot
+        {
+            double db, height, slope;
+        };
+
+        constexpr double lineBelow = (0.20 - 0.00) / (-60.0 - silenceDb);
+        constexpr double lineMiddle = (0.85 - 0.20) / (0.0 - -60.0);
+        constexpr double lineAbove = (1.00 - 0.85) / (loudestDb - 0.0);
+
+        constexpr std::array<Knot, 4> knots
+        {{
+            { silenceDb, 0.00, lineBelow },
+            { -60.0,     0.20, 2.0 * lineBelow * lineMiddle / (lineBelow + lineMiddle) },
+            { 0.0,       0.85, 2.0 * lineMiddle * lineAbove / (lineMiddle + lineAbove) },
+            { loudestDb, 1.00, lineAbove },
+        }};
+    }
+
     double laneHeightFor (double levelDb)
     {
-        return fractionForDb (levelDb);
+        const auto level = std::clamp (levelDb, silenceDb, loudestDb);
+
+        for (std::size_t at = 1; at < knots.size(); ++at)
+        {
+            const auto& below = knots[at - 1];
+            const auto& above = knots[at];
+
+            if (level > above.db && at + 1 < knots.size())
+                continue;
+
+            //  Hermite's cubic over this stretch, by how far along it the level is.
+            const auto span = above.db - below.db;
+            const auto t = (level - below.db) / span;
+            const auto t2 = t * t;
+            const auto t3 = t2 * t;
+
+            return (2.0 * t3 - 3.0 * t2 + 1.0) * below.height
+                     + (t3 - 2.0 * t2 + t) * span * below.slope
+                     + (-2.0 * t3 + 3.0 * t2) * above.height
+                     + (t3 - t2) * span * above.slope;
+        }
+
+        return 1.0;
     }
 
     double laneLevelForHeight (double height)
     {
-        return dbForFraction (height);
+        /*  BACK FROM A HEIGHT by halving: the curve only rises, so sixty
+            halvings of the throw land on the level well inside a thousandth of
+            a decibel - for a hand's press or a box typed, never per pixel. */
+        const auto wanted = std::clamp (height, 0.0, 1.0);
+        auto low = silenceDb;
+        auto high = loudestDb;
+
+        for (int step = 0; step < 60; ++step)
+        {
+            const auto middle = 0.5 * (low + high);
+
+            if (laneHeightFor (middle) < wanted)
+                low = middle;
+            else
+                high = middle;
+        }
+
+        return 0.5 * (low + high);
     }
 
     std::size_t nearestLanePoint (const std::vector<LanePoint>& points, double seconds, double height,

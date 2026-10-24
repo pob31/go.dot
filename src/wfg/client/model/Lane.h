@@ -84,7 +84,13 @@ namespace wfg::client::model
     double laneLevelAt (const std::vector<LanePoint>&, double seconds);
 
     /*  Where on the picture, from 0 at the bottom to 1 at the top, a level is
-        drawn, and what a height means: the fader's throw (DD). */
+        drawn, and what a height means: the fader's throw (DD), SMOOTHED (the
+        author, 2026-10-25: "Can't the scale be more progressive than with a
+        sharp change like this ... No problem if it doesn't follow the fader
+        curve precisely"). The fader's four points - silence, -60 dB, unity,
+        +12 - joined by a curve with no corner rather than by straight lines,
+        so a ramp straight in dB, which is what plays, is drawn without the
+        bend it had where it crossed -60. Each the other's exact inverse. */
     double laneHeightFor (double levelDb);
     double laneLevelForHeight (double height);
 

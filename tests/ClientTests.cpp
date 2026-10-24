@@ -43,6 +43,7 @@
 #include "TestSupport.h"
 
 #include <initializer_list>
+#include <cmath>
 #include <limits>
 #include <optional>
 
@@ -5355,6 +5356,42 @@ TEST_CASE ("client: drawing a level lane over a waveform, point by point")
 
         //  An empty lane's line is unity, where the cue is as written.
         CHECK (model::onLaneLine ({}, 12.0, model::laneHeightFor (0.0), 0.02));
+    }
+
+    SUBCASE ("the throw smoothed: the fader's points, no corner between them, rising all the way, its own inverse")
+    {
+        /*  The author, 2026-10-25, of a ramp from about -89 to -20 dB bent where
+            it crossed -60: "Can't the scale be more progressive than with a
+            sharp change like this." The fader's own law turns a corner there. */
+        CHECK (model::laneHeightFor (-60.0) == doctest::Approx (model::fractionForDb (-60.0)));
+        CHECK (model::laneHeightFor (12.0) == doctest::Approx (1.0));
+
+        const auto slope = [] (double db, double by)
+        {
+            return (model::laneHeightFor (db + by) - model::laneHeightFor (db)) / by;
+        };
+
+        //  The same slope arriving at -60 and at unity as leaving them: no corner.
+        for (const auto knee : { -60.0, 0.0 })
+        {
+            INFO ("at " << knee << " dB");
+            CHECK (slope (knee - 0.01, 0.01) == doctest::Approx (slope (knee, 0.01)).epsilon (0.01));
+        }
+
+        //  The fader's own throw does turn one there, which is what was drawn before.
+        CHECK (std::abs ((model::fractionForDb (-60.0) - model::fractionForDb (-60.01)) / 0.01
+                         - (model::fractionForDb (-59.99) - model::fractionForDb (-60.0)) / 0.01) > 0.005);
+
+        auto previous = -1.0;
+
+        for (auto db = -120.0; db <= 12.0; db += 0.25)
+        {
+            INFO (db << " dB");
+            const auto height = model::laneHeightFor (db);
+            CHECK (height > previous);
+            CHECK (model::laneLevelForHeight (height) == doctest::Approx (db).epsilon (0.0001));
+            previous = height;
+        }
     }
 
     SUBCASE ("a typed level reads the way the window writes one")
