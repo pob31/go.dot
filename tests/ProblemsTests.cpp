@@ -527,9 +527,37 @@ TEST_CASE ("problems: a Windows laptop held back says which setting caps it, and
     CHECK (saying ("powerSaverPlan") == "This computer is on the Power saver plan: its processor is capped, and a show heavy with plugins or video can fall behind - Control Panel, Power Options.");
     CHECK (saying ("processorLimited") == "This computer's processor is limited below its full speed by its power plan or firmware, and a show heavy with plugins or video can fall behind - Control Panel, Power Options, the plan's processor power management.");
     CHECK (saying ("lowPowerMode") == "This computer is in Low Power Mode: its processor is capped, and a show heavy with plugins or video can fall behind - System Settings, Battery.");
+    CHECK (saying ("powerSaver") == "This computer's power profile is Power Saver: its processor is capped, and a show heavy with plugins or video can fall behind - Settings, Power.");
     CHECK (saying ("none") == saying ("lowPowerMode"));
 
     //  On the mains with nothing capping it: nothing said.
     const auto fine = snapshotOf ({ { "/godot/engine/lowPower", no() }, { "/godot/engine/onBattery", no() } });
     CHECK (model::machineProblems (fine, model::indexObjects (fine)).empty());
+}
+
+TEST_CASE ("problems: the real-time class refused is said on This computer, and not before the tick thread has asked (§108, the Linux half)")
+{
+    /*  2026-10-24: the tick thread asked on its own rights and, on Linux,
+        through RealtimeKit, and got neither. The sentence says how the user
+        puts it right where that is theirs to do (Linux), and nothing before
+        the thread has asked, so a client connecting early sees no flicker. */
+    const auto refused = snapshotOf ({ { "/godot/engine/realtimeBy", word ("none") } });
+    const auto problems = model::machineProblems (refused, model::indexObjects (refused));
+
+    REQUIRE (problems.size() == 1);
+    CHECK (model::byPage (problems)[0].page == page::thisComputer);
+
+    const std::string lead = "This computer refused Go.dot real-time scheduling: the show's clock, the sound and the plugins"
+                             " run at the priority of everything else on it, and a busy machine makes them late - ";
+   #if defined (__linux__)
+    CHECK (problems[0].sentence == lead + "install rtkit, or give your user real-time rights (on Ubuntu: sudo usermod -aG pipewire $USER, then log in again).");
+   #else
+    CHECK (problems[0].sentence == lead + "close what else is running on it.");
+   #endif
+
+    for (const char* by : { "pending", "system", "rtkit" })
+    {
+        const auto fine = snapshotOf ({ { "/godot/engine/realtimeBy", word (by) } });
+        CHECK (model::machineProblems (fine, model::indexObjects (fine)).empty());
+    }
 }

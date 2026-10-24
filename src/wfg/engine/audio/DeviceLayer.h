@@ -49,6 +49,7 @@
 */
 
 #include <wfg/engine/audio/AudioHost.h>
+#include <wfg/engine/app/RealtimeRights.h>
 #include <wfg/engine/audio/AudioSettings.h>
 #include <wfg/engine/audio/InputCapture.h>
 
@@ -239,6 +240,17 @@ namespace wfg::audio
             is empty. Message thread, before `open`; the coordinator must
             outlive this driver. */
         void setWorkgroups (spatcore::rt::AudioWorkgroupCoordinator* coordinator) noexcept;
+
+        /*  THE DEVICE'S CALLBACK THREAD GIVEN THE REAL-TIME CLASS (Linux;
+            app/RealtimeRights.h, 2026-10-24). JUCE starts the ALSA thread as
+            an ordinary thread, so on the ALSA path the one thread that makes
+            the sound had no priority at all; it says who it is at its first
+            block, and this - called on the message thread once a second -
+            raises a thread not yet raised, by the user's limit or through
+            RealtimeKit, and answers what the last one got (`pending` before
+            any block). JACK's callback runs on the server's own real-time
+            thread; raising it again is harmless. Elsewhere `pending`. */
+        app::RealtimeBy raiseCallbackThread() noexcept;
 
         /*  HOW STEADILY THE INTERFACE ASKED FOR SOUND, since the last time
             this was asked (2026-10-06). Go.dot's clock is counted from the

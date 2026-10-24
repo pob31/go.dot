@@ -3454,8 +3454,8 @@ namespace
         /*  LATENCY-CRITICAL TO THE SYSTEM for as long as it serves (namespace
             draft §108, app/MachinePower.h): never napped, its timers never
             coalesced, and the computer not put to sleep under a show that is
-            only waiting for its next GO. The Mac's and Windows'; nothing on
-            Linux. */
+            only waiting for its next GO. The Mac's, Windows' and, through
+            power-profiles-daemon and logind, Linux's. */
         const wfg::app::LatencyCritical latencyCritical { "Go.dot is running a show" };
 
         useEngineFolderOption (args);
@@ -4970,6 +4970,20 @@ namespace
                                                     .getChildFile ("godot-video").getFullPathName().toStdString() };
 
         std::unique_ptr<wfg::audio::DeviceAudioDriver> deviceDriver;
+
+        /*  THE DEVICE'S CALLBACK THREAD RAISED (Linux; app/RealtimeRights.h,
+            2026-10-24): once a second on this thread, the driver gives the
+            thread that called it the real-time class if it has not yet - a
+            restarted device is a new thread. The reference outlives the
+            driver it watches, which may not exist yet or any more. */
+        struct CallbackRaise final : juce::Timer
+        {
+            explicit CallbackRaise (std::unique_ptr<wfg::audio::DeviceAudioDriver>& d) : driver (d) { startTimer (1000); }
+            ~CallbackRaise() override { stopTimer(); }
+            void timerCallback() override { if (driver != nullptr) driver->raiseCallbackThread(); }
+            std::unique_ptr<wfg::audio::DeviceAudioDriver>& driver;
+        } callbackRaise { deviceDriver };
+
         audioState.sendTest = [&deviceDriver] (const wfg::audio::OutputTestSettings& settings)
         { if (deviceDriver) deviceDriver->setOutputTest (settings); };
         wfg::audio::DeviceAudioDriver::Request activeDeviceRequest;
@@ -8416,6 +8430,7 @@ namespace
                                 state.lateness = ticks.lateness();
                                 state.latenessMax = ticks.latenessMax();
                                 state.tickRealtime = ticks.hasElevatedPriority();
+                                state.realtimeBy = wfg::app::wordOf (ticks.priorityBy());
                                 state.lowPowerMode = powerWatch.lowPower.load (std::memory_order_relaxed);
                                 state.lowPowerBy = wfg::app::wordOf (static_cast<wfg::app::PowerCap> (
                                                         powerWatch.cappedBy.load (std::memory_order_relaxed)));

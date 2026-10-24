@@ -40,6 +40,7 @@ namespace wfg::app
             case PowerCap::bestPowerEfficiency: return "bestPowerEfficiency";
             case PowerCap::powerSaverPlan:      return "powerSaverPlan";
             case PowerCap::processorLimited:    return "processorLimited";
+            case PowerCap::powerSaver:          return "powerSaver";
             case PowerCap::none:                break;
         }
 
@@ -254,15 +255,328 @@ namespace wfg::app
 }
 
 //==============================================================================
-//  LINUX: nothing to declare, nothing to read.
+//  LINUX (2026-10-24): power-profiles-daemon and logind over the system bus,
+//  the processor, the battery and the heat from sysfs.
 #elif ! defined (__APPLE__)
+
+ #include <wfg/engine/app/SystemBus_linux.h>
+
+ #include <dirent.h>
+ #include <unistd.h>
+
+ #include <cctype>
+ #include <cstdio>
+ #include <cstdlib>
+ #include <cstring>
+ #include <vector>
 
 namespace wfg::app
 {
-    LatencyCritical::LatencyCritical (const std::string&) {}
-    LatencyCritical::~LatencyCritical() = default;
+    namespace
+    {
+        /*  power-profiles-daemon, GNOME's and KDE's: renamed at 0.20 and
+            still answering to the old name, so the new is asked first. */
+        constexpr bus::Target profiles    { "org.freedesktop.UPower.PowerProfiles", "/org/freedesktop/UPower/PowerProfiles", "org.freedesktop.UPower.PowerProfiles" };
+        constexpr bus::Target profilesOld { "net.hadess.PowerProfiles", "/net/hadess/PowerProfiles", "net.hadess.PowerProfiles" };
+        constexpr bus::Target login       { "org.freedesktop.login1", "/org/freedesktop/login1", "org.freedesktop.login1.Manager" };
 
-    MachinePower readMachinePower() { return {}; }
+        struct Declaration
+        {
+            bus::Connection connection;
+            const bus::Target* daemon = nullptr;
+            dbus_uint32_t cookie = 0;
+            bool held = false;
+            int inhibitor = -1;
+        };
+
+        /*  THE PERFORMANCE PROFILE HELD for as long as the connection lives,
+            which is what `powerprofilesctl list-holds` shows under Go.dot's
+            name and reason: the processor's governor at full performance
+            whatever the user's own choice, as the Mac's activity and
+            Windows' throttling opt-out are. Refused where the hardware offers
+            no performance profile, and by polkit to a session that is not
+            the seat's (an SSH session); then the reading below still says
+            what the active profile is. */
+        bool holdPerformance (Declaration& declaration, const std::string& reason)
+        {
+            const char* profile = "performance";
+            const char* why = reason.c_str();
+            const char* application = "go.dot";
+
+            for (const auto* daemon : { &profiles, &profilesOld })
+            {
+                auto* request = bus::methodCall (*daemon, "HoldProfile");
+
+                if (request == nullptr)
+                    continue;
+
+                dbus_message_append_args (request, DBUS_TYPE_STRING, &profile, DBUS_TYPE_STRING, &why,
+                                          DBUS_TYPE_STRING, &application, DBUS_TYPE_INVALID);
+                const auto reply = bus::call (declaration.connection, request, 2000);
+
+                if (! reply.ok())
+                    continue;
+
+                dbus_uint32_t cookie = 0;
+
+                if (dbus_message_get_args (reply.get(), nullptr, DBUS_TYPE_UINT32, &cookie, DBUS_TYPE_INVALID))
+                {
+                    declaration.daemon = daemon;
+                    declaration.cookie = cookie;
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        /*  THE COMPUTER KEPT AWAKE: logind's inhibitor, which `systemd-inhibit
+            --list` shows with Go.dot's reason, blocks the idle suspend GNOME
+            and KDE ask logind for; the display may still sleep. "sleep:idle"
+            first, "sleep" alone where the seat's policy refuses the pair. The
+            returned descriptor is the inhibitor: closing it ends it. */
+        int inhibitSleep (Declaration& declaration, const std::string& reason)
+        {
+            const char* who = "Go.dot";
+            const char* why = reason.c_str();
+            const char* mode = "block";
+
+            for (const char* what : { "sleep:idle", "sleep" })
+            {
+                auto* request = bus::methodCall (login, "Inhibit");
+
+                if (request == nullptr)
+                    continue;
+
+                dbus_message_append_args (request, DBUS_TYPE_STRING, &what, DBUS_TYPE_STRING, &who,
+                                          DBUS_TYPE_STRING, &why, DBUS_TYPE_STRING, &mode, DBUS_TYPE_INVALID);
+                const auto reply = bus::call (declaration.connection, request, 2000);
+
+                if (! reply.ok())
+                    continue;
+
+                int descriptor = -1;
+
+                if (dbus_message_get_args (reply.get(), nullptr, DBUS_TYPE_UNIX_FD, &descriptor, DBUS_TYPE_INVALID) && descriptor >= 0)
+                    return descriptor;
+            }
+
+            return -1;
+        }
+
+        //  A small sysfs file, as text with its newline gone; empty where absent.
+        std::string readText (const std::string& path)
+        {
+            auto* file = std::fopen (path.c_str(), "r");
+
+            if (file == nullptr)
+                return {};
+
+            char buffer[128] {};
+            const auto read = std::fread (buffer, 1, sizeof (buffer) - 1, file);
+            std::fclose (file);
+            buffer[read] = '\0';
+
+            if (auto* newline = std::strchr (buffer, '\n'))
+                *newline = '\0';
+
+            return buffer;
+        }
+
+        std::int64_t readNumber (const std::string& path)
+        {
+            const auto text = readText (path);
+            return text.empty() ? -1 : std::strtoll (text.c_str(), nullptr, 10);
+        }
+
+        std::vector<std::string> entriesOf (const char* folder, const char* prefix)
+        {
+            std::vector<std::string> out;
+
+            if (auto* dir = opendir (folder))
+            {
+                while (const auto* entry = readdir (dir))
+                    if (std::strncmp (entry->d_name, prefix, std::strlen (prefix)) == 0)
+                        out.push_back (std::string (folder) + "/" + entry->d_name);
+
+                closedir (dir);
+            }
+
+            return out;
+        }
+
+        /*  THE PROCESSOR, from cpufreq: an energy preference of "power" is the
+            power-saver profile by hand (a governor of "powersave" is not - it
+            is intel_pstate's everyday one); a scaling maximum under the
+            processor's own maximum is a clock someone capped, which is
+            Windows' MhzLimit under MaxMhz. */
+        PowerCap processorCap()
+        {
+            auto cap = PowerCap::none;
+
+            for (const auto& cpu : entriesOf ("/sys/devices/system/cpu", "cpu"))
+            {
+                if (cpu.size() < 5 || ! std::isdigit (static_cast<unsigned char> (cpu[cpu.find_last_of ('/') + 4])))
+                    continue;
+
+                const auto cpufreq = cpu + "/cpufreq/";
+
+                if (readText (cpufreq + "energy_performance_preference") == "power")
+                    return PowerCap::powerSaver;
+
+                const auto scalingMax = readNumber (cpufreq + "scaling_max_freq");
+                const auto hardwareMax = readNumber (cpufreq + "cpuinfo_max_freq");
+
+                if (scalingMax > 0 && hardwareMax > 0 && scalingMax < hardwareMax)
+                    cap = PowerCap::processorLimited;
+            }
+
+            return cap;
+        }
+
+        //  On the battery when there is one and no mains supply is online.
+        bool onBattery()
+        {
+            auto battery = false, mains = false;
+
+            for (const auto& supply : entriesOf ("/sys/class/power_supply", ""))
+            {
+                const auto type = readText (supply + "/type");
+
+                if (type == "Battery")
+                    battery = true;
+                else if (type == "Mains" && readNumber (supply + "/online") == 1)
+                    mains = true;
+            }
+
+            return battery && ! mains;
+        }
+
+        /*  THE HEAT, from the thermal zones' own trip points: past a passive
+            trip the kernel has begun to slow the processor (fair), past a hot
+            trip it slows it hard (serious), at the critical trip it is about
+            to shut the machine down. A trip at or below zero is one the
+            driver left unset (a Wi-Fi zone says -274000) and is no trip. */
+        Thermal thermalFromZones()
+        {
+            auto worst = Thermal::nominal;
+
+            for (const auto& zone : entriesOf ("/sys/class/thermal", "thermal_zone"))
+            {
+                const auto temperature = readNumber (zone + "/temp");
+
+                if (temperature <= 0)
+                    continue;
+
+                for (int trip = 0; trip < 16; ++trip)
+                {
+                    const auto stem = zone + "/trip_point_" + std::to_string (trip) + "_";
+                    const auto type = readText (stem + "type");
+
+                    if (type.empty())
+                        break;
+
+                    const auto at = readNumber (stem + "temp");
+
+                    if (at <= 0 || temperature < at)
+                        continue;
+
+                    const auto reached = type == "critical" ? Thermal::critical
+                                       : type == "hot"      ? Thermal::serious
+                                       : type == "passive"  ? Thermal::fair
+                                                            : Thermal::nominal;
+                    if (reached > worst)
+                        worst = reached;
+                }
+            }
+
+            return worst;
+        }
+    }
+
+    LatencyCritical::LatencyCritical (const std::string& reason)
+    {
+        auto* declaration = new Declaration();
+
+        if (declaration->connection.open())
+        {
+            declaration->held = holdPerformance (*declaration, reason);
+            declaration->inhibitor = inhibitSleep (*declaration, reason);
+        }
+
+        if (! declaration->held && declaration->inhibitor < 0)
+        {
+            delete declaration;
+            return;
+        }
+
+        token = declaration;
+    }
+
+    LatencyCritical::~LatencyCritical()
+    {
+        if (token == nullptr)
+            return;
+
+        auto* declaration = static_cast<Declaration*> (token);
+
+        if (declaration->held && declaration->daemon != nullptr)
+        {
+            if (auto* request = bus::methodCall (*declaration->daemon, "ReleaseProfile"))
+            {
+                dbus_message_append_args (request, DBUS_TYPE_UINT32, &declaration->cookie, DBUS_TYPE_INVALID);
+                bus::call (declaration->connection, request, 1000);
+            }
+        }
+
+        if (declaration->inhibitor >= 0)
+            close (declaration->inhibitor);
+
+        //  And the connection closes with it, which releases both again.
+        delete declaration;
+        token = nullptr;
+    }
+
+    MachinePower readMachinePower()
+    {
+        MachinePower power;
+
+        /*  The daemon's word first: the active profile - which, under our own
+            hold, is performance - and whether it has had to degrade
+            performance for heat. One connection kept for the process, on the
+            message thread, which is the only caller. */
+        static const bus::Connection connection;
+
+        if (connection.open())
+        {
+            for (const auto* daemon : { &profiles, &profilesOld })
+            {
+                const auto active = bus::stringProperty (connection, *daemon, "ActiveProfile");
+
+                if (! active.has_value())
+                    continue;
+
+                if (*active == "power-saver")
+                    power.cappedBy = PowerCap::powerSaver;
+
+                if (bus::stringProperty (connection, *daemon, "PerformanceDegraded").value_or ("") == "high-operating-temperature")
+                    power.thermal = Thermal::serious;
+
+                break;
+            }
+        }
+
+        if (power.cappedBy == PowerCap::none)
+            power.cappedBy = processorCap();
+
+        power.lowPowerMode = power.cappedBy != PowerCap::none;
+        power.onBattery = onBattery();
+
+        if (const auto zones = thermalFromZones(); zones > power.thermal)
+            power.thermal = zones;
+
+        return power;
+    }
 }
 
 #endif

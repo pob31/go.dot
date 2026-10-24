@@ -33777,9 +33777,82 @@ Mine *(proposed)*, the author's to overrule:
   on by itself - plug it in." Pressing the warning opens Windows' Power & battery settings
   (`ms-settings:powersleep`), as it opens the Mac's Battery.
 
+**Asked a third time 2026-10-24**, of Linux: *"In a similar fashion to what we did for macOS and Windows
+are there performance settings that are Linux specific?"* - then, of the five things offered: *"Make
+those fixes."*
+
+What was found. On Linux the thing that matters most is not power at all but **the real-time class**,
+which the tick thread, the plugin child's worker and the no-card driver all ask for with `SCHED_FIFO`
+and which needs a limit (`RLIMIT_RTPRIO`) a stock desktop user does not have: Ubuntu grants it to the
+`pipewire` group (PipeWire's own limits file) and the `audio` group (JACK's), and puts nobody in either.
+On a stock machine every ask failed, `tickRealtime` said false, and nothing warned. **The ALSA callback
+thread** JUCE starts is an ordinary thread besides - `startThread (Priority::high)` is `SCHED_OTHER` on
+Linux; only `startRealtimeThread` gets a real-time class - so on the ALSA path the one thread that makes
+the sound had no priority at all; on the JACK path the callback runs on the server's own real-time
+thread and is fine. Of power: Go.dot declared nothing and read nothing. What Linux offers any user over
+the system bus: **RealtimeKit** (rtkit-daemon, on every desktop with PipeWire or PulseAudio) grants a
+thread the real-time class under its own cap (20) on condition the process bounds its real-time run
+time (`RLIMIT_RTTIME`, 200 ms) - the route PipeWire itself takes on a stock install; **power-profiles-
+daemon** (GNOME's and KDE's) holds the performance profile for a connection's life and says which profile
+is active and whether it has degraded performance for heat; **logind** blocks idle suspend with a named
+inhibitor. From sysfs: cpufreq's energy preference and scaling maximum, the power supplies, the thermal
+zones' trip points. On the NUC (Ubuntu 24.04, AMD, in `audio`): limit 95, RealtimeKit cap 20 and 200 ms,
+power-profiles-daemon 0.21 under its new name, profile already performance; polkit refuses an SSH
+session both the hold and the inhibitor - and RealtimeKit too: `pkcheck` says "Not authorized" for the
+SSH session (no seat), so the RealtimeKit route cannot be tried from the farm, only from a desktop
+session; from the farm the tests accept `none` where the daemon refuses.
+
+The author's: **BBD** the five built - RealtimeKit where the limit refuses, the warning when both
+refuse, the ALSA thread made real-time, the declaration (profile hold and inhibitor), the readings.
+Pinning to the performance cores and switching the governor were advised against as on Windows:
+real-time threads go first and the kernel prefers the fast cores for them; the governor is root's.
+
+Mine *(proposed)*, the author's to overrule:
+
+- **BBE** **One ask for the real-time class, `app/RealtimeRights.h`**, for every thread that makes or
+  times the sound: `takeRealtime (rank, period, budget)` for the calling thread - spatcore's policy on
+  the Mac, `SCHED_FIFO` under the user's limit on Linux (the clock at the middle of the range, 50, as
+  before; the sound ten above it), then **RealtimeKit** where that refused (the sound at the daemon's
+  cap, the clock five under it; `RLIMIT_RTTIME` set to what the daemon allows, never loosened, and only
+  on this route) - and `takeRealtimeOf (tid)` / `takeRealtimeOfThreadNamed (name)` for a thread
+  something else started. The answer is what took: `system`, `rtkit`, `none`. Windows' tick thread keeps
+  its `TIME_CRITICAL`. libdbus-1 does the wire (`app/SystemBus_linux.h`, Linux only, linked there).
+- **BBF** **The ALSA callback thread is raised from the message thread**, not patched in JUCE: it says
+  its own kernel id at its first block (a `gettid`, once per device start; a syscall that cannot block,
+  and glibc caches it) and `DeviceAudioDriver::raiseCallbackThread`, called once a second by the serve
+  verb, gives a thread not yet raised the sound's rank by the same two routes. Not found by name, as
+  first tried: JUCE names it "JUCE v8.0.13: ALSA", more than the fifteen bytes `pthread_setname_np`
+  takes, so the name is dropped and the thread shows as `wfg` like any unnamed one (seen on the NUC).
+  Under JACK the callback is the server's real-time thread and raising it again is harmless. A JUCE
+  patch would have raised it a second sooner and only for a user with the limit; this covers both
+  routes and leaves the patch series alone.
+- **BBG** **A fifth row says how, and `none` is a warning.** `/godot/engine/realtimeBy`: `pending`
+  until the tick thread has asked, then `system`, `rtkit` or `none` - so a client connecting before the
+  first tick sees no flicker. "This computer refused Go.dot real-time scheduling: the show's clock, the
+  sound and the plugins run at the priority of everything else on it, and a busy machine makes them
+  late - " then on Linux "install rtkit, or give your user real-time rights (on Ubuntu: sudo usermod -aG
+  pipewire $USER, then log in again)." and elsewhere "close what else is running on it." On "This
+  computer", after the heat.
+- **BBH** **On Linux the declaration is power-profiles-daemon's `HoldProfile ("performance")` and
+  logind's `Inhibit ("sleep:idle", block)`** - "sleep" alone where the seat refuses the pair - on one
+  private bus connection per process, so both end when the socket closes however the process ends;
+  `powerprofilesctl list-holds` and `systemd-inhibit --list` show them with Go.dot's reason. The new
+  bus name (`org.freedesktop.UPower.PowerProfiles`, 0.20) is asked first, `net.hadess` second.
+  `declared()` is either taken; polkit refuses both to a session that is not the seat's, so an SSH
+  session declares nothing and the tests accept that. **Read**: `lowPowerBy` gains `powerSaver` (the
+  daemon's power-saver profile, or cpufreq's `energy_performance_preference` at "power" by hand - a
+  governor of "powersave" is intel_pstate's everyday one and no cap), `processorLimited` is a
+  `scaling_max_freq` under `cpuinfo_max_freq`; `onBattery` is a Battery supply with no Mains online;
+  `thermal` is the zones' trip points (passive = fair, hot = serious, critical), a trip at or below
+  zero being one the driver left unset (a Wi-Fi zone says -274000), and the daemon's
+  `PerformanceDegraded` = high-operating-temperature as serious. Said: "This computer's power profile
+  is Power Saver: its processor is capped, ... - Settings, Power."; pressing the warning opens
+  `gnome-control-center power`, else KDE's power page.
+
 ### 108.2 Rows and commands
 
-Four read-only engine rows (BAW, BBB): `lowPower`, `lowPowerBy`, `onBattery`, `thermal`. No command.
+Five read-only engine rows (BAW, BBB, BBG): `lowPower`, `lowPowerBy`, `onBattery`, `thermal`,
+`realtimeBy`. No command.
 
 ### 108.3 As built
 
@@ -33791,7 +33864,12 @@ everyone else's. The serve verb holds the declaration beside its JUCE initialise
 `x-apple.systempreferences:com.apple.Battery-Settings.extension` for it on the Mac and
 `ms-settings:powersleep` on Windows. Windows' half of `MachinePower.cpp` (powrprof linked there):
 `optOutOfPowerThrottling`, `keepAwake`, `readMachinePower` with `PowerCap` and its `wordOf`;
-`clock/FineWait.h` the tick thread's wait, `TickThread` without its condition variable.
+`clock/FineWait.h` the tick thread's wait, `TickThread` without its condition variable. The Linux
+half (2026-10-24): `app/RealtimeRights.h` (`takeRealtime`, `takeRealtimeOf`, `takeRealtimeOfThreadNamed`,
+`RealtimeBy` and `wordOf`), `app/SystemBus_linux.h` (a private connection, `call`, `stringProperty`,
+`integerProperty`), the Linux foot of `MachinePower.cpp`; `TickThread::priorityBy`, `DeviceLayer`'s
+ALSA raise, `HostedAudioDriver` and `PluginHostChild` asking through `takeRealtime`; libdbus-1 on the
+Linux link line, `libdbus-1-dev` in `install-linux-deps.sh`, `libdbus-1-3` in the .deb's Depends.
 
 ### 108.4 Stages
 
@@ -33799,7 +33877,12 @@ everyone else's. The serve verb holds the declaration beside its JUCE initialise
 |---|---|---|
 | MP.1 | the declaration, the rows, the warning (MachinePowerTests, ProblemsTests) | |
 | MP.2 | Windows: the declaration and the power request, FineWait, lowPowerBy and onBattery, the sentences (MachinePowerTests, ProblemsTests, ClockTests) | |
+| MP.3 | Linux: RealtimeRights (the limit, then RealtimeKit; the ALSA thread by name), realtimeBy and its warning, the profile hold and the inhibitor, powerSaver / processorLimited / onBattery / thermal from the bus and sysfs (MachinePowerTests, ProblemsTests) | |
 
 Owed: the author's look at the warning with Low Power Mode switched on, on the Mac mini or a laptop;
 on the Windows laptop, unplugged and with Battery saver on, and `powercfg /requests` with a show open;
 `/godot/engine/latenessMax` before and after on a machine where nothing else has raised the timer.
+Linux: the author's look at a stock Ubuntu desktop (a user in neither group): `realtimeBy` should read
+`rtkit`, `powerprofilesctl list-holds` and `systemd-inhibit --list` should show Go.dot while a show is
+open, and `chrt -p` on the ALSA thread should say SCHED_RR or SCHED_FIFO; and with power-saver chosen,
+the warning.

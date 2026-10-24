@@ -39,9 +39,14 @@
     minimised; a power request that keeps the computer awake; Battery saver,
     the power mode slider, the Power saver plan and a processor limited below
     its full speed; running on the battery. Windows says nothing of heat.
-    Linux declares nothing and reads as unhindered.
+    Linux (2026-10-24): power-profiles-daemon's performance profile held and
+    logind's sleep inhibitor taken over the system bus; the power-saver
+    profile, an energy preference of "power" or a capped clock from cpufreq;
+    the battery from the power supplies; the heat from the thermal zones'
+    own trip points and the daemon's word. The real-time class, which on
+    Linux is the thing that matters most, is app/RealtimeRights.h.
 
-    STD ONLY, so that AppKit stays in the .mm and windows.h in the .cpp.
+    STD ONLY, so that AppKit stays in the .mm, windows.h and dbus.h in the .cpp.
 */
 
 #include <string>
@@ -55,9 +60,13 @@ namespace wfg::app
         timer coalescing, no idle system sleep, no automatic termination. On
         Windows it is the process's power throttling switched off (never
         EcoQoS, timer resolution kept) and a system-required power request:
-        the computer does not idle-sleep, the display may. `reason` is what
-        the system shows beside the process: pmset -g assertions on the Mac,
-        powercfg /requests on Windows. */
+        the computer does not idle-sleep, the display may. On Linux it is
+        power-profiles-daemon's performance profile held for as long as this
+        lives, and logind's "sleep:idle" inhibitor; polkit refuses both to a
+        session that is not the seat's, so an SSH session declares nothing.
+        `reason` is what the system shows beside the process: pmset -g
+        assertions on the Mac, powercfg /requests on Windows,
+        powerprofilesctl list-holds and systemd-inhibit --list on Linux. */
     class LatencyCritical
     {
     public:
@@ -75,8 +84,10 @@ namespace wfg::app
     };
 
     /*  HOW HOT THE SYSTEM SAYS THE COMPUTER IS, in its own four steps: at
-        `serious` it has already slowed the processor. The Mac's; Windows has
-        no such reading and says nominal. */
+        `serious` it has already slowed the processor. The Mac's; on Linux
+        the thermal zones' trip points (passive = fair, hot = serious,
+        critical) and power-profiles-daemon's high-operating-temperature
+        (serious); Windows has no such reading and says nominal. */
     enum class Thermal { nominal, fair, serious, critical };
 
     /** `nominal`, `fair`, `serious`, `critical`: what the tree says. */
@@ -87,10 +98,12 @@ namespace wfg::app
         Battery saver, its power mode slider at Best power efficiency, the
         Power saver plan, or a processor whose current limit sits below its
         full speed (a plan's processor maximum state under 100 %, or a limit
-        the firmware applied). The first that holds, in this order. */
-    enum class PowerCap { none, lowPowerMode, batterySaver, bestPowerEfficiency, powerSaverPlan, processorLimited };
+        the firmware applied); Linux's power-saver profile (power-profiles-
+        daemon's, or cpufreq's energy preference set to "power" by hand) and
+        the same capped clock. The first that holds, in this order. */
+    enum class PowerCap { none, lowPowerMode, batterySaver, bestPowerEfficiency, powerSaverPlan, processorLimited, powerSaver };
 
-    /** `none`, `lowPowerMode`, `batterySaver`, `bestPowerEfficiency`, `powerSaverPlan`, `processorLimited`. */
+    /** `none`, `lowPowerMode`, `batterySaver`, `bestPowerEfficiency`, `powerSaverPlan`, `processorLimited`, `powerSaver`. */
     const char* wordOf (PowerCap) noexcept;
 
     struct MachinePower
@@ -99,7 +112,7 @@ namespace wfg::app
         bool lowPowerMode = false;
         PowerCap cappedBy = PowerCap::none;
 
-        /** Running on the battery (Windows; false where it cannot be asked). */
+        /** Running on the battery (Windows, Linux; false where it cannot be asked). */
         bool onBattery = false;
 
         Thermal thermal = Thermal::nominal;

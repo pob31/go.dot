@@ -24,7 +24,7 @@
 #include <wfg/engine/plugin/WorkgroupShare.h>
 #include <wfg/engine/app/MachinePower.h>
 
-#include <spatcore/rt/RtThreadPriority.h>
+#include <wfg/engine/app/RealtimeRights.h>
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_core/juce_core.h>
@@ -177,13 +177,15 @@ namespace wfg::plugin
             }
 
             /*  Real-time priority for the answering thread, the same class the
-                engine's own audio thread has; the period is the block's. */
+                engine's own audio thread has; the period is the block's. On
+                Linux through RealtimeKit where the user's limit refuses
+                (app/RealtimeRights.h). */
             void takePriority() const
             {
                 const auto rate = std::max<std::uint32_t> (1, header.sampleRate.load (std::memory_order_relaxed));
                 const auto block = std::max<std::uint32_t> (1, header.blockSize.load (std::memory_order_relaxed));
                 const auto periodMs = 1000.0 * static_cast<double> (block) / static_cast<double> (rate);
-                spatcore::rt::setCurrentThreadAudioPriority (periodMs, periodMs * 0.5);
+                app::takeRealtime (app::RealtimeRank::sound, periodMs, periodMs * 0.5);
             }
 
             /*  THE INTERFACE'S AUDIO WORKGROUP (macOS, 2026-10-22): the worker,

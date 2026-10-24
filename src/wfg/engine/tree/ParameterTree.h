@@ -116,6 +116,8 @@ namespace wfg::tree
             gaps between calls for sound and the longest Go.dot took to answer
             one (both in samples), and the engine log's lines not yet on disk. */
         bool tickRealtime = false;
+        /** And how it got it (app/RealtimeRights.h): pending, none, system, rtkit. */
+        std::string realtimeBy = "pending";
         std::int64_t audioGaps = 0, audioGapMax = 0, audioCallbackMax = 0;
         std::int64_t logPending = 0;
 
@@ -126,7 +128,8 @@ namespace wfg::tree
             `lowPowerBy` names which (app/MachinePower.h's words); the Mac's
             thermal state - nominal, fair, serious, critical - says it has
             been slowed for heat from `serious`; and Windows says whether it
-            runs on its battery. Unhindered where it cannot be asked. */
+            runs on its battery; Linux says all three. Unhindered where it
+            cannot be asked. */
         bool lowPowerMode = false;
         std::string lowPowerBy = "none";
         bool onBattery = false;

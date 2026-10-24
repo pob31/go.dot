@@ -147,7 +147,7 @@ Version: ${version//-/\~}
 Architecture: amd64
 Maintainer: Pierre-Olivier Boulant <po2528@gmail.com>
 Installed-Size: $(du -sk --exclude=DEBIAN "$root" | cut -f1)
-Depends: libc6 (>= 2.39), libstdc++6, libgcc-s1, libasound2t64 | libasound2, libfreetype6, libfontconfig1, libx11-6, libxext6, libxinerama1, libxrandr2, libxcursor1, libxcomposite1, libxrender1, libgl1, libegl1, libopengl0, libudev1
+Depends: libc6 (>= 2.39), libstdc++6, libgcc-s1, libasound2t64 | libasound2, libfreetype6, libfontconfig1, libx11-6, libxext6, libxinerama1, libxrandr2, libxcursor1, libxcomposite1, libxrender1, libgl1, libegl1, libopengl0, libudev1, libdbus-1-3
 Recommends: pipewire-jack, ffmpeg, puredata-gui, curl | wget
 Section: sound
 Priority: optional

@@ -19,6 +19,7 @@
 #include <wfg/engine/audio/OutputTestSignal.h>
 #include <wfg/engine/audio/RecoveryGate.h>
 #include <wfg/engine/plugin/WorkgroupShare.h>
+#include <wfg/engine/app/RealtimeRights.h>
 
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <spatcore/io/DeviceHost.h>
@@ -27,6 +28,10 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+
+#if defined (__linux__)
+ #include <unistd.h>
+#endif
 
 namespace wfg::audio
 {
@@ -181,6 +186,10 @@ namespace wfg::audio
                 workgroups->set (device->getWorkgroup());
                 plugin::shareAudioWorkgroup (device->getWorkgroup());
             }
+
+            /*  And whichever thread calls next is a thread not yet raised
+                (callbackThread, below): a device that restarted has a new one. */
+            callbackThread.store (0, std::memory_order_relaxed);
         }
 
         /*  The audio thread's: a value raised, never lowered, against a reader
@@ -263,6 +272,19 @@ namespace wfg::audio
                 written is whatever was in it last time - which on a PA is a
                 loop of the last 3 ms, at full level, for as long as it lasts. */
             const Answering answering { *this, juce::Time::getHighResolutionTicks() };
+
+           #if defined (__linux__)
+            /*  WHO THIS THREAD IS, said once so the message thread can give it
+                the real-time class (DeviceAudioDriver::raiseCallbackThread;
+                app/RealtimeRights.h, 2026-10-24): JUCE starts the ALSA thread
+                as an ordinary one, and names it with more than the fifteen
+                bytes the kernel takes, so the name is dropped and the thread
+                cannot be found from outside. gettid is a register read in
+                glibc's cache after the first call and a syscall that cannot
+                block before it; once per device start. */
+            if (callbackThread.load (std::memory_order_relaxed) == 0)
+                callbackThread.store (static_cast<long> (gettid()), std::memory_order_relaxed);
+           #endif
 
             /*  AND THE SAME MOMENT ON THE STEADY CLOCK the link times everything
                 on (namespace draft §58, RD.9; clock/BlockStamp.h), for the
@@ -370,6 +392,13 @@ namespace wfg::audio
         std::atomic<std::int64_t> gaps { 0 }, gapLongest { 0 }, callbackLongest { 0 };
         std::atomic<std::int64_t> stops { 0 }, errors { 0 }, starts { 0 };
         spatcore::rt::AudioWorkgroupCoordinator* workgroups = nullptr;
+
+        /*  The device's callback thread by its kernel id, from its first
+            block (Linux; zero before it and after a start), and the one the
+            message thread last raised, with what it got. */
+        std::atomic<long> callbackThread { 0 };
+        long callbackThreadRaised = 0;
+        app::RealtimeBy callbackThreadBy = app::RealtimeBy::pending;
 
         bool running = false;
         RecoveryGate recovery;
@@ -484,6 +513,19 @@ namespace wfg::audio
     DeviceAudioDriver::DeviceAudioDriver (std::string storageFolder)
         : impl (std::make_unique<Impl> (std::move (storageFolder)))
     {
+    }
+
+    app::RealtimeBy DeviceAudioDriver::raiseCallbackThread() noexcept
+    {
+        const auto thread = impl->callbackThread.load (std::memory_order_relaxed);
+
+        if (thread != 0 && thread != impl->callbackThreadRaised)
+        {
+            impl->callbackThreadRaised = thread;
+            impl->callbackThreadBy = app::takeRealtimeOf (thread, app::RealtimeRank::sound);
+        }
+
+        return impl->callbackThreadBy;
     }
 
     DeviceAudioDriver::~DeviceAudioDriver()

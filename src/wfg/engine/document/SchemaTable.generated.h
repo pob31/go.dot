@@ -33,7 +33,8 @@
 namespace wfg::doc::generated
 {
     inline constexpr std::string_view enum_engine_clock[] = { "dummy", "device" };
-    inline constexpr std::string_view enum_engine_lowPowerBy[] = { "none", "lowPowerMode", "batterySaver", "bestPowerEfficiency", "powerSaverPlan", "processorLimited" };
+    inline constexpr std::string_view enum_engine_realtimeBy[] = { "pending", "none", "system", "rtkit" };
+    inline constexpr std::string_view enum_engine_lowPowerBy[] = { "none", "lowPowerMode", "batterySaver", "bestPowerEfficiency", "powerSaverPlan", "processorLimited", "powerSaver" };
     inline constexpr std::string_view enum_engine_thermal[] = { "nominal", "fair", "serious", "critical" };
     inline constexpr std::string_view enum_engine_spaceMouse[] = { "off", "searching", "connected", "driver" };
     inline constexpr std::string_view enum_pair_role[] = { "none", "main", "backup" };
@@ -272,7 +273,15 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 1.0, false, "park",
           "",
-          "Whether the tick thread - the show's clock, which every launch, fade and cursor waits on - runs at real-time priority: TIME_CRITICAL on Windows, a time-constraint policy and the interface's audio workgroup on macOS, SCHED_FIFO on Linux. False where the system refused it, typically Linux without real-time rights; the show's clock then runs at the priority of everything else on the machine." },
+          "Whether the tick thread - the show's clock, which every launch, fade and cursor waits on - runs at real-time priority: TIME_CRITICAL on Windows, a time-constraint policy and the interface's audio workgroup on macOS, SCHED_FIFO on Linux under the user-s limit, or RealtimeKit-s class where the limit refused (realtimeBy says which). False where the system refused it; the show's clock then runs at the priority of everything else on the machine, and This computer says so." },
+        { "engine", "realtimeBy",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
+          true, "pending",
+          false, 0.0, false, 0.0,
+          enum_engine_realtimeBy, 4,
+          "", 1.0, false, "park",
+          "",
+          "How the tick thread got its real-time class (namespace draft 108, the Linux half): system is the thread-s own rights - Windows- TIME_CRITICAL, the Mac-s time-constraint policy, SCHED_FIFO under the user-s limit on Linux; rtkit is RealtimeKit, asked on Linux where the limit refused, under its own cap; none is both refused, which is a warning of This computer; pending until the tick thread has asked." },
         { "engine", "lowPower",
           ValueType::boolean, 'T', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "false",
@@ -280,15 +289,15 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 1.0, false, "park",
           "",
-          "Whether something caps this computer-s processor (namespace draft 108): Low Power Mode on a Mac; on Windows Battery saver, the power mode slider at Best power efficiency, the Power saver plan, or a processor limited below its full speed. lowPowerBy says which. A show heavy with plugins or video can fall behind. Read once a second on the message thread. No app can switch it off - the fix is the system-s own power settings. False on Linux." },
+          "Whether something caps this computer-s processor (namespace draft 108): Low Power Mode on a Mac; on Windows Battery saver, the power mode slider at Best power efficiency, the Power saver plan, or a processor limited below its full speed. lowPowerBy says which. A show heavy with plugins or video can fall behind. Read once a second on the message thread. No app can switch it off - the fix is the system-s own power settings. On Linux the power-saver profile (power-profiles-daemon-s, or cpufreq-s energy preference set to power) or a capped clock." },
         { "engine", "lowPowerBy",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "none",
           false, 0.0, false, 0.0,
-          enum_engine_lowPowerBy, 6,
+          enum_engine_lowPowerBy, 7,
           "", 1.0, false, "park",
           "",
-          "What caps the processor when lowPower is true (namespace draft 108), as the system names it: lowPowerMode is the Mac-s; batterySaver, bestPowerEfficiency (the power mode slider), powerSaverPlan and processorLimited (a plan-s processor maximum state under 100 %, or a limit the firmware applied) are Windows-s, the first that holds. None otherwise." },
+          "What caps the processor when lowPower is true (namespace draft 108), as the system names it: lowPowerMode is the Mac-s; batterySaver, bestPowerEfficiency (the power mode slider), powerSaverPlan and processorLimited (a plan-s processor maximum state under 100 %, or a limit the firmware applied) are Windows-s, the first that holds; powerSaver is Linux-s power-saver profile, and processorLimited there too a scaling maximum under the processor-s own. None otherwise." },
         { "engine", "onBattery",
           ValueType::boolean, 'T', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "false",
@@ -296,7 +305,7 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 1.0, false, "park",
           "",
-          "Whether this computer runs on its battery (Windows; namespace draft 108): a laptop slows itself as the charge falls and turns Battery saver on by itself. Read once a second on the message thread. False where it cannot be asked." },
+          "Whether this computer runs on its battery (Windows, Linux; namespace draft 108): a laptop slows itself as the charge falls and turns Battery saver on by itself. Read once a second on the message thread. False where it cannot be asked." },
         { "engine", "thermal",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "nominal",
@@ -304,7 +313,7 @@ namespace wfg::doc::generated
           enum_engine_thermal, 4,
           "", 1.0, false, "park",
           "",
-          "How hot this computer says it is (macOS; namespace draft 108), in the system-s own four steps: from serious it has slowed its processor for heat. Read once a second on the message thread. Nominal elsewhere: Windows has no such reading." },
+          "How hot this computer says it is (macOS, Linux; namespace draft 108), in the system-s own four steps: from serious it has slowed its processor for heat - on Linux the thermal zones- passive, hot and critical trip points, and power-profiles-daemon-s high-operating-temperature. Read once a second on the message thread. Nominal on Windows, which has no such reading." },
         { "engine", "audioGaps",
           ValueType::integer, 'i', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "0",

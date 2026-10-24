@@ -390,7 +390,8 @@ namespace wfg::client::ui
             /*  THE COMPUTER'S OWN (namespace draft §108) opens the system's
                 settings, where Low Power Mode or Battery saver is switched
                 off and the laptop's charge is seen: the Mac's Battery, Windows'
-                Power & battery. Linux says nothing of its own. */
+                Power & battery, and on Linux GNOME's or KDE's power settings,
+                whichever is found. */
             const auto computer = page.page == model::settingsPages::thisComputer;
             const auto mac = (juce::SystemStats::getOperatingSystemType() & juce::SystemStats::MacOSX) != 0;
             const auto windows = (juce::SystemStats::getOperatingSystemType() & juce::SystemStats::Windows) != 0;
@@ -401,7 +402,7 @@ namespace wfg::client::ui
                         : computer
                         ? juce::String (page.page) + (mac ? " - press to open the Mac's Battery settings:"
                                                       : windows ? " - press to open Windows' Power & battery settings:"
-                                                      : ":")
+                                                      : " - press to open the system's power settings:")
                         : juce::String (page.page) + " - press to open Show settings on it:");
 
             for (std::size_t at = 0; at < page.sentences.size() && at < 8; ++at)
@@ -424,6 +425,13 @@ namespace wfg::client::ui
                         juce::URL ("x-apple.systempreferences:com.apple.Battery-Settings.extension").launchInDefaultBrowser();
                     else if (windows)
                         juce::URL ("ms-settings:powersleep").launchInDefaultBrowser();
+                    else
+                    {
+                        juce::ChildProcess settings;
+
+                        if (! settings.start ("gnome-control-center power"))
+                            settings.start ("systemsettings kcm_powerdevilprofilesconfig");
+                    }
                 }
                 else if (actions.openSettings)
                     actions.openSettings (which);

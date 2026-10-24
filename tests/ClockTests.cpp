@@ -473,13 +473,17 @@ TEST_CASE ("tick thread: it reports the priority it actually got")
         let the first person investigating a late show rule out the right cause
         on the strength of it. Asked on a thread of its own, so this test's
         thread is left as it was. Windows and macOS grant it to anybody; Linux
-        only to a user with real-time rights, which a CI runner may not be. */
-    bool granted = false;
-    std::thread asking { [&granted] { granted = elevateCurrentThreadForTicking(); } };
+        to a user with real-time rights or through RealtimeKit (2026-10-24,
+        app/RealtimeRights.h), and a CI runner may have neither - the answer
+        says which route took, and `pending` is never an answer. */
+    auto by = wfg::app::RealtimeBy::pending;
+    std::thread asking { [&by] { by = elevateCurrentThreadForTicking(); } };
     asking.join();
+    const auto granted = by != wfg::app::RealtimeBy::none;
+    CHECK (by != wfg::app::RealtimeBy::pending);
 
    #if defined (_WIN32) || defined (__APPLE__)
-    CHECK (granted);
+    CHECK (by == wfg::app::RealtimeBy::system);
    #endif
 
     Engine engine;
@@ -492,6 +496,7 @@ TEST_CASE ("tick thread: it reports the priority it actually got")
     REQUIRE (waitUntil ([&thread] { return thread.lastTick() >= 0; }));
 
     CHECK (thread.hasElevatedPriority() == granted);
+    CHECK (thread.priorityBy() == by);
     CHECK (thread.sampleRate() == 48000);
     CHECK (thread.samplesPerTick() == 960);
 

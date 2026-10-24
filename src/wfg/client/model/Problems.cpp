@@ -346,6 +346,8 @@ namespace wfg::client::model
                              : by == "processorLimited"
                                ? "This computer's processor is limited below its full speed by its power plan or firmware" + falls
                                    + "Control Panel, Power Options, the plan's processor power management."
+                             : by == "powerSaver"
+                               ? "This computer's power profile is Power Saver: its processor is capped" + falls + "Settings, Power."
                                : "This computer is in Low Power Mode: its processor is capped" + falls + "System Settings, Battery." });
         }
 
@@ -359,6 +361,23 @@ namespace wfg::client::model
                              std::string ("This computer is too hot and has slowed its processor")
                                + (thermal == "critical" ? " hard" : "")
                                + ": let it cool, or move it out of the heat - nothing in Go.dot puts this right." });
+
+        /*  THE REAL-TIME CLASS REFUSED (app/RealtimeRights.h, 2026-10-24): the
+            tick thread asked on its own rights and, on Linux, through
+            RealtimeKit, and got neither - the show's clock, the sound and
+            the plugins run at the priority of everything else on the
+            machine. Nothing in the show puts it right; on Linux the user's
+            limits do, and the sentence says how. Not before the tick thread
+            has asked (pending), so a client connecting early sees no flicker. */
+        if (text (snapshot, "/godot/engine/realtimeBy") == "none")
+            out.push_back ({ pageName::thisComputer, "realtime", "no real-time",
+                             std::string ("This computer refused Go.dot real-time scheduling: the show's clock, the sound and the plugins"
+                                          " run at the priority of everything else on it, and a busy machine makes them late - ")
+                              #if defined (__linux__)
+                               + "install rtkit, or give your user real-time rights (on Ubuntu: sudo usermod -aG pipewire $USER, then log in again)." });
+                              #else
+                               + "close what else is running on it." });
+                              #endif
 
         /*  THE AUDIO INTERFACE: none while it is being applied - which is
             Apply's own "Restarting audio..." - and otherwise any reason it is

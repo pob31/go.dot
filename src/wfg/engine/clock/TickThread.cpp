@@ -84,14 +84,17 @@ namespace wfg
     }
 
     //==============================================================================
-    bool elevateCurrentThreadForTicking() noexcept
+    app::RealtimeBy elevateCurrentThreadForTicking() noexcept
     {
        #if defined (_WIN32)
         /*  Not spatcore's MMCSS "Pro Audio", which would put the tick above an
             ASIO callback at TIME_CRITICAL - see the header. */
-        return ::SetThreadPriority (::GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL) != 0;
+        return ::SetThreadPriority (::GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL) != 0
+                 ? app::RealtimeBy::system : app::RealtimeBy::none;
        #else
-        return spatcore::rt::setCurrentThreadAudioPriority (tickPeriodMs, tickBudgetMs);
+        /*  spatcore's time-constraint policy on the Mac; on Linux SCHED_FIFO
+            under the user's limit, then RealtimeKit (app/RealtimeRights.h). */
+        return app::takeRealtime (app::RealtimeRank::clock, tickPeriodMs, tickBudgetMs);
        #endif
     }
 
@@ -139,7 +142,9 @@ namespace wfg
     //==============================================================================
     void TickThread::run()
     {
-        elevated.store (elevateCurrentThreadForTicking(), std::memory_order_relaxed);
+        const auto by = elevateCurrentThreadForTicking();
+        elevated.store (by != app::RealtimeBy::none, std::memory_order_relaxed);
+        elevatedBy.store (static_cast<int> (by), std::memory_order_relaxed);
 
         /*  Made, joined and left on this thread, which is what a token asks:
             its destructor at the end of this function leaves the workgroup. */

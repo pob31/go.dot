@@ -75,6 +75,8 @@ add_library(wfg_engine STATIC
     wfg/engine/app/FolderIcon.h
     wfg/engine/app/MachinePower.cpp
     wfg/engine/app/MachinePower.h
+    wfg/engine/app/RealtimeRights.cpp
+    wfg/engine/app/RealtimeRights.h
     wfg/engine/app/OpenShows.cpp
     wfg/engine/app/OpenShows.h
     wfg/engine/app/Raise.cpp
@@ -750,6 +752,15 @@ target_link_libraries(wfg_engine
 # plan and the processors' limits are powrprof's.
 if(WIN32)
     target_link_libraries(wfg_engine PRIVATE powrprof)
+endif()
+
+# Linux's half of app/MachinePower.h and app/RealtimeRights.h (namespace draft
+# §108, the Linux half): RealtimeKit, power-profiles-daemon and logind are asked
+# over the system bus, through libdbus-1 (app/SystemBus_linux.h).
+if(UNIX AND NOT APPLE)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(WFG_DBUS REQUIRED IMPORTED_TARGET dbus-1)
+    target_link_libraries(wfg_engine PRIVATE PkgConfig::WFG_DBUS)
 endif()
 
 # AJA's library (namespace draft §72, AQC; cmake/WfgThirdParty.cmake), for

@@ -85,6 +85,7 @@ $SUDO apt-get install -y --no-install-recommends \
     python3-lxml \
     libasound2-dev \
     libjack-jackd2-dev \
+    libdbus-1-dev \
     libfreetype-dev \
     libfontconfig1-dev \
     libx11-dev \
@@ -128,6 +129,9 @@ $SUDO apt-get install -y --no-install-recommends \
 #                        header only. JUCE loads libjack.so.0 when Go.dot starts,
 #                        so the binary needs no JACK to run - it offers JACK
 #                        where there is one, PipeWire's included.
+#   libdbus-1-dev        app/SystemBus_linux.h (namespace draft 108, the Linux
+#                        half): RealtimeKit, power-profiles-daemon and logind
+#                        over the system bus. libdbus-1.so.3 is on every desktop.
 #   libfreetype-dev      juce_graphics
 #   libfontconfig1-dev   juce_graphics
 #   libx11-dev           juce_gui_basics

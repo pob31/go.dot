@@ -50,6 +50,7 @@
     operator would look when a show feels loose.
 */
 
+#include <wfg/engine/app/RealtimeRights.h>
 #include <wfg/engine/clock/FineWait.h>
 #include <wfg/engine/clock/SampleClock.h>
 #include <wfg/engine/clock/TickClock.h>
@@ -118,15 +119,18 @@ namespace wfg
         - macOS: the mach time-constraint policy, a 20 ms period with a 5 ms
           budget (spatcore's rt/RtThreadPriority.h); the thread also joins the
           interface's audio workgroup, see TickThread::setWorkgroups.
-        - Linux: SCHED_FIFO at the middle of its range (spatcore), under the
-          priorities JACK and PipeWire give their audio threads. A user without
-          real-time rights gets false and an unchanged thread.
+        - Linux: SCHED_FIFO at the middle of its range, under the priorities
+          JACK and PipeWire give their audio threads, where the user's limit
+          allows it; where it refuses, RealtimeKit's class under its own cap
+          (app/RealtimeRights.h, 2026-10-24). A user with neither gets `none`
+          and an unchanged thread.
 
-        TRUE ONLY FOR WHAT TOOK EFFECT. A shim that reported a guarantee it did
+        SAID ONLY FOR WHAT TOOK EFFECT, and how (`system`, `rtkit`, `none`). A
+        shim that reported a guarantee it did
         not have would let the first person investigating a late show rule out
         the right cause on the strength of it - which is why Phase 1's stub
         returned false rather than pretending. */
-    bool elevateCurrentThreadForTicking() noexcept;
+    app::RealtimeBy elevateCurrentThreadForTicking() noexcept;
 
     //==============================================================================
     class TickThread
@@ -274,6 +278,12 @@ namespace wfg
             return elevated.load (std::memory_order_relaxed);
         }
 
+        /** And how: `pending` until the thread has asked, then what it got. */
+        app::RealtimeBy priorityBy() const noexcept
+        {
+            return static_cast<app::RealtimeBy> (elevatedBy.load (std::memory_order_relaxed));
+        }
+
     private:
         BeforeTick beforeTick;
         AfterTick afterTick;
@@ -293,6 +303,7 @@ namespace wfg
         std::atomic<bool> running { false };
         std::atomic<bool> suspended { false };
         std::atomic<bool> elevated { false };
+        std::atomic<int> elevatedBy { static_cast<int> (app::RealtimeBy::pending) };
         std::atomic<std::int64_t> processed { -1 };
         std::atomic<std::int64_t> lastLateness { 0 };
         std::atomic<std::int64_t> maxLateness { 0 };
