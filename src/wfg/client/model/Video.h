@@ -48,9 +48,11 @@ namespace wfg::client::model
             identifier, empty for none. */
         double level = 100.0;
         std::string dca;
+        double curve = 0.0;         ///< its DCA's curve, % (namespace draft §109, BBK)
 
         std::string label() const;   // the name, else the id
         std::string levelWord() const;   // "100 %" or "62.5 %", to the tenth
+        std::string curveWord() const;   // "0 %", "+20 %", "-7.5 %", to the tenth
         std::string sizeWord() const;   // "1920 × 1080"
     };
 

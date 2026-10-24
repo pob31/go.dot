@@ -3993,6 +3993,7 @@ namespace wfg::cue
         {
             std::string id;
             double level = 1.0;
+            double curve = 0.0;     ///< `dcaCurve`, % (namespace draft §109, BBK)
             std::vector<std::string> dcaChain;
         };
 

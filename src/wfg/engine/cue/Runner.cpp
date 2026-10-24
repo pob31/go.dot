@@ -20530,6 +20530,7 @@ namespace wfg::cue
                 CanvasLevelSource source;
                 source.id = canvas[idProperty].toString().toStdString();
                 source.level = std::clamp (static_cast<double> (canvas.getProperty ("level", 100.0)) / 100.0, 0.0, 1.0);
+                source.curve = osc::parseDouble (canvas.getProperty ("dcaCurve").toString().toStdString()).value_or (0.0);
                 source.dcaChain = dcaNestingFrom (canvas.getProperty ("dca").toString().toStdString());
 
                 if (! source.id.empty())
@@ -20548,7 +20549,13 @@ namespace wfg::cue
                 for (const auto& dcaId : source.dcaChain)
                     trim += dcas->trimOf (dcaId);
 
-            levels.emplace_back (source.id, source.level * (source.dcaChain.empty() ? 1.0 : video::opacityForTrim (trim)));
+            /*  BENT BY THE CANVAS'S CURVE (namespace draft §109, BBK), as a
+                mark's bends a picture's: the trims summed, made a factor, then
+                curved. */
+            levels.emplace_back (source.id, source.level * (source.dcaChain.empty()
+                                                              ? 1.0
+                                                              : video::shapedOpacity (video::opacityForTrim (trim),
+                                                                                      source.curve)));
         }
 
         /*  ON THE TICK ONE MOVES, and on the first: what the video side holds

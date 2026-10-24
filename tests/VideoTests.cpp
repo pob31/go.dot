@@ -3023,9 +3023,28 @@ TEST_CASE ("video: a canvas's level and its DCA take the whole picture towards b
     rig.tickOnce();
     CHECK (rig.sink.canvasLevelsSent.back()[0].second == doctest::Approx (0.5 * video::opacityForTrim (-6.0)));
 
+    /*  ITS CURVE (§109, BBK) bends the DCA's factor as a mark's does: fast at
+        first above nought, slowly below; the level still multiplies it. */
+    REQUIRE (rig.document.setAttribute ("/godot/canvas/VD000011/dcaCurve", "100").ok);
+    rig.tickOnce();
+    CHECK (rig.sink.canvasLevelsSent.back()[0].second
+           == doctest::Approx (0.5 * video::shapedOpacity (video::opacityForTrim (-6.0), 100.0)));
+    CHECK (rig.sink.canvasLevelsSent.back()[0].second > 0.5 * video::opacityForTrim (-6.0));
+
+    REQUIRE (rig.document.setAttribute ("/godot/canvas/VD000011/dcaCurve", "-100").ok);
+    rig.tickOnce();
+    CHECK (rig.sink.canvasLevelsSent.back()[0].second
+           == doctest::Approx (0.5 * video::shapedOpacity (video::opacityForTrim (-6.0), -100.0)));
+    CHECK (rig.sink.canvasLevelsSent.back()[0].second < 0.5 * video::opacityForTrim (-6.0));
+
     dcas.set (dca, -120.0);
     rig.tickOnce();
     CHECK (rig.sink.canvasLevelsSent.back()[0].second == doctest::Approx (0.0));
+
+    //  With no DCA the curve shapes nothing.
+    REQUIRE (rig.document.setAttribute ("/godot/canvas/VD000011/dca", "").ok);
+    rig.tickOnce();
+    CHECK (rig.sink.canvasLevelsSent.back()[0].second == doctest::Approx (0.5));
 
     /*  THE COMPOSITE, each channel towards black. */
     CHECK (video::scaledColour (0xFF8040u, 1.0) == 0xFF8040u);

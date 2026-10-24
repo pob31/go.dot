@@ -11591,6 +11591,30 @@ TEST_CASE ("client: a DCA's strip says A, V or AV for what is assigned to it, an
     CHECK (lettersOf (outer.id) == "V");
 }
 
+TEST_CASE ("client: a canvas's DCA curve is read and said signed, to the tenth, under either locale (§109, BBP)")
+{
+    Rig rig;
+
+    const auto canvas = rig.document.createCanvas ("Stage");
+    REQUIRE (canvas.ok);
+
+    rig.parameters.markStale();
+    auto rows = model::readCanvases (*rig.publish (1));
+    REQUIRE (rows.size() == 1);
+    CHECK (rows[0].curve == doctest::Approx (0.0));
+    CHECK (rows[0].curveWord() == "0 %");
+
+    REQUIRE (rig.document.setAttribute ("/godot/canvas/" + canvas.id + "/dcaCurve", "-7.5").ok);
+    rig.parameters.markStale();
+    rows = model::readCanvases (*rig.publish (2));
+    REQUIRE (rows.size() == 1);
+    CHECK (rows[0].curve == doctest::Approx (-7.5));
+    CHECK (rows[0].curveWord() == "-7.5 %");
+
+    rows[0].curve = 20.0;
+    CHECK (rows[0].curveWord() == "+20 %");
+}
+
 TEST_CASE ("client: an output's zones are read bottom first, a warp the wrong size is the whole output, and a split keeps the shape (§40)")
 {
     Rig rig;

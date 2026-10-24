@@ -7194,7 +7194,7 @@ namespace wfg::client::ui
                                                            [] (const model::CanvasRow& a, const model::CanvasRow& b)
                                                            { return a.id == b.id && a.name == b.name && a.width == b.width
                                                                       && a.height == b.height && a.levelWord() == b.levelWord()
-                                                                      && a.dca == b.dca; });
+                                                                      && a.dca == b.dca && a.curveWord() == b.curveWord(); });
 
                 dcaChoices = std::move (dcaChoicesToShow);
 
@@ -7300,6 +7300,8 @@ namespace wfg::client::ui
                 for (auto at = 0; at < 5; ++at)
                     g.drawText (canvasNames[at], canvasCells[static_cast<std::size_t> (at)], juce::Justification::centredLeft);
 
+                g.drawText ("Curve", canvasCells[6], juce::Justification::centredLeft);
+
                 const auto outputCells = outputCellsFor (outputHeading.withWidth (outputList.getWidth()));
                 const char* outputNames[] { "Output", "Shows", "Display", "On", "Identify", "State" };
 
@@ -7324,15 +7326,18 @@ namespace wfg::client::ui
 
         private:
             /*  ONE CARVE PER LIST, for the painter and the click alike. */
-            static std::array<juce::Rectangle<int>, 6> canvasCellsFor (juce::Rectangle<int> row)
+            /*  THE CURVE (namespace draft §109, BBP) after the DCA it shapes, the
+                seventh so the cells before it keep their numbers. */
+            static std::array<juce::Rectangle<int>, 7> canvasCellsFor (juce::Rectangle<int> row)
             {
                 auto area = row.reduced (8, 0);
                 const auto cross = area.removeFromRight (24);
+                const auto curve = area.removeFromRight (70);
                 const auto dca = area.removeFromRight (140);
                 const auto level = area.removeFromRight (80);
                 const auto height = area.removeFromRight (90);
                 const auto width = area.removeFromRight (90);
-                return { area, width, height, level, dca, cross };
+                return { area, width, height, level, dca, cross, curve };
             }
 
             /*  GRID (§68, ANX) beside Identify, the eighth so the cells before
@@ -7420,6 +7425,11 @@ namespace wfg::client::ui
                     g.setColour (Look::colour (page.theme, entry.dca.empty() ? "ink-off" : "ink"));
                     g.drawText (page.dcaLabelOf (entry.dca), cells[4], juce::Justification::centredLeft, true);
 
+                    //  Greyed with no DCA, which it would shape (§109, BBP).
+                    g.setColour (Look::colour (page.theme, entry.dca.empty() ? "ink-off"
+                                                           : entry.curveWord() != "0 %" ? "ink" : "ink-dim"));
+                    g.drawText (juce::String (entry.curveWord()), cells[6], juce::Justification::centredLeft);
+
                     if (! page.locked)
                     {
                         g.setColour (Look::colour (page.theme, "ink-dim"));
@@ -7437,7 +7447,7 @@ namespace wfg::client::ui
                     const auto cells = canvasCellsFor ({ 0, 0, width, page.canvasList.getRowHeight() });
                     const auto& entry = page.canvases[static_cast<std::size_t> (row)];
 
-                    switch (cellIndexAt (cells.data(), 6, event.x))
+                    switch (cellIndexAt (cells.data(), 7, event.x))
                     {
                         case 0: page.editCell (page.canvasList, row, cells[0], "/godot/canvas/" + entry.id + "/name", entry.name); return;
                         case 1: page.editCell (page.canvasList, row, cells[1], "/godot/canvas/" + entry.id + "/width", std::to_string (entry.width)); return;
@@ -7447,6 +7457,9 @@ namespace wfg::client::ui
                                 return;
                         case 4: page.chooseDcaFor (entry.id, entry.dca); return;
                         case 5: page.send (gesture::deleteObject (entry.id)); return;
+                        case 6: page.editCell (page.canvasList, row, cells[6], "/godot/canvas/" + entry.id + "/dcaCurve",
+                                               juce::String (entry.curveWord()).upToFirstOccurrenceOf (" ", false, false).toStdString());
+                                return;
                         default: return;
                     }
                 }

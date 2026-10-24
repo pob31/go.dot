@@ -148,6 +148,22 @@ namespace wfg::client::model
         return out + " %";
     }
 
+    std::string CanvasRow::curveWord() const
+    {
+        //  Signed, to the tenth, from integers as the level's is.
+        const auto tenths = static_cast<long> (std::abs (curve) * 10.0 + 0.5);
+
+        if (tenths == 0)
+            return "0 %";
+
+        auto out = std::string (curve < 0.0 ? "-" : "+") + std::to_string (tenths / 10);
+
+        if (tenths % 10 != 0)
+            out += "." + std::to_string (tenths % 10);
+
+        return out + " %";
+    }
+
     std::string CanvasRow::sizeWord() const
     {
         return std::to_string (width) + " \xc3\x97 " + std::to_string (height);
@@ -185,6 +201,7 @@ namespace wfg::client::model
             else if (name == "height") row.height = static_cast<int> (integerOf (node, 1080));
             else if (name == "level")  row.level = numberOf (node, 100.0);
             else if (name == "dca")    row.dca = text (node);
+            else if (name == "dcaCurve") row.curve = numberOf (node, 0.0);
         }
 
         return inOrder (found, words (order));
