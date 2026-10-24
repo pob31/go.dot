@@ -692,7 +692,7 @@ namespace wfg::client::model
                     same marks. */
                 if (! marksRead)
                 {
-                    marks = surface::dcaMarksPlaying (snapshot);
+                    marks = surface::dcaMarksUnder (snapshot);
                     contents = surface::dcaContents (snapshot);
                     marksRead = true;
                 }

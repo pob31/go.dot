@@ -8344,7 +8344,7 @@ TEST_CASE ("client: every strip is read in the order a sampler group fills them,
     rig.parameters.markStale();
     strips = model::readStrips (*rig.publish (3));
     REQUIRE (strips[9].dcaMarks.size() == 1u);
-    CHECK (strips[9].dcaMarks[0].cue == wash.id);
+    CHECK (strips[9].dcaMarks[0].id == wash.id);
     CHECK (strips[9].dcaMarks[0].picture);
     CHECK (strips[9].dcaPictures);
 

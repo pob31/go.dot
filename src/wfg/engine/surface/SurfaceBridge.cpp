@@ -2158,12 +2158,13 @@ namespace wfg::surface
         /*  THE TICK'S KNOB WRITES (namespace draft §50, ABK, ABP): a press
             switches what the knob turns; a turn moves the value shown - the
             nearest mark of the run that started last - by its detents and
-            writes it to every mark under the DCA the mode moves, as ONE
-            `node.setMany` from the surface's own origin. So a second of
-            turning is one undo step (§30.11), and under the lock it rides live
-            (ABQ). Nothing on a page, nothing while the faders are flipped to
-            lanes, and nothing written with nothing playing - the screen says
-            so for a second. */
+            writes it to every mark under the DCA the mode moves, and moves
+            every output and canvas the DCA rides by the same detents (§109,
+            BBM), as ONE `node.setMany` from the surface's own origin. So a
+            second of turning is one undo step (§30.11), and under the lock it
+            rides live (ABQ). Nothing on a page, nothing while the faders are
+            flipped to lanes, and nothing written with nothing to move - the
+            screen says so for a second. */
         void flushKnobWrites (const Submit& submit, std::int64_t tick)
         {
             const auto flipped = laneState().flipped;
@@ -2198,7 +2199,7 @@ namespace wfg::surface
                     if (steps == 0)
                         continue;
 
-                    const auto writes = knobWrites (marks, mode, knobTurned (mode, reading.value, steps));
+                    const auto writes = knobWrites (marks, mode, steps);
 
                     if (writes.empty())
                         continue;
@@ -3751,7 +3752,7 @@ namespace wfg::surface
             if (dcaMarksFrom != published)
             {
                 dcaMarksFrom = published;
-                dcaMarkCache = published != nullptr ? dcaMarksPlaying (*published)
+                dcaMarkCache = published != nullptr ? dcaMarksUnder (*published)
                                                     : std::map<std::string, std::vector<DcaMark>> {};
             }
 

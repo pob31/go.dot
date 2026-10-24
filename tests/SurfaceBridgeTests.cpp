@@ -4790,13 +4790,13 @@ TEST_CASE ("dca knob: the marks a knob reaches are found through the runs' paren
     fake.text ("/godot/cue/SND00006/dca", "DCA00001");
 
     const auto snapshot = fake.publish (1);
-    const auto marks = surface::dcaMarksPlaying (*snapshot);
+    const auto marks = surface::dcaMarksUnder (*snapshot);
 
     //  2: the movie's mark, with a picture and a sound under it.
     REQUIRE (marks.count ("DCA00002") == 1);
     const auto& two = marks.at ("DCA00002");
     REQUIRE (two.size() == 1u);
-    CHECK (two[0].cue == "MOV00001");
+    CHECK (two[0].id == "MOV00001");
     CHECK (two[0].picture);
     CHECK (two[0].sound);
     CHECK (two[0].curve == doctest::Approx (20.0));
@@ -4808,7 +4808,7 @@ TEST_CASE ("dca knob: the marks a knob reaches are found through the runs' paren
     std::vector<std::string> cues;
 
     for (const auto& mark : one)
-        cues.push_back (mark.cue);
+        cues.push_back (mark.id);
 
     CHECK (cues == std::vector<std::string> { "GRP00001", "MOV00001" });
     CHECK (one[0].sound);
@@ -4821,16 +4821,16 @@ TEST_CASE ("dca knob: the value shown, a turn's writes, its words and its ring (
 
     //  Shown first to last: a movie with its sound, a group of pictures, a sound alone.
     std::vector<surface::DcaMark> marks (3);
-    marks[0].cue = "MOV00001";
+    marks[0].id = "MOV00001";
     marks[0].curve = 20.0;
     marks[0].offsetDb = -3.0;
     marks[0].picture = true;
     marks[0].sound = true;
-    marks[1].cue = "GRP00001";
+    marks[1].id = "GRP00001";
     marks[1].curve = 40.0;
     marks[1].offsetDb = -3.0;
     marks[1].picture = true;
-    marks[2].cue = "SND00001";
+    marks[2].id = "SND00001";
     marks[2].offsetDb = -6.0;
     marks[2].sound = true;
 
@@ -4850,16 +4850,16 @@ TEST_CASE ("dca knob: the value shown, a turn's writes, its words and its ring (
 
     //  A TURN: three detents up the curve on the marks with a picture, two down the offset on those with a sound.
     CHECK (surface::knobTurned (KnobMode::curve, 20.0, 3) == doctest::Approx (26.0));
-    CHECK (surface::knobWrites (marks, KnobMode::curve, 26.0)
+    CHECK (surface::knobWrites (marks, KnobMode::curve, 3)
              == Writes { { "/godot/cue/MOV00001/dcaCurve", "26" }, { "/godot/cue/GRP00001/dcaCurve", "26" } });
 
     CHECK (surface::knobTurned (KnobMode::offset, -3.0, -2) == doctest::Approx (-4.0));
-    CHECK (surface::knobWrites (marks, KnobMode::offset, -4.0)
+    CHECK (surface::knobWrites (marks, KnobMode::offset, -2)
              == Writes { { "/godot/cue/MOV00001/dcaOffset", "-4" }, { "/godot/cue/SND00001/dcaOffset", "-4" } });
 
     //  A mark already there is not written, a mark reached twice once, and the ends hold.
-    CHECK (surface::knobWrites (marks, KnobMode::offset, -3.0) == Writes { { "/godot/cue/SND00001/dcaOffset", "-3" } });
-    CHECK (surface::knobWrites ({ marks[2], marks[2] }, KnobMode::offset, -1.0).size() == 1u);
+    CHECK (surface::knobWrites (marks, KnobMode::offset, 0) == Writes { { "/godot/cue/SND00001/dcaOffset", "-3" } });
+    CHECK (surface::knobWrites ({ marks[2], marks[2] }, KnobMode::offset, 10).size() == 1u);
     CHECK (surface::knobTurned (KnobMode::curve, 98.0, 5) == doctest::Approx (100.0));
     CHECK (surface::knobTurned (KnobMode::offset, 11.0, 10) == doctest::Approx (12.0));
     CHECK (surface::knobTurned (KnobMode::offset, -23.5, -5) == doctest::Approx (-24.0));
@@ -4911,6 +4911,146 @@ TEST_CASE ("dca knob: the value shown, a turn's writes, its words and its ring (
         CHECK (row->minimum == doctest::Approx (curveRow ? surface::knobCurveMin : surface::knobOffsetMinDb));
         CHECK (row->maximum == doctest::Approx (curveRow ? surface::knobCurveMax : surface::knobOffsetMaxDb));
     }
+}
+
+TEST_CASE ("dca knob: the outputs and canvases a DCA rides come after the cues' marks, playing or not, outputs in channel order (§109, BBI, BBL)")
+{
+    FakeTree fake;
+    fake.text ("/godot/dca/order", "DCA00001 DCA00002");
+    fake.text ("/godot/dca/DCA00002/dca", "DCA00001");     // 2 inside 1
+
+    //  Two outputs on 2, listed out of channel order; one on no DCA.
+    fake.number ("/godot/bus/BUS00002/firstChannel", 4.0);
+    fake.number ("/godot/bus/BUS00002/trim", -6.0);
+    fake.text ("/godot/bus/BUS00002/dca", "DCA00002");
+    fake.number ("/godot/bus/BUS00001/firstChannel", 0.0);
+    fake.number ("/godot/bus/BUS00001/trim", -3.0);
+    fake.text ("/godot/bus/BUS00001/dca", "DCA00002");
+    fake.number ("/godot/bus/BUS00003/firstChannel", 2.0);
+    fake.text ("/godot/bus/BUS00003/dca", "");
+
+    //  A canvas on 1, with its curve.
+    fake.text ("/godot/canvas/order", "VD000011");
+    fake.text ("/godot/canvas/VD000011/dca", "DCA00001");
+    fake.number ("/godot/canvas/VD000011/dcaCurve", 30.0);
+
+    //  A movie marked with 1, playing.
+    fake.text ("/godot/run/order", "RUN00001");
+    fake.text ("/godot/run/RUN00001/kind", "video");
+    fake.text ("/godot/run/RUN00001/cue", "MOV00001");
+    fake.text ("/godot/run/RUN00001/state", "playing");
+    fake.number ("/godot/run/RUN00001/started", 10.0);
+    fake.text ("/godot/cue/MOV00001/dca", "DCA00001");
+
+    const auto marks = surface::dcaMarksUnder (*fake.publish (1));
+
+    const auto placesOf = [] (const std::vector<surface::DcaMark>& under)
+    {
+        std::vector<std::string> out;
+
+        for (const auto& mark : under)
+            out.push_back ((mark.place == surface::MarkPlace::cue      ? "cue "
+                            : mark.place == surface::MarkPlace::output ? "output "
+                                                                       : "canvas ")
+                           + mark.id);
+
+        return out;
+    };
+
+    //  2: its two outputs, by channel; nothing plays under it.
+    REQUIRE (marks.count ("DCA00002") == 1);
+    CHECK (placesOf (marks.at ("DCA00002")) == std::vector<std::string> { "output BUS00001", "output BUS00002" });
+    CHECK (marks.at ("DCA00002")[0].sound);
+    CHECK_FALSE (marks.at ("DCA00002")[0].picture);
+    CHECK (marks.at ("DCA00002")[0].offsetDb == doctest::Approx (-3.0));
+
+    //  1: the movie first, then 2's outputs handed up, then its canvas.
+    REQUIRE (marks.count ("DCA00001") == 1);
+    CHECK (placesOf (marks.at ("DCA00001"))
+           == std::vector<std::string> { "cue MOV00001", "output BUS00001", "output BUS00002", "canvas VD000011" });
+    CHECK (marks.at ("DCA00001")[3].picture);
+    CHECK_FALSE (marks.at ("DCA00001")[3].sound);
+    CHECK (marks.at ("DCA00001")[3].curve == doctest::Approx (30.0));
+}
+
+TEST_CASE ("dca knob: a turn sets the cues' marks and moves each output and canvas by the same detents from its own, each held to its row (§109, BBM)")
+{
+    using surface::KnobMode;
+    using surface::MarkPlace;
+    using Writes = std::vector<std::pair<std::string, std::string>>;
+
+    const auto place = [] (MarkPlace where, const char* id, double value)
+    {
+        surface::DcaMark mark;
+        mark.id = id;
+        mark.place = where;
+        mark.offsetDb = where == MarkPlace::output ? value : 0.0;
+        mark.curve = where == MarkPlace::canvas ? value : 0.0;
+        mark.sound = where == MarkPlace::output;
+        mark.picture = where == MarkPlace::canvas;
+        return mark;
+    };
+
+    //  TWO OUTPUTS keep their gap: -3 and -6, one detent up.
+    const std::vector<surface::DcaMark> outputs { place (MarkPlace::output, "BUS00001", -3.0),
+                                                  place (MarkPlace::output, "BUS00002", -6.0) };
+
+    const auto reading = surface::knobReading (outputs, KnobMode::offset);
+    CHECK (reading.any);
+    CHECK (reading.place == MarkPlace::output);
+    CHECK (reading.value == doctest::Approx (-3.0));
+    CHECK (reading.disagree);
+
+    CHECK (surface::knobWrites (outputs, KnobMode::offset, 1)
+           == Writes { { "/godot/bus/BUS00001/trim", "-2.5" }, { "/godot/bus/BUS00002/trim", "-5.5" } });
+    CHECK_FALSE (surface::knobReading (outputs, KnobMode::curve).any);
+
+    //  A TRIM reaches lower than a mark's offset, and the top holds each on its own.
+    CHECK (surface::knobTurned (KnobMode::offset, -30.0, -4, MarkPlace::output) == doctest::Approx (-32.0));
+    CHECK (surface::knobTurned (KnobMode::offset, -30.0, -4) == doctest::Approx (-24.0));
+    CHECK (surface::knobWrites ({ place (MarkPlace::output, "BUS00001", 11.0), place (MarkPlace::output, "BUS00002", 9.0) },
+                                KnobMode::offset, 4)
+           == Writes { { "/godot/bus/BUS00001/trim", "12" }, { "/godot/bus/BUS00002/trim", "11" } });
+    CHECK (surface::knobTurned (KnobMode::offset, -119.0, -4, MarkPlace::output) == doctest::Approx (-120.0));
+
+    //  A CANVAS by its curve, by 2 % a detent.
+    CHECK (surface::knobWrites ({ place (MarkPlace::canvas, "VD000011", 30.0) }, KnobMode::curve, -3)
+           == Writes { { "/godot/canvas/VD000011/dcaCurve", "24" } });
+
+    //  BOTH AT ONCE (BBJ): the playing cue's mark set to the shown value turned, the outputs moved, in one write.
+    surface::DcaMark movie;
+    movie.id = "MOV00001";
+    movie.offsetDb = 12.0;
+    movie.picture = true;
+    movie.sound = true;
+
+    std::vector<surface::DcaMark> all { movie };
+    all.insert (all.end(), outputs.begin(), outputs.end());
+
+    CHECK (surface::knobReading (all, KnobMode::offset).place == MarkPlace::cue);
+
+    //  The mark at its top stays; the outputs still move.
+    CHECK (surface::knobWrites (all, KnobMode::offset, 2)
+           == Writes { { "/godot/bus/BUS00001/trim", "-2" }, { "/godot/bus/BUS00002/trim", "-5" } });
+    CHECK (surface::knobWrites (all, KnobMode::offset, -2)
+           == Writes { { "/godot/cue/MOV00001/dcaOffset", "11" },
+                       { "/godot/bus/BUS00001/trim", "-4" },
+                       { "/godot/bus/BUS00002/trim", "-7" } });
+
+    //  AND THE TRIM'S RANGE IS THE ROW'S: one table, said twice.
+    for (const auto* row : doc::Schema::rowsForOwner ("bus"))
+        if (std::string_view (row->name) == "trim")
+        {
+            CHECK (row->minimum == doctest::Approx (surface::knobTrimMinDb));
+            CHECK (row->maximum == doctest::Approx (surface::knobTrimMaxDb));
+        }
+
+    for (const auto* row : doc::Schema::rowsForOwner ("canvas"))
+        if (std::string_view (row->name) == "dcaCurve")
+        {
+            CHECK (row->minimum == doctest::Approx (surface::knobCurveMin));
+            CHECK (row->maximum == doctest::Approx (surface::knobCurveMax));
+        }
 }
 
 namespace
@@ -4999,10 +5139,10 @@ TEST_CASE ("dca level words: decibels for sound, the opacity for a picture throu
 
     //  WHAT PLAYS DECIDES: a picture with its curve - the first shown - though sound is assigned too.
     std::vector<surface::DcaMark> playing (2);
-    playing[0].cue = "MOV00001";
+    playing[0].id = "MOV00001";
     playing[0].picture = true;
     playing[0].curve = 100.0;
-    playing[1].cue = "MOV00002";
+    playing[1].id = "MOV00002";
     playing[1].picture = true;
     playing[1].curve = -100.0;
 
@@ -5011,9 +5151,28 @@ TEST_CASE ("dca level words: decibels for sound, the opacity for a picture throu
 
     //  And a sound alone playing under a DCA with pictures assigned: decibels.
     std::vector<surface::DcaMark> sound (1);
-    sound[0].cue = "SND00001";
+    sound[0].id = "SND00001";
     sound[0].sound = true;
     CHECK (surface::dcaLevelWords (-20.0, sound, both, 12) == "-20.0 dB");
+
+    /*  A CANVAS THE DCA RIDES (§109, BBO): nothing playing, so what is assigned
+        decides - and the opacity is through the canvas's curve. An output
+        beside it is not something playing either. */
+    std::vector<surface::DcaMark> places (2);
+    places[0].id = "BUS00001";
+    places[0].place = surface::MarkPlace::output;
+    places[0].sound = true;
+    places[1].id = "VD000011";
+    places[1].place = surface::MarkPlace::canvas;
+    places[1].picture = true;
+    places[1].curve = 100.0;
+    CHECK (surface::dcaLevelWords (-20.0, places, pictures, 12) == percentAt (-20.0, 100.0) + " %");
+    CHECK (surface::dcaLevelWords (-20.0, places, both, 12) == "-20.0 dB " + percentAt (-20.0, 100.0) + "%");
+
+    //  A movie playing comes first: its curve, not the canvas's.
+    auto withMovie = places;
+    withMovie.insert (withMovie.begin(), playing[1]);
+    CHECK (surface::dcaLevelWords (-20.0, withMovie, both, 12) == percentAt (-20.0, -100.0) + " %");
 }
 
 TEST_CASE ("surface bridge: the knob above a DCA strip turns the curve of the pictures playing under it, a press switches it to their sound's offset (§50)")
@@ -5110,4 +5269,44 @@ TEST_CASE ("surface bridge: a Mackie desk's knob above a DCA strip says what it 
 
     desk.turn ({ 0x41 });
     CHECK (desk.writes() == std::vector<std::string> { "node.setMany /godot/cue/MOV00001/dcaCurve 18" });
+}
+
+TEST_CASE ("surface bridge: the knob above a DCA strip riding two outputs moves both trims with nothing playing, keeping their gap (§109, BBI, BBL)")
+{
+    KnobDesk desk;
+    desk.fake.number ("/godot/bus/BUS00001/firstChannel", 0.0);
+    desk.fake.number ("/godot/bus/BUS00001/trim", -3.0);
+    desk.fake.text ("/godot/bus/BUS00001/dca", "DCA00001");
+    desk.fake.number ("/godot/bus/BUS00002/firstChannel", 2.0);
+    desk.fake.number ("/godot/bus/BUS00002/trim", -6.0);
+    desk.fake.text ("/godot/bus/BUS00002/dca", "DCA00001");
+    desk.fake.number ("/godot/document/revision", 2.0);
+    desk.publish();
+    desk.settle();
+
+    //  Sound assigned: on the offset, the first output's trim shown, the second disagreeing.
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "snd*-3.0")));
+
+    desk.submitted.clear();
+    desk.turn ({ 0x41 });
+    CHECK (desk.writes()
+           == std::vector<std::string> { "node.setMany /godot/bus/BUS00001/trim -3.5 /godot/bus/BUS00002/trim -6.5" });
+}
+
+TEST_CASE ("surface bridge: the knob above a DCA strip moves the playing movie's mark and the canvas the DCA rides in one write (§109, BBJ)")
+{
+    KnobDesk desk;
+    desk.fake.text ("/godot/canvas/order", "VD000011");
+    desk.fake.text ("/godot/canvas/VD000011/dca", "DCA00001");
+    desk.fake.number ("/godot/canvas/VD000011/dcaCurve", -10.0);
+    desk.playMovie();
+    desk.settle();
+
+    //  The movie's curve shown first.
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "pic*+20")));
+
+    desk.submitted.clear();
+    desk.turn ({ 0x02 });
+    CHECK (desk.writes()
+           == std::vector<std::string> { "node.setMany /godot/cue/MOV00001/dcaCurve 24 /godot/canvas/VD000011/dcaCurve -6" });
 }

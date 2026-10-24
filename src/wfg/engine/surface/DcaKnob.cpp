@@ -79,6 +79,34 @@ namespace wfg::surface
             return mode == KnobMode::curve ? mark.curve : mark.offsetDb;
         }
 
+        //  The range of the row a mark's value is kept in: an output's trim reaches lower (§109, BBM).
+        std::pair<double, double> rangeOf (KnobMode mode, MarkPlace place) noexcept
+        {
+            if (mode == KnobMode::curve)
+                return { knobCurveMin, knobCurveMax };
+
+            return place == MarkPlace::output ? std::pair { knobTrimMinDb, knobTrimMaxDb }
+                                              : std::pair { knobOffsetMinDb, knobOffsetMaxDb };
+        }
+
+        //  To a hundredth, so a value typed in the inspector and turned does not grow a tail.
+        double hundredths (double value) noexcept
+        {
+            return std::round (value * 100.0) / 100.0;
+        }
+
+        std::string addressOf (const DcaMark& mark, KnobMode mode)
+        {
+            switch (mark.place)
+            {
+                case MarkPlace::output: return "/godot/bus/" + mark.id + "/trim";
+                case MarkPlace::canvas: return "/godot/canvas/" + mark.id + "/dcaCurve";
+                case MarkPlace::cue:    break;
+            }
+
+            return "/godot/cue/" + mark.id + (mode == KnobMode::curve ? "/dcaCurve" : "/dcaOffset");
+        }
+
         //  Nearer the run that started last: later first, then nearer, then later in the order.
         bool shownBefore (const DcaMark& a, const DcaMark& b) noexcept
         {
@@ -108,7 +136,7 @@ namespace wfg::surface
         }
     }
 
-    std::map<std::string, std::vector<DcaMark>> dcaMarksPlaying (const tree::TreeSnapshot& snapshot)
+    std::map<std::string, std::vector<DcaMark>> dcaMarksUnder (const tree::TreeSnapshot& snapshot)
     {
         std::map<std::string, std::vector<DcaMark>> out;
         const auto declared = wordsOf (textOf (snapshot, "/godot/dca/order"));
@@ -164,7 +192,7 @@ namespace wfg::surface
                 if (const auto dca = textOf (snapshot, cue + "dca"); ! cueId.empty() && ! dca.empty())
                 {
                     DcaMark seen;
-                    seen.cue = cueId;
+                    seen.id = cueId;
                     seen.curve = numberOf (snapshot, cue + "dcaCurve", 0.0);
                     seen.offsetDb = numberOf (snapshot, cue + "dcaOffset", 0.0);
                     seen.picture = picture;
@@ -177,7 +205,7 @@ namespace wfg::surface
                     {
                         auto& marks = out[reached];
                         const auto found = std::find_if (marks.begin(), marks.end(),
-                                                         [&cueId] (const DcaMark& mark) { return mark.cue == cueId; });
+                                                         [&cueId] (const DcaMark& mark) { return mark.id == cueId; });
 
                         if (found == marks.end())
                         {
@@ -204,6 +232,83 @@ namespace wfg::surface
         for (auto& [dca, marks] : out)
             std::stable_sort (marks.begin(), marks.end(), shownBefore);
 
+        /*  THEN THE OUTPUTS AND THE CANVASES THE DCA RIDES (namespace draft
+            §109, BBI, BBL), playing or not, after every cue's mark: outputs in
+            channel order, ties by identifier as the Outputs tab lists them,
+            then canvases in the show's order. */
+        struct Output
+        {
+            std::string id;
+            int firstChannel = 0;
+            double trimDb = 0.0;
+            std::string dca;
+        };
+
+        std::map<std::string, Output> outputs;
+        constexpr std::string_view busPrefix = "/godot/bus/";
+
+        for (const auto* node : snapshot.under (busPrefix))
+        {
+            const auto rest = std::string_view (node->address).substr (busPrefix.size());
+            const auto slash = rest.find ('/');
+
+            if (slash == std::string_view::npos || rest.find ('/', slash + 1) != std::string_view::npos)
+                continue;
+
+            const auto row = rest.substr (slash + 1);
+
+            if (row != "firstChannel" && row != "trim" && row != "dca")
+                continue;
+
+            auto& output = outputs[std::string (rest.substr (0, slash))];
+            output.id = std::string (rest.substr (0, slash));
+
+            if (row == "firstChannel")
+                output.firstChannel = static_cast<int> (numberOf (snapshot, node->address, 0.0));
+            else if (row == "trim")
+                output.trimDb = numberOf (snapshot, node->address, 0.0);
+            else
+                output.dca = textOf (snapshot, node->address);
+        }
+
+        std::vector<const Output*> byChannel;
+
+        for (const auto& [id, output] : outputs)
+            if (! output.dca.empty())
+                byChannel.push_back (&output);
+
+        std::stable_sort (byChannel.begin(), byChannel.end(),
+                          [] (const Output* a, const Output* b) { return a->firstChannel < b->firstChannel; });
+
+        for (const auto* output : byChannel)
+        {
+            DcaMark place;
+            place.id = output->id;
+            place.place = MarkPlace::output;
+            place.offsetDb = output->trimDb;
+            place.sound = true;
+
+            for (const auto& reached : chainOf (output->dca))
+                out[reached].push_back (place);
+        }
+
+        for (const auto& canvasId : wordsOf (textOf (snapshot, "/godot/canvas/order")))
+        {
+            const auto base = "/godot/canvas/" + canvasId + "/";
+
+            if (const auto dca = textOf (snapshot, base + "dca"); ! dca.empty())
+            {
+                DcaMark place;
+                place.id = canvasId;
+                place.place = MarkPlace::canvas;
+                place.curve = numberOf (snapshot, base + "dcaCurve", 0.0);
+                place.picture = true;
+
+                for (const auto& reached : chainOf (dca))
+                    out[reached].push_back (place);
+            }
+        }
+
         return out;
     }
 
@@ -226,6 +331,7 @@ namespace wfg::surface
             {
                 reading.any = true;
                 reading.value = valueOf (mark, mode);
+                reading.place = mark.place;
             }
             else if (std::abs (valueOf (mark, mode) - reading.value) > 1.0e-9)
             {
@@ -236,35 +342,38 @@ namespace wfg::surface
         return reading;
     }
 
-    double knobTurned (KnobMode mode, double value, int steps) noexcept
+    double knobTurned (KnobMode mode, double value, int steps, MarkPlace place) noexcept
     {
-        const auto moved = mode == KnobMode::curve
-                             ? std::clamp (value + knobCurveStep * steps, knobCurveMin, knobCurveMax)
-                             : std::clamp (value + knobOffsetStepDb * steps, knobOffsetMinDb, knobOffsetMaxDb);
+        const auto [low, high] = rangeOf (mode, place);
+        const auto step = mode == KnobMode::curve ? knobCurveStep : knobOffsetStepDb;
 
-        //  To a hundredth, so a value typed in the inspector and turned does not grow a tail.
-        return std::round (moved * 100.0) / 100.0;
+        return hundredths (std::clamp (value + step * steps, low, high));
     }
 
     std::vector<std::pair<std::string, std::string>> knobWrites (const std::vector<DcaMark>& marks,
-                                                                   KnobMode mode, double target)
+                                                                   KnobMode mode, int steps)
     {
         std::vector<std::pair<std::string, std::string>> writes;
         std::set<std::string> written;
 
-        const auto clamped = mode == KnobMode::curve ? std::clamp (target, knobCurveMin, knobCurveMax)
-                                                     : std::clamp (target, knobOffsetMinDb, knobOffsetMaxDb);
-        const auto row = mode == KnobMode::curve ? "/dcaCurve" : "/dcaOffset";
+        /*  THE CUES' MARKS COME FIRST, so the value shown is a cue's whenever
+            one moves, and every cue's mark is set to it turned (ABY). */
+        const auto reading = knobReading (marks, mode);
+        const auto target = knobTurned (mode, reading.value, steps, MarkPlace::cue);
 
         for (const auto& mark : marks)
         {
-            if (! moves (mark, mode) || ! written.insert (mark.cue).second)
+            if (! moves (mark, mode) || ! written.insert (addressOf (mark, mode)).second)
                 continue;
 
-            if (std::abs (valueOf (mark, mode) - clamped) <= 1.0e-9)
+            //  An output or a canvas from its own value, by the same detents (§109, BBM).
+            const auto wanted = mark.place == MarkPlace::cue ? target
+                                                             : knobTurned (mode, valueOf (mark, mode), steps, mark.place);
+
+            if (std::abs (valueOf (mark, mode) - wanted) <= 1.0e-9)
                 continue;
 
-            writes.emplace_back ("/godot/cue/" + mark.cue + row, osc::formatDouble (clamped));
+            writes.emplace_back (addressOf (mark, mode), osc::formatDouble (wanted));
         }
 
         return writes;
@@ -286,26 +395,31 @@ namespace wfg::surface
         return word + signedNumber (reading.value, mode == KnobMode::offset);
     }
 
-    std::string dcaLevelWords (double levelDb, const std::vector<DcaMark>& playing, const DcaContents& assigned,
+    std::string dcaLevelWords (double levelDb, const std::vector<DcaMark>& marks, const DcaContents& assigned,
                                int width)
     {
         auto picture = assigned.picture;
         auto sound = assigned.sound;
         auto curve = 0.0;
 
-        if (! playing.empty())
+        //  What plays decides: the cues' marks, never the outputs and canvases always there.
+        if (std::any_of (marks.begin(), marks.end(), [] (const DcaMark& mark) { return mark.place == MarkPlace::cue; }))
         {
-            picture = std::any_of (playing.begin(), playing.end(), [] (const DcaMark& mark) { return mark.picture; });
-            sound = std::any_of (playing.begin(), playing.end(), [] (const DcaMark& mark) { return mark.sound; });
-
-            //  The mark shown first that holds a picture: the run that started last.
-            for (const auto& mark : playing)
-                if (mark.picture)
-                {
-                    curve = mark.curve;
-                    break;
-                }
+            picture = std::any_of (marks.begin(), marks.end(),
+                                   [] (const DcaMark& mark) { return mark.place == MarkPlace::cue && mark.picture; });
+            sound = std::any_of (marks.begin(), marks.end(),
+                                 [] (const DcaMark& mark) { return mark.place == MarkPlace::cue && mark.sound; });
         }
+
+        /*  The mark shown first that holds a picture: the run that started
+            last, else the first canvas the DCA rides (§109, BBO) - the cues'
+            marks come first. */
+        for (const auto& mark : marks)
+            if (mark.picture)
+            {
+                curve = mark.curve;
+                break;
+            }
 
         const auto silent = levelDb <= -120.0;
         const auto clamped = std::clamp (levelDb, -120.0, 12.0);

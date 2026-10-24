@@ -915,6 +915,7 @@ namespace wfg::client::ui
         const auto reading = surface::knobReading (taken.marks, taken.mode);
         taken.any = reading.any;
         taken.heldValue = reading.value;
+        taken.heldPlace = reading.place;
         taken.wanted = reading.value;
         knobGrab = taken;
 
@@ -939,12 +940,13 @@ namespace wfg::client::ui
         if (! takeKnob (column) || ! knobGrab->any)
             return;
 
-        const auto wanted = surface::knobTurned (knobGrab->mode, knobGrab->heldValue, steps);
-
-        if (std::abs (wanted - knobGrab->wanted) < 1.0e-9)
+        /*  BY THE DETENTS, not the value shown: an output or a canvas still
+            moves when the shown cue's mark is at its end (§109, BBM). */
+        if (steps == knobGrab->steps)
             return;
 
-        knobGrab->wanted = wanted;
+        knobGrab->steps = steps;
+        knobGrab->wanted = surface::knobTurned (knobGrab->mode, knobGrab->heldValue, steps, knobGrab->heldPlace);
         knobGrab->unsent = true;
         canvas.repaint();
     }
@@ -966,9 +968,10 @@ namespace wfg::client::ui
 
         knobGrab->unsent = false;
 
-        /*  EVERY MARK THE MODE MOVES, to the one value, as one write - the
-            bridge's rule (`knobWrites`), so the window and a desk agree. */
-        if (const auto writes = surface::knobWrites (knobGrab->marks, knobGrab->mode, knobGrab->wanted);
+        /*  EVERY MARK THE MODE MOVES, as one write - the bridge's rule
+            (`knobWrites`), so the window and a desk agree. From the marks as
+            they were when taken, so a write sent twice is the same write. */
+        if (const auto writes = surface::knobWrites (knobGrab->marks, knobGrab->mode, knobGrab->steps);
             ! writes.empty() && send)
             send (gesture::setNodes (writes));
     }

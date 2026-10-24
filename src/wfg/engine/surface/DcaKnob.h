@@ -29,11 +29,19 @@
     On the picture's curve, the marks with a picture under them; on the
     sound's offset, those with a sound. A mark reached twice is written once.
 
-    WHAT IS SHOWN is the nearest mark of the run that started last; a turn sets
-    every mark it writes to that value moved by its detents, clamped to the
-    rows' ranges, as one `node.setMany`. With nothing playing nothing is
-    written. Words and the ring's fraction are made here so a desk's screen and
-    the panel say the same, digit by digit so no locale changes them.
+    AND THE OUTPUTS AND CANVASES THE DCA RIDES (namespace draft §109, BBI,
+    BBJ, BBL), whether or not anything plays: an output's trim on the sound's
+    offset, a canvas's `dcaCurve` on the picture's curve - itself, or through a
+    DCA it sits inside. They come after the cues' marks, outputs in channel
+    order, then canvases in the show's.
+
+    WHAT IS SHOWN is the nearest mark of the run that started last, else the
+    first output or canvas; a turn SETS every cue's mark it writes to that value
+    moved by its detents, and MOVES every output and canvas by the same detents
+    from its own value (BBM) - several keep their differences - each clamped to
+    its row's range, as one `node.setMany`. Words and the ring's fraction are
+    made here so a desk's screen and the panel say the same, digit by digit so
+    no locale changes them.
 
     Pure functions of a snapshot; std only, for the engine's bridge and the
     window's model alike.
@@ -61,12 +69,21 @@ namespace wfg::surface
     inline constexpr double knobCurveStep = 2.0;
     inline constexpr double knobOffsetStepDb = 0.5;
 
+    //  An output's trim's range (`bus/trim`), which the knob's offset moves (§109, BBM).
+    inline constexpr double knobTrimMinDb = -120.0;
+    inline constexpr double knobTrimMaxDb = 12.0;
+
+    /** Where a mark is kept: on a cue, or an output or a canvas the DCA rides (§109). */
+    enum class MarkPlace { cue, output, canvas };
+
     /*  ONE MARK A KNOB REACHES: the cue carrying it - a sound, a picture or a
         group - what it carries, what plays under it, and how near it is to the
-        run that started last, which decides the value shown. */
+        run that started last, which decides the value shown. Or an output, its
+        trim as the offset, or a canvas, its curve (§109). */
     struct DcaMark
     {
-        std::string cue;
+        std::string id;             ///< the cue's, the output's or the canvas's
+        MarkPlace place = MarkPlace::cue;
         double curve = 0.0;
         double offsetDb = 0.0;
         bool picture = false;
@@ -78,8 +95,9 @@ namespace wfg::surface
     };
 
     /*  For each DCA, the marks of what plays under it now, the one shown first:
-        the nearest mark of the run that started last. */
-    std::map<std::string, std::vector<DcaMark>> dcaMarksPlaying (const tree::TreeSnapshot& snapshot);
+        the nearest mark of the run that started last; then the outputs and the
+        canvases it rides. */
+    std::map<std::string, std::vector<DcaMark>> dcaMarksUnder (const tree::TreeSnapshot& snapshot);
 
     /*  Where a strip starts: on the curve when its DCA has pictures assigned,
         the "V" of §39's letters, on the offset otherwise (ABX). */
@@ -89,19 +107,22 @@ namespace wfg::surface
     {
         bool any = false;           ///< something under the DCA the mode can move
         double value = 0.0;         ///< the shown mark's
+        MarkPlace place = MarkPlace::cue;   ///< where the shown mark is kept
         bool disagree = false;      ///< another mark the mode moves says otherwise
     };
 
     KnobReading knobReading (const std::vector<DcaMark>& marks, KnobMode mode) noexcept;
 
-    /** A value moved by `steps` detents, held to the row's range. */
-    double knobTurned (KnobMode mode, double value, int steps) noexcept;
+    /** A value moved by `steps` detents, held to the range of its place's row. */
+    double knobTurned (KnobMode mode, double value, int steps, MarkPlace place = MarkPlace::cue) noexcept;
 
-    /*  THE WRITES A TURN TO `target` MAKES, as address and text pairs for one
-        `node.setMany`: every mark the mode moves, once, where it differs.
+    /*  THE WRITES A TURN OF `steps` DETENTS MAKES, as address and text pairs
+        for one `node.setMany`: every mark the mode moves, once, where it
+        differs - a cue's set to the shown value turned, an output's or a
+        canvas's moved from its own. `marks` as they were when the turn began.
         Empty when there is nothing to change. */
     std::vector<std::pair<std::string, std::string>> knobWrites (const std::vector<DcaMark>& marks,
-                                                                   KnobMode mode, double target);
+                                                                   KnobMode mode, int steps);
 
     /*  WHAT A STRIP'S SCREEN SAYS (ABZ): "pic +20" or "snd -3.5" in eight
         characters, "p +20" or "s -3.5" in seven or fewer, a "*" after the word
@@ -118,13 +139,14 @@ namespace wfg::surface
         if possible. This may change depending on the running cues assigned to
         the DCA."; namespace draft §80).
 
-        What plays under the DCA decides - `playing`, as `dcaMarksPlaying` has
-        it - else, with nothing playing, what is assigned to it. Sound alone, or
-        nothing at all: the level, "-6.2 dB" as ever. A picture alone: the
-        opacity the DCA gives it, "75 %" - the fader's travel (37.5, WE) through
-        the curve of the mark shown first, the run that started last, straight
-        with nothing playing. Both: "-6.2 dB 75%", or "-6 75%" in fewer than
+        What plays under the DCA decides - the cues' marks in `marks`, as
+        `dcaMarksUnder` has them - else, with nothing playing, what is assigned
+        to it. Sound alone, or nothing at all: the level, "-6.2 dB" as ever. A
+        picture alone: the opacity the DCA gives it, "75 %" - the fader's travel
+        (37.5, WE) through the curve of the mark shown first, the run that
+        started last, else of the first canvas the DCA rides (§109, BBO),
+        straight with neither. Both: "-6.2 dB 75%", or "-6 75%" in fewer than
         eleven characters. Digit by digit, so no locale moves the point. */
-    std::string dcaLevelWords (double levelDb, const std::vector<DcaMark>& playing, const DcaContents& assigned,
+    std::string dcaLevelWords (double levelDb, const std::vector<DcaMark>& marks, const DcaContents& assigned,
                                int width);
 }

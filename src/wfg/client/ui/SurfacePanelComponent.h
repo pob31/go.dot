@@ -221,7 +221,9 @@ namespace wfg::client::ui
             surface::KnobMode mode = surface::KnobMode::offset;
             bool any = false;
             double heldValue = 0.0;
+            surface::MarkPlace heldPlace = surface::MarkPlace::cue;
             double wanted = 0.0;
+            int steps = 0;          ///< detents since taken: outputs and canvases move by them (§109)
             bool unsent = false;
             std::vector<surface::DcaMark> marks;
             float fromY = 0.0f;

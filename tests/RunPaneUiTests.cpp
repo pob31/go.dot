@@ -2967,14 +2967,14 @@ TEST_CASE ("surface panel: the knob above a DCA strip turns the marks playing un
     screens.dcaPictures = true;
 
     wfg::surface::DcaMark movie;
-    movie.cue = "MOV00001";
+    movie.id = "MOV00001";
     movie.curve = 20.0;
     movie.offsetDb = -3.0;
     movie.picture = true;
     movie.sound = true;
 
     wfg::surface::DcaMark wash;
-    wash.cue = "VID00002";
+    wash.id = "VID00002";
     wash.curve = 20.0;
     wash.picture = true;
 
@@ -3044,6 +3044,48 @@ TEST_CASE ("surface panel: the knob above a DCA strip turns the marks playing un
         panel.turnKnob (1, 3);
         panel.endKnob (1);
         CHECK (sent.empty());
+    }
+
+    SUBCASE ("an output the DCA rides moves by the detents from its own trim, beside the movie's mark set (§109, BBJ, BBM)")
+    {
+        wfg::surface::DcaMark front;
+        front.id = "BUS00001";
+        front.place = wfg::surface::MarkPlace::output;
+        front.offsetDb = -9.0;
+        front.sound = true;
+
+        auto withOutput = strips;
+        withOutput[1].dcaMarks.push_back (front);
+        panel.show (surfaces, withOutput);
+
+        panel.clickKnob (1);
+        panel.turnKnob (1, -2);
+        panel.endKnob (1);
+
+        REQUIRE (sent.size() == 1u);
+        CHECK (pairsOf (sent[0]) == std::vector<std::string> { "/godot/cue/MOV00001/dcaOffset", "-4",
+                                                                "/godot/bus/BUS00001/trim", "-10" });
+    }
+
+    SUBCASE ("with only an output on its DCA and nothing playing, a turn still moves the output (§109, BBL)")
+    {
+        wfg::surface::DcaMark front;
+        front.id = "BUS00001";
+        front.place = wfg::surface::MarkPlace::output;
+        front.offsetDb = -30.0;
+        front.sound = true;
+
+        auto quiet = strips;
+        quiet[1].dcaMarks = { front };
+        quiet[1].dcaPictures = false;
+        panel.show (surfaces, quiet);
+
+        //  On the offset, since no picture is assigned; below the mark's -24, as a trim may go.
+        panel.turnKnob (1, -4);
+        panel.endKnob (1);
+
+        REQUIRE (sent.size() == 1u);
+        CHECK (pairsOf (sent[0]) == std::vector<std::string> { "/godot/bus/BUS00001/trim", "-32" });
     }
 
     SUBCASE ("a sampler strip has no knob, and the DCA's pad still puts its trim back at nought")
