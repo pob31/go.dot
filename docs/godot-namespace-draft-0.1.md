@@ -34840,3 +34840,49 @@ Mine *(proposed)*, the codes continuing after §120's:
 - **BEA** **The report says more:** the notes that fire scenes, with the GO each would fire; the switches
   on track activators; a Max for Live device by its `.amxd`; the loopback (BDX) and the clip-fed mappings
   (BDY).
+
+**As built, 2026-10-25** (`92c09235` BDQ-BDR, `c499d36e` BDS-BDT, `fa2cb114` BDU and BEA, `3e16e940`
+BDV-BDY), all in `src/wfg/engine/import/`:
+
+- The reader (`AlsReader`): a `MidiClip` read as a `Clip` with `midi` and its `notes` counted; the track's
+  `MidiControllers/ControllerTargets.N` entered in the target table as `Parameter::controller`, `path` the
+  number; a MIDI track's `midiOut` (port, one-based channel) from `MidiOutputRouting`; a mapping's
+  `MidiControllerRange` as `rangeMin`/`rangeMax`; `Speaker` as `Parameter::active`; a scene's own `KeyMidi`
+  as `Scene::key`; a Max for Live device named by its patch's `.amxd`.
+- The walk (`AlsWalk`): `beatsPerRealSecond` is the walker's state, set by each scene with a tempo - even one
+  that launches nothing - and a warped sound still in `state.playing` when it changes gets a `FadeOut` with
+  `rate` (BDR); `clipBeats`/`startBeatOf` turn an unwarped clip's loop points from seconds into its beats by
+  `beatsPerSecond` (BDQ). The graph adds a `direct:<track id>` mix for a track wired to the interface (BDS)
+  and `shareChannels` settles the owners (BDT): a loser is an aux with a `SendOut` into the owner, `pan` ±1
+  for a mono one, or a direct out whose path goes `into` the owner. `liveFor` makes a live input's `Sound`
+  (`live`, `inputChannel`) through `soundFor` on a silent clip, fired in the first walked scene where
+  `held.active` holds (BDU); `fadeFor` became `fadesFor`/`fadeOnto` - a move on a track, a live input or a
+  group, one fade per sound reached - with the activator as a mute or an unmute and the mixer held after,
+  `held.active` included. `midiClipFor` lands each controller curve on the mappings it feeds as a synthetic
+  carrier clip on the target track (`controllerValue`, BDW) and sends the rest out as `MidiOut` (BDV);
+  `readHands` puts a clip-fed mapping in `Walk::clipFed` and makes no DCA for it (BDY); `flagResting` skips
+  it; `noteLivesNeverFired` says which live input stays unmade.
+- The build (`AlsImport`): a `direct` bus per direct mix, patched, named on the cue's `directOut` with
+  `sharedOut` (Live sums there); an aux as wide as its return (`mono`/`stereo`), its send's `pan` written;
+  a mic cue on a `createInput` named after the track, `audio/inputPatch` written in the inputs' order, an
+  exclusive rack channel; a MIDI cue per `MidiOut` on a `Port` declared once per Live port name, `fadeTo`/
+  `fadeTime` for a ramp; the report's mixes say "a direct out" and what an aux is sent into, a table "Moved
+  by the set's own MIDI clips", counts of speed fades, mic cues and MIDI cues.
+
+**The lent project, imported** (`build/import/Sturbzep`, Angers the template, Aix and Orléans performances,
+3.5 GB of media copied once, each show accepted by `wfg validate` and `scripts/validate-show.py`): 29 GOs
+and 79 sounds a venue; the flute a mic cue fired at RESET, muted at Loop and back at Cha cha cha; the singer
+said as never switched on by a scene (a hand does); every stem at its scene's speed and the organ to its
+6:42; ERGE on output 64; the three shared returns auxes into C_Cs and pla PRE; six MIDI cues for the
+controllers the set maps nowhere (14, 17 and 19 on channel 3); eleven files pointing into the lender's
+other projects, to be asked for. Lazzi's Pau imports as before (its FX delay return, on Face's pair, is now
+an aux sent into Face at 0 dB rather than a second bus on the pair).
+
+Tests (`AlsReaderTests`, `AlsWalkTests`, `AlsImportTests`, C and fr_FR): an unwarped clip's seconds; a
+scene's tempo held and a playing sound re-stretched; a direct out and a return on a held pair; the hands
+table's scene keys, activators and a Max device; a live input fired and faded; a MIDI clip on a fader, on a
+group, a switch's mute and unmute, a controller mapped nowhere; a live input switched on by a clip; a
+MIDI track read; a mic cue, a MIDI cue and a direct bus built.
+
+Owed: the probe set's questions 8-11; the words of the new report lines, mine; a listen to the Sturbzep
+import against Live playing the same set; §122, the tempo.

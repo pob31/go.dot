@@ -207,7 +207,8 @@ has stood in front of the thing.
   tab, and the settings window marks the same tabs. Its device menus look for
   devices again as they open.
 - **Importing.** Ableton Live sets (`wfg import-als`, several sets making a tour
-  with a performance for each venue) and QLab 4 and 5 workspaces
+  with a performance for each venue; scene tempos, direct outs, live inputs as
+  mic cues and MIDI clips' controller curves since §121) and QLab 4 and 5 workspaces
   (`wfg import-qlab`), their text and video cues on canvases made from QLab's
   stages, their MIDI cues, triggers, cameras and carts, both also in the
   window's File menu; a file not where the workspace says is looked for in

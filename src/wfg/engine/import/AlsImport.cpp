@@ -1201,6 +1201,9 @@ namespace wfg::import::als
             {
                 for (const auto& sound : step.sounds)
                 {
+                    if (sound.live)     // a mic cue has no file to find (§121, BDU)
+                        continue;
+
                     const auto source = findMedia (sound.file, setFolder);
 
                     if (source == juce::File())
