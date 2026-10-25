@@ -855,8 +855,8 @@ namespace wfg::import::als
 
                     if (unread > 0)
                         note (Note::Kind::dropped, std::to_string (unread) + " envelope(s) on the clip move something "
-                                                   "the import does not read - a pan, a modulation other than the "
-                                                   "volume's, or a parameter the set does not name");
+                                                   "the import does not read - a pan (Go.dot has no pan lanes yet), a "
+                                                   "modulation other than the volume's, or a parameter the set does not name");
                 }
 
                 if (clip.pitchCoarse != 0 || std::abs (clip.pitchFine) > 0.01)
@@ -1110,9 +1110,17 @@ namespace wfg::import::als
                     note (Note::Kind::approximated, std::to_string (sound.eqs.size()) + " EQ Eights on its path; "
                                                     "the first is the cue's EQ, the others are reported");
 
+                /*  ITS PAN RIDES INTO ITS SENDS (namespace draft §113, BCG): a
+                    pan on a mono file, a balance on a stereo one - which the
+                    build decides, knowing the file. Approximated rather than
+                    exact: Live's pan is constant-power, 3 dB down at the
+                    centre, and Go.dot's is full there. */
+                sound.pan = std::abs (track.pan) > 0.005 ? std::clamp (track.pan, -1.0, 1.0) : 0.0;
+
                 if (std::abs (track.pan) > 0.01)
-                    note (Note::Kind::dropped, "panned " + osc::formatDouble (std::round (track.pan * 100.0) / 100.0)
-                                               + " in Live; Go.dot has no pan, so it plays centred");
+                    note (Note::Kind::approximated, "panned " + osc::formatDouble (std::round (track.pan * 100.0) / 100.0)
+                                                    + " in Live: its sends carry it as a pan (a mono file) or a balance "
+                                                      "(a stereo one), full at the centre where Live's is 3 dB down");
 
                 //  --- A carrier's movement past a loop's first pass ---------------
                 if (clip.loopOn)
@@ -1543,7 +1551,7 @@ namespace wfg::import::als
 
                         case Parameter::pan:
                             hand.moved = "the pan of \"" + trackName + "\"";
-                            hand.goDot = "nothing: Go.dot has no pan";
+                            hand.goDot = "the D700's Pan page on the aimed cue (namespace draft 113)";
                             break;
 
                         case Parameter::modulation:

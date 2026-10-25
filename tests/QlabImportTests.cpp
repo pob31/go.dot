@@ -137,9 +137,12 @@ TEST_CASE ("qlab import: the plan written - groups, a sound and its routes, a de
     CHECK (at (document, "/godot/cue/" + fade + "/target") == sound);
     CHECK (at (document, "/godot/cue/" + fade + "/level") == "-20");
 
-    //  A range for ever, and two routes to two mono outputs on the interface.
+    /*  A range for ever, and - outputs 1 and 2 a stereo mix (namespace draft
+        §113, BCF) - one send into it: input 1 to output 1 at full, input 2 to
+        output 2 at -6, which is a level of nought and a balance of a half to
+        the left, exactly. No route. */
     const auto media = document.findById (sound);
-    int ranges = 0, routes = 0;
+    int ranges = 0, routes = 0, sends = 0;
 
     for (const auto& child : media)
     {
@@ -151,12 +154,27 @@ TEST_CASE ("qlab import: the plan written - groups, a sound and its routes, a de
 
         if (child.getType().toString() == "Route")
             ++routes;
+
+        if (child.getType().toString() == "Send")
+            ++sends;
     }
 
     CHECK (ranges == 1);
-    CHECK (routes == 2);
+    CHECK (routes == 0);
+    CHECK (sends == 1);
+
+    const auto pair = idFor ("out:PATCH-AUDIO:1-2");
+    CHECK (at (document, "/godot/bus/" + pair + "/name") == "FOH L / FOH R");
+    CHECK (at (document, "/godot/bus/" + pair + "/kind") == "mix");
+    CHECK (at (document, "/godot/bus/" + pair + "/width") == "2");
     CHECK (at (document, "/godot/audio/outputPatch") == "0 1");
-    CHECK (at (document, "/godot/bus/" + idFor ("out:PATCH-AUDIO:1") + "/name") == "FOH L");
+
+    const auto send = idFor ("cue:" + built->soundId + ":send:out:PATCH-AUDIO:1-2");
+    CHECK (at (document, "/godot/send/" + send + "/bus") == pair);
+    CHECK (at (document, "/godot/send/" + send + "/level") == "0");
+    CHECK (at (document, "/godot/send/" + send + "/balance") == "-0.5");
+    CHECK (at (document, "/godot/send/" + send + "/pan") == "0");
+    CHECK (at (document, "/godot/send/" + send + "/width") == "1");
 
     //  A device per patch, under the segments its cues send.
     const auto s21 = idFor ("patch:PATCH-S21");

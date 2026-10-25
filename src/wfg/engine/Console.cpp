@@ -1939,6 +1939,7 @@ namespace
         wfg::import::qlab::ImportOptions options;
         options.into = juce::File (juce::String::fromUTF8 (request.into.c_str()));
         options.lists = std::set<int> (request.scenes.begin(), request.scenes.end());
+        options.pairOutputs = request.pairOutputs;
         options.progress = progress;
 
         for (const auto& folder : request.searchFolders)
@@ -2072,13 +2073,16 @@ namespace
         if (workspace == juce::File() || ! args.containsOption ("--into"))
         {
             std::cerr << "wfg import-qlab: <workspace.qlab4|.qlab5> --into=<folder> [--lists=1-2,4] [--no-media]"
-                         " [--search=<folder>]..." << std::endl;
+                         " [--no-pairs] [--search=<folder>]..." << std::endl;
             return 2;
         }
 
         wfg::import::qlab::ImportOptions options;
         options.into = cwd.getChildFile (args.getValueForOption ("--into"));
         options.copyMedia = ! args.containsOption ("--no-media");
+
+        //  Outputs as stereo pairs unless asked otherwise (namespace draft §113, BCF).
+        options.pairOutputs = ! args.containsOption ("--no-pairs");
         options.progress = [] (const std::string& sentence) { std::cout << "wfg import-qlab: " << sentence << std::endl; };
 
         /*  EACH FOLDER TO LOOK IN for a file not where the workspace says
@@ -10316,7 +10320,7 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
                       } });
 
     app.addCommand ({ "import-qlab",
-                      "import-qlab <workspace.qlab4|.qlab5> --into=<folder> [--lists=1-2,4] [--no-media]",
+                      "import-qlab <workspace.qlab4|.qlab5> --into=<folder> [--lists=1-2,4] [--no-media] [--no-pairs]",
                       "A QLab 4 or 5 workspace imported into a new show: its cue lists, groups, sounds, fades and"
                       " network cues, its sounds copied into media/",
                       {},

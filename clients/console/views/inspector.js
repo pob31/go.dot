@@ -158,8 +158,9 @@ const KIND_ORDER = {
   plugin:  ["name", "identifier", "format", "path", "preset", "state", "problem",
             "latencySamples", "paramCount", "stateLoadMs", "stateProblem"],
   // A media cue's send into one mix channel: which, how loud, whether it is in (2026-09-25),
-  // and the curve over the file it follows (namespace draft §28), a plain row as the cue's is.
-  send:    ["bus", "level", "on", "levelLane", "live", "cue"],
+  // where it sits - a pan, a width, a balance, a swap, and the shape that says which are heard
+  // (namespace draft §113) - and the curve over the file it follows (§28), a plain row as the cue's is.
+  send:    ["bus", "level", "on", "pan", "width", "balance", "swap", "placement", "levelLane", "live", "cue"],
 };
 
 /*  THE NAMES A KIND CLAIMS - or, when several cues are chosen at once, the

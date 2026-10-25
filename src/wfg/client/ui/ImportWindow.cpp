@@ -35,10 +35,11 @@ namespace wfg::client::ui
     public:
         Content (const model::Theme& themeToUse, const juce::StringArray& sets, const ImportScenes& scenes,
                  const juce::File& parentToUse, const juce::String& name,
-                 std::function<void (const std::vector<int>&, const juce::File&, const std::vector<std::string>&)> onImport,
+                 std::function<void (const std::vector<int>&, const juce::File&, const std::vector<std::string>&, bool)> onImport,
                  std::function<void()> onCancel,
-                 std::function<void (const std::vector<std::string>&, std::function<void (const ImportFiles&)>)> findFilesToUse)
-            : theme (themeToUse), parent (parentToUse), findFiles (std::move (findFilesToUse))
+                 std::function<void (const std::vector<std::string>&, std::function<void (const ImportFiles&)>)> findFilesToUse,
+                 bool offerPairsToUse)
+            : theme (themeToUse), parent (parentToUse), findFiles (std::move (findFilesToUse)), offerPairs (offerPairsToUse)
         {
             const auto what = sets.size() == 1
                                 ? "One set becomes one show: " + sets[0] + "."
@@ -100,6 +101,20 @@ namespace wfg::client::ui
             chooseButton.onClick = [this] { chooseFolder(); };
             addAndMakeVisible (chooseButton);
 
+            /*  THE OUTPUTS AS PAIRS (namespace draft §113, BCF), for a QLab
+                workspace: on by default, off for a rig of single speakers. */
+            if (offerPairs)
+            {
+                pairBox.setButtonText ("Pair the outputs into stereo mixes (1-2, 3-4...)");
+                pairBox.setToggleState (true, juce::dontSendNotification);
+                pairBox.setTooltip ("QLab's outputs are mono. Ticked, each pair becomes a stereo mix channel and a "
+                                    "sound's levels onto it a send with a pan or a balance. Untick when the rig's "
+                                    "outputs are single speakers: every output stays a mono bus with its routes.");
+                pairBox.setColour (juce::ToggleButton::textColourId, Look::colour (theme, "ink"));
+                pairBox.setColour (juce::ToggleButton::tickColourId, Look::colour (theme, "picked"));
+                addAndMakeVisible (pairBox);
+            }
+
             /*  THE FILES (namespace draft §100, AXX): how many were found, the
                 ones that were not, and a folder to look in - as many as it
                 takes, each looked through once. */
@@ -137,7 +152,7 @@ namespace wfg::client::ui
                 const auto named = juce::File::createLegalFileName (nameBox.getText().trim());
 
                 if (onImport && ! named.isEmpty())
-                    onImport (ticked, parent.getChildFile (named), searchFolders);
+                    onImport (ticked, parent.getChildFile (named), searchFolders, ! offerPairs || pairBox.getToggleState());
             };
             cancelButton.setButtonText ("Cancel");
             cancelButton.onClick = [onCancel] { if (onCancel) onCancel(); };
@@ -169,6 +184,12 @@ namespace wfg::client::ui
             destination.removeFromRight (8);
             folderLabel.setBounds (destination);
             area.removeFromBottom (10);
+
+            if (offerPairs)
+            {
+                pairBox.setBounds (area.removeFromBottom (24));
+                area.removeFromBottom (8);
+            }
 
             if (findFiles)
             {
@@ -313,6 +334,9 @@ namespace wfg::client::ui
         juce::Label filesSaid;
         juce::TextEditor missingList;
         juce::TextButton addFolderButton;
+
+        bool offerPairs = false;
+        juce::ToggleButton pairBox;
     };
 
     //==========================================================================
@@ -324,10 +348,10 @@ namespace wfg::client::ui
     {
         content = std::make_unique<Content> (theme, sets, scenes, parent, name,
                                              [this] (const std::vector<int>& ticked, const juce::File& into,
-                                                     const std::vector<std::string>& folders)
-                                             { if (actions.import) actions.import (ticked, into, folders); },
+                                                     const std::vector<std::string>& folders, bool pairs)
+                                             { if (actions.import) actions.import (ticked, into, folders, pairs); },
                                              [this] { if (actions.cancel) actions.cancel(); },
-                                             actions.findFiles);
+                                             actions.findFiles, actions.offerPairs);
         setUsingNativeTitleBar (true);
         setResizable (true, false);
         setResizeLimits (520, 360, 2400, 2000);

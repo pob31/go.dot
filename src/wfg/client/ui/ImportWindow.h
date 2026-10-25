@@ -44,9 +44,17 @@ namespace wfg::client::ui
     public:
         struct Actions
         {
-            /** "Import": the scenes ticked, the folder to make, and the folders added to look in. */
+            /*  "Import": the scenes ticked, the folder to make, the folders added
+                to look in, and whether the outputs are paired (§113) - the
+                tick's answer, and true where the tick is not offered. */
             std::function<void (const std::vector<int>& scenes, const juce::File& into,
-                                const std::vector<std::string>& searchFolders)> import;
+                                const std::vector<std::string>& searchFolders, bool pairOutputs)> import;
+
+            /*  WHETHER TO OFFER THE PAIRING TICK (namespace draft §113, BCF): a
+                QLab workspace's outputs are mono, and 1-2, 3-4... become stereo
+                mixes unless the hand says the rig's are single speakers. A Live
+                set's returns are already what they are. */
+            bool offerPairs = false;
 
             /*  THE FILES LOOKED FOR (namespace draft §100, AXX), in the folders
                 given too - asked off the message thread, `answer` called back on

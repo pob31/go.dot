@@ -182,6 +182,25 @@ TEST_CASE ("als import: the session fixture becomes a show - GOs, sounds, the fa
     CHECK (at (document, "/godot/audio/outputPatch") == "0 1 2 3");
     CHECK (at (document, "/godot/dca/" + idFor ("dca:14") + "/name") == "1");
 
+    /*  ITS PLACE (namespace draft §113): track 14 is panned -0.25 in Live and
+        the rain is a stereo file, so every send of it leans by that balance;
+        its pan row stays at rest. */
+    auto rainSends = 0;
+
+    for (const auto* mix : { "return:0", "return:1", "master" })
+    {
+        const auto sendId = idFor (std::string ("sound:37:14:send:") + mix);
+
+        if (! document.findById (sendId).isValid())
+            continue;
+
+        ++rainSends;
+        CHECK (at (document, "/godot/send/" + sendId + "/balance") == "-0.25");
+        CHECK (at (document, "/godot/send/" + sendId + "/pan") == "0");
+    }
+
+    CHECK (rainSends > 0);
+
     /*  THE SECOND GO: the carrier's fade on the wind, and the rain stopped. */
     const auto fade = idFor ("fade:39:28");
     CHECK (elementOf (document, fade) == "Fade");

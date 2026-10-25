@@ -17,6 +17,7 @@
 #include <wfg/engine/import/QlabWalk.h>
 
 #include <wfg/engine/cue/KeyChord.h>
+#include <wfg/engine/cue/SendPlacement.h>
 #include <wfg/engine/osc/OscValue.h>
 
 #include <algorithm>
@@ -1429,32 +1430,66 @@ namespace wfg::import::qlab
                 return nullptr;
             }
 
-            /*  THE BUS FOR A CUE OUTPUT, made the first time an output is used,
-                on the interface's channel of the same number. */
-            std::string busFor (const std::string& patchId, int output, const Cue& cue)
+            /*  WHICH BUS A CUE OUTPUT LANDS ON (namespace draft §113, BCF): with
+                the outputs paired, the odd output and the one after it are a
+                stereo pair - unless the patch says it has no output after it,
+                where it stays alone - so output 4 is the second column of the
+                pair 3-4. Pairing off, every output is its own mono bus. */
+            std::pair<int, int> spanOf (const std::string& patchId, int output) const
             {
-                const auto key = "out:" + patchId + ":" + std::to_string (output);
+                if (! options.pairOutputs)
+                    return { output, 1 };
+
+                const auto first = output % 2 == 1 ? output : output - 1;
+                const auto* patch = audioPatch (patchId);
+
+                if (first < 1 || (patch != nullptr && patch->outputs > 0 && first + 1 > patch->outputs))
+                    return { output, 1 };
+
+                return { first, 2 };
+            }
+
+            /*  THE BUS FOR A CUE OUTPUT - or a pair of them - made the first
+                time it is used, on the interface's channel(s) of the same
+                number. */
+            std::string busFor (const std::string& patchId, int first, int width, const Cue& cue)
+            {
+                const auto key = "out:" + patchId + ":" + std::to_string (first)
+                                 + (width == 2 ? "-" + std::to_string (first + 1) : std::string {});
 
                 if (std::none_of (plan.buses.begin(), plan.buses.end(), [&key] (const Bus& b) { return b.key == key; }))
                 {
                     const auto* patch = audioPatch (patchId);
                     Bus bus;
                     bus.key = key;
+                    bus.width = width;
 
-                    if (patch != nullptr && patch->outputNames.count (output) != 0)
-                        bus.name = patch->outputNames.at (output);
-                    else
-                        bus.name = (patch != nullptr && ! patch->name.empty() ? patch->name : std::string ("Output")) + " "
-                                   + std::to_string (output);
-
-                    if (channelOwner.count (output) == 0)
+                    const auto nameOf = [patch] (int output)
                     {
-                        channelOwner[output] = key;
-                        bus.channel = output - 1;
+                        if (patch != nullptr && patch->outputNames.count (output) != 0)
+                            return patch->outputNames.at (output);
+
+                        return (patch != nullptr && ! patch->name.empty() ? patch->name : std::string ("Output")) + " "
+                               + std::to_string (output);
+                    };
+
+                    bus.name = width == 2 ? nameOf (first) + " / " + nameOf (first + 1) : nameOf (first);
+
+                    auto taken = false;
+
+                    for (int output = first; output < first + width; ++output)
+                        taken = taken || channelOwner.count (output) != 0;
+
+                    if (! taken)
+                    {
+                        for (int output = first; output < first + width; ++output)
+                            channelOwner[output] = key;
+
+                        bus.channel = first - 1;
                     }
                     else
                     {
-                        note (Note::Kind::approximated, cue, "a second audio patch's output " + std::to_string (output)
+                        note (Note::Kind::approximated, cue, "a second audio patch's output " + std::to_string (first)
                               + " has no interface channel of its own: its bus is left unpatched");
                     }
 
@@ -1524,22 +1559,66 @@ namespace wfg::import::qlab
                         if (level.row >= 1 && level.row <= channels->second && level.column >= 1)
                             outputs.insert (level.column);
 
+                    /*  THE BUSES THE OUTPUTS LAND ON, in output order: a pair
+                        once for both of its outputs (§113). */
+                    std::vector<std::pair<std::string, std::pair<int, int>>> landing;
+
                     for (const auto output : outputs)
                     {
-                        std::vector<double> gains;
+                        const auto span = spanOf (cue.audioPatch, output);
+                        const auto key = busFor (cue.audioPatch, span.first, span.second, cue);
+
+                        if (std::none_of (landing.begin(), landing.end(),
+                                          [&key] (const auto& one) { return one.first == key; }))
+                            landing.push_back ({ key, span });
+                    }
+
+                    for (const auto& [key, span] : landing)
+                    {
+                        const auto [first, width] = span;
+                        const auto rows = channels->second;
+                        std::vector<double> gains (static_cast<std::size_t> (rows * width), 0.0);
                         bool heard = false;
 
-                        for (int row = 1; row <= channels->second; ++row)
+                        for (int row = 1; row <= rows; ++row)
+                            for (int column = 0; column < width; ++column)
+                            {
+                                const auto output = first + column;
+                                const auto gain = gainAt (0, output, 1.0) * gainAt (row, 0, 1.0) * gainAt (row, output, 0.0);
+                                const auto db = decibels (gain, floor);
+                                const auto written = db <= silence ? 0.0 : std::round (std::pow (10.0, db / 20.0) * 1.0e6) / 1.0e6;
+                                gains[static_cast<std::size_t> ((row - 1) * width + column)] = written;
+                                heard = heard || written > 0.0;
+                            }
+
+                        if (! heard)
+                            continue;
+
+                        /*  ONTO A PAIR, A LEVEL AND A PLACE where the law can say
+                            the matrix (namespace draft §113, BCF) - any mono pair
+                            of gains, any stereo diagonal, symmetric cross terms -
+                            and the matrix itself as a route where it cannot. */
+                        double levelGain = 0.0;
+                        cue::SendPlace place;
+
+                        if (width == 2 && cue::fitPlacement (gains, rows, width, levelGain, place))
                         {
-                            const auto gain = gainAt (0, output, 1.0) * gainAt (row, 0, 1.0) * gainAt (row, output, 0.0);
-                            const auto db = decibels (gain, floor);
-                            const auto written = db <= silence ? 0.0 : std::round (std::pow (10.0, db / 20.0) * 1.0e6) / 1.0e6;
-                            gains.push_back (written);
-                            heard = heard || written > 0.0;
+                            Send send;
+                            send.bus = key;
+                            send.levelDb = decibels (levelGain, floor);
+                            send.pan = place.pan;
+                            send.width = place.width;
+                            send.balance = place.balance;
+                            send.swap = place.swap;
+                            item.sends.push_back (std::move (send));
+                            continue;
                         }
 
-                        if (heard)
-                            item.routes.push_back ({ busFor (cue.audioPatch, output, cue), std::move (gains) });
+                        if (width == 2)
+                            note (Note::Kind::info, cue, "its levels onto the pair from output " + std::to_string (first)
+                                  + " are not a pan, a balance or a width: they are kept as a route's matrix");
+
+                        item.routes.push_back ({ key, std::move (gains) });
                     }
                 }
 

@@ -53,6 +53,9 @@ namespace wfg::client::model
         double levelDb = -120.0;
         bool on = true;
 
+        /** The shape of this cue's send here (namespace draft §113): none, pan, stereo or fold. */
+        std::string placement = "none";
+
         bool present() const noexcept { return ! sendId.empty(); }
     };
 
@@ -85,6 +88,22 @@ namespace wfg::client::model
         /*  Whether a locked show is riding it live - its level or switch held,
             or the whole send made under the lock - and not saved until kept. */
         bool live = false;
+
+        /*  WHERE IT SITS IN THE MIX (namespace draft §113): the shape the tree
+            derives from the cue's channels and the mix's width - none, pan,
+            stereo or fold - and the four rows, read whether the shape hears
+            them or not, so a strip shows the ones that apply. */
+        std::string placement = "none";
+        double pan = 0.0;
+        double width = 1.0;
+        double balance = 0.0;
+        bool swap = false;
+
+        /** The lean the shape hears: a mono cue's pan, a stereo cue's balance; nought with none. */
+        double lean() const noexcept { return placement == "pan" ? pan : balance; }
+
+        /** The row that lean is - "pan" or "balance" - and empty when the shape hears none. */
+        std::string leanRow() const;
 
         bool present() const noexcept { return ! sendId.empty(); }
 

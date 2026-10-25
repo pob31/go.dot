@@ -123,6 +123,11 @@ namespace wfg::client::ui
         /** A send's switch, by the mixer's index (2026-09-25). */
         void switchAt (std::size_t at, bool on);
 
+        /*  A SEND'S PLACE (namespace draft §113): one of its pan, balance,
+            width or swap rows written, by the mixer's index - the lead cue's
+            send alone, since the shapes of several cues need not agree. */
+        void placeAt (std::size_t at, const std::string& row, const std::string& text);
+
         /*  OVER SEVERAL PICKED CUES (namespace draft §30.11, the author's RA).
             `levelsAt` is every picked cue's level at a strip - its address and
             where it stands - for the cues that have one there: every cue's own

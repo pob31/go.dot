@@ -6219,6 +6219,31 @@ TEST_CASE ("client: the mixer draws a strip per mix channel, not per send")
 
         //  And another cue's sends are not this one's.
         CHECK (model::readSends (*after, "F7HR8TVD").front().present() == false);
+
+        /*  ITS PLACE (namespace draft §113): with no channel count the shape
+            is none; a mono file into the stereo Foldback is a pan, and the
+            pan row is the lean the strip shows. */
+        CHECK (raised[0].placement == "none");
+        CHECK (raised[0].leanRow().empty());
+
+        rig.apply (6, "window", "node.set",
+                   { osc::Value::string ("/godot/cue/" + cue + "/channels"), osc::Value::string ("1") });
+        const auto mono = model::readSends (*rig.publish (7), cue);
+        REQUIRE (mono.size() == 1);
+        CHECK (mono[0].placement == "pan");
+        CHECK (mono[0].leanRow() == "pan");
+        CHECK (mono[0].width == doctest::Approx (1.0));
+
+        rig.apply (8, "window", "node.set",
+                   { osc::Value::string ("/godot/send/" + raised[0].sendId + "/pan"), osc::Value::string ("-0.5") });
+        CHECK (model::readSends (*rig.publish (9), cue)[0].lean() == doctest::Approx (-0.5));
+
+        rig.apply (10, "window", "node.set",
+                   { osc::Value::string ("/godot/cue/" + cue + "/channels"), osc::Value::string ("2") });
+        const auto stereo = model::readSends (*rig.publish (11), cue);
+        CHECK (stereo[0].placement == "stereo");
+        CHECK (stereo[0].leanRow() == "balance");
+        CHECK (stereo[0].lean() == doctest::Approx (0.0));
     }
 
     SUBCASE ("and one made at a level is born at it, in the same edit (2026-09-25)")

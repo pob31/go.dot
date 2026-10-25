@@ -848,6 +848,15 @@ namespace wfg::import::als
 
                     if (! send.lane.empty())
                         write ("/godot/send/" + sendId + "/levelLane", laneText (send.lane), step.scene);
+
+                    /*  ITS PLACE (namespace draft §113, BCG): the track's pan, a
+                        pan on a mono file and a balance on a stereo one - into
+                        a mono mix the balance leans the fold. A file not found
+                        has no channel count, and the pan waits for the day it
+                        is; nothing is written at the centre. */
+                    if (std::abs (sound.pan) > 0.005 && (channels == 1 || channels == 2))
+                        write ("/godot/send/" + sendId + "/" + (channels == 1 ? "pan" : "balance"),
+                               number (std::round (sound.pan * 100.0) / 100.0, 2), step.scene);
                 }
             }
 

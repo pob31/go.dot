@@ -83,6 +83,12 @@ namespace wfg::import::qlab
         std::string key;
         std::string name;
         int channel = -1;           ///< -1: no interface channel
+
+        /*  TWO FOR A PAIR (namespace draft §113, BCF): outputs 1-2, 3-4... are
+            stereo mix channels, keyed "out:<patch>:<first>-<second>", on the
+            two interface channels from `channel`; an odd last output, or every
+            output with pairing off, is a mono direct bus as before. */
+        int width = 1;
     };
 
     /*  A DEVICE for one QLab network patch (ZW): an opaque mount, its prefix the
@@ -133,6 +139,20 @@ namespace wfg::import::qlab
     {
         std::string bus;            ///< a `Bus::key`
         std::vector<double> gains;  ///< one per input channel of the cue, plain multipliers
+    };
+
+    /*  A SEND INTO A STEREO MIX (namespace draft §113, BCF): what QLab's
+        crosspoints onto a pair said, fitted back into one level and one place
+        under Go.dot's law - exact whenever the law can say it; where it
+        cannot, the cue keeps a `Route` with the matrix instead. */
+    struct Send
+    {
+        std::string bus;            ///< a `Bus::key`, a pair's
+        double levelDb = 0.0;
+        double pan = 0.0;
+        double width = 1.0;
+        double balance = 0.0;
+        bool swap = false;
     };
 
     struct Range
@@ -209,6 +229,7 @@ namespace wfg::import::qlab
         FileRef file;
         std::vector<Range> ranges;
         std::vector<Route> routes;  ///< per input channel; the import trims them to the file's channels
+        std::vector<Send> sends;    ///< into the stereo pairs its matrix fits as a place (§113)
         bool defaultRoute = false;  ///< QLab left the matrix as it was: Go.dot's default route
 
         //  An OSC cue's curves.
@@ -263,6 +284,13 @@ namespace wfg::import::qlab
             row for every input it might have. A sound missing here gets no
             route. */
         std::map<std::string, int> channels;
+
+        /*  OUTPUTS AS STEREO PAIRS (namespace draft §113, the author's pick):
+            1-2, 3-4... become stereo mix channels, and a cue whose crosspoints
+            onto a pair are a level and a place gets a send with them. Off, every
+            output is a mono direct bus and every matrix a route, as before -
+            for a rig whose outputs are single speakers. */
+        bool pairOutputs = true;
 
         /*  EACH PICTURE'S AND MOVIE'S OWN SIZE IN PIXELS, by QLab cue UUID, where
             its file was found and read: what a cue QLab drew at its own size is

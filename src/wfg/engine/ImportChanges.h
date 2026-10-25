@@ -69,6 +69,10 @@ namespace wfg
         /*  FOLDERS TO LOOK IN for a file not where the workspace says (namespace
             draft §100, AXX), in the order somebody picked them. */
         std::vector<std::string> searchFolders;
+
+        /*  QLAB: ITS OUTPUTS AS STEREO PAIRS (namespace draft §113, BCF) - the
+            window's tick, on unless the rig's outputs are single speakers. */
+        bool pairOutputs = true;
     };
 
     /*  THE FILES A WORKSPACE PLAYS, LOOKED FOR (namespace draft §100, AXX): how

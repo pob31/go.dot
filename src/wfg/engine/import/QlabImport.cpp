@@ -214,6 +214,7 @@ namespace wfg::import::qlab
             BuiltShow built;
             Identities ids { "wfg-qlab:" };
             std::map<std::string, std::string> made;        ///< plan key to the identifier written
+            std::map<std::string, int> widthOf;             ///< a bus's width by its plan key (§113)
             std::vector<std::pair<std::string, std::string>> targets;   ///< cue identifier, target key
 
             void said (Note::Kind kind, const std::string& where, const std::string& text)
@@ -323,11 +324,44 @@ namespace wfg::import::qlab
                                                                   "has no output to give it");
                     }
 
+                    /*  ITS SENDS INTO THE PAIRS (namespace draft §113, BCF): a
+                        level and a place, the rows at rest left unwritten. */
+                    for (const auto& send : item.sends)
+                    {
+                        const auto bus = made.find (send.bus);
+
+                        if (bus == made.end())
+                            continue;
+
+                        const auto sendId = ids.of (item.key + ":send:" + send.bus);
+                        const auto sent = document.createSend (id, bus->second, sendId,
+                                                               number (std::clamp (send.levelDb, -120.0, 12.0), 2));
+
+                        if (! sent.ok)
+                        {
+                            said (Note::Kind::dropped, item.name, "a send could not be made (" + sent.reason + ")");
+                            continue;
+                        }
+
+                        if (std::abs (send.pan) > 0.005)
+                            write ("/godot/send/" + sendId + "/pan", number (send.pan, 2), item.name);
+
+                        if (std::abs (send.width - 1.0) > 0.005)
+                            write ("/godot/send/" + sendId + "/width", number (send.width, 2), item.name);
+
+                        if (std::abs (send.balance) > 0.005)
+                            write ("/godot/send/" + sendId + "/balance", number (send.balance, 2), item.name);
+
+                        if (send.swap)
+                            write ("/godot/send/" + sendId + "/swap", "true", item.name);
+                    }
+
                     for (const auto& route : item.routes)
                     {
                         const auto bus = made.find (route.bus);
+                        const auto width = widthOf.count (route.bus) != 0 ? widthOf.at (route.bus) : 1;
 
-                        if (bus == made.end() || static_cast<int> (route.gains.size()) != channels)
+                        if (bus == made.end() || static_cast<int> (route.gains.size()) != channels * width)
                             continue;
 
                         const auto routed = document.createRoute (id, bus->second, ids.of (item.key + ":" + route.bus));
@@ -381,13 +415,15 @@ namespace wfg::import::qlab
                         write ("/godot/audio/channelsPerTrack", std::to_string (std::min (widest, 64)), {});
                 }
 
-                //  --- The outputs: a mono direct bus per QLab cue output (ZU) ----------
+                /*  --- The outputs (ZU; §113, BCF): a stereo mix per pair of QLab
+                    cue outputs, a mono direct bus for one alone - and the
+                    interface channel of each logical output. */
                 std::string patch;
 
                 for (const auto& bus : plan.buses)
                 {
                     const auto id = ids.of (bus.key);
-                    const auto created = document.createBus ("direct", 1, -1, id);
+                    const auto created = document.createBus (bus.width == 2 ? "mix" : "direct", bus.width, -1, id);
 
                     if (! created.ok)
                     {
@@ -396,8 +432,11 @@ namespace wfg::import::qlab
                     }
 
                     made[bus.key] = id;
+                    widthOf[bus.key] = bus.width;
                     write ("/godot/bus/" + id + "/name", bus.name, bus.name);
-                    patch += (patch.empty() ? "" : " ") + std::to_string (bus.channel);
+
+                    for (int column = 0; column < bus.width; ++column)
+                        patch += (patch.empty() ? "" : " ") + std::to_string (bus.channel < 0 ? -1 : bus.channel + column);
                 }
 
                 if (! patch.empty())
@@ -821,6 +860,7 @@ namespace wfg::import::qlab
         MediaBook book;
         WalkOptions walkOptions;
         walkOptions.lists = options.lists;
+        walkOptions.pairOutputs = options.pairOutputs;
 
         /*  THE FOLDERS SOMEBODY POINTED AT (§100, AXX), each walked once - and
             only when a file is not where the workspace says. */

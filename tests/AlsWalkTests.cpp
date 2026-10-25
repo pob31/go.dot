@@ -460,6 +460,49 @@ TEST_CASE ("walk: a fader a hand rode is a DCA, a send it rode is the Send page,
     CHECK (said);
 }
 
+TEST_CASE ("walk: a track's pan rides into its sound, said as approximated, and a hand on it is the Pan page (§113)")
+{
+    auto set = setOf (1);
+    auto source = trackOf ("1", "1", 1, 2);
+    source.sends[0] = 1.0;
+    source.pan = -0.25;
+    source.slots[0].clip = clipOf ("rain", 0.0, 8.0);
+    set.tracks.push_back (source);
+
+    Mapping rotary;
+    rotary.channel = 7;
+    rotary.number = 111;
+    rotary.target.trackId = "1";
+    rotary.target.what = Parameter::pan;
+    set.mappings = { rotary };
+
+    const auto walked = walk (set);
+
+    REQUIRE (walked.steps.size() == 1u);
+    REQUIRE (walked.steps[0].sounds.size() == 1u);
+    CHECK (walked.steps[0].sounds[0].pan == doctest::Approx (-0.25));
+
+    //  Said, and as an approximation now - Live's centre is 3 dB down, Go.dot's is full.
+    const auto said = std::any_of (walked.notes.begin(), walked.notes.end(), [] (const Note& note)
+    {
+        return note.kind == Note::Kind::approximated && note.text.find ("panned") != std::string::npos;
+    });
+    CHECK (said);
+
+    const auto dropped = std::any_of (walked.notes.begin(), walked.notes.end(), [] (const Note& note)
+    {
+        return note.kind == Note::Kind::dropped && note.text.find ("panned") != std::string::npos;
+    });
+    CHECK_FALSE (dropped);
+
+    REQUIRE (walked.hands.size() == 1u);
+    CHECK (walked.hands[0].goDot.find ("Pan page") != std::string::npos);
+
+    //  A track at the centre carries nothing.
+    set.tracks[0].pan = 0.0;
+    CHECK (walk (set).steps[0].sounds[0].pan == doctest::Approx (0.0));
+}
+
 TEST_CASE ("walk: a return sending into another is an aux, its send its own, a mix's fader folded into it")
 {
     auto set = setOf (1);

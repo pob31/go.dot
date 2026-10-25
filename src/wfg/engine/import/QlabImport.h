@@ -90,6 +90,7 @@ namespace wfg::import::qlab
         juce::File into;                ///< the show folder to write; refused when it holds a show
         std::set<int> lists;            ///< empty: every list
         bool copyMedia = true;
+        bool pairOutputs = true;        ///< outputs 1-2, 3-4... as stereo mixes, their crosspoints a place (§113)
 
         /*  FOLDERS TO LOOK IN for a file not found where the workspace says
             (§100, AXX), in the order they were picked. */

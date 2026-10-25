@@ -229,19 +229,82 @@ TEST_CASE ("qlab walk: a sound - its level, speed, ranges and routes (ZT, ZU)")
     CHECK (item.ranges[0].out == doctest::Approx (595.25));
     CHECK (item.ranges[0].loops == 0);
 
-    //  Two routes - input 1 to output 1, input 2 to output 2 at -6 - and none
-    //  from row 3, which is not one of this file's inputs.
-    REQUIRE (item.routes.size() == 2);
-    CHECK (item.routes[0].bus == "out:A:1");
-    CHECK (item.routes[0].gains == std::vector<double> { 1.0, 0.0 });
-    CHECK (item.routes[1].bus == "out:A:2");
-    CHECK (item.routes[1].gains[1] == doctest::Approx (gain (-6.0)).epsilon (1e-5));
+    /*  OUTPUTS 1 AND 2 ARE A STEREO MIX (namespace draft §113, BCF): input 1
+        to output 1, input 2 to output 2 at -6 - a diagonal, which is one level
+        and one balance exactly - and nothing from row 3, which is not one of
+        this file's inputs. */
+    CHECK (item.routes.empty());
+    REQUIRE (item.sends.size() == 1);
+    CHECK (item.sends[0].bus == "out:A:1-2");
+    CHECK (std::abs (item.sends[0].levelDb) < 1.0e-3);
+    CHECK (item.sends[0].balance == doctest::Approx (-(1.0 - gain (-6.0))).epsilon (1e-4));
+    CHECK (item.sends[0].width == doctest::Approx (1.0));
+    CHECK_FALSE (item.sends[0].swap);
 
-    REQUIRE (plan.buses.size() == 2);
-    CHECK (plan.buses[0].name == "FOH L");
+    REQUIRE (plan.buses.size() == 1);
+    CHECK (plan.buses[0].name == "FOH L / FOH R");
     CHECK (plan.buses[0].channel == 0);
-    CHECK (plan.buses[1].name == "FOH R");
-    CHECK (plan.buses[1].channel == 1);
+    CHECK (plan.buses[0].width == 2);
+
+    SUBCASE ("pairing off: a mono direct bus an output, and routes as before")
+    {
+        options.pairOutputs = false;
+        const auto apart = walk (workspaceOf ({ sound }), options);
+        const auto& single = top (apart)[0];
+
+        CHECK (single.sends.empty());
+        REQUIRE (single.routes.size() == 2);
+        CHECK (single.routes[0].bus == "out:A:1");
+        CHECK (single.routes[0].gains == std::vector<double> { 1.0, 0.0 });
+        CHECK (single.routes[1].bus == "out:A:2");
+        CHECK (single.routes[1].gains[1] == doctest::Approx (gain (-6.0)).epsilon (1e-5));
+
+        REQUIRE (apart.buses.size() == 2);
+        CHECK (apart.buses[0].name == "FOH L");
+        CHECK (apart.buses[0].channel == 0);
+        CHECK (apart.buses[0].width == 1);
+        CHECK (apart.buses[1].name == "FOH R");
+        CHECK (apart.buses[1].channel == 1);
+    }
+
+    SUBCASE ("a mono file hard left is a pan, equal cross terms a width, and a matrix of no such shape stays a route")
+    {
+        auto left = cue ("Audio", "Left");
+        left.audioPatch = "A";
+        left.levels = { { 1, 0, 1.0 }, { 1, 1, 1.0 } };
+
+        auto wide = cue ("Audio", "Wide");
+        wide.audioPatch = "A";
+        wide.levels = { { 1, 0, 1.0 }, { 2, 0, 1.0 }, { 1, 1, gain (-6.0) }, { 1, 2, gain (-6.0) },
+                        { 2, 1, gain (-6.0) }, { 2, 2, gain (-6.0) } };
+
+        auto odd = cue ("Audio", "Odd");
+        odd.audioPatch = "A";
+        odd.levels = { { 1, 0, 1.0 }, { 2, 0, 1.0 }, { 1, 1, 1.0 }, { 1, 2, 1.0 }, { 2, 2, 1.0 } };
+
+        WalkOptions three;
+        three.channels[left.id] = 1;
+        three.channels[wide.id] = 2;
+        three.channels[odd.id] = 2;
+
+        const auto shapes = walk (workspaceOf ({ left, wide, odd }), three);
+        const auto& items = top (shapes);
+        REQUIRE (items.size() == 3);
+
+        REQUIRE (items[0].sends.size() == 1);
+        CHECK (items[0].sends[0].pan == doctest::Approx (-1.0));
+        CHECK (std::abs (items[0].sends[0].levelDb) < 1.0e-3);
+
+        REQUIRE (items[1].sends.size() == 1);
+        CHECK (items[1].sends[0].width == doctest::Approx (0.0));
+        CHECK (items[1].sends[0].balance == doctest::Approx (0.0));
+        CHECK (std::abs (items[1].sends[0].levelDb) < 0.05);
+
+        CHECK (items[2].sends.empty());
+        REQUIRE (items[2].routes.size() == 1);
+        CHECK (items[2].routes[0].bus == "out:A:1-2");
+        CHECK (items[2].routes[0].gains == std::vector<double> { 1.0, 1.0, 0.0, 1.0 });
+    }
 }
 
 TEST_CASE ("qlab walk: a sound's slices, an untouched matrix, a file not found")

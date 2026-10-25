@@ -5268,7 +5268,7 @@ namespace wfg::client
 
                 ui::ImportWindow::Actions actions;
                 actions.import = [this, sets] (const std::vector<int>& ticked, const juce::File& into,
-                                               const std::vector<std::string>&)
+                                               const std::vector<std::string>&, bool)
                 {
                     startImport (sets, ticked, into, {}, host.importSets);
                 };
@@ -5317,11 +5317,12 @@ namespace wfg::client
 
                 ui::ImportWindow::Actions actions;
                 actions.import = [this, sets] (const std::vector<int>& ticked, const juce::File& into,
-                                               const std::vector<std::string>& folders)
+                                               const std::vector<std::string>& folders, bool pairs)
                 {
-                    startImport (sets, ticked, into, folders, host.importQlab);
+                    startImport (sets, ticked, into, folders, host.importQlab, pairs);
                 };
                 actions.cancel = [this] { closeImportWindow(); };
+                actions.offerPairs = true;      // QLab's outputs are mono: pairs, unless told otherwise (§113)
 
                 /*  ITS FILES LOOKED FOR (namespace draft §100, AXX) off the message
                     thread - a folder picked may be a whole drive - and the answer
@@ -5463,7 +5464,8 @@ namespace wfg::client
             void startImport (const std::vector<std::string>& sets, const std::vector<int>& ticked, const juce::File& into,
                               const std::vector<std::string>& searchFolders,
                               const std::function<wfg::ImportResult (const wfg::ImportRequest&,
-                                                                     const std::function<void (const std::string&)>&)>& importer)
+                                                                     const std::function<void (const std::string&)>&)>& importer,
+                              bool pairOutputs = true)
             {
                 if (importing || ! importer)
                     return;
@@ -5483,6 +5485,7 @@ namespace wfg::client
                 request.scenes = ticked;
                 request.into = into.getFullPathName().toStdString();
                 request.searchFolders = searchFolders;
+                request.pairOutputs = pairOutputs;
 
                 /*  OFF THE MESSAGE THREAD: a tour copies a gigabyte of sound. Every
                     word back is posted to it, and nothing is touched once this

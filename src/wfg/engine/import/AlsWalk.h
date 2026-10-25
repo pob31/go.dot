@@ -152,6 +152,11 @@ namespace wfg::import::als
         std::vector<CurvePoint> levelLane;
         std::vector<SendOut> sends;
 
+        /*  THE TRACK'S OWN PAN, -1..1 (namespace draft §113): on every send of
+            the cue as a pan when the file is mono and a balance when it is
+            stereo - Live's stereo pan is a balance too. Nought at centre. */
+        double pan = 0.0;
+
         /*  The EQ Eights on its path, as Live has them, for the translation to
             fit onto the cue's EQ, and the other devices by name for its notes. */
         std::vector<const Device*> eqs;

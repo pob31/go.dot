@@ -57,6 +57,17 @@ namespace wfg::client::model
         return loudestDb - lowestDb > 0.005;
     }
 
+    std::string SendStrip::leanRow() const
+    {
+        if (placement == "pan")
+            return "pan";
+
+        if (placement == "stereo" || placement == "fold")
+            return "balance";
+
+        return {};
+    }
+
     std::vector<SendStrip> readSends (const tree::TreeSnapshot& snapshot,
                                       const std::string& cueId)
     {
@@ -82,7 +93,16 @@ namespace wfg::client::model
             are published flat under their own owner with a derived `cue`, so
             the way back to the cue is that row and not containment. Once for
             the tree, whichever cues are asked about. */
-        struct Held { std::string id, cue, bus; double level = 0.0; bool on = true; bool live = false; };
+        struct Held
+        {
+            std::string id, cue, bus;
+            double level = 0.0;
+            bool on = true;
+            bool live = false;
+            std::string placement = "none";
+            double pan = 0.0, width = 1.0, balance = 0.0;
+            bool swap = false;
+        };
 
         std::map<std::string, Held> held;
 
@@ -109,6 +129,11 @@ namespace wfg::client::model
             else if (name == "level") one.level = osc::parseDouble (reading).value_or (0.0);
             else if (name == "on")    one.on = reading != "false";
             else if (name == "live")  one.live = reading == "true";
+            else if (name == "placement") one.placement = reading.empty() ? std::string ("none") : reading;
+            else if (name == "pan")       one.pan = osc::parseDouble (reading).value_or (0.0);
+            else if (name == "width")     one.width = osc::parseDouble (reading).value_or (1.0);
+            else if (name == "balance")   one.balance = osc::parseDouble (reading).value_or (0.0);
+            else if (name == "swap")      one.swap = reading == "true";
         }
 
         //  Each asked-about cue's sends, by the mix they go into.
@@ -140,6 +165,11 @@ namespace wfg::client::model
                 strip.levelDb = found->second.level;
                 strip.on = found->second.on;
                 strip.live = found->second.live;
+                strip.placement = found->second.placement;
+                strip.pan = found->second.pan;
+                strip.width = found->second.width;
+                strip.balance = found->second.balance;
+                strip.swap = found->second.swap;
             }
             else
             {
@@ -164,6 +194,7 @@ namespace wfg::client::model
                     share.sendId = found->second.id;
                     share.levelDb = found->second.level;
                     share.on = found->second.on;
+                    share.placement = found->second.placement;
                     strip.live = strip.live || found->second.live;
 
                     strip.lowestDb = any ? std::min (strip.lowestDb, share.levelDb) : share.levelDb;
