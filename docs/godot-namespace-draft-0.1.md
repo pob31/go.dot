@@ -2648,7 +2648,7 @@ Two operator commands:
 | Command | Node | Params | Notes |
 |---|---|---|---|
 | `list.aim` | `/godot/cmd/list/aim` | `s` list, `s` cue, `d` offset | moves the state-position pointer. Solves and publishes; changes nothing in the world |
-| `list.loadToTime` | `/godot/cmd/list/loadToTime` | `s` list, `s` cue, `d` offset, `[s run…]` | applies the solve. As many identifiers as the jump created, in the order they were made — the `go` pattern (§12.6), because a replay never draws one of its own |
+| `list.loadToTime` | `/godot/cmd/list/loadToTime` | `s` list, `[s run…]` *(the cue and offset are the list's `aim`, written by `list.aim`; corrected 2026-10-25, §115)* | applies the solve. As many identifiers as the jump created, in the order they were made — the `go` pattern (§12.6), because a replay never draws one of its own |
 
 `audio.arm`, `go`, `cue.fire` and `trigger.fire` are unchanged in signature.
 
@@ -34280,3 +34280,101 @@ As built: `NodeShape::skipWord`; `Walk::skips` a map to the word; `PathStep::typ
 editable and commits what is typed (`typedPart`). Tests: ClientTests (the word, which levels are typed and
 what they keep), RunPaneUiTests (typing into the box, the arrow and spaces dropped, a part with a slash
 refused, a pick as before, the lists' menu not typable), AuthoringTests (version 3), C and fr_FR.
+
+## 115. Load to time says what the scene had said
+
+**Asked 2026-10-25** by the author: *"The 'Load to time' feature is not really doing what I'd expect of it.
+The idea is to enable the user to revert to the state the show is in at a given point and fast forward from
+the cue where the standby pointer is. This might mean reverting OSC and MIDI commands to a previous state or
+sending ones that are sent between the start of the cue and the moment the user is requesting. Say you have
+a long intro to a song before the dancing starts and you want to rehearse only the dance moves of the second
+chorus. You go back to the cue with the start of the song. Press load to time and move the time cursor to
+the time of the second chorus then press play. This should allow the users to send back any changes from
+the beginning of the cue, all the way until the start in the middle of the song."*
+
+PRD §3.13 promises exactly that - *"evaluate at its end state, or partway if T lands inside a fade... diff
+against the world's actual state and send only what differs"* - and what Phase 4 built fell short of it in
+five places, all in the solver's value half:
+
+1. **The value half read the ROWS, never the time.** `solve` walked `placed` and stopped at the target's
+   row. Rows are depth-first, a group's before its members', so a jump aimed at a scene sent nothing of
+   the scene at all; aimed at a member of it, a message listed before the member was sent at its end value
+   when it was due after the instant (the future), and one listed after it was left out when it had fired
+   before (the past). The run half had the arithmetic right all along (`planTargetOnce`, `from`/`to`
+   against the instant) and marked a message member before the instant *finished - what it wrote is in
+   the values*, which was the half that was wrong. Doh!'s `relaunchScene` had worked round exactly this.
+2. **MIDI was never a value.** Only `Osc` was read; a MIDI cue before the instant was over and never
+   re-sent, in the scene or at the top of the list - though the persistent assertion (§13.11) re-sends one.
+3. **A curve or a MIDI fade the instant lands inside was sent at its END** (§6.9's known limitation).
+4. **The history reading** wrote values from OSC steps alone; a scene's members, spawned by the scheduler,
+   have no step, so a scene placed from the history had no values either.
+5. **A fade's trim was computed and never applied**: `plan.trims` was read by nothing but `toJson`, so a
+   cue relaunched by a jump after a fade had brought it down came back at its written level.
+
+### 115.1 Decisions
+
+The author's (2026-10-25), from three questions put to him:
+
+- **MIDI state kinds are re-sent; a note is not.** A control change, a programme change, a bend, a pressure,
+  a dump is state a desk holds. A note is the MIDI event - §3.13 step 4, *do not re-fire the pyro* - and a
+  note on a lighting desk is a GO. A cue with a note before the instant is in the confused list,
+  `event-kind`, *"a note is an event - not sent again"*. (Offered beside it: every kind; the state kinds plus
+  a note still held at the instant. Not taken.)
+- **Load plays at once.** The jump is the jump: the sound and the scene start from the aimed second when
+  Load is pressed, and the next GO fires the cue after the target - as built since Phase 4. No paused
+  landing.
+- **The trims are applied in this round too.**
+
+Mine *(proposed)*:
+
+- **BCE** **The chain by time, the rest by row.** Inside the target's timed chain - a timeline or an
+  automatic sequence the walk times, the scene itself when the aim is on it - every message cue and fade
+  is read off the run the plan placed for it, at the second it had reached: a `finished` run keeps how long
+  before the instant it started (its `offset`), and the chain's writers are read in that order, the last
+  winning, after everything outside the chain, which stays at its end state by row as §3.13 says of a
+  manual list. A member still due has not spoken. A chain member the walk could not time falls back to the
+  rows, as the run half does.
+- **BCF** **A curve or a fade the instant lands inside goes on from there.** Its member is seated
+  `sounding`, that many seconds in: `fireOsc` writes the curves' value at that second first and starts
+  their clock from it (`seatingAt`, set by the seat round the fire; a looping curve round its loop, since
+  inside the chain the moment IS timed); `fireMidi` sends the fade's value there and dates the fade back.
+  The value is in the plan marked `live`: the last word on its address, and the run's to write, so the
+  jump's own flush sends nothing for it - a value a tick old over a moving curve.
+- **BCG** **MIDI goes straight onto the port**, as a Doh's MIDI rollback does (§24, OV-OX), where the port's
+  `tx` is on; nothing where it is off, as a cue on it would send nothing; nothing in a replay, which has no
+  sink. Nothing to compare against - MIDI has no read-back (§100) - so every planned message is sent. The
+  last writer is by port, channel, type and number; a dump by its bytes. The flush skips a message a member
+  fired this tick writes, as it skips an OSC address one does.
+- **BCH** **A seek of a running scene asserts the same state.** `run.seek` on a scene - the scrub in the
+  running pane, which is the author's *"move the time cursor"* as much as the panel's offset is - stashes
+  the scene's own values, MIDI and trims from the same solve, and the flush sends what differs, as a jump's
+  does. The round reading (`solveRound`) carries the round's values too; an event-kind node is left out
+  by the Runner there, since the round is solved with no mount table.
+- **BCI** **The trims are seated.** A group's trim is its own level - nought until a fade moves it - so a
+  scene the seat makes starts there; a media run's is `seatedTrimDb`, written before the arm and folded
+  into the level the arm hands the voice, so `ownLevel` starts where the fade had left it and nothing slews.
+  A fade the instant lands inside trims by the part of it that had happened, as the history reading already
+  did; its run is seated over, not continued (the fade itself is not resumed - a later round, if wanted).
+- **BCJ** **A message cue aimed at** is `sounding` while its curves or its fade are still moving at the
+  offset, and over otherwise - what it said is in the values. (Before: `sounding` always, and the seat
+  would have armed it as a sound.)
+
+### 115.2 As built (2026-10-25)
+
+`Solver`: `PlannedMidi` (`port`, `midi::MessageSpec`, `writer`, `live`), `Plan::midi`, `RoundPlan::values`
+/ `midi`, `PlannedValue::live`, `confusion::eventKind`; `readMessages` / `messagesOf (…, seconds)`,
+`readMidi` / `midiAt`, `messageStillGoing`, one `Placing` carried through every pass with `placeMessages`,
+`placeTrim` and `placeRunMessages`; `toJson` emits `"midi": [{port, type, channel, data1, data2, from}]`.
+`ShowWalk::Reader` reads the `osc` and `midi` rows' defaults. `FadeMoves::midiFadeValueAt` is the one
+formula the tick's fade and the solver share. `Runner`: `DohStash::midi`, `stashPlanned`, `seatingAt`,
+`seatPlan (…, trims)`, `Run::seatedTrimDb` read by `armMedia`, `seekGroup` stashing, the flush's MIDI
+sends and MIDI `firing` keys.
+
+Tests: SolverTests (the scene by time aimed at the scene and at its sound, by row past it, from the
+history; MIDI state and a note; a MIDI fade and a curve inside and past, a looping curve round its loop; a
+fade's trim by its part), NetworkCueTests (the bytes reach the port once, never a note, nothing with `tx`
+off, a seek of the scene), GoTests (a jump seats a fade's trim, whole and partway). `list.loadToTime`'s
+row in §13.9 corrected: it takes `s list, [s run…]` and reads the list's aim - no cue or offset of its own.
+
+Not in this round: a fade the instant lands inside is not resumed (its trim is); the chase's `code.seat`
+and the follower's `pair.seat` send no values (the follower carries the desk its own way, §58).

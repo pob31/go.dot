@@ -1203,6 +1203,11 @@ Dual-touch load-to-time (§3.17) is these two pointers, one per hand. *Not built
 direction (2026-10-17, namespace draft §75, ASN): the standby lands after the target, so a jump has one
 place to set, and one finger sets it while a button makes it true.*
 
+*Inside a timed chain the value half reads the members by their seconds, not by their rows; a MIDI cue's
+state kinds are values and a note is an event; a curve or a fade the instant lands inside is partway and
+goes on from there; a fade's trim is applied to the cue the jump seats (namespace draft §115, at the
+author's direction, 2026-10-25).*
+
 ### 3.14 Timecode
 
 **Chase and generate**, both required. LTC and MTC.
@@ -4419,7 +4424,9 @@ calls YW-ZM in §45.2 are the author's to overrule; these are what the work left
 - **Messages of one cue to several devices**, Doh! worked out per device inside the cue (YV keeps
   one).
 - **A cue with curves prepared ahead of its GO** (§3.12).
-- **Load-to-time inside a cue's curves** (§3.13): the solve plans a curve at its last point.
+- ~~**Load-to-time inside a cue's curves** (§3.13): the solve plans a curve at its last point.~~ *Lifted
+  2026-10-25 (namespace draft §115): inside the cue's own chain the curve is placed at the second and its
+  run goes on from there; outside one, at its last point as before.*
 - **An OSC cue's messages as a foot part** to copy and paste (namespace draft §38).
 - **The SpaceMouse's left button** starting and stopping a pass (ZM).
 

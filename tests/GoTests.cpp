@@ -8413,6 +8413,39 @@ TEST_CASE ("jump: the scheduler carries the scene on from where the jump left it
     CHECK (rig.runs.find (third)->state != cue::runState::waiting);
 }
 
+TEST_CASE ("jump: a fade before the place leaves its trim on the cue the jump seats (namespace draft 115)")
+{
+    /*  PRD §3.13 step 1, the half that was never built: the solver worked a
+        fade's trim out and the jump never applied it, so a cue a fade had
+        brought down came back at its written level. The seat folds the trim
+        into the level the arm hands the voice, whole for a fade that had
+        completed and the part that had happened for one the instant lands
+        inside. On fdeaad13 both read the cue's own level. */
+    JumpRig rig;
+
+    //  A fade before the scene has taken the first member to -12; one inside it takes the second to -8 over four seconds.
+    const auto before = rig.document.createCue (rig.listId, 2, "fade", "Under").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + before + "/target", rig.early).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + before + "/level", "-12").ok);
+
+    const auto inside = rig.document.createCue (rig.scene, 3, "fade", "Down").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + inside + "/target", rig.middle).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + inside + "/level", "-8").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + inside + "/duration", "4").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + inside + "/preWait", "2").ok);
+
+    //  Three seconds into the scene: the first member sounding, the second one second in, the fade a quarter through.
+    REQUIRE (rig.jumpTo (rig.scene, 3.0).rejected == 0);
+
+    const auto first = rig.runOf (rig.early);
+    const auto second = rig.runOf (rig.middle);
+    REQUIRE (! first.empty());
+    REQUIRE (! second.empty());
+
+    CHECK (rig.runs.find (first)->ownLevel == doctest::Approx (-12.0));
+    CHECK (rig.runs.find (second)->ownLevel == doctest::Approx (-2.0));
+}
+
 TEST_CASE ("jump: with no aim there is nothing to make true")
 {
     /*  A jump is `list.aim`'s question answered, so without a question it is

@@ -511,6 +511,16 @@ namespace wfg::cue
             set it are logged, which is what a replay needs. */
         double trim = 0.0;
 
+        /*  WHAT A FADE BEFORE THE INSTANT HAD DONE TO THIS CUE'S LEVEL, in dB,
+            when a plan seated the run (namespace draft §115; PRD §3.13 step
+            1): the solver's trim, whole for a fade that had completed and the
+            part of it that had happened for one the instant lands inside.
+            Written before the arm and folded into the level the arm hands the
+            voice, so `ownLevel` starts where the fade had left it and nothing
+            slews on the way. Nought for every run a GO makes. Never logged:
+            the jump is, and a replay solves the same trim. */
+        double seatedTrimDb = 0.0;
+
         /*  THE CUE'S LEVEL LANE (namespace draft §20): a volume curve over the
             FILE, and the fourth term of this run's sum, beside `ownLevel`,
             `trim` and the DCAs. A term of THIS run's sum and of nobody else's:

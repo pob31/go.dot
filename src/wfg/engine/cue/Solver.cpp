@@ -18,6 +18,7 @@
 
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/CurveJob.h>
+#include <wfg/engine/cue/FadeMoves.h>
 #include <wfg/engine/cue/PlayedMedia.h>
 #include <wfg/engine/cue/ShowWalk.h>
 #include <wfg/engine/document/ShowDocument.h>
@@ -44,24 +45,29 @@ namespace wfg::cue
             (namespace draft 45). One helper for the three places a plan reads
             an OSC cue, so a jump, a relaunch and load-to-time all place every
             message of it. */
-        std::vector<std::pair<std::string, std::string>> messagesOf (const Reader& read,
-                                                                     const juce::ValueTree& cue)
+        struct Written
         {
-            /*  AND WHAT ITS CURVES SAY AT THEIR END (namespace draft 45, O.4):
-                a value a curve moves is planned at the curves' last second - the
-                cue's duration, or the longest curve's last point - which is
-                what it holds once the cue is over. A cue whose curves loop is
-                never over, and a message they move is planned at nothing: where
-                a loop is at a given moment is not a decision anybody wrote. */
-            struct Written
-            {
-                std::string address, text;
-                CurveTarget target;
-            };
+            std::string address, text;
+            CurveTarget target;
+            bool curved = false;
+        };
 
+        /*  The cue's messages with their curves, and the curves' span: when the
+            last of them ends - the cue's duration, or the longest curve's last
+            point - and whether they loop. */
+        struct ReadMessages
+        {
             std::vector<Written> messages;
+            double end = 0.0;
+            bool loops = false;
+            bool curved = false;
+        };
 
-            const auto add = [&read, &messages] (const juce::ValueTree& message, const char* owner)
+        ReadMessages readMessages (const Reader& read, const juce::ValueTree& cue)
+        {
+            ReadMessages out;
+
+            const auto add = [&read, &out] (const juce::ValueTree& message, const char* owner)
             {
                 Written written;
                 written.address = read.text (message, owner, "address");
@@ -84,10 +90,15 @@ namespace wfg::cue
                     CurveLane lane;
                     lane.arg = static_cast<std::size_t> (arg);
                     lane.points = doc::readLane (read.text (child, "curve", "points"), range).points;
+
+                    if (! lane.points.empty())
+                        written.curved = true;
+
                     written.target.lanes.push_back (std::move (lane));
                 }
 
-                messages.push_back (std::move (written));
+                out.curved = out.curved || written.curved;
+                out.messages.push_back (std::move (written));
             };
 
             add (cue, "osc");
@@ -98,28 +109,352 @@ namespace wfg::cue
 
             std::vector<CurveTarget> targets;
 
-            for (const auto& message : messages)
+            for (const auto& message : out.messages)
                 targets.push_back (message.target);
 
             const auto duration = osc::parseDouble (read.text (cue, "osc", "duration")).value_or (0.0);
-            const auto end = duration > 0.0 ? duration : lastPointOf (targets);
-            const auto loops = read.flag (cue, "osc", "loop");
+            out.end = duration > 0.0 ? duration : lastPointOf (targets);
+            out.loops = read.flag (cue, "osc", "loop");
+            return out;
+        }
 
+        /*  WHAT ITS CURVES SAY AT A SECOND, OR AT THEIR END (namespace draft 45,
+            O.4; §115). With no second asked, a value a curve moves is planned
+            at the curves' last second - what it holds once the cue is over -
+            and a message whose curves loop is planned at nothing: where a loop
+            is at a moment nobody timed is not a decision anybody wrote. With a
+            second - the instant is inside the cue's own chain, so the moment IS
+            timed - every message is where its curves put it then, a looping
+            one round its loop. */
+        std::vector<std::pair<std::string, std::string>> messagesOf (const Reader& read,
+                                                                     const juce::ValueTree& cue,
+                                                                     std::optional<double> seconds = std::nullopt)
+        {
+            const auto found = readMessages (read, cue);
             std::vector<std::pair<std::string, std::string>> out;
 
-            for (const auto& message : messages)
+            for (const auto& message : found.messages)
             {
-                const auto curved = std::any_of (message.target.lanes.begin(), message.target.lanes.end(),
-                                                 [] (const CurveLane& lane) { return ! lane.points.empty(); });
-
-                if (curved && loops)
+                if (message.curved && found.loops && ! seconds.has_value())
                     continue;
 
-                out.push_back ({ message.address,
-                                 curved ? osc::atomsOf (valuesAt (message.target, end)) : message.text });
+                auto text = message.text;
+
+                if (message.curved)
+                {
+                    const auto at = seconds.has_value()
+                                      ? placeOnCurves (std::max (*seconds, 0.0), found.end, found.loops).seconds
+                                      : found.end;
+                    text = osc::atomsOf (valuesAt (message.target, at));
+                }
+
+                out.push_back ({ message.address, text });
             }
 
             return out;
+        }
+
+        /*  Whether an OSC cue's curves are still moving `seconds` after it
+            fired: for ever when they loop, until their last second otherwise. */
+        bool curvesRunningAt (const Reader& read, const juce::ValueTree& cue, double seconds)
+        {
+            const auto found = readMessages (read, cue);
+            return found.curved && (found.loops || seconds < found.end);
+        }
+
+        //======================================================================
+        /*  A MIDI CUE AS A VALUE (namespace draft §115; the author's choice,
+            2026-10-25). The kinds a desk HOLDS - a control change, a programme
+            change, a bend, a pressure, a dump - are state, re-sent by a jump as
+            an OSC value is. A note is an event: §3.13 step 4 says a jump does
+            not re-fire the pyro, and a note on a lighting desk IS the pyro. */
+        bool midiStateKind (const std::string& type)
+        {
+            return type == "controlChange" || type == "programChange" || type == "pitchBend"
+                || type == "aftertouch" || type == "channelPressure" || type == "sysex";
+        }
+
+        /** The types whose second byte a fade moves (namespace draft §100, AXY). */
+        bool midiFadeable (const std::string& type)
+        {
+            return type == "controlChange" || type == "aftertouch"
+                || type == "channelPressure" || type == "pitchBend";
+        }
+
+        struct MidiReading
+        {
+            PlannedMidi message;
+            bool fading = false;
+            int fadeTo = -1;
+            double fadeSeconds = 0.0;
+            bool sCurve = false;
+        };
+
+        /*  The cue's message as GO would build it (`Runner::fireMidi`): `data2`
+            where a fade starts, or where it ends when the fade has no time. */
+        MidiReading readMidi (const Reader& read, const juce::ValueTree& cue)
+        {
+            MidiReading out;
+            auto& spec = out.message.spec;
+
+            out.message.port = read.text (cue, "midi", "port");
+            spec.type = read.text (cue, "midi", "type");
+            spec.channel = read.integer (cue, "midi", "channel");
+            spec.data1 = read.integer (cue, "midi", "data1");
+            spec.data2 = read.integer (cue, "midi", "data2");
+            spec.sysex = read.text (cue, "midi", "sysex");
+
+            out.fadeTo = read.integer (cue, "midi", "fadeTo");
+            out.fadeSeconds = read.number (cue, "midi", "fadeTime");
+            out.sCurve = read.text (cue, "midi", "fadeCurve") == "sCurve";
+
+            const auto fadeable = midiFadeable (spec.type);
+            out.fading = fadeable && out.fadeTo >= 0 && out.fadeTo != spec.data2 && out.fadeSeconds > 0.0;
+
+            if (fadeable && out.fadeTo >= 0 && out.fadeSeconds <= 0.0)
+                spec.data2 = out.fadeTo;
+
+            return out;
+        }
+
+        /** Whether a MIDI cue's fade is still moving `seconds` after it fired. */
+        bool midiFadeRunningAt (const Reader& read, const juce::ValueTree& cue, double seconds)
+        {
+            const auto found = readMidi (read, cue);
+            return found.fading && seconds < found.fadeSeconds;
+        }
+
+        /** The message `seconds` into the cue; at its fade's end with no second asked. */
+        PlannedMidi midiAt (const MidiReading& found, std::optional<double> seconds)
+        {
+            auto message = found.message;
+
+            if (found.fading)
+                message.spec.data2 = seconds.has_value()
+                                       ? midiFadeValueAt (message.spec.data2, found.fadeTo, std::max (*seconds, 0.0),
+                                                          found.fadeSeconds, found.sCurve)
+                                       : found.fadeTo;
+
+            return message;
+        }
+
+        /*  Whether a message cue - an OSC cue's curves, a MIDI cue's fade - is
+            still moving `seconds` after it fired. A plan seats one that is as
+            SOUNDING, at that second, so it goes on from there. */
+        bool messageStillGoing (const Reader& read, const Placed& entry, double seconds)
+        {
+            if (entry.element == "Osc")
+                return curvesRunningAt (read, entry.node, seconds);
+
+            if (entry.element == "Midi")
+                return midiFadeRunningAt (read, entry.node, seconds);
+
+            return false;
+        }
+
+        //======================================================================
+        /*  WHERE A PLAN'S VALUES ARE WRITTEN, last writer winning: the OSC
+            values by address, the MIDI messages by port, channel, type and
+            number (a dump by its bytes), the trims by the cue they move. One
+            of these per plan, carried through every pass that writes it. */
+        struct Placing
+        {
+            Placing (std::vector<PlannedValue>& valuesToFill, std::vector<PlannedMidi>& midiToFill,
+                     std::vector<PlannedTrim>* trimsToFill, std::vector<Confusion>& confusedToFill)
+                : values (valuesToFill), midi (midiToFill), trims (trimsToFill), confused (confusedToFill)
+            {
+            }
+
+            std::vector<PlannedValue>& values;
+            std::vector<PlannedMidi>& midi;
+            std::vector<PlannedTrim>* trims;
+            std::vector<Confusion>& confused;
+
+            std::map<std::string, std::size_t> writtenAt, midiAt, trimmedAt;
+        };
+
+        std::string midiKeyOf (const PlannedMidi& message)
+        {
+            const auto& spec = message.spec;
+            return message.port + "|" + std::to_string (spec.channel) + "|" + spec.type + "|"
+                     + (spec.type == "sysex" ? spec.sysex : std::to_string (spec.data1));
+        }
+
+        /*  A MESSAGE CUE'S MESSAGES INTO THE PLAN: an OSC cue's, each at the
+            second asked (its end state with none), an event-kind node left out;
+            a MIDI cue's one message, a note said in the confused list instead.
+            `live` marks a value a seated run is about to write itself. */
+        void placeMessages (const Reader& read, const juce::ValueTree& cue, std::optional<double> seconds,
+                            bool live, const tree::MountTable* mounts, Placing& into)
+        {
+            const auto id = cue[idProperty].toString().toStdString();
+
+            if (cue.hasType ("Osc"))
+            {
+                for (const auto& [address, text] : messagesOf (read, cue, seconds))
+                {
+                    if (address.empty())
+                        continue;
+
+                    /*  AN EVENT IS NOT A VALUE (§3.13 step 4). "Fire the pyro" has
+                        no state to restore to, and a jump that re-sent it would set
+                        the theatre alight on the way past a cue that already
+                        happened. A mount that has not been loaded says nothing about
+                        its nodes, so nothing is excluded - which is the direction
+                        that fires, and is why a caller with a mount table hands it
+                        over. */
+                    if (mounts != nullptr)
+                        if (const auto* node = mounts->nodeAt (address);
+                            node != nullptr && node->kind == tree::Kind::event)
+                            continue;
+
+                    const auto value = osc::valuesFromAtoms (text);
+
+                    if (! value.has_value())
+                        continue;
+
+                    PlannedValue planned;
+                    planned.address = address;
+                    planned.value = *value;
+                    planned.writer = id;
+                    planned.live = live;
+
+                    if (const auto seen = into.writtenAt.find (address); seen != into.writtenAt.end())
+                    {
+                        into.values[seen->second] = planned;
+                        continue;
+                    }
+
+                    into.writtenAt[address] = into.values.size();
+                    into.values.push_back (planned);
+                }
+
+                return;
+            }
+
+            if (! cue.hasType ("Midi"))
+                return;
+
+            const auto found = readMidi (read, cue);
+
+            if (! midiStateKind (found.message.spec.type))
+            {
+                into.confused.push_back ({ id, confusion::eventKind, "a note is an event - not sent again" });
+                return;
+            }
+
+            if (found.message.port.empty())
+                return;
+
+            auto planned = midiAt (found, seconds);
+            planned.writer = id;
+            planned.live = live;
+
+            const auto key = midiKeyOf (planned);
+
+            if (const auto seen = into.midiAt.find (key); seen != into.midiAt.end())
+            {
+                into.midi[seen->second] = planned;
+                return;
+            }
+
+            into.midiAt[key] = into.midi.size();
+            into.midi.push_back (planned);
+        }
+
+        /*  A FADE'S TRIM INTO THE PLAN: base plus what the fade did (PR 3.12).
+            Whole once its time has passed - a fade before the target has
+            completed, the same end-state rule the runs follow - and the part of
+            it that had happened inside it: a fade three seconds into six has
+            moved its target half of the way. Linear, which is the shape a
+            reading can promise without the curve; the run that is built from
+            this plays the real one. What it changed is the difference between
+            where it was told to go and what its target cue says, which is the
+            one thing a level can be trimmed BY. A fade that leaves the level
+            alone trims nothing (namespace draft §22.6): read as a level, a fade
+            that moves only the speed would be a fade to its `level`'s default,
+            silence. Its speed is not solved (EE). */
+        void placeTrim (const Reader& read, const doc::ShowDocument& document, const juce::ValueTree& fade,
+                        std::optional<double> seconds, Placing& into)
+        {
+            if (into.trims == nullptr || ! read.flag (fade, "fade", "levelOn"))
+                return;
+
+            const auto targetCue = read.text (fade, "fade", "target");
+            const auto cue = document.findById (targetCue);
+
+            if (targetCue.empty() || ! cue.isValid())
+                return;
+
+            const auto whole = read.number (fade, "fade", "level") - read.number (cue, "sound", "level");
+            const auto duration = read.number (fade, "fade", "duration");
+            const auto part = seconds.has_value() && duration > 0.0 && *seconds < duration
+                                ? std::max (*seconds, 0.0) / duration
+                                : 1.0;
+            const auto trim = whole * part;
+
+            if (const auto seen = into.trimmedAt.find (targetCue); seen != into.trimmedAt.end())
+            {
+                (*into.trims)[seen->second].decibels = trim;
+                return;
+            }
+
+            into.trimmedAt[targetCue] = into.trims->size();
+            into.trims->push_back ({ targetCue, trim });
+        }
+
+        /*  WHAT A CHAIN'S MEMBERS HAD SAID BY THE INSTANT (namespace draft
+            §115), read off the runs a plan placed from `from` on: each message
+            cue and each fade among them that had started - a `finished` run's
+            offset is how long before the instant it did - in the order they
+            started, the last writer winning. One seated SOUNDING, a curve or a
+            fade the instant lands inside, is the last word on what it moves
+            and is written by its own run from there: `live`, so the jump does
+            not send it. A member still due had not spoken.
+
+            Inside a timed chain the instant is on the chain's own clock, so
+            this is arithmetic the document can do; everything OUTSIDE the chain
+            is at its end state by row, the caller's pass. */
+        void placeRunMessages (const Reader& read, const doc::ShowDocument& document,
+                               const tree::MountTable* mounts, const std::vector<PlannedRun>& runs,
+                               std::size_t from, Placing& into)
+        {
+            std::vector<const PlannedRun*> spoken;
+
+            for (auto index = from; index < runs.size(); ++index)
+            {
+                const auto& run = runs[index];
+
+                if (run.when != planned::finished && run.when != planned::sounding
+                      && run.when != planned::postWait)
+                    continue;
+
+                const auto node = document.findById (run.cue);
+
+                if (! node.isValid())
+                    continue;
+
+                if (! node.hasType ("Osc") && ! node.hasType ("Midi") && ! node.hasType ("Fade"))
+                    continue;
+
+                if (! read.flag (node, "cue", "enabled"))
+                    continue;
+
+                spoken.push_back (&run);
+            }
+
+            std::stable_sort (spoken.begin(), spoken.end(),
+                              [] (const PlannedRun* a, const PlannedRun* b) { return a->offset > b->offset; });
+
+            for (const auto* run : spoken)
+            {
+                const auto node = document.findById (run->cue);
+
+                if (node.hasType ("Fade"))
+                    placeTrim (read, document, node, run->offset, into);
+                else
+                    placeMessages (read, node, run->offset, run->when == planned::sounding, mounts, into);
+            }
         }
 
         /*  How long a sound cue holds its sound back, in seconds on the clock
@@ -529,17 +864,26 @@ namespace wfg::cue
                             the scene the scheduler takes over never fires it. A
                             fade or a message the instant has already passed is
                             over - what it wrote is in the values and the trims. */
-                        if (inner == planned::finished || (! endless && entry.to <= at))
+                        /*  AND HOW LONG BEFORE THE INSTANT IT STARTED, kept on a
+                            run that is over too (namespace draft §115): the order
+                            the chain's messages and fades are read in. */
+                        const auto since = at - entry.from;
+
+                        if (inner == planned::finished
+                              || (! endless && entry.to <= at && ! messageStillGoing (read, entry, since)))
+                        {
                             beside.when = planned::finished;
+                            beside.offset = std::max (since, 0.0);
+                        }
                         else if (at < entry.from)
                         {
                             beside.when = planned::due;
                             beside.startsIn = entry.from - at;
                         }
                         else if (entry.element == "Media")
-                            placeInRanges (read, entry.node, at - entry.from, beside, plan.confused, durations);
+                            placeInRanges (read, entry.node, since, beside, plan.confused, durations);
                         else if (entry.element == "Group")
-                            beside.offset = at - entry.from;
+                            beside.offset = since;
                         else if (entry.element == "Mic")
                         {
                             /*  A LIVE INPUT BESIDE THE TARGET IS SOUNDING
@@ -553,10 +897,22 @@ namespace wfg::cue
                                 its `from` plus that, on the sounds' sample. One
                                 whose length the instant has passed is over,
                                 above. */
-                            beside.offset = at - entry.from;
+                            beside.offset = since;
+                        }
+                        else if (entry.element == "Osc" || entry.element == "Midi")
+                        {
+                            /*  A CURVE OR A FADE THE INSTANT LANDS INSIDE goes
+                                on from there (namespace draft §115): seated
+                                sounding, `since` seconds in, its run writing
+                                the rest. What it holds at the instant is in
+                                the values, marked as its run's to write. */
+                            beside.offset = since;
                         }
                         else
+                        {
                             beside.when = planned::finished;
+                            beside.offset = std::max (since, 0.0);
+                        }
 
                         if (entry.element == "Group")
                             innerWhen[entry.id] = beside.when;
@@ -755,6 +1111,13 @@ namespace wfg::cue
                         if (const auto length = read.number (target.node, "timecode", "length");
                             length > 0.0 && offset >= length)
                             run.when = planned::finished;
+
+                    /*  A MESSAGE CUE AIMED AT (namespace draft §115): sounding
+                        while its curves or its fade are still moving at the
+                        offset, over otherwise - what it said is in the values. */
+                    if ((target.element == "Osc" || target.element == "Midi")
+                          && ! messageStillGoing (read, target, offset))
+                        run.when = planned::finished;
 
                     plan.runs.push_back (run);
                 }
@@ -1031,6 +1394,12 @@ namespace wfg::cue
         /*  And a looping scene among them placed by its start gets its round. */
         expandInnerRounds (read, document, durations, out.runs, before, stopped, plan.confused);
 
+        /*  AND WHAT THE ROUND'S MEMBERS HAD SAID BY THE SECOND (namespace draft
+            §115), for a seek of a scene in its round. No mount table here: an
+            event-kind node is the caller's to leave out. */
+        Placing placing { out.values, out.midi, nullptr, plan.confused };
+        placeRunMessages (read, document, nullptr, out.runs, 0, placing);
+
         out.confused = plan.confused;
         return out;
     }
@@ -1229,107 +1598,57 @@ namespace wfg::cue
             bounds what is RUNNING - the footer has run and nothing it started
             is still going - and bounds nothing at all about what is SET. A
             level somebody chose in act one is still chosen in act three, and a
-            walk that stopped at a boundary would quietly lose it. */
-        std::map<std::string, std::size_t> writtenAt;
+            walk that stopped at a boundary would quietly lose it.
+
+            AND THE TARGET'S OWN CHAIN BY TIME, NOT BY ROW (namespace draft
+            §115). Inside a timeline or an automatic sequence there is no
+            person between the members, so the document knows which of them
+            had spoken `offset` seconds in - and the rows do not: a member
+            listed before the target may be due after the instant, one listed
+            after it may have fired before. Read by row, a jump into a scene
+            sent the future and lost the past, and aimed at the scene itself
+            sent nothing of it at all, every member's row being after the
+            scene's. So the chain's timed members are left to the run half,
+            which places each at its second, and are read off those runs
+            below; everything outside the chain is at its end state, by row,
+            as §3.13 says of a manual list. The trims, the same pass. */
+        Placing placing { plan.values, plan.midi, &plan.trims, plan.confused };
+
+        const auto untilStopped = ! target->timed && target->element == "Timecode"
+                                    && ! target->startChain.empty();
+        const auto chain = ! fired ? std::string {}
+                         : target->timed ? target->chain
+                         : target->element == "Group" ? target->id
+                         : untilStopped ? target->startChain
+                                        : std::string {};
+
+        const auto inChain = [&chain] (const Placed& entry)
+        {
+            return ! chain.empty() && entry.timed && entry.chain == chain;
+        };
 
         for (const auto& entry : walk.placed)
         {
-            if (entry.row > target->row || (entry.row == target->row && ! fired))
+            /*  The target itself is read from its run when it has fired -
+                at the offset, where a curve or a fade of its own is partway. */
+            if (entry.row >= target->row)
                 break;
 
             read.pass (entry.node);
 
-            if (entry.element != "Osc")
+            if (inChain (entry))
+                continue;
+
+            if (entry.element != "Osc" && entry.element != "Midi" && entry.element != "Fade")
                 continue;
 
             if (! read.flag (entry.node, "cue", "enabled"))
                 continue;
 
-            for (const auto& [address, text] : messagesOf (read, entry.node))
-            {
-                if (address.empty())
-                    continue;
-
-                /*  AN EVENT IS NOT A VALUE (§3.13 step 4). "Fire the pyro" has
-                    no state to restore to, and a jump that re-sent it would set
-                    the theatre alight on the way past a cue that already
-                    happened. A mount that has not been loaded says nothing about
-                    its nodes, so nothing is excluded - which is the direction
-                    that fires, and is why a caller with a mount table hands it
-                    over. */
-                if (mounts != nullptr)
-                    if (const auto* node = mounts->nodeAt (address);
-                        node != nullptr && node->kind == tree::Kind::event)
-                        continue;
-
-                const auto value = osc::valuesFromAtoms (text);
-
-                if (! value.has_value())
-                    continue;
-
-                const auto seen = writtenAt.find (address);
-
-                if (seen != writtenAt.end())
-                {
-                    plan.values[seen->second] = { address, *value, entry.id };
-                    continue;
-                }
-
-                writtenAt[address] = plan.values.size();
-                plan.values.push_back ({ address, *value, entry.id });
-            }
-        }
-
-        //----------------------------------------------------------------------
-        /*  THE TRIMS: base plus the sum of what the fades did (PR 3.12).
-
-            A fade before the target has completed - the same end-state rule the
-            runs follow - so it contributes its whole change. What it changed is
-            the difference between where it was told to go and what its target
-            cue says, which is the one thing a level can be trimmed BY. */
-        std::map<std::string, std::size_t> trimmedAt;
-        read.forgetSwitches();
-
-        for (const auto& entry : walk.placed)
-        {
-            if (entry.row > target->row || (entry.row == target->row && ! fired))
-                break;
-
-            read.pass (entry.node);
-
-            if (entry.element != "Fade" || ! read.flag (entry.node, "cue", "enabled"))
-                continue;
-
-            /*  A FADE THAT LEAVES THE LEVEL ALONE trims nothing (namespace
-                draft §22.6): read as a level, a fade that moves only the speed
-                would be a fade to its `level`'s default, silence. Its speed is
-                not solved (EE). */
-            if (! read.flag (entry.node, "fade", "levelOn"))
-                continue;
-
-            const auto targetCue = read.text (entry.node, "fade", "target");
-
-            if (targetCue.empty())
-                continue;
-
-            const auto level = read.number (entry.node, "fade", "level");
-            const auto cue = document.findById (targetCue);
-
-            if (! cue.isValid())
-                continue;
-
-            const auto trim = level - read.number (cue, "sound", "level");
-
-            const auto seen = trimmedAt.find (targetCue);
-
-            if (seen != trimmedAt.end())
-            {
-                plan.trims[seen->second].decibels = trim;
-                continue;
-            }
-
-            trimmedAt[targetCue] = plan.trims.size();
-            plan.trims.push_back ({ targetCue, trim });
+            if (entry.element == "Fade")
+                placeTrim (read, document, entry.node, std::nullopt, placing);
+            else
+                placeMessages (read, entry.node, std::nullopt, false, mounts, placing);
         }
 
         //----------------------------------------------------------------------
@@ -1402,7 +1721,15 @@ namespace wfg::cue
         }
 
         if (fired && read.flag (target->node, "cue", "enabled"))
+        {
+            const auto from = plan.runs.size();
             planTarget (read, document, durations, walk, *target, aim.offset, stopped, plan);
+
+            /*  AND WHAT THE TARGET'S CHAIN HAD SAID BY THE INSTANT, off the runs
+                it placed (namespace draft §115): after the rows outside it, so
+                the chain's writers are the later ones. */
+            placeRunMessages (read, document, mounts, plan.runs, from, placing);
+        }
 
         /*  WHAT THIS RUN HAS SWITCHED BY THE PLACE (PK): every enable and
             disable cue before it, and the target itself once it has fired. */
@@ -1499,9 +1826,8 @@ namespace wfg::cue
                           [] (const Step& a, const Step& b) { return a.tick < b.tick; });
 
         std::vector<std::string> stopped;
-        std::map<std::string, std::size_t> writtenAt;
-        std::map<std::string, std::size_t> trimmedAt;
         std::string lastGo;
+        Placing placing { plan.values, plan.midi, &plan.trims, plan.confused };
 
         /*  A CUE FIRED AGAIN REPLACES ITS EARLIER SELF: the runs its earlier
             step planned - itself, and a scene's members - go before the later
@@ -1554,32 +1880,12 @@ namespace wfg::cue
                 continue;
             }
 
-            if (entry->element == "Osc")
+            /*  A MESSAGE FIRED AT A STEP IS A VALUE, last writer by time: an OSC
+                cue's messages, a MIDI cue's state (namespace draft §115). Over
+                by the instant - what it holds is its end state. */
+            if (entry->element == "Osc" || entry->element == "Midi")
             {
-                for (const auto& [address, text] : messagesOf (read, entry->node))
-                {
-                    if (address.empty())
-                        continue;
-
-                    if (mounts != nullptr)
-                        if (const auto* node = mounts->nodeAt (address);
-                            node != nullptr && node->kind == tree::Kind::event)
-                            continue;
-
-                    const auto value = osc::valuesFromAtoms (text);
-
-                    if (! value.has_value())
-                        continue;
-
-                    if (const auto seen = writtenAt.find (address); seen != writtenAt.end())
-                        plan.values[seen->second] = { address, *value, entry->id };
-                    else
-                    {
-                        writtenAt[address] = plan.values.size();
-                        plan.values.push_back ({ address, *value, entry->id });
-                    }
-                }
-
+                placeMessages (read, entry->node, std::nullopt, false, mounts, placing);
                 continue;
             }
 
@@ -1587,33 +1893,8 @@ namespace wfg::cue
             {
                 /*  WHOLE ONCE ITS TIME HAS PASSED, and the part of it that had
                     happened inside it: a fade three seconds into six has moved
-                    its target half of the way. Linear, which is the shape a
-                    reading can promise without the curve; the run that is
-                    built from this plays the real one. A fade that leaves the
-                    level alone trims nothing, as above. */
-                if (! read.flag (entry->node, "fade", "levelOn"))
-                    continue;
-
-                const auto targetCue = read.text (entry->node, "fade", "target");
-                const auto cue = document.findById (targetCue);
-
-                if (targetCue.empty() || ! cue.isValid())
-                    continue;
-
-                const auto whole = read.number (entry->node, "fade", "level")
-                                     - read.number (cue, "sound", "level");
-                const auto duration = read.number (entry->node, "fade", "duration");
-                const auto part = duration > 0.0 && seconds < duration ? seconds / duration : 1.0;
-                const auto trim = whole * part;
-
-                if (const auto seen = trimmedAt.find (targetCue); seen != trimmedAt.end())
-                    plan.trims[seen->second].decibels = trim;
-                else
-                {
-                    trimmedAt[targetCue] = plan.trims.size();
-                    plan.trims.push_back ({ targetCue, trim });
-                }
-
+                    its target half of the way. */
+                placeTrim (read, document, entry->node, seconds, placing);
                 continue;
             }
 
@@ -1707,7 +1988,15 @@ namespace wfg::cue
             }
 
             unplan (entry->id);
+
+            const auto from = plan.runs.size();
             planTarget (read, document, durations, walk, *entry, seconds, stopped, plan);
+
+            /*  AND WHAT ITS CHAIN HAD SAID BY THE INSTANT (namespace draft
+                §115): a scene fired at this step has had `seconds` of its own
+                clock, and its messages and fades are read off the runs just
+                placed - after the steps before this one, before the later. */
+            placeRunMessages (read, document, mounts, plan.runs, from, placing);
         }
 
         /*  THE POINTER, where the last GO in the instant's past left it:
@@ -1974,6 +2263,21 @@ namespace wfg::cue
             out += "{\"address\": " + quoted (values[n].address)
                      + ", \"value\": " + quoted (osc::atomsOf (values[n].value))
                      + ", \"from\": " + quoted (values[n].writer) + "}";
+        }
+
+        out += "], \"midi\": [";
+
+        for (std::size_t n = 0; n < midi.size(); ++n)
+        {
+            const auto& spec = midi[n].spec;
+
+            out += n == 0 ? "" : ", ";
+            out += "{\"port\": " + quoted (midi[n].port)
+                     + ", \"type\": " + quoted (spec.type)
+                     + ", \"channel\": " + std::to_string (spec.channel)
+                     + ", \"data1\": " + std::to_string (spec.data1)
+                     + ", \"data2\": " + std::to_string (spec.data2)
+                     + ", \"from\": " + quoted (midi[n].writer) + "}";
         }
 
         out += "], \"trims\": [";

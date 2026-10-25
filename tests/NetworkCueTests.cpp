@@ -5155,3 +5155,120 @@ TEST_CASE ("mount: removePrefix is read from the show into the device's declarat
     CHECK (declaration->removePrefix);
     CHECK (tree::MountSender::destinationFor (*declaration).removedPrefix == "/MacMini_Justice1");
 }
+
+//==============================================================================
+/*  NAMESPACE DRAFT §115 (the author, 2026-10-25): a jump into a scene puts the
+    MIDI state its members had sent by the second on the port, as it puts the
+    OSC values on the desk - the state kinds, never a note; nothing where the
+    port is switched off; and a seek of the running scene does the same. Each
+    case was written first and failed on fdeaad13. */
+namespace
+{
+    struct MidiSceneRig : NetworkRig
+    {
+        MidiSceneRig()
+        {
+            const auto made = document.createPort ("Desk");
+            REQUIRE (made.ok);
+            port = made.id;
+
+            scene = document.createCue (listId, index++, "group", "Song").id;
+            REQUIRE (document.setAttribute ("/godot/cue/" + scene + "/mode", "timeline").ok);
+
+            control = midiIn (0, "controlChange", "7", "64", "1");
+            note = midiIn (1, "noteOn", "60", "127", "2");
+            later = midiIn (2, "controlChange", "7", "20", "30");
+
+            const auto hold = document.createCue (scene, 3, "memo", "Hold").id;
+            REQUIRE (document.setAttribute ("/godot/cue/" + hold + "/preWait", "60").ok);
+
+            document.createCue (listId, index++, "memo", "After");
+            runner.setMidiSink (&sink);
+        }
+
+        std::string midiIn (int at, const char* type, const char* data1, const char* data2, const char* preWait)
+        {
+            const auto id = document.createCue (scene, at, "midi", "Desk").id;
+            REQUIRE (document.setAttribute ("/godot/cue/" + id + "/port", port).ok);
+            REQUIRE (document.setAttribute ("/godot/cue/" + id + "/type", type).ok);
+            REQUIRE (document.setAttribute ("/godot/cue/" + id + "/data1", data1).ok);
+            REQUIRE (document.setAttribute ("/godot/cue/" + id + "/data2", data2).ok);
+            REQUIRE (document.setAttribute ("/godot/cue/" + id + "/preWait", preWait).ok);
+            return id;
+        }
+
+        void jumpTo (double offset)
+        {
+            REQUIRE (engine.submit ("cli", "list.aim", { osc::Value::string (listId), osc::Value::string (scene),
+                                                         osc::Value::float64 (offset) }));
+            tickOnce();
+            REQUIRE (engine.submit ("cli", "list.loadToTime", { osc::Value::string (listId) }));
+            tickOnce();     // the handler seats
+            tickOnce();     // the flush sends
+        }
+
+        std::size_t sent (std::uint8_t status, std::uint8_t data1) const
+        {
+            std::size_t count = 0;
+
+            for (const auto& [to, bytes] : sink.taken)
+                if (to == port && bytes.size() >= 2 && bytes[0] == status && bytes[1] == data1)
+                    ++count;
+
+            return count;
+        }
+
+        CountingMidi sink;
+        std::string port, scene, control, note, later;
+    };
+}
+
+TEST_CASE ("jump: the MIDI state a scene had sent by the second reaches the port once, a note never (namespace draft 115)")
+{
+    MidiSceneRig rig;
+
+    rig.jumpTo (5.0);
+
+    //  The control change at one second, as written; not the note at two; not the change due at thirty.
+    REQUIRE (rig.sink.taken.size() == 1u);
+    CHECK (rig.sink.taken[0].second == std::vector<std::uint8_t> { 0xB0, 0x07, 0x40 });
+    CHECK (rig.sent (0x90, 60) == 0u);
+
+    //  A few ticks on, nothing else leaves: the seated members are over, the later one waits.
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.sink.taken.size() == 1u);
+
+    //  Before the first message: nothing of the scene has spoken.
+    rig.jumpTo (0.5);
+    CHECK (rig.sink.taken.size() == 1u);
+}
+
+TEST_CASE ("jump: a port switched off hears nothing of the state a jump wants on it (namespace draft 115)")
+{
+    MidiSceneRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/port/" + rig.port + "/tx", "false").ok);
+
+    rig.jumpTo (5.0);
+    CHECK (rig.sink.taken.empty());
+}
+
+TEST_CASE ("seek: a scene scrubbed to a second puts the state its members had sent by then on the port (namespace draft 115)")
+{
+    MidiSceneRig rig;
+
+    rig.jumpTo (0.5);
+    REQUIRE (rig.sink.taken.empty());
+
+    const auto* run = rig.runOf (rig.scene);
+    REQUIRE (run != nullptr);
+    const auto id = run->id;
+
+    REQUIRE (rig.engine.submit ("cli", "run.seek", { osc::Value::string (id), osc::Value::float64 (5.0) }));
+    rig.tickOnce();
+    rig.tickOnce();
+
+    REQUIRE (rig.sink.taken.size() == 1u);
+    CHECK (rig.sink.taken[0].second == std::vector<std::uint8_t> { 0xB0, 0x07, 0x40 });
+}

@@ -68,6 +68,7 @@
 */
 
 #include <wfg/engine/cue/ListState.h>
+#include <wfg/engine/midi/MidiMessages.h>
 #include <wfg/engine/osc/OscValue.h>
 
 #include <juce_data_structures/juce_data_structures.h>
@@ -131,7 +132,10 @@ namespace wfg::cue
         /** Its groups, outermost first. Empty for a cue at the top of a list. */
         std::vector<std::string> ancestors;
 
-        /** Seconds into the cue's own material. */
+        /*  Seconds into the cue's own material. Set for a `finished` message,
+            fade or scene member of a timed chain too (namespace draft §115):
+            how long before the instant it started, which is the order the
+            chain's writers are read in - a seat reads nothing of it. */
         double offset = 0.0;
 
         /*  A SOUND HELD BACK (namespace draft §70, AOV): seconds of its delay
@@ -172,6 +176,27 @@ namespace wfg::cue
 
         /** The cue that wrote it last, so a client can say where it came from. */
         std::string writer;
+
+        /*  BEING WRITTEN BY A RUN THE PLAN SEATS SOUNDING (namespace draft
+            §115): a curve the instant lands inside goes on from there under
+            its own run, so the value is the last writer's - nothing before it
+            is sent - and not sent by the jump itself, which would land a
+            tick-old value over the moving curve. */
+        bool live = false;
+    };
+
+    /*  ONE MIDI MESSAGE THE PORT SHOULD HAVE HEARD LAST (namespace draft §115;
+        the author's choice, 2026-10-25): a control change, a programme change,
+        a bend, a pressure or a dump is state a desk holds, re-sent by a jump
+        as an OSC value is - unconditionally, since MIDI has no read-back. A
+        NOTE IS AN EVENT (§3.13 step 4) and is never here: the cue is in the
+        confused list instead. `spec.data2` is a fade's value at the instant. */
+    struct PlannedMidi
+    {
+        std::string port;
+        midi::MessageSpec spec;
+        std::string writer;
+        bool live = false;
     };
 
     /*  A level that is not where its cue says, because a fade moved it.
@@ -214,6 +239,10 @@ namespace wfg::cue
         /** A looping group: standby says which member and nothing says which
             round. */
         inline constexpr const char* unknownRound = "unknown-round";
+
+        /*  A MIDI note before the instant (namespace draft §115): an event,
+            not a value, so a jump does not play it again. */
+        inline constexpr const char* eventKind = "event-kind";
     }
 
     //==============================================================================
@@ -226,6 +255,7 @@ namespace wfg::cue
 
         std::vector<PlannedRun> runs;
         std::vector<PlannedValue> values;
+        std::vector<PlannedMidi> midi;
         std::vector<PlannedTrim> trims;
         std::vector<Confusion> confused;
 
@@ -322,6 +352,14 @@ namespace wfg::cue
     struct RoundPlan
     {
         std::vector<PlannedRun> runs;
+
+        /*  What the round's messages had said by the second (namespace draft
+            §115), as a plan's: the last writer among the members placed before
+            it. No mount table is asked here, so an event-kind node is the
+            caller's to leave out. */
+        std::vector<PlannedValue> values;
+        std::vector<PlannedMidi> midi;
+
         std::optional<double> length;
         std::map<std::string, double> starts;
         std::vector<Confusion> confused;

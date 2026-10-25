@@ -2564,7 +2564,15 @@ namespace wfg::cue
                        const std::vector<PlannedRun>& wanted,
                        std::map<std::string, std::string>& runFor,
                        const NameDraw& nextId,
-                       const SeatResume* resume = nullptr);
+                       const SeatResume* resume = nullptr,
+                       const std::vector<PlannedTrim>* trims = nullptr);
+
+        /*  THE SECOND A SEAT FIRES A MESSAGE CUE AT (namespace draft §115),
+            while `seatPlan` fires one the instant landed inside: an OSC cue's
+            curves write their value there and run on from it, a MIDI fade is
+            dated back by it. -1 for every other fire - a GO, a scene's spawn -
+            which starts at its top. */
+        double seatingAt = -1.0;
 
         /*  The slots a cue's `Feed` and `Insert` children name, claimed for its
             run (PRD §3.9b, §3.9e).
@@ -4666,6 +4674,13 @@ namespace wfg::cue
             std::string list;
             std::vector<DeskBefore> desk;
             std::vector<std::pair<std::string, osc::Values>> values;
+
+            /*  THE MIDI STATE A JUMP OR A SEEK WANTS ON ITS PORTS (namespace
+                draft §115): sent as a Doh's MIDI rollback is, straight onto the
+                port where its `tx` is on. Nothing to compare against - MIDI has
+                no read-back - so every one is sent. */
+            std::vector<PlannedMidi> midi;
+
             std::vector<std::string> items;
             bool report = false;
 
@@ -4698,6 +4713,11 @@ namespace wfg::cue
 
         /*  Set while a put-back makes runs: nobody's GO (GY's rule). */
         bool makingForPutBack = false;
+
+        /*  What a plan's values and MIDI messages leave for the flush: the ones
+            a seated run is not about to write itself (`live`). */
+        void stashPlanned (std::int64_t tick, const std::vector<PlannedValue>& values,
+                           const std::vector<PlannedMidi>& midi);
 
         /*  WHAT ONE PUT-BACK HAS IN HAND: the press's tick, the GO's serial and
             list, the panic fade it fades over, the identifiers it may draw, the

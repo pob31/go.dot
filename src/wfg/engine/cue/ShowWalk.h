@@ -128,7 +128,11 @@ namespace wfg::cue
                                        //  A timecode cue's start and length (namespace draft §59).
                                        "timecode",
                                        //  A time group's member: its start and its chase (§60).
-                                       "timed" })
+                                       "timed",
+                                       /*  An OSC cue's own row and a MIDI cue's (namespace draft
+                                           §115): the solver reads a MIDI cue's channel, its type
+                                           and its fade, whose defaults are not nought. */
+                                       "osc", "midi" })
                 for (const auto* row : doc::Schema::rowsForOwner (owner))
                     defaults[std::string (owner) + "/" + std::string (row->name)]
                         = std::string (row->defaultText);

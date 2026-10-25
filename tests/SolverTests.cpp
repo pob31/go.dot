@@ -48,6 +48,7 @@
 
 #include <algorithm>
 #include <map>
+#include <optional>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -1237,4 +1238,282 @@ TEST_CASE ("solve: inside an automatic Crossfade both members are sounding, each
 
     REQUIRE (thirdRun != nullptr);
     CHECK (thirdRun->offset == doctest::Approx (3.5));
+}
+
+//==============================================================================
+/*  NAMESPACE DRAFT §115 (the author, 2026-10-25): a load to time says what the
+    scene's messages had said by the second. The value half used to read the
+    rows, which inside a timed chain is the wrong clock: a member listed before
+    the target may be due after the instant, one listed after it may have
+    spoken before - and aimed at the scene itself, every member's row is after
+    the scene's, so nothing of it was sent at all. Each case here was written
+    first and failed on fdeaad13. */
+namespace
+{
+    /*  A timeline scene with a long sound and three messages at their seconds,
+        WRITTEN OUT OF TIME ORDER so a reading by row and a reading by time
+        disagree: the latest message first, the sound, then two on one address. */
+    struct SceneRig : SolverRig
+    {
+        SceneRig()
+        {
+            durations["long.wav"] = 60.0;
+
+            scene = document.createCue (listId, 0, "group", "Song").id;
+            document.setAttribute ("/godot/cue/" + scene + "/mode", "timeline");
+
+            late = messageIn (scene, 0, "/lx/b", "i:2", "12");
+            sound = document.createCue (scene, 1, "media", "Song").id;
+            document.setAttribute ("/godot/cue/" + sound + "/file", "long.wav");
+            early = messageIn (scene, 2, "/lx/a", "i:1", "2");
+            middle = messageIn (scene, 3, "/lx/a", "i:3", "6");
+
+            after = document.createCue (listId, 1, "memo", "After").id;
+        }
+
+        std::string messageIn (const std::string& parent, int index, const std::string& address,
+                               const std::string& atom, const char* preWait)
+        {
+            const auto id = document.createCue (parent, index, "osc", "Desk").id;
+            document.setAttribute ("/godot/cue/" + id + "/address", address);
+            document.setAttribute ("/godot/cue/" + id + "/value", atom);
+            document.setAttribute ("/godot/cue/" + id + "/preWait", preWait);
+            return id;
+        }
+
+        std::string midiIn (const std::string& parent, int index, const std::string& port, const char* type,
+                            const char* data1, const char* data2, const char* preWait)
+        {
+            const auto id = document.createCue (parent, index, "midi", "Desk").id;
+            document.setAttribute ("/godot/cue/" + id + "/port", port);
+            document.setAttribute ("/godot/cue/" + id + "/type", type);
+            document.setAttribute ("/godot/cue/" + id + "/data1", data1);
+            document.setAttribute ("/godot/cue/" + id + "/data2", data2);
+            document.setAttribute ("/godot/cue/" + id + "/preWait", preWait);
+            return id;
+        }
+
+        const cue::PlannedRun* runOf (const cue::Plan& plan, const std::string& cueId)
+        {
+            for (const auto& run : plan.runs)
+                if (run.cue == cueId)
+                    return &run;
+
+            return nullptr;
+        }
+
+        std::string scene, sound, early, middle, late, after;
+    };
+
+    int intOf (const cue::PlannedValue& value)
+    {
+        REQUIRE (value.value.size() == 1u);
+        return value.value.front().getInt32();
+    }
+}
+
+TEST_CASE ("solve: a scene's messages are read at the second, not by row (namespace draft 115)")
+{
+    SceneRig rig;
+
+    SUBCASE ("aimed at the scene, eight seconds in: the two that had spoken, the later winning")
+    {
+        const auto plan = rig.solve (rig.scene, 8.0);
+        REQUIRE (plan.ok);
+
+        const auto* a = rig.valueAt (plan, "/lx/a");
+        REQUIRE (a != nullptr);
+        CHECK (intOf (*a) == 3);
+        CHECK (a->writer == rig.middle);
+        CHECK_FALSE (a->live);
+
+        //  The one due at twelve has not spoken, whatever its row says.
+        CHECK (rig.valueAt (plan, "/lx/b") == nullptr);
+        REQUIRE (rig.runOf (plan, rig.late) != nullptr);
+        CHECK (rig.runOf (plan, rig.late)->when == cue::planned::due);
+    }
+
+    SUBCASE ("aimed at the scene, four seconds in: only the first had spoken")
+    {
+        const auto plan = rig.solve (rig.scene, 4.0);
+        const auto* a = rig.valueAt (plan, "/lx/a");
+        REQUIRE (a != nullptr);
+        CHECK (intOf (*a) == 1);
+        CHECK (a->writer == rig.early);
+    }
+
+    SUBCASE ("aimed at the sound inside it, the same clock")
+    {
+        const auto plan = rig.solve (rig.sound, 8.0);
+        const auto* a = rig.valueAt (plan, "/lx/a");
+        REQUIRE (a != nullptr);
+        CHECK (intOf (*a) == 3);
+        CHECK (rig.valueAt (plan, "/lx/b") == nullptr);
+
+        const auto before = rig.solve (rig.sound, 1.0);
+        CHECK (rig.valueAt (before, "/lx/a") == nullptr);
+    }
+
+    SUBCASE ("past the whole scene, by row: every message at its end state, the last row winning")
+    {
+        const auto plan = rig.solve (rig.after, -1.0);
+        const auto* a = rig.valueAt (plan, "/lx/a");
+        REQUIRE (a != nullptr);
+        CHECK (intOf (*a) == 3);
+        REQUIRE (rig.valueAt (plan, "/lx/b") != nullptr);
+        CHECK (intOf (*rig.valueAt (plan, "/lx/b")) == 2);
+    }
+
+    SUBCASE ("read from what happened: the scene fired at a step, its members by the same clock")
+    {
+        std::vector<cue::Step> steps { { 1000, rig.scene, 'g', 1 } };
+        const auto plan = cue::solveHistory (rig.document, &rig.durations, nullptr,
+                                             { rig.listId, rig.scene, 8.0 }, steps);
+        REQUIRE (plan.ok);
+        CHECK (plan.how == "history");
+
+        const auto* a = rig.valueAt (plan, "/lx/a");
+        REQUIRE (a != nullptr);
+        CHECK (intOf (*a) == 3);
+        CHECK (rig.valueAt (plan, "/lx/b") == nullptr);
+    }
+}
+
+TEST_CASE ("solve: a MIDI cue before the place is state a jump re-sends, and a note is not (namespace draft 115)")
+{
+    SceneRig rig;
+    const auto port = rig.document.createPort ("Desk");
+    REQUIRE (port.ok);
+
+    SUBCASE ("by row, before the target: a control change is planned, a note is said")
+    {
+        const auto control = rig.midiIn (rig.listId, 0, port.id, "controlChange", "7", "100", "0");
+        const auto note = rig.midiIn (rig.listId, 1, port.id, "noteOn", "60", "127", "0");
+        const auto target = rig.document.createCue (rig.listId, 2, "memo", "Here").id;
+
+        const auto plan = rig.solve (target, -1.0);
+        REQUIRE (plan.ok);
+        REQUIRE (plan.midi.size() == 1u);
+        CHECK (plan.midi[0].port == port.id);
+        CHECK (plan.midi[0].spec.type == "controlChange");
+        CHECK (plan.midi[0].spec.channel == 1);
+        CHECK (plan.midi[0].spec.data1 == 7);
+        CHECK (plan.midi[0].spec.data2 == 100);
+        CHECK (plan.midi[0].writer == control);
+        CHECK (rig.confusedAbout (plan, note, cue::confusion::eventKind));
+        CHECK (plan.toJson().find ("\"midi\": [{\"port\": ") != std::string::npos);
+    }
+
+    SUBCASE ("inside the scene, by time: the later of two on one controller wins, the one still to come is silent")
+    {
+        rig.midiIn (rig.scene, 4, port.id, "controlChange", "7", "100", "2");
+        const auto later = rig.midiIn (rig.scene, 5, port.id, "controlChange", "7", "50", "6");
+        rig.midiIn (rig.scene, 6, port.id, "controlChange", "7", "10", "20");
+
+        const auto at8 = rig.solve (rig.scene, 8.0);
+        REQUIRE (at8.midi.size() == 1u);
+        CHECK (at8.midi[0].spec.data2 == 50);
+        CHECK (at8.midi[0].writer == later);
+
+        const auto at4 = rig.solve (rig.scene, 4.0);
+        REQUIRE (at4.midi.size() == 1u);
+        CHECK (at4.midi[0].spec.data2 == 100);
+
+        const auto at1 = rig.solve (rig.scene, 1.0);
+        CHECK (at1.midi.empty());
+    }
+
+    SUBCASE ("a MIDI fade the instant lands inside is where the fade would be, and goes on from there")
+    {
+        const auto fade = rig.midiIn (rig.scene, 4, port.id, "controlChange", "7", "0", "0");
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + fade + "/fadeTo", "100").ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + fade + "/fadeTime", "10").ok);
+
+        const auto inside = rig.solve (rig.scene, 5.0);
+        REQUIRE (inside.midi.size() == 1u);
+        CHECK (inside.midi[0].spec.data2 == 50);
+        CHECK (inside.midi[0].live);
+        REQUIRE (rig.runOf (inside, fade) != nullptr);
+        CHECK (rig.runOf (inside, fade)->when == cue::planned::sounding);
+        CHECK (rig.runOf (inside, fade)->offset == doctest::Approx (5.0));
+
+        const auto past = rig.solve (rig.scene, 12.0);
+        REQUIRE (past.midi.size() == 1u);
+        CHECK (past.midi[0].spec.data2 == 100);
+        CHECK_FALSE (past.midi[0].live);
+        CHECK (rig.runOf (past, fade)->when == cue::planned::finished);
+    }
+}
+
+TEST_CASE ("solve: a curve the instant lands inside is where the curve would be, and its run goes on from there (namespace draft 115)")
+{
+    SceneRig rig;
+
+    const auto ramp = rig.messageIn (rig.scene, 4, "/desk/fader", "f:0", "0");
+    const auto made = rig.document.createCurve (ramp, 0);
+    REQUIRE (made.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/curve/" + made.id + "/points", "0 0 2 0.6").ok);
+
+    SUBCASE ("inside: the value there, live, the run sounding at that second")
+    {
+        const auto plan = rig.solve (rig.scene, 1.0);
+        const auto* fader = rig.valueAt (plan, "/desk/fader");
+        REQUIRE (fader != nullptr);
+        REQUIRE (fader->value.size() == 1u);
+        CHECK (fader->value.front().getFloat32() == doctest::Approx (0.3f));
+        CHECK (fader->live);
+
+        REQUIRE (rig.runOf (plan, ramp) != nullptr);
+        CHECK (rig.runOf (plan, ramp)->when == cue::planned::sounding);
+        CHECK (rig.runOf (plan, ramp)->offset == doctest::Approx (1.0));
+    }
+
+    SUBCASE ("past its end: its last value, over")
+    {
+        const auto plan = rig.solve (rig.scene, 3.0);
+        const auto* fader = rig.valueAt (plan, "/desk/fader");
+        REQUIRE (fader != nullptr);
+        CHECK (fader->value.front().getFloat32() == doctest::Approx (0.6f));
+        CHECK_FALSE (fader->live);
+        CHECK (rig.runOf (plan, ramp)->when == cue::planned::finished);
+    }
+
+    SUBCASE ("a looping curve inside its chain is placed round its loop - the moment is timed")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + ramp + "/loop", "true").ok);
+
+        const auto plan = rig.solve (rig.scene, 3.0);     // one round and a second: half way up again
+        const auto* fader = rig.valueAt (plan, "/desk/fader");
+        REQUIRE (fader != nullptr);
+        CHECK (fader->value.front().getFloat32() == doctest::Approx (0.3f));
+        CHECK (fader->live);
+        CHECK (rig.runOf (plan, ramp)->when == cue::planned::sounding);
+    }
+}
+
+TEST_CASE ("solve: a fade inside the chain trims by the part of it that had happened (namespace draft 115)")
+{
+    SceneRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.sound + "/level", "-6").ok);
+
+    const auto fade = rig.document.createCue (rig.scene, 4, "fade", "Down").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + fade + "/target", rig.sound).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + fade + "/level", "-18").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + fade + "/duration", "4").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + fade + "/preWait", "2").ok);
+
+    const auto trimOf = [&rig] (double offset) -> std::optional<double>
+    {
+        const auto plan = rig.solve (rig.scene, offset);
+
+        for (const auto& trim : plan.trims)
+            if (trim.cue == rig.sound)
+                return trim.decibels;
+
+        return std::nullopt;
+    };
+
+    CHECK_FALSE (trimOf (1.0).has_value());                         // not started
+    CHECK (trimOf (4.0).value_or (0.0) == doctest::Approx (-6.0));  // half way
+    CHECK (trimOf (8.0).value_or (0.0) == doctest::Approx (-12.0)); // whole
 }

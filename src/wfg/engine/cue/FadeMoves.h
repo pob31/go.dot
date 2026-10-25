@@ -89,4 +89,11 @@ namespace wfg::cue
 
     /** The value along a move: `progress` 0..1, shaped by `sCurve` when asked. */
     double moveValueAt (double from, double to, double progress, bool sCurve, MoveDomain);
+
+    /*  A MIDI FADE'S SECOND BYTE `seconds` into it (namespace draft §100, AXY;
+        §115): `from` towards `to` over `duration`, straight or eased, rounded
+        to the nearest, `to` once the time has run - or at once with no time.
+        The one formula the tick's fade and the solver's reading share, so a
+        load to time inside the fade lands where the fade would have been. */
+    int midiFadeValueAt (int from, int to, double seconds, double duration, bool sCurve) noexcept;
 }

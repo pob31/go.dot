@@ -216,4 +216,15 @@ namespace wfg::cue
 
         return from + (to - from) * shaped;
     }
+
+    int midiFadeValueAt (int from, int to, double seconds, double duration, bool sCurve) noexcept
+    {
+        const auto t = duration > 0.0 ? std::clamp (seconds / duration, 0.0, 1.0) : 1.0;
+
+        if (t >= 1.0)
+            return to;
+
+        const auto shaped = sCurve ? t * t * (3.0 - 2.0 * t) : t;
+        return static_cast<int> (std::lround (from + (to - from) * shaped));
+    }
 }

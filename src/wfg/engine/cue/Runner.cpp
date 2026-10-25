@@ -32,6 +32,7 @@
 #include <wfg/engine/tree/Touches.h>
 #include <wfg/engine/cue/ShowWalk.h>
 #include <wfg/engine/cue/Solver.h>
+#include <wfg/engine/cue/FadeMoves.h>
 #include <wfg/engine/cue/Override.h>
 #include <wfg/engine/cue/GroupJoin.h>
 
@@ -2823,8 +2824,10 @@ namespace wfg::cue
         //----------------------------------------------------------------------
         /*  AND THE TREE, OUTERMOST FIRST - shared with a group re-seated at a
             second of its own timeline, which is the same building with the
-            scene's run already standing. */
-        seatPlan (engine, tick, plan.runs, runFor, nextId);
+            scene's run already standing. With the trims the fades before the
+            place left (namespace draft §115): a cue a fade had brought down
+            comes back down, as §3.13 says it should. */
+        seatPlan (engine, tick, plan.runs, runFor, nextId, nullptr, &plan.trims);
 
         //----------------------------------------------------------------------
         /*  AND THE VALUES: A MINIMAL CORRECTION, NOT A SHOTGUN BLAST (§3.13).
@@ -2847,10 +2850,9 @@ namespace wfg::cue
             every jump value twice. The flush on the next tick compares and
             sends, after that tick's give-backs - the old horizon's restores
             could otherwise land over a value the jump had just sent. */
-        auto& values = stashFor (tick);
-
-        for (const auto& value : plan.values)
-            values.values.emplace_back (value.address, value.value);
+        /*  AND THE MIDI STATE WITH THEM (namespace draft §115), and neither for
+            a value a run the seat has just fired writes itself. */
+        stashPlanned (tick, plan.values, plan.midi);
 
         /*  WHERE IT LANDED, which is §3.13's second pointer. After a jump this
             agrees with the aim; after the next GO it does not, and that
@@ -2883,8 +2885,23 @@ namespace wfg::cue
                            const std::vector<PlannedRun>& wanted,
                            std::map<std::string, std::string>& runFor,
                            const NameDraw& nextId,
-                           const SeatResume* resume)
+                           const SeatResume* resume,
+                           const std::vector<PlannedTrim>* trims)
     {
+        /*  WHAT A FADE BEFORE THE PLACE HAD DONE TO A CUE (namespace draft
+            §115): the plan's trim for it, when the caller handed the trims in. */
+        const auto trimFor = [trims] (const std::string& cueId) -> std::optional<double>
+        {
+            if (trims == nullptr)
+                return std::nullopt;
+
+            for (const auto& trim : *trims)
+                if (trim.cue == cueId)
+                    return trim.decibels;
+
+            return std::nullopt;
+        };
+
         /*  THE TREE, OUTERMOST FIRST.
 
             `RunTable::create` links a run into its parent's children only if
@@ -3058,6 +3075,14 @@ namespace wfg::cue
             if (resume != nullptr)
                 if (const auto level = resume->levels.find (wants.cue); level != resume->levels.end())
                     run->ownLevel = level->second;
+
+            /*  A FADE AIMED AT THE SCENE BEFORE THE PLACE had trimmed it
+                (namespace draft §115): a group's own level is that trim, nought
+                until a fade moves it, so a scene made here starts where the
+                fade had taken it. One standing keeps its own. */
+            if (madeHere)
+                if (const auto trim = trimFor (wants.cue); trim.has_value())
+                    run->ownLevel = *trim;
         }
 
         //----------------------------------------------------------------------
@@ -3141,9 +3166,32 @@ namespace wfg::cue
                 continue;
             }
 
+            /*  A CURVE OR A MIDI FADE THE INSTANT LANDS INSIDE (namespace draft
+                §115): fired as its GO fires it, at the second the plan says -
+                `seatingAt`, which `fireOsc` writes the curves' value at and
+                starts their clock from, and `fireMidi` dates its fade back by -
+                so it goes on from where it would have been, under its own run.
+                Its pre-wait is behind it: the chain placed it. Nothing of what
+                it writes is sent by the flush: the plan marked it live. */
+            if (cue.hasType ("Osc") || cue.hasType ("Midi"))
+            {
+                run->preWaitTicks = 0;
+                run->launchRequestedAtTick = tick - ticksFor (wants.offset);
+
+                seatingAt = std::max (wants.offset, 0.0);
+                fireNow (engine, tick, id);
+                seatingAt = -1.0;
+                continue;
+            }
+
             /*  AND THE ONES MAKING A NOISE. Armed with their launch asked for
                 and their offset on them: the arm applies it as the clip's own
-                offset, which M17 measured landing on the sample. */
+                offset, which M17 measured landing on the sample. With the trim
+                a fade before the place left on the cue (namespace draft §115),
+                folded into the level the arm hands the voice. */
+            if (const auto trim = trimFor (wants.cue); trim.has_value())
+                run->seatedTrimDb = *trim;
+
             run->startOffset = wants.offset;
             run->startRange = std::max (wants.range, 0);
 
@@ -4233,6 +4281,14 @@ namespace wfg::cue
         std::vector<PlannedRun> wanted;
         auto sceneSeconds = seconds;
 
+        /*  WHAT THE SCENE'S MESSAGES HAD SAID BY THE SECOND, and what its fades
+            had done (namespace draft §115): a scrub of a scene puts the desk
+            where the scene had it, as a jump does, sent by the flush after
+            this tick's give-backs. */
+        std::vector<PlannedValue> said;
+        std::vector<PlannedMidi> saidMidi;
+        std::vector<PlannedTrim> trims;
+
         /*  A SCENE THE WALK TIMES AS WRITTEN - a timeline or an automatic
             sequence that plays its members once, in order, with no header - is
             asked of the solver at that second, exactly as a jump asks it, in
@@ -4253,6 +4309,26 @@ namespace wfg::cue
                      || std::find (wants.ancestors.begin(), wants.ancestors.end(), run->cue)
                           != wants.ancestors.end())
                     wanted.push_back (wants);
+
+            /*  Only the scene's own writers, and the trims on its members: what
+                the solver found for the rest of the list is the jump's business. */
+            const auto under = [&wanted] (const std::string& cueId)
+            {
+                return std::any_of (wanted.begin(), wanted.end(),
+                                    [&cueId] (const PlannedRun& wants) { return wants.cue == cueId; });
+            };
+
+            for (const auto& value : plan.values)
+                if (under (value.writer))
+                    said.push_back (value);
+
+            for (const auto& message : plan.midi)
+                if (under (message.writer))
+                    saidMidi.push_back (message);
+
+            for (const auto& trim : plan.trims)
+                if (under (trim.cue))
+                    trims.push_back (trim);
 
             /*  NOTHING PLACED UNDER IT, NOTHING DONE (2026-10-01, the J1 review,
                 namespace draft §23.8, HX). The walk gives a scene's members their
@@ -4361,6 +4437,20 @@ namespace wfg::cue
                 member.ancestors.insert (member.ancestors.begin(), above.begin(), above.end());
                 wanted.push_back (member);
             }
+
+            /*  The round's writers, an event-kind node left out here since the
+                round was solved with no mount table (§3.13 step 4). */
+            for (const auto& value : inRound.values)
+            {
+                if (mounts != nullptr)
+                    if (const auto* node = mounts->nodeAt (value.address);
+                        node != nullptr && node->kind == tree::Kind::event)
+                        continue;
+
+                said.push_back (value);
+            }
+
+            saidMidi = inRound.midi;
         }
 
         /*  WHAT IT HELD IS ENDED FIRST, the way a jump ends what it abandons:
@@ -4423,7 +4513,8 @@ namespace wfg::cue
             parent = above->parent;
         }
 
-        seatPlan (engine, tick, wanted, runFor, nextId);
+        seatPlan (engine, tick, wanted, runFor, nextId, nullptr, &trims);
+        stashPlanned (tick, said, saidMidi);
 
         /*  AND WHAT ITS OLD JOB DECIDED IN THIS TICK IS NOBODY'S (K9's review,
             2026-10-03, MS). A seek drained in the tick a round ends finds the
@@ -5834,7 +5925,9 @@ namespace wfg::cue
             (`deClickLaunched`). Its own level is the silence until then, so
             nothing - `applyLevels`, a seek's re-arm - puts it at the cue's
             level ahead of the ramp. */
-        auto level = numberOf (cue, "level");
+        /*  PLUS WHAT A FADE BEFORE THE PLACE HAD DONE TO IT, when a plan seated
+            this run (namespace draft §115): nought for a GO's. */
+        auto level = numberOf (cue, "level") + run->seatedTrimDb;
 
         /*  AND ONE DOH! CARRIES ON comes up to the level it had when the Doh
             paused it, not to its cue's (D2): a fade had it somewhere else. */
@@ -13298,9 +13391,11 @@ namespace wfg::cue
         /*  WHAT ITS CUES HOLD AT THIS SECOND, where they take back: the value
             of each network cue the plan places before it, the last writer of
             an address winning, diffed and sent by the flush after this tick's
-            give-backs - never an event, which has no value to hold. The walk's
-            own values stop at the scene's row, so they are read here from the
-            cues the plan placed. */
+            give-backs - never an event, which has no value to hold. Read here
+            from the cues the plan placed rather than from the plan's own
+            values (which since namespace draft §115 do carry the scene's, by
+            time), because a Doh sends only where a device takes back, and
+            `left` is this handler's reading. */
         auto& out = stashFor (back.tick);
 
         for (const auto& wants : placedBefore)
@@ -13826,6 +13921,24 @@ namespace wfg::cue
             out.items.push_back (item);
     }
 
+    void Runner::stashPlanned (std::int64_t tick, const std::vector<PlannedValue>& values,
+                               const std::vector<PlannedMidi>& midi)
+    {
+        /*  STASHED, AND SENT BY THE HOOK (2026-10-03, Doh! D3, namespace draft
+            §24.13): a handler never submits. The flush on the next tick compares
+            and sends, after that tick's give-backs. A value marked live is a
+            seated run's to write (namespace draft §115) and is left out. */
+        auto& out = stashFor (tick);
+
+        for (const auto& value : values)
+            if (! value.live)
+                out.values.emplace_back (value.address, value.value);
+
+        for (const auto& message : midi)
+            if (! message.live)
+                out.midi.push_back (message);
+    }
+
     void Runner::flushDohWrites (Engine& engine)
     {
         /*  A SCENE THE GO STOPPED, ENDED NOW: asked for once, and the handler
@@ -13851,10 +13964,36 @@ namespace wfg::cue
             scene left the desk where the cue before the scene put it. */
         std::set<std::string> firing;
 
+        /*  A MIDI message's place on its port (namespace draft §115): the key
+            the solver's last-writer pass uses, spelt the same way here. */
+        const auto midiKeyOf = [] (const std::string& port, const midi::MessageSpec& spec)
+        {
+            return port + "|" + std::to_string (spec.channel) + "|" + spec.type + "|"
+                     + (spec.type == "sysex" ? spec.sysex : std::to_string (spec.data1));
+        };
+
         for (const auto& run : runs.current())
-            if (run.kind == "osc" && run.state == runState::waiting && run.dueTick <= currentTick)
-                if (const auto address = textOf (document.findById (run.cue), "address"); ! address.empty())
+        {
+            if (run.state != runState::waiting || run.dueTick > currentTick)
+                continue;
+
+            const auto node = document.findById (run.cue);
+
+            if (run.kind == "osc")
+            {
+                if (const auto address = textOf (node, "address"); ! address.empty())
                     firing.insert (address);
+            }
+            else if (run.kind == "midi")
+            {
+                midi::MessageSpec spec;
+                spec.type = textOf (node, "type");
+                spec.channel = static_cast<int> (numberOf (node, "channel"));
+                spec.data1 = static_cast<int> (numberOf (node, "data1"));
+                spec.sysex = textOf (node, "sysex");
+                firing.insert (midiKeyOf (textOf (node, "port"), spec));
+            }
+        }
 
         /*  WHAT THE DESK WILL HOLD after this tick's give-backs: what they
             restore, else what it was seen to hold, else what Go.dot wrote. */
@@ -13962,6 +14101,30 @@ namespace wfg::cue
                 continue;
 
             engine.submit (origin::engine, "node.set", addressAnd (address, value));
+        }
+
+        /*  AND THE MIDI STATE A JUMP OR A SEEK WANTS ON ITS PORTS (namespace
+            draft §115): straight onto the port, as a Doh's MIDI rollback goes,
+            where the port's `tx` is on - a port switched off sends nothing, as a
+            cue on it would not. Nothing to compare against: MIDI has no
+            read-back, so every one is sent. Not for a message a member fired
+            this tick writes: its own is the newer. Nothing on a cable in a
+            replay, which has no sink. */
+        for (const auto& message : held.midi)
+        {
+            if (firing.count (midiKeyOf (message.port, message.spec)) > 0 || midiOut == nullptr)
+                continue;
+
+            if (document.getAttribute ("/godot/port/" + message.port + "/tx").value_or (std::string {}) == "false")
+                continue;
+
+            const auto built = midi::messageFor (message.spec);
+
+            if (! built.ok())
+                continue;
+
+            if (const auto problem = midiOut->send (message.port, built.bytes); ! problem.empty())
+                items.push_back (deviceLabel ("port", message.port) + ": the jump's message could not be sent - " + problem);
         }
 
         /*  THE REPORT, ONE RECORD. A Doh's replaces the readout - when it has
@@ -14667,12 +14830,21 @@ namespace wfg::cue
                                      && curveTable->cue() == cue[idProperty].toString().toStdString();
         const auto curved = hasCurves (targets) || recordingThis;
 
+        /*  FROM THE SECOND A SEAT ASKS FOR (namespace draft §115), when one is
+            firing this cue the instant landed inside: the curves' value there
+            is what leaves first, and their clock runs on from there. A GO
+            starts them at nought. */
+        const auto seatSeconds = seatingAt >= 0.0 && curved
+                                   ? placeOnCurves (seatingAt, curveDurationOf (cue, targets),
+                                                    textOf (cue, "loop") == "true").seconds
+                                   : 0.0;
+
         if (curved)
         {
-            job.pending = valuesAt (targets.front(), 0.0);
+            job.pending = valuesAt (targets.front(), seatSeconds);
 
             for (std::size_t n = 0; n < job.further.size() && n + 1 < targets.size(); ++n)
-                job.further[n].pending = valuesAt (targets[n + 1], 0.0);
+                job.further[n].pending = valuesAt (targets[n + 1], seatSeconds);
         }
 
         if (selfRun->prepare.empty() || ! job.further.empty() || curved)
@@ -14685,6 +14857,7 @@ namespace wfg::cue
                 curves.self = self;
                 curves.cue = cue[idProperty].toString().toStdString();
                 curves.originTick = tick;
+                curves.originSeconds = std::max (seatingAt, 0.0);
                 curves.duration = curveDurationOf (cue, targets);
                 curves.loop = textOf (cue, "loop") == "true";
                 curves.revision = document.revision();
@@ -14941,6 +15114,17 @@ namespace wfg::cue
         if (fadeable && fadeTo >= 0 && fadeSeconds <= 0.0)
             spec.data2 = fadeTo;
 
+        /*  FROM THE SECOND A SEAT ASKS FOR (namespace draft §115), when one is
+            firing this cue inside its fade: what leaves first is the fade's
+            value there, and the fade is dated back by it, so it goes on from
+            where it would have been. The fade still starts from `data2` as
+            written. A GO starts at nought. */
+        const auto fadeStart = spec.data2;
+        const auto fadeFrom = fading && seatingAt > 0.0 ? seatingAt : 0.0;
+
+        if (fadeFrom > 0.0)
+            spec.data2 = midiFadeValueAt (fadeStart, fadeTo, fadeFrom, fadeSeconds, textOf (cue, "fadeCurve") == "sCurve");
+
         const auto built = midi::messageFor (spec);
 
         if (! built.ok())
@@ -14963,11 +15147,11 @@ namespace wfg::cue
             faded.cue = cue[idProperty].toString().toStdString();
             faded.port = textOf (cue, "port");
             faded.spec = spec;
-            faded.from = spec.data2;
+            faded.from = fadeStart;
             faded.to = fadeTo;
             faded.seconds = fadeSeconds;
             faded.sCurve = textOf (cue, "fadeCurve") == "sCurve";
-            faded.originTick = tick;
+            faded.originTick = tick - ticksFor (fadeFrom);
             faded.last = spec.data2;
             faded.quiet = quiet;
             faded.done = job;
@@ -15076,9 +15260,7 @@ namespace wfg::cue
 
             const auto elapsed = static_cast<double> (tick - job.originTick) / static_cast<double> (TickClock::rateHz);
             const auto t = job.seconds > 0.0 ? std::clamp (elapsed / job.seconds, 0.0, 1.0) : 1.0;
-            const auto shaped = job.sCurve ? t * t * (3.0 - 2.0 * t) : t;
-            const auto value = t >= 1.0 ? job.to
-                                        : static_cast<int> (std::lround (job.from + (job.to - job.from) * shaped));
+            const auto value = midiFadeValueAt (job.from, job.to, elapsed, job.seconds, job.sCurve);
 
             if (value != job.last && ! job.quiet && midiOut != nullptr)
             {
