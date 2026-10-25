@@ -18947,13 +18947,17 @@ could not be read or a folder that could not be written.
 
 ### 29.4 Named limits
 
-- **Session view only.** Arrangement clips, MIDI clips, follow actions, tempo changes and grooves
-  are reported, not imported.
+- **Session view only.** Arrangement clips, follow actions and grooves are reported, not imported.
+  *(Until 2026-10-25: MIDI clips and tempo changes too. Since §121 a scene's tempo is played, and a MIDI
+  clip's controller curves move what they are mapped to.)*
 - **No pan** *(until 2026-10-25)*. A pan away from centre was reported; Go.dot had no pan row. **Since
   §113 (BCH)** the sound's own track's pan rides into its sends - a pan on a mono file, a balance on a
   stereo one - said as approximated (Live's centre is 3 dB down); the pans of carrier, group, return and
   master tracks are noted, pan envelopes and hands dropped (no pan lane).
 - **No shared effects** (QE), and so no hand on them: a rotary on a parked effect is reported.
+  *(Answered by §93.)*
+- **A track straight to the interface, a live input, two returns on one pair** were dropped or refused
+  until §121: now a direct out, a mic cue, an aux into the mix that holds the pair.
 - **A warp that is not one ratio** is averaged into `rate` and reported.
 - **The conduite and the script are not read.** The script is Choufleur's (PRD §3.23).
 - **Colours are not imported.** Live's palette is an index into a table the importer does not have,
@@ -19029,6 +19033,21 @@ and one return, **A**, on outputs 1/2, with Probe in's send to it at 0 dB. One s
    with Probe in's send to A at 0 dB and Probe's own output on 1/2 as well. Answers whether Live's sends
    are taken before or after the pan (the import puts the pan on every send), and Live's pan law at the
    centre and a quarter (the import's is full at the centre and lowers the far side, BCC).
+
+8. **An unwarped clip** *(added 2026-10-25, §121)*. Probe: the tone unwarped, its end marker dragged to
+   six seconds, a volume envelope from 0 dB at four seconds to the bottom at six. Answers that an unwarped
+   clip's loop points are seconds of the file (BDQ, read off the Sturbzep stems) and in what unit its
+   envelopes are drawn - the clip's own beats, the import's reading, or seconds.
+9. **The controller law** *(2026-10-25)*. A MIDI track on the IAC bus, a clip with a CC ramp 0 to 127 over
+   twenty beats, that CC mapped to Probe's volume (0 dB) and the tone on Probe. Answers where a controller
+   value lands on the fader's throw: the import takes 109 for 0 dB and goes straight in decibels either
+   side (BDW).
+10. **Launch quantisation** *(2026-10-25)*. Scene 10a: the tone, the clip's quantisation at Global, the
+    set's at one bar; scene 10b launched a beat later: the tone on a second track, its quantisation None.
+    Answers the stored numbers (the import reads 0 as Global, 1 as None, 5 as one bar, BDY) and that a
+    clip at None starts on the launch.
+11. **A switch by CC** *(2026-10-25)*. The track activator of Probe mapped to a CC, a clip sending 63 then
+    64. Answers the threshold a mapped switch turns at (the import takes 64).
 
 The export is Live's own: the session recorded into the arrangement while each scene is launched in
 turn, a few seconds apart, then exported as one WAV of outputs 1/2. AL.7's driver imports
@@ -34736,3 +34755,88 @@ Owed: the author's try; the bench - an interface with a reverb send (Esc while p
 camera, MTC into a desk, a main and backup paused together, a DeckLink card's sound through a pause (it
 starves to silence as in an outage, untested on the card); the transport line's words, mine; a plugin
 editor or monitor window does not pass F8 on (they pass Esc and Space).
+
+## 121. The Sturbzep round: a second Live set, and what it taught the importer
+
+**Asked 2026-10-25** by the author, with a project lent by a colleague (`Sturbzep Project`: three venue
+sets, Aix, Angers and Orléans, Live 11.3.43, 55 audio tracks in 17 nested groups, 10 returns, 2 MIDI
+tracks, 32 scenes): *"Can you look into it and see if there are things to add to the importer and
+eventually the app? The user who lent it to me mentioned he didn't see the MIDI tracks imported."* And a
+screen capture of the imported Cha cha cha, its organ stem cut at 2:57 of 6:42: *"il a décidé de mettre le
+STOP des audio ici au lieu d'aller à la fin"*.
+
+What the set turned out to be, read against `wfg import-als` as it stood at `d1235222`:
+
+- **The MIDI tracks hold no notes.** "IAC" (out to IAC Bus 1, channel 3) and "RESET FADES" (channel 9)
+  hold clips whose only content is controller envelopes, and the set maps those same controllers - on the
+  same channel and number - to its own faders: a reverb return's volume on a live singer, the flute's
+  track switched on and off, three group faders put back to 0 dB. Live listens to the bus it sends to.
+  The clip's envelope names the controller through the MIDI track's `MidiControllers/ControllerTargets.N`
+  (N-2 is the controller; 0 and 1 are pitch bend and channel pressure), its values 0..127.
+- **A scene's tempo was ignored.** The set's is 110; the scenes set 108, 100, 80, 136, 160 and 190, and
+  every warped stem was stretched to 110 - Loch Ness at 1.375 of its speed, The Grind at 1.1.
+- **An unwarped clip's loop points are seconds.** The organ's `Loop/LoopEnd` is 402.55 with the loop
+  off, its `CurrentEnd` 912.46 beats at the markers' 136 BPM - both the file's 402.55 s. The walk took
+  the first for beats and cut the sound at 2:57.6. The same on every unwarped stem (Halo: 301.508 s,
+  195.98 beats at 39 BPM); none of them has an envelope, so their envelopes' unit waits for the probe.
+- **Two live inputs** - "FX Flute" and "operete", monitoring In on interface inputs 51 and 52 through
+  Live's Delay and Reverb, no clips - were never visited by the walk and absent from the report.
+- **Returns sharing a pair**: pla PRE and pla POST on outputs 61/62; 23 C, 24 Cs and C_Cs on 55, 56 and
+  55/56. The patch was refused `bad-value`, and every mix landed on the wrong outputs.
+- **ERGE goes straight to output 64**, no sends: its six cues played only through a send at -15 dB.
+- **Left out of the report**: the notes on channel 9 that fire scenes, the mappings on track activators, a
+  Max for Live device on a group, the hand mappings fed by the set's own MIDI clips.
+- Eleven files point into other projects on the lender's disk: not the importer's.
+
+The author's answers, 2026-10-25, each to an item above: *"Make that fix"* (the tempo); *"exactly what
+mic cues through the rack do"*; *"Could we use the auxes for this to bounce to other outputs?"* (the
+shared pair); *"This is a direct out in Go.dot"*; *"We need to have adjustable tempo in Go.dot then for
+this"* (the launch quantisation), *"The transport menu can be used to add tempo indications"*, and *"Not
+all cues should be on the grid, this is an option in a cue or group"*; *"Add to the report"*. A tempo in
+Go.dot is §122, after this.
+
+Mine *(proposed)*, the codes continuing after §120's:
+
+- **BDQ** **An unwarped clip's loop points are seconds of the file**, as Live stores them; its start and
+  end markers are beats at the clip's own tempo, the warp markers' slope, and its envelopes are read in
+  those beats until the probe says otherwise (§29.6, question 8). A warped clip is read as before.
+- **BDR** **The walk keeps the tempo from scene to scene.** A scene that sets one sets it for the scenes
+  after; a sound launched at that tempo is stretched to it, a fade's length and a lane's seconds are
+  counted at it. A warped sound still playing when a later scene changes the tempo is given a speed fade
+  to its new rate, as Live re-stretches it live, said as "to know".
+- **BDS** **A track wired straight to the interface is a direct out:** a bus of kind `direct` named after
+  the track, patched to its channel or pair, named on the cue's `directOut`; the cue's flattened level
+  applies, as Live's output is after the fader.
+- **BDT** **A return whose outputs another already holds becomes an aux feeding that mix.** The owner of
+  a set of channels is the widest on them, then the first in Live's order; every other return or direct
+  out whose channels lie inside an owner's gives up its own output and sends at 0 dB into the owner - a
+  mono into a stereo owner panned to its side, a stereo into a stereo owner plain. One straddling two
+  owners keeps nothing of its output and is reported. The patch stays one bus per channel, as the patch
+  editor and the output trims assume; summing in the device's patch was the other road.
+- **BDU** **A live input is a mic cue,** fired in the first GO where its track is on, at its held level,
+  with its sends flattened as a sound's are and its direct out (BDS); its EQ Eight is its EQ, Live's other
+  devices are said and the cue plays dry. Switched off later it is faded to silence and kept running, as
+  Live's mute keeps the track live; on again, faded back.
+- **BDV** **A MIDI clip's controller curve is a move on what it is mapped to:** a track's or a group's
+  volume → a fade, its points relative to the held value, on every sound whose path crosses that fader,
+  the end value held for the scenes after; a track activator → a mute, the fade to silence of BDU, or on
+  a mic cue not yet running its GO; a send → a send move; an EQ Eight band → an EQ move; another device →
+  said. A controller the set maps nowhere is sent out as a MIDI cue on a Port named after Live's output
+  port - something outside may listen - a ramp as the cue's own fade. A clip holding notes is said, not
+  imported.
+- **BDW** **The controller law is provisional:** a value lands on the fader straight in decibels from the
+  mapping's floor to 0 dB at 109 of 127, then to its top at 127 (the reset clips sit at 109); a switch is
+  on at 64 and above; a device's parameter goes straight between the mapping's ends. Said approximated,
+  every one, until §29.6's questions 9 and 11 are measured.
+- **BDX** **The bus is taken as read back.** The set does not say which MIDI inputs Live's Remote reads; a
+  MIDI track whose output port carries controllers the set has mapped is taken for a loopback, said once.
+- **BDY** **A mapping fed by the set's own MIDI clip is not a hand:** no DCA is made for it and it leaves
+  the hands table for a section of its own, "Moved by the set's own MIDI clips". A hand that also moves it
+  is QW's case - the drawing wins.
+- **BDZ** **Live's launch quantisation comes over as the cue's `quantise`** once Go.dot has one (§122): a
+  clip at Global takes the set's, None is none, and the stored numbers - 0 Global, 1 None, 2 eight bars, 3
+  four, 4 two, 5 one bar, 6 a half, 8 a quarter - wait on §29.6's question 10. Until then the report says
+  the clip starts on the next bar in Live and at once in Go.dot.
+- **BEA** **The report says more:** the notes that fire scenes, with the GO each would fire; the switches
+  on track activators; a Max for Live device by its `.amxd`; the loopback (BDX) and the clip-fed mappings
+  (BDY).
