@@ -46,6 +46,7 @@
 #include <wfg/engine/cue/LaneCommands.h>
 #include <wfg/engine/cue/LaneTable.h>
 #include <wfg/engine/cue/LiveEdits.h>
+#include <wfg/engine/cue/SendPlacement.h>
 #include <wfg/engine/cue/LiveRows.h>
 #include <wfg/engine/audio/CueMatrix.h>
 #include <wfg/engine/cue/FadeJob.h>
@@ -1186,6 +1187,152 @@ TEST_CASE ("sends: a mix channel is a destination with a level, and silence cost
         rig.addSend (rig.mediaId, "NOSUCHBS", 0.0);
         rig.routingOf (rig.mediaId, problem);
         CHECK (problem == "send names no bus of this show");
+    }
+}
+
+TEST_CASE ("sends: pan, width, balance and swap place the send, and at rest the spread is what it always was")
+{
+    /*  Namespace draft §113 (the author, 2026-10-25): a mono cue has a pan
+        into a stereo mix, a stereo cue a width, a balance and a swap into one,
+        and a balance into a mono mix. "Full at centre, lower the far side"
+        (BCC): the defaults are the spread of §42 exactly, and a move only
+        turns the far side down, so placing never costs level. Foldback starts
+        at hardware 4; Voice is one channel at 8. */
+    RoutedRig rig;
+    std::string problem;
+    const auto voice = rig.addBus ("Voice", 8, 1);
+
+    const auto set = [&] (const std::string& send, const char* row, const char* text)
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/send/" + send + "/" + row, text).ok);
+    };
+
+    SUBCASE ("a mono cue into a stereo mix: centre is both at full, hard left is the left alone")
+    {
+        rig.setMedia (rig.mediaId, 1);
+        const auto send = rig.addSend (rig.mediaId, rig.foldback, 0.0);
+        CHECK (rig.spreadOf (rig.mediaId, problem) == "0>4@1.000 0>5@1.000");
+
+        set (send, "pan", "-1");
+        CHECK (rig.spreadOf (rig.mediaId, problem) == "0>4@1.000");
+
+        set (send, "pan", "0.5");
+        CHECK (rig.spreadOf (rig.mediaId, problem) == "0>4@0.500 0>5@1.000");
+        CHECK (problem.empty());
+    }
+
+    SUBCASE ("a stereo cue into a stereo mix: width mixes the other side in, balance lowers one output, swap exchanges the sides")
+    {
+        rig.setMedia (rig.mediaId, 2);
+        const auto send = rig.addSend (rig.mediaId, rig.foldback, 0.0);
+        CHECK (rig.spreadOf (rig.mediaId, problem) == "0>4@1.000 1>5@1.000");
+
+        set (send, "width", "0");
+        CHECK (rig.spreadOf (rig.mediaId, problem) == "0>4@0.500 0>5@0.500 1>4@0.500 1>5@0.500");
+
+        set (send, "width", "0.5");
+        CHECK (rig.spreadOf (rig.mediaId, problem) == "0>4@0.750 0>5@0.250 1>4@0.250 1>5@0.750");
+
+        set (send, "width", "1");
+        set (send, "balance", "-1");
+        CHECK (rig.spreadOf (rig.mediaId, problem) == "0>4@1.000");
+
+        set (send, "balance", "0.5");
+        CHECK (rig.spreadOf (rig.mediaId, problem) == "0>4@0.500 1>5@1.000");
+
+        set (send, "balance", "0");
+        set (send, "swap", "true");
+        CHECK (rig.spreadOf (rig.mediaId, problem) == "0>5@1.000 1>4@1.000");
+
+        //  Swapped and leaned left: the LEFT speaker is the quiet one, as a hand on a balance knob means.
+        set (send, "balance", "-0.5");
+        CHECK (rig.spreadOf (rig.mediaId, problem) == "0>5@0.500 1>4@1.000");
+        CHECK (problem.empty());
+    }
+
+    SUBCASE ("a stereo cue into a mono mix: the fold is leaned, from half each to one side alone")
+    {
+        rig.setMedia (rig.mediaId, 2);
+        const auto send = rig.addSend (rig.mediaId, voice, 0.0);
+        CHECK (rig.spreadOf (rig.mediaId, problem) == "0>8@0.500 1>8@0.500");
+
+        set (send, "balance", "1");
+        CHECK (rig.spreadOf (rig.mediaId, problem) == "1>8@1.000");
+
+        set (send, "balance", "-0.5");
+        CHECK (rig.spreadOf (rig.mediaId, problem) == "0>8@0.750 1>8@0.250");
+        CHECK (problem.empty());
+    }
+
+    SUBCASE ("the rows the shape does not hear are kept, and not heard")
+    {
+        rig.setMedia (rig.mediaId, 1);
+        const auto send = rig.addSend (rig.mediaId, voice, 0.0);
+        set (send, "pan", "-1");
+        set (send, "balance", "1");
+        set (send, "width", "0");
+        CHECK (rig.spreadOf (rig.mediaId, problem) == "0>8@1.000");
+        CHECK (rig.document.getAttribute ("/godot/send/" + send + "/pan").value_or ("?") == "-1");
+    }
+
+    SUBCASE ("the level scales the place, below the cue's own level")
+    {
+        rig.setMedia (rig.mediaId, 1);
+        const auto send = rig.addSend (rig.mediaId, rig.foldback, -6.0);
+        set (send, "pan", "1");
+        CHECK (rig.spreadOf (rig.mediaId, problem) == "0>5@0.501");
+    }
+
+    SUBCASE ("and a matrix the law can say fits back into one level and one place, exactly")
+    {
+        /*  What the QLab import leans on (§113, BCF): any pair of gains for a
+            mono cue, any diagonal for a stereo one, is a level and a lean with
+            nothing left over - and a matrix that is not of the law's shape
+            says so, and stays a route. */
+        using cue::SendPlace;
+        const auto roundTrip = [] (int channels, int width, const SendPlace& wanted, double gain)
+        {
+            std::vector<double> gains (static_cast<std::size_t> (channels * width), 0.0);
+
+            //  The spread at rest, as the Runner builds it.
+            for (int input = 0; input < channels; ++input)
+                for (int channel = 0; channel < width; ++channel)
+                    gains[static_cast<std::size_t> (input * width + channel)]
+                        = channels == 2 && width == 1 ? 0.5 : (channels == 1 || input == channel ? 1.0 : 0.0);
+
+            cue::applyPlacement (gains, channels, width, gain, wanted);
+
+            double level = 0.0;
+            SendPlace found;
+            REQUIRE (cue::fitPlacement (gains, channels, width, level, found));
+            CHECK (level == doctest::Approx (gain));
+            CHECK (found.pan == doctest::Approx (wanted.pan));
+            CHECK (found.width == doctest::Approx (wanted.width));
+            CHECK (found.balance == doctest::Approx (wanted.balance));
+            CHECK (found.swap == wanted.swap);
+        };
+
+        roundTrip (1, 2, SendPlace { -0.3, 1.0, 0.0, false }, 0.5);
+        roundTrip (1, 2, SendPlace { 1.0, 1.0, 0.0, false }, 1.0);
+        roundTrip (2, 1, SendPlace { 0.0, 1.0, 0.7, false }, 0.25);
+        roundTrip (2, 2, SendPlace { 0.0, 1.0, 0.0, false }, 0.8);
+        roundTrip (2, 2, SendPlace { 0.0, 0.4, -0.6, false }, 0.8);
+        roundTrip (2, 2, SendPlace { 0.0, 1.0, 0.25, true }, 1.0);
+        roundTrip (2, 2, SendPlace { 0.0, 0.0, 0.0, false }, 1.0);
+
+        double level = 0.0;
+        SendPlace found;
+
+        //  A hard-left mono, as QLab's crosspoints say it: the level is the heard side.
+        REQUIRE (cue::fitPlacement ({ 0.5, 0.0 }, 1, 2, level, found));
+        CHECK (level == doctest::Approx (0.5));
+        CHECK (found.pan == doctest::Approx (-1.0));
+
+        //  Not of the law's shape: a stereo cue whose two columns are mixed at different widths.
+        CHECK_FALSE (cue::fitPlacement ({ 0.75, 0.0, 0.25, 1.0 }, 2, 2, level, found));
+
+        //  Three channels say nothing a placement could.
+        CHECK_FALSE (cue::fitPlacement ({ 1.0, 0.0, 0.0, 1.0, 0.5, 0.5 }, 3, 2, level, found));
     }
 }
 
@@ -14131,6 +14278,83 @@ TEST_CASE ("live: under the lock a send rides live, a new one is made live, and 
         CHECK (rig.submitAndTick ("send.create", { osc::Value::string (rig.mediaId),
                                                    osc::Value::string (rig.reverb) }).rejected == 1);
     }
+}
+
+TEST_CASE ("live: under the lock a send's place rides live - heard, written to nothing, kept or let go on unlock (§113)")
+{
+    LiveRig rig;
+    const auto foldback = rig.addSend (rig.mediaId, rig.foldback, 0.0);
+    const auto run = rig.play();
+    const auto track = rig.runs.find (run)->track;
+    REQUIRE (track >= 0);
+
+    //  Two channels into two: the shape is published, so a page need not work it out.
+    CHECK (rig.published ("/godot/send/" + foldback + "/placement") == "stereo");
+
+    rig.lock (true);
+    const auto steps = rig.steps();
+
+    //  Leaned hard left: the right output goes, and the show still says centre.
+    CHECK (rig.set ("/godot/send/" + foldback + "/balance", osc::Value::float64 (-1.0)).applied == 1);
+    rig.tickOnce();
+    CHECK (rig.pushedOn (track) == "0>0@1.000 1>1@1.000 0>4@1.000");
+    CHECK (rig.saved ("/godot/send/" + foldback + "/balance") == "0");
+    CHECK (rig.published ("/godot/send/" + foldback + "/balance") == "-1");
+    CHECK (rig.published ("/godot/send/" + foldback + "/live") == "true");
+    CHECK (rig.live.size() == 1u);
+
+    //  And swapped: the right side is what the left output hears.
+    CHECK (rig.set ("/godot/send/" + foldback + "/swap", osc::Value::boolean (true)).applied == 1);
+    rig.tickOnce();
+    CHECK (rig.pushedOn (track) == "0>0@1.000 1>1@1.000 1>4@1.000");
+    CHECK (rig.live.size() == 2u);
+    CHECK (rig.steps() == steps);
+
+    SUBCASE ("Keep writes the place, as one step")
+    {
+        rig.lock (false);
+        CHECK (rig.submitAndTick ("live.keep").applied == 1);
+        CHECK (rig.saved ("/godot/send/" + foldback + "/balance") == "-1");
+        CHECK (rig.saved ("/godot/send/" + foldback + "/swap") == "true");
+        CHECK (rig.live.empty());
+        CHECK (rig.steps() == steps + 1);
+    }
+
+    SUBCASE ("Discard lets it go, and the spread is the show's again")
+    {
+        rig.lock (false);
+        CHECK (rig.submitAndTick ("live.drop").applied == 1);
+        rig.tickOnce();
+        CHECK (rig.pushedOn (track) == "0>0@1.000 1>1@1.000 0>4@1.000 1>5@1.000");
+        CHECK (rig.saved ("/godot/send/" + foldback + "/balance") == "0");
+    }
+
+    SUBCASE ("a row turned back to what the show says leaves nothing riding")
+    {
+        CHECK (rig.set ("/godot/send/" + foldback + "/balance", osc::Value::float64 (0.0)).applied == 1);
+        CHECK (rig.set ("/godot/send/" + foldback + "/swap", osc::Value::boolean (false)).applied == 1);
+        CHECK (rig.live.empty());
+        CHECK (rig.published ("/godot/send/" + foldback + "/live") == "false");
+    }
+}
+
+TEST_CASE ("sends: the shape of a send is published as its placement (§113)")
+{
+    LiveRig rig;
+    const auto voice = rig.addBus ("Voice", 8, 1);
+    const auto wide = rig.addSend (rig.mediaId, rig.foldback, 0.0);
+    const auto narrow = rig.addSend (rig.mediaId, voice, 0.0);
+
+    CHECK (rig.published ("/godot/send/" + wide + "/placement") == "stereo");
+    CHECK (rig.published ("/godot/send/" + narrow + "/placement") == "fold");
+
+    rig.setMedia (rig.mediaId, 1);
+    CHECK (rig.published ("/godot/send/" + wide + "/placement") == "pan");
+    CHECK (rig.published ("/godot/send/" + narrow + "/placement") == "none");
+
+    //  A bus that has gone is no shape at all.
+    rig.document.findById (narrow).setProperty (juce::Identifier ("bus"), "NOSUCHBS", nullptr);
+    CHECK (rig.published ("/godot/send/" + narrow + "/placement") == "none");
 }
 
 TEST_CASE ("live: a set of values rides live under the lock, is put back whole when one pair is refused, and is one step unlocked")

@@ -56,6 +56,7 @@ namespace wfg::tree
 #include <wfg/engine/cue/LaneTable.h>
 #include <wfg/engine/cue/LaneCommands.h>
 #include <wfg/engine/cue/InsertChain.h>
+#include <wfg/engine/cue/SendPlacement.h>
 #include <wfg/engine/cue/FxRows.h>
 #include <wfg/engine/cue/ShowWalk.h>
 #include <wfg/engine/cue/Override.h>
@@ -891,6 +892,31 @@ namespace wfg::tree
             address - its level, direct out, DCA and EQ as the show holds them,
             and the ids of its sends and inserts - and those sends, inserts and
             routes at their own addresses, as a cue's are. */
+        /*  WHICH OF A SEND'S PLACEMENT ROWS ARE HEARD (namespace draft §113):
+            the shape of the send, from the cue's channel count and the bus's
+            width - a mix bus's `width`, an aux's class - read as the Runner
+            reads them. Derived here so a surface page or a mixer strip need
+            not work it out again; a bus that has gone is a width of nought,
+            and the word is `none`. */
+        std::string placementWordFor (const juce::ValueTree& send)
+        {
+            static const cue::Reader schema;
+            const auto audio = send.getRoot().getChildWithName ("Audio");
+            const auto busId = send[juce::Identifier ("bus")].toString();
+            int width = 0;
+
+            for (const auto& bus : audio)
+                if (bus.hasType ("Bus") && bus[idProperty].toString() == busId)
+                    width = schema.integer (bus, "bus", "width");
+
+            if (width == 0)
+                for (const auto& channel : audio.getChildWithName ("Rack"))
+                    if (channel.hasType ("Channel") && channel[idProperty].toString() == busId)
+                        width = cue::sourceChannelsOf (channel);
+
+            return std::string (cue::placementWordOf (cue::sourceChannelsOf (send.getParent()), width));
+        }
+
         void collectAux (const juce::ValueTree& channel, std::vector<Node>& out, const cue::LiveEdits* live)
         {
             const auto id = channel[idProperty].toString().toStdString();
@@ -942,9 +968,10 @@ namespace wfg::tree
                     {
                         const doc::Attribute attribute { "Send", row };
                         const auto name = std::string (row->name);
-                        const auto text = name == "cue"  ? id
-                                        : name == "live" ? std::string ("false")
-                                                         : storedText (attribute, child);
+                        const auto text = name == "cue"       ? id
+                                        : name == "live"      ? std::string ("false")
+                                        : name == "placement" ? placementWordFor (child)
+                                                              : storedText (attribute, child);
 
                         out.push_back (makeLeaf (std::string (godot) + "/send/" + childId + "/" + name, *row, text));
                     }
@@ -2034,8 +2061,12 @@ namespace wfg::tree
                                 text = *riding->level;
                             else if (riding != nullptr && name == "on" && riding->on.has_value())
                                 text = *riding->on;
+                            else if (riding != nullptr && riding->placement.count (name) > 0)
+                                text = riding->placement.at (name);
                             else if (childElement == "Send" && name == "live")
                                 text = riding != nullptr ? "true" : "false";
+                            else if (childElement == "Send" && name == "placement")
+                                text = placementWordFor (child);
 
                             out.push_back (makeLeaf (childBase + "/" + name, *row, text));
                         }

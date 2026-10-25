@@ -60,6 +60,7 @@
 #include <juce_audio_basics/juce_audio_basics.h>
 
 #include <wfg/engine/cue/InsertChain.h>
+#include <wfg/engine/cue/SendPlacement.h>
 #include <wfg/engine/cue/LaneTable.h>
 #include <wfg/engine/document/LevelLane.h>
 
@@ -6260,7 +6261,7 @@ namespace wfg::cue
             `what` is the destination in words, so the refusal names the thing
             the designer was looking at rather than a kind they never chose. */
         const auto spreadOf = [&] (const juce::ValueTree& mediaCue, int width,
-                                   double gain, const char* what,
+                                   double gain, const SendPlace& place, const char* what,
                                    std::string& why) -> std::vector<double>
         {
             const auto fileChannels = sourceChannelsOf (mediaCue);
@@ -6293,6 +6294,8 @@ namespace wfg::cue
                         gains[static_cast<std::size_t> (input * width + input % width)] = gain * share;
                 }
 
+                //  Placed as the cue its inserts made it: two sides from a mono file are stereo here (§113).
+                applyPlacement (gains, sides, width, gain, place);
                 return gains;
             }
 
@@ -6324,6 +6327,11 @@ namespace wfg::cue
                         gains[at] = gain;
                 }
 
+            /*  AND WHERE THE SEND PUTS IT (namespace draft §113): a pan where
+                one channel meets two, a width, a balance and a swap where two
+                meet two, a balance where two meet one. At rest every one of
+                them is the spread above, exactly; a direct out passes rest. */
+            applyPlacement (gains, channels, width, gain, place);
             return gains;
         };
 
@@ -6331,7 +6339,8 @@ namespace wfg::cue
             scaled by the send's level - shared by the show's sends and the
             ones a locked show made live. False when the run cannot be routed,
             with `problem` saying why. */
-        const auto sendInto = [&] (const juce::ValueTree& bus, double level, bool on) -> bool
+        const auto sendInto = [&] (const juce::ValueTree& bus, double level, bool on,
+                                   const SendPlace& place) -> bool
         {
             /*  SILENCE CONTRIBUTES NOTHING AT ALL rather than a very small
                 number: -120 dB is how this document spells silence
@@ -6362,7 +6371,7 @@ namespace wfg::cue
                     return true;
 
                 const auto auxWidth = sourceChannelsOf (bus);
-                const auto auxGains = spreadOf (cue, auxWidth, gain, "aux", why);
+                const auto auxGains = spreadOf (cue, auxWidth, gain, place, "aux", why);
 
                 if (! why.empty())
                 {
@@ -6374,7 +6383,7 @@ namespace wfg::cue
             }
 
             const auto width = schema.integer (bus, "bus", "width");
-            const auto gains = spreadOf (cue, width, gain, "mix channel", why);
+            const auto gains = spreadOf (cue, width, gain, place, "mix channel", why);
 
             /*  ASKED HERE rather than left to `emit`, which cannot always
                 tell: a refused spread answers with one zero, and against a
@@ -6388,6 +6397,43 @@ namespace wfg::cue
             }
 
             return emit (schema.integer (bus, "bus", "firstChannel"), width, gains);
+        };
+
+        /*  A SEND'S PLACE (namespace draft §113): the show's rows, under what
+            the lock is riding. A send made live has no <Send>, so its rows are
+            the layer's alone; one with neither is at rest. */
+        const auto placementOf = [] (const juce::ValueTree& destination, const LiveEdits::Send* riding) -> SendPlace
+        {
+            SendPlace place;
+
+            if (destination.isValid())
+            {
+                place.pan = schema.number (destination, "send", "pan");
+                place.width = schema.number (destination, "send", "width");
+                place.balance = schema.number (destination, "send", "balance");
+                place.swap = schema.flag (destination, "send", "swap");
+            }
+
+            if (riding != nullptr)
+                for (const auto& [row, text] : riding->placement)
+                {
+                    if (row == "swap")
+                    {
+                        place.swap = text == "true";
+                        continue;
+                    }
+
+                    const auto value = osc::parseDouble (text);
+
+                    if (! value.has_value())
+                        continue;
+
+                    if (row == "pan")           place.pan = *value;
+                    else if (row == "width")    place.width = *value;
+                    else if (row == "balance")  place.balance = *value;
+                }
+
+            return place;
         };
 
         /*  THE DIRECT OUT, where this cue's own channels land. Empty is every
@@ -6405,7 +6451,7 @@ namespace wfg::cue
 
             std::string why;
             const auto width = schema.integer (bus, "bus", "width");
-            const auto gains = spreadOf (cue, width, 1.0, "direct out", why);
+            const auto gains = spreadOf (cue, width, 1.0, SendPlace {}, "direct out", why);
 
             if (! why.empty())
             {
@@ -6505,7 +6551,7 @@ namespace wfg::cue
 
                 sentTo.push_back (busId);
 
-                if (! sendInto (bus, level, on))
+                if (! sendInto (bus, level, on, placementOf (destination, riding)))
                     return {};
 
                 continue;
@@ -6583,7 +6629,7 @@ namespace wfg::cue
 
                 sentTo.push_back (send->bus);
 
-                if (! sendInto (bus, level, on))
+                if (! sendInto (bus, level, on, placementOf ({}, send)))
                     return {};
             }
         }
@@ -6605,7 +6651,7 @@ namespace wfg::cue
 
                 sentTo.push_back (busId);
 
-                if (! sendInto (bus, std::clamp (offset, silenceDb, 12.0), true))
+                if (! sendInto (bus, std::clamp (offset, silenceDb, 12.0), true, SendPlace {}))
                     return {};
             }
 
@@ -6626,7 +6672,7 @@ namespace wfg::cue
 
                 const auto bus = sendTargetNamed (busId);
 
-                if (bus.isValid() && ! sendInto (bus, level, true))
+                if (bus.isValid() && ! sendInto (bus, level, true, SendPlace {}))
                     return {};
             }
 

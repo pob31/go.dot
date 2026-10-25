@@ -760,10 +760,11 @@ TEST_CASE ("surface bridge: the profiles say what each surface has and what its 
     CHECK (surface::actionFor (mcu, surface::buttonForNote (0x5f)) == surface::Action::record);
     CHECK (surface::actionFor (d700, surface::buttonForNote (0x5f)) == surface::Action::record);
 
-    //  Phase 9c: Pan is the Loop page, and Loop - Mackie's Cycle - is take.loop.
-    CHECK (surface::actionFor (d700, surface::buttonForNote (0x2a)) == surface::Action::loopPage);
-    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x2a)) == surface::Action::loopPage);
-    CHECK (surface::actionFor (d700, surface::buttonForNote (0x56)) == surface::Action::loop);
+    //  Pan is the pan pages (§113); Loop - Mackie's Cycle - is the Loop page, and Metronome - Click - is take.loop.
+    CHECK (surface::actionFor (d700, surface::buttonForNote (0x2a)) == surface::Action::panPage);
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x2a)) == surface::Action::panPage);
+    CHECK (surface::actionFor (d700, surface::buttonForNote (0x56)) == surface::Action::loopPage);
+    CHECK (surface::actionFor (d700, surface::buttonForNote (0x59)) == surface::Action::loop);
     CHECK (surface::actionFor (surface::Profile::midiPads, surface::buttonForNote (0x5e))
              == surface::Action::none);
 
@@ -3727,7 +3728,7 @@ namespace
     }
 }
 
-TEST_CASE ("surface bridge: Pan puts the aimed mic cue's take on the rotaries - in, out, a slide of both, and its level")
+TEST_CASE ("surface bridge: Loop puts the aimed mic cue's take on the rotaries - in, out, a slide of both, and its level")
 {
     /*  Phase 9c, stage 9c.5 (namespace draft 19.7, decision CD): the Loop
         page, whose points are written through the take's door. */
@@ -3736,7 +3737,7 @@ TEST_CASE ("surface bridge: Pan puts the aimed mic cue's take on the rotaries - 
     desk.aimAt ("MIC00001");
     desk.sink.sent.clear();
 
-    desk.press ("PORTBNK1", 0x2a);
+    desk.press ("PORTBNK1", 0x56);
     CHECK (desk.page().word == "loop");
     CHECK (desk.page().count == 1);
     desk.settle();
@@ -3749,7 +3750,7 @@ TEST_CASE ("surface bridge: Pan puts the aimed mic cue's take on the rotaries - 
     CHECK (contains (sent, surface::d700DisplayRow (3, 1, "-6.0 dB")));
     CHECK (contains (sent, surface::d700DisplayRow3 (0, "Loop")));
     CHECK (contains (sent, surface::d700Ring (0, 32, 2)));                    // in, a quarter into the take
-    CHECK (contains (sent, surface::led (0x2a, surface::Led::on)));
+    CHECK (contains (sent, surface::led (0x56, surface::Led::on)));
 
     //  IN, three detents on: thirty milliseconds, through the take's door.
     desk.submitted.clear();
@@ -3803,8 +3804,8 @@ TEST_CASE ("surface bridge: Pan puts the aimed mic cue's take on the rotaries - 
     CHECK (desk.submitted.back().args[0].getString() == "/godot/cue/MIC00001/level");
     CHECK (lastValue (desk) == doctest::Approx (0.0));
 
-    //  Pan again leaves.
-    desk.press ("PORTBNK1", 0x2a);
+    //  Loop again leaves.
+    desk.press ("PORTBNK1", 0x56);
     CHECK (desk.page().word == "show");
 }
 
@@ -3813,7 +3814,7 @@ TEST_CASE ("surface bridge: the Loop page on a cue with no take says so, and tur
     PageDesk desk;
     desk.aimAt ("CUE00001");
     desk.sink.sent.clear();
-    desk.press ("PORTBNK1", 0x2a);
+    desk.press ("PORTBNK1", 0x56);
     CHECK (desk.page().word == "loop");
     desk.settle();
     CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow (0, 0, "no take")));
@@ -3833,7 +3834,7 @@ TEST_CASE ("surface bridge: the Loop page on a cue with no take says so, and tur
     CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow (0, 1, "no loop yet")));
 }
 
-TEST_CASE ("surface bridge: Rec is lit while the aimed take records, blinks while a layer is laid, and Loop presses take.loop")
+TEST_CASE ("surface bridge: Rec is lit while the aimed take records, blinks while a layer is laid, and Metronome presses take.loop")
 {
     /*  Phase 9c, stage 9c.5: the transport's Rec says what the aimed mic
         cue's take is doing, on the first port, where the transport is. */
@@ -3857,15 +3858,15 @@ TEST_CASE ("surface bridge: Rec is lit while the aimed take records, blinks whil
     CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::led (0x5f, surface::Led::on)));
     CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::led (0x5f, surface::Led::off)));
 
-    //  LOOP - Mackie's Cycle - is take.loop on the aimed cue's channel.
+    //  METRONOME - Mackie's Click - is take.loop on the aimed cue's channel (§113; it was Cycle's until the Loop page took it).
     desk.submitted.clear();
-    desk.press ("PORTBNK1", 0x56);
+    desk.press ("PORTBNK1", 0x59);
     CHECK (desk.writes() == std::vector<std::string> { "take.loop CHAN0001" });
 
     //  Nothing aimed: nothing pressed.
     desk.aimAt ("");
     desk.submitted.clear();
-    desk.press ("PORTBNK1", 0x56);
+    desk.press ("PORTBNK1", 0x59);
     CHECK (desk.submitted.empty());
 }
 
@@ -4037,6 +4038,11 @@ namespace
         fake.text ("/godot/send/SND00001/bus", "BUS00001");
         fake.number ("/godot/send/SND00001/level", -6.0);
         fake.flag ("/godot/send/SND00001/on", true);
+        fake.text ("/godot/send/SND00001/placement", "stereo");
+        fake.number ("/godot/send/SND00001/pan", 0.0);
+        fake.number ("/godot/send/SND00001/balance", 0.0);
+        fake.number ("/godot/send/SND00001/width", 1.0);
+        fake.flag ("/godot/send/SND00001/swap", false);
         fake.text ("/godot/cue/CUE00001/colour", "#C04040");
     }
 }
@@ -4096,6 +4102,100 @@ TEST_CASE ("surface bridge: Send puts the aimed cue's sends on the rotaries, one
 
     //  Send again: one page, so the surface's own page.
     desk.press ("PORTBNK1", 0x29);
+    CHECK (desk.page().word == "show");
+}
+
+TEST_CASE ("surface bridge: Pan puts the sends' place on the rotaries, a press centres, and the pages walk pan then width then back")
+{
+    /*  Namespace draft §113 (the author, 2026-10-25): a pan or a balance a
+        mix channel on the Pan button, the widths after, "no send" where the
+        cue does not reach and "mono" where the shape has no such row. */
+    PageDesk desk;
+    fakeSends (desk.fake, 3);
+    desk.fake.text ("/godot/cue/CUE00001/sends", "SND00001 SND00002");
+    desk.fake.text ("/godot/send/SND00002/bus", "BUS00002");
+    desk.fake.number ("/godot/send/SND00002/level", 0.0);
+    desk.fake.flag ("/godot/send/SND00002/on", true);
+    desk.fake.text ("/godot/send/SND00002/placement", "pan");
+    desk.fake.number ("/godot/send/SND00002/pan", -0.3);
+    desk.fake.number ("/godot/send/SND00001/balance", 0.5);
+    desk.aimAt ("CUE00001");
+
+    desk.sink.sent.clear();
+    desk.press ("PORTBNK1", 0x2a);
+    CHECK (desk.page().word == "pan");
+    CHECK (desk.page().count == 1);
+    desk.settle();
+
+    const auto first = sentOn (desk.sink, "PORTBNK1");
+
+    //  ONE ROTARY A MIX CHANNEL: a balance for the stereo send, a pan for the mono one, "no send" past them.
+    CHECK (contains (first, surface::d700DisplayRow (0, 0, "Foldback")));
+    CHECK (contains (first, surface::d700DisplayRow (0, 1, "R 50")));
+    CHECK (contains (first, surface::d700DisplayRow (1, 0, "Mix 2")));
+    CHECK (contains (first, surface::d700DisplayRow (1, 1, "L 30")));
+    CHECK (contains (first, surface::d700DisplayRow (2, 1, "no send")));
+    CHECK (contains (first, surface::d700DisplayRow3 (0, "Pan")));
+
+    //  The ring from the centre: a balance of a half is three quarters along; Pan lit, Loop dark.
+    CHECK (contains (first, surface::d700Ring (0, 95, 1)));
+    CHECK (contains (first, surface::led (0x2a, surface::Led::on)));
+    CHECK_FALSE (contains (first, surface::led (0x56, surface::Led::on)));
+
+    //  A TURN moves two hundredths a detent; a PRESS puts the lean back to the centre.
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x11, 0x05 } } });
+    desk.press ("PORTBNK1", 0x20);
+    CHECK (desk.writes() == std::vector<std::string> { "node.set /godot/send/SND00002/pan -0.2",
+                                                       "node.set /godot/send/SND00001/balance 0.0" });
+
+    //  A channel the cue does not reach turns nothing here: the Send page makes sends.
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x12, 0x02 } } });
+    desk.press ("PORTBNK1", 0x22);
+    CHECK (desk.writes().empty());
+
+    //  Pan again: one page of pans, and Foldback is two channels into two, so the widths.
+    desk.sink.sent.clear();
+    desk.press ("PORTBNK1", 0x2a);
+    CHECK (desk.page().word == "width");
+    desk.settle();
+
+    const auto second = sentOn (desk.sink, "PORTBNK1");
+    CHECK (contains (second, surface::d700DisplayRow (0, 1, "100 %")));
+    CHECK (contains (second, surface::d700DisplayRow (1, 1, "mono")));     // "no send" past them stays, unchanged, so unsent
+    CHECK (contains (second, surface::d700DisplayRow3 (0, "Width")));
+    CHECK (contains (second, surface::d700Ring (0, 127, 2)));
+
+    //  A PRESS on a width swaps the sides; a turn narrows it.
+    desk.submitted.clear();
+    desk.press ("PORTBNK1", 0x20);
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x10, 0x45 } } });
+    CHECK (desk.writes() == std::vector<std::string> { "node.set /godot/send/SND00001/swap true",
+                                                       "node.set /godot/send/SND00001/width 0.9" });
+
+    //  And the screen says so while the sides are exchanged.
+    desk.fake.flag ("/godot/send/SND00001/swap", true);
+    desk.sink.sent.clear();
+    desk.publish();
+    desk.settle();
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow (0, 0, "Foldback swap")));
+
+    //  Pan once more: the surface's own page.
+    desk.press ("PORTBNK1", 0x2a);
+    CHECK (desk.page().word == "show");
+
+    //  With no send two channels wide into two, the pans go straight back to the surface's own page.
+    desk.fake.text ("/godot/send/SND00001/placement", "fold");
+    desk.publish();
+    desk.press ("PORTBNK1", 0x2a);
+    CHECK (desk.page().word == "pan");
+    desk.press ("PORTBNK1", 0x2a);
+    CHECK (desk.page().word == "show");
+
+    //  `*` leaves a pan page as it leaves any.
+    desk.press ("PORTBNK1", 0x2a);
+    desk.press ("PORTBNK1", 0x36);
     CHECK (desk.page().word == "show");
 }
 

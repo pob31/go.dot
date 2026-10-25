@@ -22,7 +22,8 @@
     "octavesPerDetent": 0.0625,
     "gainStepDb": 0.5,
     "widthDoublingsPerDetent": 0.125,
-    "levelTravelPerDetent": 0.007874015748031496
+    "levelTravelPerDetent": 0.007874015748031496,
+    "placePerDetent": 0.02
   },
   "fader": {
     "silenceDb": -120.0,

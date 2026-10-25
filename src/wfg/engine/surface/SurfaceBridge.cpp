@@ -97,7 +97,14 @@ namespace wfg::surface
         constexpr int selectNote = 0x18;        // + element: SELECT, whose LED says the rotaries are aimed at its cue
         constexpr int vpotNote = 0x20;          // + element: the V-Pot - its press, and the D700's colour
         constexpr int sendButtonNote = 0x29;    // Send, lit while its page is up
-        constexpr int panButtonNote = 0x2a;     // Pan, lit while the Loop page is up (Phase 9c)
+        constexpr int panButtonNote = 0x2a;     // Pan, lit while a pan or a width page is up (namespace draft §113)
+        constexpr int loopButtonNote = 0x56;    // Loop, Mackie's Cycle: lit while the Loop page is up (§113; its light is to confirm at the bench)
+
+        /** The pages laid out one rotary a mix channel: the sends, their pans, their widths (§113). */
+        constexpr bool isSendKind (Page page) noexcept
+        {
+            return page == Page::send || page == Page::pan || page == Page::width;
+        }
         constexpr int fxButtonNote = 0x2b;      // FX (Mackie's Plug-In), lit while its page is up
         constexpr int eqButtonNote = 0x2c;      // EQ, lit while its page is up
         constexpr int recordButtonNote = 0x5f;  // the transport's Rec: the aimed take records, or lays a layer
@@ -601,6 +608,8 @@ namespace wfg::surface
             std::string switchAt;                   // the switch that takes its band, or its send, out
             std::string busId;                      // a Send page: the mix channel under the rotary
             std::string busNameAt;
+            std::string placementAt;                // a pan or width page: the send's shape, /godot/send/<id>/placement; empty for no send
+            std::string onAt;                       // a pan or width page: the send's switch, for the dimming
             std::string paramAt;                    // an FX page: /godot/plugin/<id>/param/<n>/, its name, steps, default
             std::string fxTextAt;                   // an FX page: /godot/fx/<id>/t<n>, the plugin's own words for it
 
@@ -627,6 +636,7 @@ namespace wfg::surface
             int sendLed = -1;
             int fxLed = -1;
             int loopLed = -1;
+            int panLed = -1;
 
             //  The transport's Rec, on the first port only - where the transport is (Phase 9c).
             int recLed = -1;
@@ -988,9 +998,23 @@ namespace wfg::surface
             /*  A SEND PAGE IS ALSO MADE AGAIN when the show's mix channels or
                 the cue's sends change - a send made by the page's own turn, a
                 bus added - since which send is under which rotary moved. */
-            const auto& mixes = paging.page == Page::send ? textAt (at, mixesAddress()) : noText();
-            const auto sends = paging.page == Page::send && ! base.empty()
-                                 ? textAt (at, base + "sends") : std::string {};
+            const auto sendKind = isSendKind (paging.page);
+            const auto& mixes = sendKind ? textAt (at, mixesAddress()) : noText();
+            const auto sends = sendKind && ! base.empty() ? textAt (at, base + "sends") : std::string {};
+            auto sendsKey = sends;
+
+            /*  AND A PAN OR WIDTH PAGE WHEN A SEND'S SHAPE MOVES (namespace
+                draft §113) - a file replaced by a mono one, a bus widened -
+                since which row a rotary turns is the shape's. */
+            if (paging.page == Page::pan || paging.page == Page::width)
+            {
+                std::string shapes;
+
+                for (const auto& sendId : wordsOf (sends))
+                    shapes += ":" + textAt (at, "/godot/send/" + sendId + "/placement");
+
+                sendsKey += shapes;
+            }
 
             /*  AND AN FX PAGE when the cue's inserts or their catalogues move;
                 and a Loop page when the cue's channel does, or whether it
@@ -1006,7 +1030,7 @@ namespace wfg::surface
 
             if (paging.madeForAim == aim && paging.madeForPage == paging.page
                   && paging.madeForIndex == paging.index
-                  && paging.madeForMixes == mixes && paging.madeForSends == sends
+                  && paging.madeForMixes == mixes && paging.madeForSends == sendsKey
                   && paging.madeForFx == fxKey)
                 return;
 
@@ -1017,7 +1041,7 @@ namespace wfg::surface
             paging.madeForPage = paging.page;
             paging.madeForIndex = paging.index;
             paging.madeForMixes = mixes;
-            paging.madeForSends = sends;
+            paging.madeForSends = sendsKey;
             paging.madeForFx = fxKey;
             paging.fxTitle.clear();
             paging.fxInsert = 0;
@@ -1043,6 +1067,8 @@ namespace wfg::surface
                 strip.switchAt.clear();
                 strip.busId.clear();
                 strip.busNameAt.clear();
+                strip.placementAt.clear();
+                strip.onAt.clear();
                 strip.paramAt.clear();
                 strip.fxTextAt.clear();
 
@@ -1063,7 +1089,7 @@ namespace wfg::surface
 
             const auto rotaries = box.rotaries();
 
-            if (paging.page == Page::send)
+            if (isSendKind (paging.page))
             {
                 //  Which of the cue's sends goes into which mix channel.
                 std::map<std::string, std::string> sendInto;
@@ -1090,8 +1116,37 @@ namespace wfg::surface
 
                     if (const auto found = sendInto.find (strip.busId); found != sendInto.end())
                     {
-                        strip.controlAt = "/godot/send/" + found->second + "/level";
-                        strip.switchAt = "/godot/send/" + found->second + "/on";
+                        const auto sendBase = "/godot/send/" + found->second + "/";
+
+                        if (paging.page == Page::send)
+                        {
+                            strip.controlAt = sendBase + "level";
+                            strip.switchAt = sendBase + "on";
+                            continue;
+                        }
+
+                        /*  A PAN OR WIDTH PAGE (namespace draft §113): the row
+                            the send's shape hears - a pan where one channel
+                            meets two, a balance where two meet two or one, a
+                            width where two meet two - and nothing where the
+                            shape has no such row. The press on a width is the
+                            swap. */
+                        const auto& shapeWord = textAt (at, sendBase + "placement");
+                        strip.placementAt = sendBase + "placement";
+                        strip.onAt = sendBase + "on";
+
+                        if (paging.page == Page::pan)
+                        {
+                            if (shapeWord == "pan")
+                                strip.controlAt = sendBase + "pan";
+                            else if (shapeWord == "stereo" || shapeWord == "fold")
+                                strip.controlAt = sendBase + "balance";
+                        }
+                        else if (shapeWord == "stereo")
+                        {
+                            strip.controlAt = sendBase + "width";
+                            strip.switchAt = sendBase + "swap";
+                        }
                     }
                 }
 
@@ -1190,7 +1245,7 @@ namespace wfg::surface
             if (page == Page::eq)
                 return eqControlCount;
 
-            if (page == Page::send)
+            if (isSendKind (page))
                 return static_cast<int> (wordsOf (textAt (published.get(), mixesAddress())).size());
 
             return 0;
@@ -1215,6 +1270,20 @@ namespace wfg::surface
             publishPage (box);
         }
 
+        /*  WHETHER THE AIMED CUE HAS A SEND TWO CHANNELS WIDE INTO TWO (§113):
+            the one shape with a width to turn, so the Pan button walks on to
+            the widths only when there is one. */
+        bool hasStereoSend (const std::string& aim) const
+        {
+            const auto* at = published.get();
+
+            for (const auto& sendId : wordsOf (textAt (at, "/godot/cue/" + aim + "/sends")))
+                if (textAt (at, "/godot/send/" + sendId + "/placement") == "stereo")
+                    return true;
+
+            return false;
+        }
+
         /*  EQ OR SEND PRESSED: that kind's first page, or its next, or - after
             its last - the surface's own page again ("revert to normal mode
             once all sends have been displayed"). With nothing aimed at there
@@ -1230,6 +1299,31 @@ namespace wfg::surface
             if (kind == Page::loop)
             {
                 showPage (box, box.paging.page == Page::loop ? Page::show : Page::loop, 0, bank);
+                return;
+            }
+
+            /*  PAN WALKS ITS PAGES, THEN THE WIDTHS (namespace draft §113): the
+                pans a page of mix channels at a time, then the widths the same
+                way when the aimed cue has a send two channels wide into two -
+                a page with nothing to turn is a question - and then the
+                surface's own page. */
+            if (kind == Page::pan)
+            {
+                if (controlsOf (kind) == 0)
+                    return;
+
+                const auto count = pageCount (controlsOf (kind), box.rotaries());
+                const auto page = box.paging.page;
+
+                if (page != Page::pan && page != Page::width)
+                    showPage (box, Page::pan, 0, bank);
+                else if (box.paging.index + 1 < count)
+                    showPage (box, page, box.paging.index + 1, bank);
+                else if (page == Page::pan && hasStereoSend (aimNow()))
+                    showPage (box, Page::width, 0, bank);
+                else
+                    showPage (box, Page::show, 0, bank);
+
                 return;
             }
 
@@ -1706,6 +1800,11 @@ namespace wfg::surface
                         turnPage (box, Page::loop, bank);
                     break;
 
+                case Action::panPage:
+                    if (event.down)
+                        turnPage (box, Page::pan, bank);
+                    break;
+
                 case Action::leavePage:
                     if (event.down && box.paging.page != Page::show)
                         showPage (box, Page::show, 0, box.paging.bank);
@@ -2064,6 +2163,8 @@ namespace wfg::surface
                         fxWrite (box, strip, steps, pressed, submit);
                     else if (box.paging.page == Page::loop)
                         loopWrite (box, strip, steps, pressed, submit);
+                    else if (box.paging.page == Page::pan || box.paging.page == Page::width)
+                        placeWrite (box, strip, steps, pressed, submit);
                 }
 
                 /*  A HAND ON THE PAGE, counted whatever it wrote, so the window
@@ -2352,6 +2453,55 @@ namespace wfg::surface
 
             const auto next = turned (Law::level, *current, steps, faderSilenceDb, faderLoudestDb,
                                       box.topology.faderLaw);
+
+            if (std::abs (next - *current) < 1.0e-9)
+                return;
+
+            write (strip.controlAt, osc::Value::float64 (next));
+        }
+
+        /*  A SEND'S PLACE ON A ROTARY (namespace draft §113): a pan or a
+            balance turned two hundredths a detent and pressed back to the
+            centre; a width turned the same and pressed to swap the sides. A
+            mix the cue does not send to, or a shape with no such row, turns
+            nothing - the Send page is where a send is made. Under the lock
+            the rows ride live, as a send's level does. */
+        void placeWrite (Surface& box, const Strip& strip, int steps, bool pressed, const Submit& submit) const
+        {
+            const auto* at = published.get();
+
+            if (strip.controlAt.empty())
+                return;
+
+            const auto write = [&] (const std::string& address, osc::Value value)
+            {
+                submit (commandFrom (box.origin, "node.set",
+                                     { osc::Value::string (address), std::move (value) }));
+                box.paging.edited = address;
+            };
+
+            const auto onWidth = box.paging.page == Page::width;
+            const auto current = numberAt (at, strip.controlAt);
+
+            if (pressed)
+            {
+                if (onWidth)
+                {
+                    if (soleAt (at, strip.switchAt) != nullptr)
+                        write (strip.switchAt, osc::Value::boolean (! flagAt (at, strip.switchAt)));
+                }
+                else if (current.has_value() && std::abs (*current) > 1.0e-9)
+                {
+                    write (strip.controlAt, osc::Value::float64 (0.0));
+                }
+            }
+
+            if (steps == 0 || ! current.has_value())
+                return;
+
+            const auto next = onWidth
+                                ? turned (Law::stereoWidth, *current, steps, placeWidthMin, placeWidthMax, box.topology.faderLaw)
+                                : turned (Law::pan, *current, steps, placeLeanMin, placeLeanMax, box.topology.faderLaw);
 
             if (std::abs (next - *current) < 1.0e-9)
                 return;
@@ -2862,11 +3012,19 @@ namespace wfg::surface
             const auto sends = here && box.paging.page == Page::send && lit ? Led::on : Led::off;
             const auto fx = here && box.paging.page == Page::fx && lit ? Led::on : Led::off;
             const auto loop = here && box.paging.page == Page::loop && lit ? Led::on : Led::off;
+            const auto pan = here && (box.paging.page == Page::pan || box.paging.page == Page::width) && lit
+                               ? Led::on : Led::off;
 
             if (static_cast<int> (loop) != shown.loopLed)
             {
-                send (shown.port, led (panButtonNote, loop));
+                send (shown.port, led (loopButtonNote, loop));
                 shown.loopLed = static_cast<int> (loop);
+            }
+
+            if (static_cast<int> (pan) != shown.panLed)
+            {
+                send (shown.port, led (panButtonNote, pan));
+                shown.panLed = static_cast<int> (pan);
             }
 
             if (static_cast<int> (fx) != shown.fxLed)
@@ -3408,6 +3566,46 @@ namespace wfg::surface
                                static_cast<int> (std::lround (own.green * share)),
                                static_cast<int> (std::lround (own.blue * share)) };
             }
+            else if (strip.control >= 0 && (paging.page == Page::pan || paging.page == Page::width))
+            {
+                /*  A SEND'S PLACE (namespace draft §113): the mix channel's
+                    name, "swap" beside it on the width page while the sides
+                    are exchanged; its pan or balance, or its width; "no send"
+                    into a channel the cue does not reach, "mono" where the
+                    shape has no such row; the ring from the centre for a lean
+                    and from the left for a width; the cue's colour, dimmed
+                    while the send is out. */
+                const auto present = ! strip.placementAt.empty();
+                const auto lean = paging.page == Page::pan;
+                const auto placed = ! strip.controlAt.empty() ? numberAt (at, strip.controlAt) : std::optional<double> {};
+                const auto out = ! present || ! flagAt (at, strip.onAt);
+                const auto& busName = textAt (at, strip.busNameAt);
+
+                labelScratch.assign (busName.empty() ? std::string_view (strip.busId) : std::string_view (busName));
+
+                if (native && ! lean && ! strip.switchAt.empty() && flagAt (at, strip.switchAt))
+                    labelScratch.append (" swap");
+
+                if (placed.has_value())
+                {
+                    const auto law = lean ? Law::pan : Law::stereoWidth;
+                    const auto low = lean ? placeLeanMin : placeWidthMin;
+                    const auto high = lean ? placeLeanMax : placeWidthMax;
+                    valueText (law, *placed, ! native, levelScratch);
+                    ring = native ? d700RingFor (law, *placed, low, high, box.topology.faderLaw)
+                                  : mcuRingFor (law, *placed, low, high, box.topology.faderLaw);
+                }
+                else
+                {
+                    levelScratch.assign (! present ? (native ? "no send" : "none") : "mono");
+                }
+
+                const auto own = colourFromHex (textAt (at, paging.aimColourAt)).value_or (neutralLight);
+                const auto share = out ? pageOffLight : 1.0;
+                colour = Rgb { static_cast<int> (std::lround (own.red * share)),
+                               static_cast<int> (std::lround (own.green * share)),
+                               static_cast<int> (std::lround (own.blue * share)) };
+            }
             else if (strip.control >= 0 && paging.page == Page::fx)
             {
                 /*  A PLUGIN PARAMETER (2026-09-26): its name as the plugin
@@ -3525,6 +3723,8 @@ namespace wfg::surface
                                              && soleAt (at, paging.eqOnAt) != nullptr && ! flagAt (at, paging.eqOnAt);
                         pageScratch.assign (paging.page == Page::send ? "Send"
                                             : paging.page == Page::loop ? "Loop"
+                                            : paging.page == Page::pan ? "Pan"
+                                            : paging.page == Page::width ? "Width"
                                             : eqOut ? "EQ out" : "EQ");
 
                         if (! eqOut && paging.count > 1)

@@ -733,6 +733,106 @@ TEST_CASE ("stream deck bridge: the Send page makes a send a turn up asks for, a
     CHECK (desk.host.keys[5].dim);
 }
 
+TEST_CASE ("stream deck bridge: the Send key walks the levels, the pans and the widths, and the key says which (§113)")
+{
+    /*  Namespace draft §113, the author's pick (no key being free): Send
+        again after the levels is the pans, then the widths of the sends two
+        channels wide into two, then the levels again. */
+    Desk desk ("plus");
+    desk.fake.text ("/godot/audio/mixes", "BUS00001 BUS00002");
+    desk.fake.text ("/godot/bus/BUS00001/name", "Foldback");
+    desk.fake.text ("/godot/bus/BUS00002/name", "Mix 2");
+    desk.fake.text ("/godot/surface/aim", "CUE00001");
+    desk.fake.text ("/godot/cue/CUE00001/sends", "SND00001 SND00002");
+    desk.fake.text ("/godot/send/SND00001/bus", "BUS00001");
+    desk.fake.number ("/godot/send/SND00001/level", -6.0);
+    desk.fake.flag ("/godot/send/SND00001/on", true);
+    desk.fake.text ("/godot/send/SND00001/placement", "stereo");
+    desk.fake.number ("/godot/send/SND00001/balance", 0.5);
+    desk.fake.number ("/godot/send/SND00001/width", 1.0);
+    desk.fake.flag ("/godot/send/SND00001/swap", false);
+    desk.fake.text ("/godot/send/SND00002/bus", "BUS00002");
+    desk.fake.number ("/godot/send/SND00002/level", 0.0);
+    desk.fake.flag ("/godot/send/SND00002/on", true);
+    desk.fake.text ("/godot/send/SND00002/placement", "pan");
+    desk.fake.number ("/godot/send/SND00002/pan", -0.3);
+    desk.step();
+
+    CHECK (desk.table.pageOf ("SURF0001").word == "send");
+    CHECK (desk.host.zones[0].value == "-6.0 dB");
+    CHECK (desk.host.keys[0].label == "Send");
+
+    const auto pressSend = [&desk]
+    {
+        desk.host.keysDown ("AL12K1A00001", { 0 });
+        desk.step();
+        desk.host.keysDown ("AL12K1A00001", {});
+        desk.step();
+    };
+
+    //  Send again: two mixes are one page of levels, so the pans.
+    pressSend();
+    CHECK (desk.table.pageOf ("SURF0001").word == "pan");
+    CHECK (desk.host.keys[0].lit);
+    CHECK (desk.host.keys[0].label == "Pan");
+    CHECK (desk.host.zones[0].label == "Foldback");
+    CHECK (desk.host.zones[0].value == "R 50");
+    CHECK (desk.host.zones[0].fromCentre);
+    CHECK (desk.host.zones[1].value == "L 30");
+
+    //  A turn moves two hundredths a detent; a click puts the lean back to the centre.
+    desk.submitted.clear();
+    surface::DeckInput turn;
+    turn.kind = surface::DeckInput::Kind::dialTurns;
+    turn.detents = { 0, 5, 0, 0 };
+    desk.host.input ("AL12K1A00001", turn);
+    surface::DeckInput press;
+    press.kind = surface::DeckInput::Kind::dialPresses;
+    press.dialsDown = { true, false, false, false };
+    desk.host.input ("AL12K1A00001", press);
+    press.dialsDown = { false, false, false, false };
+    desk.host.input ("AL12K1A00001", press);
+    desk.step();
+
+    REQUIRE (desk.submitted.size() == 2);
+    CHECK (desk.submitted[0].args[0].getString() == "/godot/send/SND00001/balance");
+    CHECK (desk.submitted[0].args[1].asDouble() == doctest::Approx (0.0));
+    CHECK (desk.submitted[1].args[0].getString() == "/godot/send/SND00002/pan");
+    CHECK (desk.submitted[1].args[1].asDouble() == doctest::Approx (-0.2));
+
+    //  Send again: Foldback is two channels into two, so the widths; the mono send has none.
+    pressSend();
+    CHECK (desk.table.pageOf ("SURF0001").word == "width");
+    CHECK (desk.host.keys[0].label == "Width");
+    CHECK (desk.host.zones[0].value == "100 %");
+    CHECK_FALSE (desk.host.zones[0].fromCentre);
+    CHECK (desk.host.zones[1].value == "mono");
+    CHECK (desk.host.zones[1].off);
+
+    //  A click on a width swaps the sides.
+    desk.submitted.clear();
+    press.dialsDown = { true, false, false, false };
+    desk.host.input ("AL12K1A00001", press);
+    press.dialsDown = { false, false, false, false };
+    desk.host.input ("AL12K1A00001", press);
+    desk.step();
+    REQUIRE (desk.submitted.size() == 1);
+    CHECK (desk.submitted[0].args[0].getString() == "/godot/send/SND00001/swap");
+
+    //  Send once more: round to the levels.
+    pressSend();
+    CHECK (desk.table.pageOf ("SURF0001").word == "send");
+    CHECK (desk.host.keys[0].label == "Send");
+
+    //  With no send two channels wide into two, the pans go round to the levels at once.
+    desk.fake.text ("/godot/send/SND00001/placement", "fold");
+    desk.step();
+    pressSend();
+    CHECK (desk.table.pageOf ("SURF0001").word == "pan");
+    pressSend();
+    CHECK (desk.table.pageOf ("SURF0001").word == "send");
+}
+
 TEST_CASE ("stream deck bridge: a Stream Deck+'s page counts what its hands did, and is put down when the deck goes (§101)")
 {
     /*  The author, 2026-10-22: "If the device would get disconnected when the

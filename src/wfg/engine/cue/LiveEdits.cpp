@@ -75,7 +75,18 @@ namespace wfg::cue
 
         bool isSendRow (const Parts& parts)
         {
-            return parts.owner == "send" && (parts.row == "level" || parts.row == "on");
+            return parts.owner == "send"
+                   && (parts.row == "level" || parts.row == "on"
+                       || parts.row == "pan" || parts.row == "width"
+                       || parts.row == "balance" || parts.row == "swap");
+        }
+
+        /** Whether this row of a send is the one the layer holds. */
+        bool sendRides (const LiveEdits::Send& send, const std::string& row)
+        {
+            if (row == "level") return send.level.has_value();
+            if (row == "on")    return send.on.has_value();
+            return send.placement.count (row) > 0;
         }
 
         /*  WHAT A CUE'S DCA MARK CARRIES rides live under the lock as its EQ
@@ -223,7 +234,8 @@ namespace wfg::cue
             count += riding.size();
 
         for (const auto& [id, send] : sends)
-            count += send.created ? 1u : (send.level.has_value() ? 1u : 0u) + (send.on.has_value() ? 1u : 0u);
+            count += send.created ? 1u : (send.level.has_value() ? 1u : 0u) + (send.on.has_value() ? 1u : 0u)
+                                            + send.placement.size();
 
         for (const auto& [id, values] : fx)
             count += values.size();
@@ -286,7 +298,10 @@ namespace wfg::cue
             send.bus = busId;
         }
 
-        (row == "level" ? send.level : send.on) = std::move (text);
+        if (row == "level")     send.level = std::move (text);
+        else if (row == "on")   send.on = std::move (text);
+        else                    send.placement[row] = std::move (text);
+
         ++rev;
     }
 
@@ -297,9 +312,12 @@ namespace wfg::cue
         if (found == sends.end() || found->second.created)
             return;
 
-        (row == "level" ? found->second.level : found->second.on).reset();
+        if (row == "level")     found->second.level.reset();
+        else if (row == "on")   found->second.on.reset();
+        else                    found->second.placement.erase (row);
 
-        if (! found->second.level.has_value() && ! found->second.on.has_value())
+        if (! found->second.level.has_value() && ! found->second.on.has_value()
+              && found->second.placement.empty())
             sends.erase (found);
 
         ++rev;
@@ -377,9 +395,7 @@ namespace wfg::cue
             {
                 const auto isRiding = isCueRow (*parts)
                                         ? live.rowOf (parts->id, parts->row) != nullptr
-                                        : riding != nullptr
-                                            && (parts->row == "level" ? riding->level.has_value()
-                                                                      : riding->on.has_value());
+                                        : riding != nullptr && sendRides (*riding, parts->row);
 
                 if (! isRiding)
                     return std::nullopt;
@@ -630,6 +646,9 @@ namespace wfg::cue
                                         if (send.on.has_value())
                                             document.setAttribute ("/godot/send/" + sendId + "/on", *send.on);
 
+                                        for (const auto& [row, text] : send.placement)
+                                            document.setAttribute ("/godot/send/" + sendId + "/" + row, text);
+
                                         continue;
                                     }
                                 }
@@ -642,6 +661,10 @@ namespace wfg::cue
 
                                 if (send.on.has_value())
                                     document.setAttribute ("/godot/send/" + target + "/on", *send.on);
+
+                                //  And its place (namespace draft §113), row by row.
+                                for (const auto& [row, text] : send.placement)
+                                    document.setAttribute ("/godot/send/" + target + "/" + row, text);
                             }
 
                             /*  A PLUGIN'S PARAMETERS (2026-09-26): merged into

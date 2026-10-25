@@ -160,6 +160,8 @@ namespace wfg::surface
                     return std::clamp (std::log (value / minimum) / std::log (maximum / minimum), 0.0, 1.0);
 
                 case Law::gain:
+                case Law::pan:
+                case Law::stereoWidth:
                     if (! (maximum > minimum))
                         return 0.5;
 
@@ -186,6 +188,8 @@ namespace wfg::surface
             case Page::send: return "send";
             case Page::fx:   return "fx";
             case Page::loop: return "loop";
+            case Page::pan:  return "pan";
+            case Page::width: return "width";
         }
 
         return "show";
@@ -225,6 +229,11 @@ namespace wfg::surface
                                                minimum, maximum);
                 return std::clamp (roundedTo (moved, 0.01), minimum, maximum);
             }
+
+            //  A lean or a width: two hundredths a detent, fifty end to end (§113).
+            case Law::pan:
+            case Law::stereoWidth:
+                return std::clamp (roundedTo (value + detents * pagePlacePerDetent, 0.01), minimum, maximum);
 
             case Law::level:
             {
@@ -269,12 +278,12 @@ namespace wfg::surface
     {
         const auto fraction = fractionOf (law, value, minimum, maximum, fader);
 
-        if (law == Law::gain)
+        if (law == Law::gain || law == Law::pan)
             return { static_cast<int> (std::lround (fraction * 127.0)), 1 };
 
         /*  A LEVEL AT SILENCE IS AN EMPTY RING, and a frequency at the bottom
             of its range is not silence: it keeps one step lit. */
-        if (law == Law::level)
+        if (law == Law::level || law == Law::stereoWidth)
             return { static_cast<int> (std::lround (fraction * 127.0)), 2 };
 
         return { 1 + static_cast<int> (std::lround (fraction * 126.0)), 2 };
@@ -285,10 +294,10 @@ namespace wfg::surface
         const auto fraction = fractionOf (law, value, minimum, maximum, fader);
 
         //  Mackie's boost/cut: position six is the middle, one and eleven the ends.
-        if (law == Law::gain)
+        if (law == Law::gain || law == Law::pan)
             return { 1 + static_cast<int> (std::lround (fraction * 10.0)), 1 };
 
-        if (law == Law::level)
+        if (law == Law::level || law == Law::stereoWidth)
             return { static_cast<int> (std::lround (fraction * 11.0)), 2 };
 
         return { 1 + static_cast<int> (std::lround (fraction * 10.0)), 2 };
@@ -490,6 +499,31 @@ namespace wfg::surface
                 fixed (value, 1, out);
                 out.append (space);
                 out.append ("dB");
+                return;
+
+            case Law::pan:
+            {
+                /*  A LEAN IN PERCENT, which side first: "L 30", "R 100", and "C"
+                    for the centre - the word a desk's pan display uses, and
+                    one a hand can read against a balance knob's "L"/"R". */
+                const auto percent = std::llround (std::abs (value) * 100.0);
+
+                if (percent == 0)
+                {
+                    out.push_back ('C');
+                    return;
+                }
+
+                out.push_back (value < 0.0 ? 'L' : 'R');
+                out.append (space);
+                fixed (static_cast<double> (percent), 0, out);
+                return;
+            }
+
+            case Law::stereoWidth:
+                fixed (static_cast<double> (std::llround (std::clamp (value, 0.0, 1.0) * 100.0)), 0, out);
+                out.append (space);
+                out.push_back ('%');
                 return;
 
             case Law::shape:

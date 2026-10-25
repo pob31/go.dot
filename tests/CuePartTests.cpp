@@ -61,7 +61,7 @@ namespace
         "  <Lists>\n"
         "    <List id=\"CP000001\" name=\"Main\">\n"
         "      <Media eqB1Gain=\"6\" eqHpf=\"true\" file=\"a.wav\" id=\"CP000002\" name=\"A\">\n"
-        "        <Send bus=\"CP000090\" id=\"CP000010\" level=\"-6\"/>\n"
+        "        <Send bus=\"CP000090\" id=\"CP000010\" level=\"-6\" pan=\"-0.5\" swap=\"true\"/>\n"
         "        <Fx id=\"CP000011\" plugin=\"CP000080\" values=\"0:0.25\"/>\n"
         "        <Fx enabled=\"false\" id=\"CP000012\" plugin=\"CP000081\"/>\n"
         "        <Range id=\"CP000013\" in=\"1\" loops=\"2\" name=\"Verse\" out=\"4\"/>\n"
@@ -351,6 +351,11 @@ TEST_CASE ("cue parts: sends pasted match by bus, keep the target's lane, and ta
     CHECK (at (document, "/godot/send/CP000020/on") == "true");
     CHECK (at (document, "/godot/send/CP000020/levelLane") == "0 0 4 -12");
     CHECK_FALSE (document.findById ("CP000021").isValid());
+
+    //  Its place goes with it (namespace draft §113): the rows, whether the shape hears them or not.
+    CHECK (at (document, "/godot/send/CP000020/pan") == "-0.5");
+    CHECK (at (document, "/godot/send/CP000020/swap") == "true");
+    CHECK (at (document, "/godot/send/CP000020/width") == "1");
 
     /*  Onto a cue that sends nowhere: made, and named in the answer. */
     const auto made = document.pastePart (fragment, { "CP000004" }, {});

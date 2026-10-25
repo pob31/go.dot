@@ -81,6 +81,10 @@ namespace wfg::cue
             std::string bus;
             std::optional<std::string> level;
             std::optional<std::string> on;
+
+            /*  Its place in the mix riding live (namespace draft §113): pan,
+                width, balance or swap, by row, as canonical text. */
+            std::map<std::string, std::string> placement;
             bool created = false;
         };
 

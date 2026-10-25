@@ -264,6 +264,14 @@ TEST_CASE ("surface pages: what a screen says a value is, in every locale")
         CHECK (text (Law::level, -6.0) == "-6.0 dB");
         CHECK (text (Law::level, -120.0) == "-inf dB");
         CHECK (text (Law::level, -120.0, true) == "-inf");
+
+        //  A lean in percent, which side first; a width in percent (§113).
+        CHECK (text (Law::pan, 0.0) == "C");
+        CHECK (text (Law::pan, -0.3) == "L 30");
+        CHECK (text (Law::pan, 1.0) == "R 100");
+        CHECK (text (Law::pan, 0.25, true) == "R25");
+        CHECK (text (Law::stereoWidth, 1.0) == "100 %");
+        CHECK (text (Law::stereoWidth, 0.5, true) == "50%");
     }
 
     std::setlocale (LC_NUMERIC, restore.c_str());
@@ -298,6 +306,19 @@ TEST_CASE ("surface pages: a ring stands at its value - a gain from the centre, 
     //  A send at silence is an empty ring; at the fader's top, a full one.
     CHECK (surface::d700RingFor (Law::level, -120.0, -120.0, 12.0, law) == surface::Ring { 0, 2 });
     CHECK (surface::d700RingFor (Law::level, 12.0, -120.0, 12.0, law).value == 127);
+
+    //  A lean from the centre - hard left empty, the centre the middle; a width from the left, full as the file is (§113).
+    CHECK (surface::d700RingFor (Law::pan, 0.0, -1.0, 1.0, law) == surface::Ring { 64, 1 });
+    CHECK (surface::d700RingFor (Law::pan, -1.0, -1.0, 1.0, law) == surface::Ring { 0, 1 });
+    CHECK (surface::mcuRingFor (Law::pan, 1.0, -1.0, 1.0, law) == surface::Ring { 11, 1 });
+    CHECK (surface::d700RingFor (Law::stereoWidth, 1.0, 0.0, 1.0, law) == surface::Ring { 127, 2 });
+    CHECK (surface::d700RingFor (Law::stereoWidth, 0.0, 0.0, 1.0, law) == surface::Ring { 0, 2 });
+
+    //  And they turn two hundredths a detent, held at their ends.
+    CHECK (surface::turned (Law::pan, 0.0, 3, -1.0, 1.0, law) == doctest::Approx (0.06));
+    CHECK (surface::turned (Law::pan, 0.99, 3, -1.0, 1.0, law) == doctest::Approx (1.0));
+    CHECK (surface::turned (Law::stereoWidth, 1.0, -5, 0.0, 1.0, law) == doctest::Approx (0.9));
+    CHECK (surface::turned (Law::stereoWidth, 0.01, -5, 0.0, 1.0, law) == doctest::Approx (0.0));
 
     //  A shape: empty as a peak, full as a shelf.
     CHECK (surface::d700ShapeRing ("peak") == surface::Ring { 0, 2 });
@@ -620,6 +641,8 @@ TEST_CASE ("surface pages: the remote's copy of the tables is these headers' (na
             case surface::Law::width:     return "width";
             case surface::Law::shape:     return "shape";
             case surface::Law::level:     return "level";
+            case surface::Law::pan:       return "pan";
+            case surface::Law::stereoWidth: return "stereoWidth";
         }
 
         return {};
@@ -668,6 +691,7 @@ TEST_CASE ("surface pages: the remote's copy of the tables is these headers' (na
     CHECK (near (detent->find ("gainStepDb")->asNumber(), surface::pageGainStepDb));
     CHECK (near (detent->find ("widthDoublingsPerDetent")->asNumber(), surface::pageWidthDoublingsPerDetent));
     CHECK (near (detent->find ("levelTravelPerDetent")->asNumber(), surface::pageLevelTravelPerDetent));
+    CHECK (near (detent->find ("placePerDetent")->asNumber(), surface::pagePlacePerDetent));
 
     const auto* fader = parsed.value->find ("fader");
     REQUIRE (fader != nullptr);

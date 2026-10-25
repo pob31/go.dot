@@ -143,7 +143,7 @@ namespace wfg::surface
         /** What one surface's rotaries are showing. */
         struct Page
         {
-            /** show, eq or send - the words of surface/page. */
+            /** show, eq, send, fx, loop, pan or width - the words of surface/page. */
             std::string word = "show";
 
             /** Which page of that kind, from nought, and how many it has. */

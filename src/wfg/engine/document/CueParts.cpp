@@ -50,7 +50,8 @@ namespace wfg::doc::parts
 
                 /*  A send is the level of a cue at a mix, matched by the mix it
                     feeds: its lane stays behind (WV). */
-                { Part::sends, "sends", { "Media", "Mic" }, {}, "Send", { "bus", "level", "on" } },
+                { Part::sends, "sends", { "Media", "Mic" }, {}, "Send",
+                  { "bus", "level", "on", "pan", "width", "balance", "swap" } },
 
                 /*  The chain, in order, each insert with its state: the file
                     named by `stateFile` is immutable in the bundle, so two cues
@@ -507,7 +508,7 @@ namespace wfg::doc
                             send = findById (made.id);
                         }
 
-                        for (const auto row : { "level", "on" })
+                        for (const auto row : { "level", "on", "pan", "width", "balance", "swap" })
                             if (const auto written = writeRow (want, send, row); ! written.ok)
                                 return written;
                     }

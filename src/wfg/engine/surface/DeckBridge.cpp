@@ -221,10 +221,18 @@ namespace wfg::surface
                 case Page::eq:   return "EQ";
                 case Page::fx:   return "FX";
                 case Page::loop: return "Loop";
+                case Page::pan:  return "Pan";
+                case Page::width: return "Width";
                 case Page::show: break;
             }
 
             return {};
+        }
+
+        /** The pages laid out one dial a mix channel: the sends, their pans, their widths (§113). */
+        constexpr bool isSendKind (Page page) noexcept
+        {
+            return page == Page::send || page == Page::pan || page == Page::width;
         }
     }
 
@@ -248,6 +256,7 @@ namespace wfg::surface
         {
             int control = -1;
             std::string controlAt, switchAt, busId, busNameAt, paramAt, fxTextAt;
+            std::string placementAt, onAt;      // a pan or width page: the send's shape and its switch (§113)
         };
 
         struct FxPage
@@ -751,7 +760,7 @@ namespace wfg::surface
                     submit (commandFrom (deck.origin, "standby.next"));
                     break;
 
-                case DeckRole::pageSend: turnPage (deck, Page::send); break;
+                case DeckRole::pageSend: nextSendPart (deck); break;
                 case DeckRole::pageEq:   turnPage (deck, Page::eq);   break;
                 case DeckRole::pageFx:   turnPage (deck, Page::fx);   break;
                 case DeckRole::pageLoop: turnPage (deck, Page::loop); break;
@@ -917,7 +926,10 @@ namespace wfg::surface
             switch (deck.page)
             {
                 case Page::eq:   return deckEqPageCount;
-                case Page::send: return pageCount (static_cast<int> (wordsOf (textAt (at(), "/godot/audio/mixes")).size()), zones);
+                case Page::send:
+                case Page::pan:
+                case Page::width:
+                    return pageCount (static_cast<int> (wordsOf (textAt (at(), "/godot/audio/mixes")).size()), zones);
                 case Page::fx:   return std::max (1, static_cast<int> (fxPagesOf (aimNow()).size()));
                 case Page::loop:
                 case Page::show: break;
@@ -944,6 +956,42 @@ namespace wfg::surface
             deck.madeFor.clear();
             deck.dials = {};
             ++deck.moves;
+        }
+
+        /*  WHETHER THE AIMED CUE HAS A SEND TWO CHANNELS WIDE INTO TWO (§113):
+            the one shape with a width to turn. */
+        bool hasStereoSend (const std::string& aim) const
+        {
+            for (const auto& sendId : wordsOf (textAt (at(), "/godot/cue/" + aim + "/sends")))
+                if (textAt (at(), "/godot/send/" + sendId + "/placement") == "stereo")
+                    return true;
+
+            return false;
+        }
+
+        /*  THE SEND KEY WALKS ON (namespace draft §113, the author's pick, no
+            key being free): the sends' levels four a page, then their pans,
+            then - when the aimed cue has a send two channels wide into two -
+            their widths, and round to the levels again. The key's picture
+            says which part is up. */
+        void nextSendPart (Deck& deck)
+        {
+            if (! isSendKind (deck.page))
+            {
+                turnPage (deck, Page::send);
+                return;
+            }
+
+            if (deck.pageIndex + 1 < countOf (deck))
+            {
+                turnPage (deck, deck.page);
+                return;
+            }
+
+            const auto next = deck.page == Page::send                                 ? Page::pan
+                            : deck.page == Page::pan && hasStereoSend (aimNow())      ? Page::width
+                                                                                      : Page::send;
+            turnPage (deck, next);
         }
 
         void showControls (Deck& deck, int index)
@@ -999,8 +1047,13 @@ namespace wfg::surface
 
             std::string key = aim + "|" + pageTitleOf (deck.page) + "|" + std::to_string (deck.pageIndex) + "|";
 
-            if (deck.page == Page::send)
+            if (isSendKind (deck.page))
                 key += mixes + "|" + sends;
+
+            //  A pan or width page is made again when a send's shape moves (§113).
+            if (deck.page == Page::pan || deck.page == Page::width)
+                for (const auto& sendId : wordsOf (sends))
+                    key += ":" + textAt (at(), "/godot/send/" + sendId + "/placement");
 
             for (const auto& page : fxPages)
                 key += page.fxId + ':' + std::to_string (page.first + page.count) + ' ';
@@ -1031,7 +1084,7 @@ namespace wfg::surface
             if (base.empty())
                 return;
 
-            if (deck.page == Page::send)
+            if (isSendKind (deck.page))
             {
                 std::map<std::string, std::string> sendInto;
 
@@ -1054,8 +1107,35 @@ namespace wfg::surface
 
                     if (const auto found = sendInto.find (control.busId); found != sendInto.end())
                     {
-                        control.controlAt = "/godot/send/" + found->second + "/level";
-                        control.switchAt = "/godot/send/" + found->second + "/on";
+                        const auto sendBase = "/godot/send/" + found->second + "/";
+
+                        if (deck.page == Page::send)
+                        {
+                            control.controlAt = sendBase + "level";
+                            control.switchAt = sendBase + "on";
+                            continue;
+                        }
+
+                        /*  A PAN OR WIDTH PAGE (namespace draft §113), as the
+                            D700's: the row the send's shape hears, the swap
+                            under a width's press, nothing where the shape has
+                            no such row. */
+                        const auto& shapeWord = textAt (at(), sendBase + "placement");
+                        control.placementAt = sendBase + "placement";
+                        control.onAt = sendBase + "on";
+
+                        if (deck.page == Page::pan)
+                        {
+                            if (shapeWord == "pan")
+                                control.controlAt = sendBase + "pan";
+                            else if (shapeWord == "stereo" || shapeWord == "fold")
+                                control.controlAt = sendBase + "balance";
+                        }
+                        else if (shapeWord == "stereo")
+                        {
+                            control.controlAt = sendBase + "width";
+                            control.switchAt = sendBase + "swap";
+                        }
                     }
                 }
 
@@ -1215,6 +1295,42 @@ namespace wfg::surface
                 write (deck, submit, control.controlAt, osc::Value::float64 (next));
         }
 
+        /*  A SEND'S PLACE ON A DIAL (namespace draft §113): a pan or a balance
+            turned two hundredths a detent and clicked back to the centre; a
+            width turned the same and clicked to swap the sides. A mix the cue
+            does not send to, or a shape with no such row, turns nothing. */
+        void placeWrite (Deck& deck, const Control& control, int steps, bool pressed, const Submit& submit) const
+        {
+            if (control.controlAt.empty())
+                return;
+
+            const auto onWidth = deck.page == Page::width;
+            const auto current = numberAt (at(), control.controlAt);
+
+            if (pressed)
+            {
+                if (onWidth)
+                {
+                    if (soleAt (at(), control.switchAt) != nullptr)
+                        write (deck, submit, control.switchAt, osc::Value::boolean (! flagAt (at(), control.switchAt)));
+                }
+                else if (current.has_value() && std::abs (*current) > 1.0e-9)
+                {
+                    write (deck, submit, control.controlAt, osc::Value::float64 (0.0));
+                }
+            }
+
+            if (steps == 0 || ! current.has_value())
+                return;
+
+            const auto next = onWidth
+                                ? turned (Law::stereoWidth, *current, steps, placeWidthMin, placeWidthMax, FaderLaw::generic)
+                                : turned (Law::pan, *current, steps, placeLeanMin, placeLeanMax, FaderLaw::generic);
+
+            if (std::abs (next - *current) >= 1.0e-9)
+                write (deck, submit, control.controlAt, osc::Value::float64 (next));
+        }
+
         void fxWrite (Deck& deck, const Control& control, int steps, bool pressed, const Submit& submit) const
         {
             const auto current = numberAt (at(), control.controlAt);
@@ -1338,6 +1454,8 @@ namespace wfg::surface
                 {
                     case Page::eq:   eqWrite (deck, control, steps, pressed, submit);   break;
                     case Page::send: sendWrite (deck, control, steps, pressed, submit); break;
+                    case Page::pan:
+                    case Page::width: placeWrite (deck, control, steps, pressed, submit); break;
                     case Page::fx:   fxWrite (deck, control, steps, pressed, submit);   break;
                     case Page::loop: loopWrite (deck, control, steps, pressed, submit); break;
                     case Page::show: break;
@@ -1503,13 +1621,17 @@ namespace wfg::surface
                                     : key.role == DeckRole::pageEq   ? Page::eq
                                     : key.role == DeckRole::pageFx   ? Page::fx
                                                                      : Page::loop;
+                    /*  THE SEND KEY IS LIT FOR THE PANS AND WIDTHS TOO (§113), and
+                        says which part is up. */
+                    const auto sendPart = key.role == DeckRole::pageSend
+                                            && (deck.page == Page::pan || deck.page == Page::width);
                     KeyPicture picture;
                     picture.glyph = key.role == DeckRole::pageSend ? Glyph::pageSend
                                   : key.role == DeckRole::pageEq   ? Glyph::pageEq
                                   : key.role == DeckRole::pageFx   ? Glyph::pageFx
                                                                    : Glyph::pageLoop;
-                    picture.label = pageTitleOf (page);
-                    picture.lit = deck.page == page;
+                    picture.label = pageTitleOf (sendPart ? deck.page : page);
+                    picture.lit = deck.page == page || sendPart;
 
                     if (picture.lit && deck.pageCount > 1)
                         picture.top = std::to_string (deck.pageIndex + 1) + "/" + std::to_string (deck.pageCount);
@@ -1651,6 +1773,51 @@ namespace wfg::surface
                             zone.fill = d700RingFor (Law::level, *level, faderSilenceDb, faderLoudestDb,
                                                      FaderLaw::generic).value / 127.0;
                             zone.off = soleAt (at(), control.switchAt) != nullptr && ! flagAt (at(), control.switchAt);
+                        }
+
+                        break;
+                    }
+
+                    case Page::pan:
+                    case Page::width:
+                    {
+                        /*  A SEND'S PLACE (namespace draft §113): the mix's name;
+                            its lean or its width, "swap" after the width while
+                            the sides are exchanged; "no send" where the cue
+                            does not reach, "mono" where the shape has no such
+                            row; the bar from the centre for a lean. */
+                        zone.label = textAt (at(), control.busNameAt);
+
+                        if (zone.label.empty())
+                            zone.label = control.busId;
+
+                        zone.colour = cueColour;
+                        const auto lean = deck.page == Page::pan;
+
+                        if (control.placementAt.empty())
+                        {
+                            zone.value = "no send";
+                            zone.off = true;
+                        }
+                        else if (control.controlAt.empty())
+                        {
+                            zone.value = "mono";
+                            zone.off = true;
+                        }
+                        else if (const auto placed = numberAt (at(), control.controlAt))
+                        {
+                            const auto law = lean ? Law::pan : Law::stereoWidth;
+                            valueText (law, *placed, false, value);
+                            zone.value = value;
+
+                            if (! lean && soleAt (at(), control.switchAt) != nullptr && flagAt (at(), control.switchAt))
+                                zone.value += " swap";
+
+                            const auto ring = d700RingFor (law, *placed, lean ? placeLeanMin : placeWidthMin,
+                                                           lean ? placeLeanMax : placeWidthMax, FaderLaw::generic);
+                            zone.fill = static_cast<double> (ring.value) / 127.0;
+                            zone.fromCentre = ring.mode == 1;
+                            zone.off = soleAt (at(), control.onAt) != nullptr && ! flagAt (at(), control.onAt);
                         }
 
                         break;

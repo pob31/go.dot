@@ -4486,6 +4486,15 @@
         <ref name="identifier"/>
       </attribute>
       <optional>
+        <attribute name="balance">
+          <a:documentation>Which side of a STEREO cue a mix channel favours. Into a stereo bus it lowers one side: -1 leaves the right silent, 1 the left, and nought changes nothing. Into a mono bus it is how much of each side goes into the fold: nought is half each (namespace draft 42), -1 the left alone, 1 the right alone. Read when the cue is two channels; kept and silent otherwise.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-1</param>
+            <param name="maxInclusive">1</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="bus">
           <a:documentation>The mix channel this send feeds. One Send per bus per cue: a second naming the same one is refused when it is created, because two sends into one mix are a level nobody can read off a fader.</a:documentation>
           <data type="string"/>
@@ -4517,6 +4526,33 @@
             <value>true</value>
             <value>false</value>
           </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="pan">
+          <a:documentation>Where a MONO cue sits in a STEREO mix channel: -1 hard left, nought centre, 1 hard right. Full at centre and lowering the far side - at nought both channels hear the cue at the send-s level, as they always did, and a move away only turns the other side down - so a pan never costs level, and any pair of gains a matrix could say is one level and one pan (namespace draft 113). Read when the cue is one channel and the bus two; kept and silent otherwise, as a setting someone made.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-1</param>
+            <param name="maxInclusive">1</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="swap">
+          <a:documentation>Whether a STEREO cue-s sides are exchanged on the way into a STEREO mix channel, before its width and balance apply. Read when the cue and the bus are both two channels; kept and silent otherwise.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="width">
+          <a:documentation>How wide a STEREO cue arrives in a STEREO mix channel: 1 is the file as it is, nought is mono - each side hearing half of both - and between the two each side hears that much of the other. Nothing of level is lost at 1, which is why it is the default and the normal position (author, 2026-10-25). Read when the cue and the bus are both two channels; kept and silent otherwise.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">1</param>
+          </data>
         </attribute>
       </optional>
     </element>

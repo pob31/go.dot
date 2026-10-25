@@ -1159,7 +1159,8 @@ namespace wfg::client::model
             page.aim = aim;
             page.surface = id;
             page.word = text (snapshot, base + "page");
-            page.up = page.word == "eq" || page.word == "send" || page.word == "fx" || page.word == "loop";
+            page.up = page.word == "eq" || page.word == "send" || page.word == "fx" || page.word == "loop"
+                      || page.word == "pan" || page.word == "width";
             page.index = static_cast<int> (osc::parseDouble (text (snapshot, base + "pageIndex")).value_or (0.0));
             page.count = static_cast<int> (osc::parseDouble (text (snapshot, base + "pageCount")).value_or (1.0));
             page.edited = text (snapshot, base + "edited");

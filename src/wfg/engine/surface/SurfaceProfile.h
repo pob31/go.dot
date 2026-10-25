@@ -125,9 +125,12 @@ namespace wfg::surface
         blinking. And LOOP, Mackie's Cycle, is `take.loop` there: a take or a
         layer closed and looped, a held take looped again.
 
-        PAN IS THE LOOP PAGE (Phase 9c, §19.7): Go.dot has no pan, and the
-        button put the aimed mic cue's take on the rotaries - in, out, a slide
-        of both, and the cue's level. Pan again, or `*`, leaves.
+        PAN IS THE PAN PAGES (namespace draft §113, the author 2026-10-25):
+        where the aimed cue's sends sit in their mixes, then their widths. The
+        Loop page it held since Phase 9c (§19.7) - the aimed mic cue's take on
+        the rotaries: in, out, a slide of both, and the cue's level - is on
+        LOOP, Mackie's Cycle; and the take's loop that Cycle pressed is on the
+        METRONOME, Mackie's Click. Loop again, or `*`, leaves.
 
         MUTE ON A STRIP KILLS WHAT IT PLAYS (author, 2026-09-25: "Can the mute
         switch of a sampler fader be a kill switch for it? Not temporary
@@ -150,7 +153,7 @@ namespace wfg::surface
         `initialLevel` - an edit to the show and one undo step. */
     enum class Action { none, gate, go, stop, rewind, forward, kill, solo, startLevel,
                         record, loop, dialLetGo, dialRest,
-                        aim, eqPage, sendPage, fxPage, loopPage, leavePage };
+                        aim, eqPage, sendPage, fxPage, loopPage, panPage, leavePage };
 
     /*  AND IT SAYS SO: the red MUTE light is on for half a second after a
         kill it sent (author, 2026-09-25: "Can you flash for 0.5s the red mute
@@ -197,6 +200,7 @@ namespace wfg::surface
     inline constexpr double pageGainStepDb = 0.5;
     inline constexpr double pageWidthDoublingsPerDetent = 1.0 / 8.0;
     inline constexpr double pageLevelTravelPerDetent = 1.0 / 127.0;
+    inline constexpr double pagePlacePerDetent = 0.02;      // a pan, a balance or a width: fifty detents end to end (§113)
 
     /*  A PLUGIN PARAMETER'S DETENT on the FX page (2026-09-26): a hundred and
         twenty-eighth of its travel, a ring's resolution - a fast turn arrives

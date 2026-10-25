@@ -55,16 +55,29 @@ namespace wfg::surface
         inserts, their parameters in each plugin's own order (the author's
         decision), the inserts walked in chain order. `loop` since Phase 9c:
         the aimed mic cue's take, on Pan. */
-    enum class Page { show, eq, send, fx, loop };
+    enum class Page { show, eq, send, fx, loop, pan, width };
 
-    /** The word `surface/page` publishes: show, eq, send, fx or loop. */
+    /** The word `surface/page` publishes: show, eq, send, fx, loop, pan or width. */
     std::string_view pageWord (Page page) noexcept;
 
     /*  HOW A CONTROL MOVES AND READS. A frequency and a width are turned in
         ratios and drawn on a logarithmic ring; a gain in decibels, drawn from
         the centre; a shape is a choice of two; a send's level moves along the
         fader's own law, so its ring is where a fader would be. */
-    enum class Law { frequency, gain, width, shape, level };
+    enum class Law { frequency, gain, width, shape, level, pan, stereoWidth };
+
+    /*  THE PAN PAGES (namespace draft §113, the author 2026-10-25): where the
+        aimed cue's sends sit in their mixes, one rotary a mix channel as the
+        Send page lays them, on the Pan button - a pan where one channel meets
+        two, a balance where two meet two or one, in -1..1 and pressed back to
+        the centre; then, Pan again, the widths of the sends two channels wide
+        into two, in 0..1 and pressed to swap the sides. `Law::pan` is a lean,
+        drawn from the centre; `Law::stereoWidth` a width, drawn from the left
+        (`Law::width` is the EQ's Q). Both turn `pagePlacePerDetent` a detent. */
+    inline constexpr double placeLeanMin = -1.0;
+    inline constexpr double placeLeanMax = 1.0;
+    inline constexpr double placeWidthMin = 0.0;
+    inline constexpr double placeWidthMax = 1.0;
 
     /** What a press on a control does. */
     enum class Press { none, toggleSwitch, toggleShape };

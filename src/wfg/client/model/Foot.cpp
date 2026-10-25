@@ -733,7 +733,8 @@ namespace wfg::client::model
         if (pageWord == "eq")
             return { Subject::Kind::eq, aim };
 
-        if (pageWord == "send")
+        //  The pan and width pages (namespace draft §113) are the sends' too.
+        if (pageWord == "send" || pageWord == "pan" || pageWord == "width")
             return { Subject::Kind::sends, aim };
 
         //  The FX page (2026-09-26): the cue's chain at the foot.
