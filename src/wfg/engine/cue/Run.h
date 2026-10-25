@@ -921,6 +921,11 @@ namespace wfg::cue
             slot under it; deleting it lets it finish its pass (decision L). */
         std::string soundingSlice;
 
+        /*  ITS BOUNCE TURNED ON OR OFF in the document and not yet in the
+            voice (namespace draft §41, BCX): `Runner::flipBounce` places it
+            once it can be placed with no step. Cleared when the slice is left. */
+        bool bounceOwed = false;
+
         /*  THE CLOCK OF A SLICE THAT WAS MOVED UNDER ITSELF. A move lands
             wherever the file is - part-way into a pass - so the first pass of
             the moved loop runs from there to its new out, and only the passes

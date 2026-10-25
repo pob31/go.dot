@@ -34587,3 +34587,52 @@ MP3 (5 min 22 s, 44.1 kHz stereo) converted in 0.9 s in a Debug build and played
 tester guides say it under *Add sounds*.
 
 Owed: the author's try - the MP3 dropped on its cue again, played; and on the Mac, an M4A.
+
+## 119. A loop's bounce turned on or off while it plays
+
+**Asked 2026-10-25** by the author: *"Could the pingpong option in the loops/repeats apply without the need
+for a stop to rebuild?"* A loop's in and out have been heard at once since §33; its bounce (§41) was read
+only when its range was entered, so turning ⇄ on or off under a sounding loop did nothing until the cue was
+stopped and fired again, and a cue at standby kept the bounce it was armed with.
+
+The author's: heard at once, and **turned off while the sound is on its way back, it goes on back to the
+in-point and loops forwards from there** (asked, the recommended of two: the other turned it round on the
+spot, heard at once and wherever the click lands).
+
+- **BCX** **A bounce turned is heard with no step.** On, from a launch horizon ahead: the file goes on to
+  its out-point and comes back. Off while the file goes the run's way, from a horizon ahead: it goes on to
+  its out-point and wraps. Off on its way back, nothing is placed until the turn comes inside the horizon,
+  and the plain loop is placed on the turn itself - the in-point going forwards (the out-point for a cue
+  playing backwards). Turned back before then, nothing is placed. The passes go on counting through it, so
+  a range's `loops` ends where it would have: a bounce's pass is each way, a plain loop's each time round.
+  The bounce is placed only once the slot has reached every move placed on it before - a slot keeps two,
+  and a third would drop the one it plays by. A cue at standby is armed again when its bounce is turned,
+  as it is for its points.
+
+Mine *(proposed)*:
+
+- **BCY** **A loop point dragged while it bounces, or while it plays backwards, keeps it bouncing and going
+  that way.** It was placed as a plain loop going forwards, and the playhead then read a bounce the sound
+  was not making. The §33 cases, the way the file goes: inside the new loop it carries on; past the end it
+  goes to, a bounce turns there and a loop played backwards goes round to its out-point, faded as §33's
+  jump is; before the end it comes from, it plays on into the loop where the reader can place that and
+  jumps to that end where it cannot.
+- **BCZ** **A speed turned round on a bounce's way back sends the file out again.** It went on back, so a
+  fade through nought on the way back was heard as nothing at all.
+
+As built: `Runner::flipBounce`, asked every tick while `Run::bounceOwed`; `travelAt` (which way the file
+goes, from the run's last turn) and `unfoldedSecond` - the reader counts one way through a bounce and on
+through its mirror, so a file at 1.5 on its way back in a loop to 1.8 is placed at 2.1 - used by
+`flipBounce`, `moveSoundingSlice` and `turnRun`. A loop that goes forwards with no bounce after a flip is
+read by the slice's clock again, as at a boundary, so a seek and the lane treat it as one that never
+bounced. A movie's ranges are not touched here.
+
+Tests: RangeTests "bounce flip:" (on under a sounding loop; off on the way out; off on the way back, placed
+at the in-point at two seconds and forwards from there; off and on again, nothing placed; a range's four
+passes ending at four seconds across a flip; an out pulled in behind and ahead of a bouncing playhead; a
+standby armed again), AudioTests "slice move: a bouncing loop moved on its way back carries on back, placed
+in the reader's mirror" (on a ramp: every sample where it should be) and "audio host: a bouncing range
+turned round on its way back goes out again" (the playhead climbs and the sweep's pitch rises; without BCZ
+it fell), C and fr_FR. Both tester guides say it under *In and out points, loops*.
+
+Owed: the author's try - ⇄ clicked under a sounding loop, both ways.

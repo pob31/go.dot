@@ -9273,6 +9273,95 @@ TEST_CASE ("audio host: a range that bounces plays out and back between its poin
     CHECK (show.rig.host.trackPlayState (0).playing);
 }
 
+/*  A BOUNCE ON ITS WAY BACK, PLACED IN THE READER'S MIRROR (namespace draft
+    §41, BCX, BCY): the reader counts one way through the loop and on through
+    its mirror, so a file going back at 1.5 of a loop to 1.8 is placed at 2.1.
+    Heard on a ramp, whose every sample says where in the file it came from:
+    back from where it was, with no step, and out again from the in-point. */
+TEST_CASE ("slice move: a bouncing loop moved on its way back carries on back, placed in the reader's mirror (§41, BCY)")
+{
+    SpeedRig voice;
+    const auto ramp = writeRamp (voice.rig.storage.folder, voice.rate, 4);
+    REQUIRE (ramp.existsAsFile());
+    REQUIRE (voice.open (ramp, false, { { 0.0, 2.0, 0 } }));
+
+    //  Bouncing from its first frame, as a slice entered bouncing is told.
+    REQUIRE (voice.rig.host.placeTrackLoop (0, 0, { 0, 0.0, 0.0, 0.0, 2.0, 0.0, 1, true }) != 0);
+    REQUIRE (voice.go (1.0));
+
+    /*  Two and a half seconds in, the file is at 1.5 on its way back; the
+        out-point comes in to 1.8. */
+    voice.runTo (voice.at (2.5));
+
+    const auto lands = voice.rig.host.clock().samplesElapsed() + 4 * voice.block;
+    const auto landsAt = static_cast<double> (lands - voice.launch) / voice.rate;
+
+    REQUIRE (voice.rig.host.placeTrackLoop (0, 0, { 0, landsAt, 3.6 - (4.0 - landsAt), 0.0, 1.8, 0.0, 1, true }) != 0);
+
+    const auto heard = voice.record (2.0, 2.6);
+
+    const auto fold = [] (double u, double length)
+    {
+        const auto w = std::fmod (u, 2.0 * length);
+        return w < length ? w : 2.0 * length - w;
+    };
+
+    const auto path = [landsAt, fold] (double t)
+    {
+        return t < landsAt ? fold (t, 2.0) : fold (t - 0.4, 1.8);
+    };
+
+    CHECK (offPath (heard, voice.rate, 4, voice.startedAt, voice.launch, path, 2.0) == 0);
+    CHECK_FALSE (voice.rig.host.trackLoopAdoption (0, 0).has_value());
+}
+
+/*  AND A SPEED TURNED ROUND ON A BOUNCE'S WAY BACK (§41, BCZ): the file goes
+    back the way it came - out again, its pitch rising - where until now it
+    went on back, the turn heard as nothing at all. */
+TEST_CASE ("audio host: a bouncing range turned round on its way back goes out again (§41, BCZ)")
+{
+    SpeedShow show;
+    show.sweepTo = 2000.0;
+    REQUIRE (show.open (200.0, 4, "1", "varispeed"));
+
+    const auto range = show.document.createRange (show.cueId, 1.0, 3.0);
+    REQUIRE (range.ok);
+    REQUIRE (show.document.setAttribute ("/godot/range/" + range.id + "/loops", "0").ok);
+    REQUIRE (show.document.setAttribute ("/godot/range/" + range.id + "/pingPong", "true").ok);
+
+    //  The standby armed again with its range, once the edits have stopped.
+    show.ticks (15);
+    REQUIRE (show.go());
+
+    //  On its way back, part-way down.
+    double previous = show.tone().position;
+    bool back = false;
+
+    for (int i = 0; i < 300 && ! back; ++i)
+    {
+        show.oneTick();
+        const auto now = show.tone().position;
+        back = now < previous - 1.0e-6 && now < 2.6 && now > 2.2;
+        previous = now;
+    }
+
+    REQUIRE (back);
+
+    const auto turn = show.speedFade (1, "-1", "0.1");
+    REQUIRE (show.fire (turn));
+    show.ticks (12);
+
+    //  Going out again: the playhead climbs, and so does the pitch.
+    const auto from = show.tone().position;
+    const auto first = risingCrossings (show.record (8));
+    const auto second = risingCrossings (show.record (8));
+    const auto to = show.tone().position;
+    INFO ("playhead " << from << " then " << to << "; crossings " << first << " then " << second);
+    CHECK (show.tone().rateNow == doctest::Approx (-1.0));
+    CHECK (to > from + 0.2);
+    CHECK (second > first + 5);
+}
+
 //==============================================================================
 /*  WHERE A RANGE ENDS, AT THE ARM (namespace draft §99, AXR, AXU). The author's
     two cues of 2026-10-20 were refused whole and said "missing": a frozen

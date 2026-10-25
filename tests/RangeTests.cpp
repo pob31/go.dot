@@ -1312,6 +1312,279 @@ TEST_CASE ("slice move: a move the reader met late puts the clock where the read
 }
 
 //==============================================================================
+/*  A BOUNCE TURNED ON OR OFF WHILE THE LOOP SOUNDS (namespace draft §41, BCX):
+    heard with no stop and no step. On, from a horizon ahead; off, from a
+    horizon ahead while the file goes out, and on its way back from where it
+    reaches the in-point; the count and the playhead carry on through it. And
+    a loop point dragged while it bounces keeps it bouncing (BCY). */
+namespace
+{
+    void runToSecond (SchedulerRig& rig, std::int64_t launchedAt, double seconds)
+    {
+        while (secondsSinceLaunch (rig, launchedAt) < seconds)
+            rig.tickOnce();
+    }
+
+    void setBounce (SchedulerRig& rig, const std::string& range, bool bounces)
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/range/" + range + "/pingPong", bounces ? "true" : "false").ok);
+    }
+
+    //  Within a few samples, as the playhead is read on a tick's counter.
+    bool playheadNear (double got, double want)
+    {
+        return std::abs (got - want) < 0.002;
+    }
+}
+
+TEST_CASE ("bounce flip: a bounce turned on under a sounding loop turns at its out-point, with no step (§41, BCX)")
+{
+    SchedulerRig rig;
+    const auto bed = rig.addRange (0.0, 2.0, 0);
+
+    const auto id = rig.goAndLaunch();
+    const auto launchedAt = rig.audio.launches.front().sample;
+
+    runToSecond (rig, launchedAt, 0.5);
+    REQUIRE (rig.audio.moves.empty());
+
+    setBounce (rig, bed, true);
+    rig.tickOnce();
+
+    /*  ONE MOVE, a horizon ahead, the file where it is and going on out. */
+    REQUIRE (rig.audio.moves.size() == 1u);
+
+    const auto& flipped = rig.audio.moves.front().move;
+    CHECK (flipped.pingPong);
+    CHECK (flipped.direction == 1);
+    CHECK (flipped.crossfade == doctest::Approx (0.0));
+    CHECK (flipped.fileAt == doctest::Approx (flipped.from));
+    CHECK (flipped.loopIn == doctest::Approx (0.0));
+    CHECK (flipped.loopOut == doctest::Approx (2.0));
+    CHECK (flipped.from > 0.5);
+
+    /*  Past the out-point it comes back - a pass each way - and out again. */
+    runToSecond (rig, launchedAt, 2.5);
+    auto t = secondsSinceLaunch (rig, launchedAt);
+    INFO ("at " << t << " s the playhead is at " << rig.run (id)->position);
+    CHECK (playheadNear (rig.run (id)->position, 4.0 - t));
+    CHECK (rig.run (id)->rangeIteration == 2);
+
+    runToSecond (rig, launchedAt, 4.5);
+    t = secondsSinceLaunch (rig, launchedAt);
+    CHECK (playheadNear (rig.run (id)->position, t - 4.0));
+    CHECK (rig.run (id)->rangeIteration == 3);
+
+    //  Nothing more was placed: the bounce is the reader's.
+    CHECK (rig.audio.moves.size() == 1u);
+}
+
+TEST_CASE ("bounce flip: a bounce turned off on its way out goes on to its out-point and wraps (§41, BCX)")
+{
+    SchedulerRig rig;
+    const auto bed = rig.addRange (0.0, 2.0, 0);
+    setBounce (rig, bed, true);
+
+    const auto id = rig.goAndLaunch();
+    const auto launchedAt = rig.audio.launches.front().sample;
+
+    //  The slice was entered bouncing: its slot told so at its launch.
+    REQUIRE (rig.audio.moves.size() == 1u);
+    CHECK (rig.audio.moves.front().move.pingPong);
+
+    runToSecond (rig, launchedAt, 0.5);
+    setBounce (rig, bed, false);
+    rig.tickOnce();
+
+    REQUIRE (rig.audio.moves.size() == 2u);
+
+    const auto& flipped = rig.audio.moves.back().move;
+    CHECK_FALSE (flipped.pingPong);
+    CHECK (flipped.direction == 1);
+    CHECK (flipped.fileAt == doctest::Approx (flipped.from));
+
+    runToSecond (rig, launchedAt, 2.5);
+    const auto t = secondsSinceLaunch (rig, launchedAt);
+    CHECK (playheadNear (rig.run (id)->position, t - 2.0));
+    CHECK (rig.run (id)->rangeIteration == 2);
+    CHECK_FALSE (rig.run (id)->bent);
+}
+
+TEST_CASE ("bounce flip: a bounce turned off on its way back waits for the in-point, then loops forwards (§41, BCX)")
+{
+    SchedulerRig rig;
+    const auto bed = rig.addRange (0.0, 1.0, 0);
+    setBounce (rig, bed, true);
+
+    const auto id = rig.goAndLaunch();
+    const auto launchedAt = rig.audio.launches.front().sample;
+    REQUIRE (rig.audio.moves.size() == 1u);
+
+    /*  At 1.4 s the file is at 0.6 on its way back. Turned off, nothing is
+        placed: a loop starting here would jump. */
+    runToSecond (rig, launchedAt, 1.4);
+    setBounce (rig, bed, false);
+    rig.tickOnce();
+    CHECK (rig.audio.moves.size() == 1u);
+    CHECK (rig.run (id)->bounceOwed);
+
+    //  It still bounces meanwhile, and says so.
+    rig.ticks (5);
+    auto t = secondsSinceLaunch (rig, launchedAt);
+    REQUIRE (t < 2.0);
+    CHECK (playheadNear (rig.run (id)->position, 2.0 - t));
+
+    /*  PLACED AS THE TURN COMES INSIDE THE HORIZON, at the turn: the file at
+        the in-point, the reader at two seconds, going forwards and plain. */
+    while (rig.audio.moves.size() == 1u && secondsSinceLaunch (rig, launchedAt) < 2.5)
+        rig.tickOnce();
+
+    REQUIRE (rig.audio.moves.size() == 2u);
+    CHECK (secondsSinceLaunch (rig, launchedAt) < 2.0);
+
+    const auto& flipped = rig.audio.moves.back().move;
+    CHECK_FALSE (flipped.pingPong);
+    CHECK (flipped.direction == 1);
+    CHECK (flipped.crossfade == doctest::Approx (0.0));
+    CHECK (flipped.fileAt == doctest::Approx (0.0));
+    CHECK (std::abs (flipped.from - 2.0) < 2.0 / 48000.0);
+    CHECK_FALSE (rig.run (id)->bounceOwed);
+
+    //  Forwards from there, and round from the in-point at the out.
+    runToSecond (rig, launchedAt, 2.5);
+    t = secondsSinceLaunch (rig, launchedAt);
+    CHECK (playheadNear (rig.run (id)->position, t - 2.0));
+
+    runToSecond (rig, launchedAt, 3.3);
+    t = secondsSinceLaunch (rig, launchedAt);
+    CHECK (playheadNear (rig.run (id)->position, t - 3.0));
+    CHECK (rig.run (id)->rangeIteration == 4);
+}
+
+TEST_CASE ("bounce flip: turned off and on again before the in-point, nothing is placed (§41, BCX)")
+{
+    SchedulerRig rig;
+    const auto bed = rig.addRange (0.0, 1.0, 0);
+    setBounce (rig, bed, true);
+
+    const auto id = rig.goAndLaunch();
+    const auto launchedAt = rig.audio.launches.front().sample;
+
+    runToSecond (rig, launchedAt, 1.3);
+    setBounce (rig, bed, false);
+    rig.tickOnce();
+    setBounce (rig, bed, true);
+    rig.tickOnce();
+
+    CHECK_FALSE (rig.run (id)->bounceOwed);
+    runToSecond (rig, launchedAt, 2.5);
+    CHECK (rig.audio.moves.size() == 1u);
+
+    //  Still bouncing: out again from the in-point at two seconds.
+    CHECK (playheadNear (rig.run (id)->position, secondsSinceLaunch (rig, launchedAt) - 2.0));
+}
+
+TEST_CASE ("bounce flip: the passes before and after the flip count towards its loops (§41, BCX)")
+{
+    /*  Four passes of a bouncing second - out, back, out, back - then the next
+        range: the boundary at four seconds. Turned off at 1.4 s, on the second
+        pass's way back, it waits for the in-point at two, then plays two passes
+        forwards. The boundary is where it was. */
+    SchedulerRig rig;
+    const auto bed = rig.addRange (0.0, 1.0, 4);
+    rig.addRange (1.0, 2.0, 1);
+    setBounce (rig, bed, true);
+
+    rig.goAndLaunch();
+    const auto launchedAt = rig.audio.launches.front().sample;
+
+    runToSecond (rig, launchedAt, 1.4);
+    setBounce (rig, bed, false);
+    runToSecond (rig, launchedAt, 4.5);
+
+    REQUIRE_FALSE (rig.audio.stops.empty());
+    INFO ("boundary at " << secondsOf (rig.audio.stops.front().sample - launchedAt) << " s");
+    CHECK (std::llabs (rig.audio.stops.front().sample - launchedAt - 4 * 48000) <= 1);
+}
+
+TEST_CASE ("bounce flip: an out pulled in under a bouncing loop keeps it bouncing (§41, BCY)")
+{
+    SUBCASE ("behind the playhead on its way out: it turns at the new out, faded")
+    {
+        SchedulerRig rig;
+        const auto bed = rig.addRange (0.0, 2.0, 0);
+        setBounce (rig, bed, true);
+
+        const auto id = rig.goAndLaunch();
+        const auto launchedAt = rig.audio.launches.front().sample;
+
+        runToSecond (rig, launchedAt, 1.5);
+        REQUIRE (rig.document.setAttribute ("/godot/range/" + bed + "/out", "1.2").ok);
+        rig.tickOnce();
+
+        REQUIRE (rig.audio.moves.size() == 2u);
+
+        /*  Placed going back from the new out: in the reader's mirror, just
+            past the out-point. */
+        const auto& moved = rig.audio.moves.back().move;
+        CHECK (moved.pingPong);
+        CHECK (moved.direction == 1);
+        CHECK (moved.loopOut == doctest::Approx (1.2));
+        CHECK (moved.crossfade == doctest::Approx (0.010));
+        CHECK (moved.fileAt == doctest::Approx (1.2 + 1.0 / 48000.0));
+
+        rig.ticks (25);
+        const auto t = secondsSinceLaunch (rig, launchedAt);
+        INFO ("at " << t << " s, " << t - moved.from << " s after the move, the playhead is at " << rig.run (id)->position);
+        CHECK (playheadNear (rig.run (id)->position, 1.2 - (t - moved.from)));
+    }
+
+    SUBCASE ("ahead of the playhead on its way back: it carries on back")
+    {
+        SchedulerRig rig;
+        const auto bed = rig.addRange (0.0, 2.0, 0);
+        setBounce (rig, bed, true);
+
+        const auto id = rig.goAndLaunch();
+        const auto launchedAt = rig.audio.launches.front().sample;
+
+        runToSecond (rig, launchedAt, 2.5);
+        REQUIRE (rig.document.setAttribute ("/godot/range/" + bed + "/out", "1.8").ok);
+        rig.tickOnce();
+
+        REQUIRE (rig.audio.moves.size() == 2u);
+
+        //  The file at 4 - t going back, so in the mirror of the new loop at 3.6 - (4 - t).
+        const auto& moved = rig.audio.moves.back().move;
+        CHECK (moved.pingPong);
+        CHECK (moved.crossfade == doctest::Approx (0.0));
+        CHECK (moved.fileAt == doctest::Approx (moved.from - 0.4));
+
+        //  Back to the in-point at four seconds, then out to the new out.
+        runToSecond (rig, launchedAt, 4.5);
+        CHECK (playheadNear (rig.run (id)->position, secondsSinceLaunch (rig, launchedAt) - 4.0));
+    }
+}
+
+TEST_CASE ("bounce flip: a cue armed at standby is armed again when its bounce is turned (§41, BCX)")
+{
+    SchedulerRig rig;
+    const auto bed = rig.addRange (0.0, 2.0, 0);
+
+    rig.ticks (5);
+    REQUIRE (rig.audio.arms.size() == 1u);
+    rig.audio.completeArms (rig.engine);
+    rig.ticks (2);
+
+    setBounce (rig, bed, true);
+    rig.ticks (12);
+
+    REQUIRE (rig.audio.arms.size() == 1u);
+    REQUIRE (rig.audio.arms.front().ranges.size() == 1u);
+    CHECK (rig.audio.arms.front().ranges.front().pingPong);
+}
+
+//==============================================================================
 /*  THE WAVEFORM'S MENUS (namespace draft §81): where a cue starts and ends, a
     selection made slices, the first slice of a cue with none, and markers.
     Each through its command, one transaction each as serve makes them, so an

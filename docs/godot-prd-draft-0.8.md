@@ -2509,7 +2509,10 @@ name. Playback walks the list.
 - A range's in- and out-points edited during playback are heard **at once**: the
   range sounding moves under the playhead with no relaunch, and jumps to its
   in-point, faded, only when the new out-point is already behind it (the author,
-  2026-10-06; `docs/godot-namespace-draft-0.1.md` §33). A changed loop count, and a
+  2026-10-06; `docs/godot-namespace-draft-0.1.md` §33). So is its **bounce**
+  (ping-pong) turned on or off: with no step, and turned off while the sound is
+  on its way back, only once it has come back to its in-point (the author,
+  2026-10-25; §119). A changed loop count, and a
   range removed, take effect **at the next iteration**, never retroactively
   (decision L, `docs/godot-namespace-draft-0.1.md` §9, 2026-09-06).
 - Ranges need not be contiguous nor in file order (decision L) — a media cue is

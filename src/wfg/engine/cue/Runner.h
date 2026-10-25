@@ -2361,6 +2361,13 @@ namespace wfg::cue
         void applySlices (Engine& engine, std::int64_t tick);
         void moveSoundingSlice (Run& run, const RangeSpec& wanted, std::int64_t now);
 
+        /*  AND ITS BOUNCE TURNED ON OR OFF WHILE IT SOUNDS (namespace draft
+            §41, BCX): heard with no step - on, a horizon ahead; off, a horizon
+            ahead while the file goes the run's way, else where it next turns
+            that way. Placed once the slot has reached every move before it.
+            True when it was placed. */
+        bool flipBounce (Run& run, std::int64_t now, std::int64_t lead);
+
         /*  BACKWARDS AND BOUNCING (namespace draft §41). Where the run's reader
             is - forwards always, at the speed's size - and where its file is, at
             a sample; a turn of its direction placed on its slot at a sample; a
