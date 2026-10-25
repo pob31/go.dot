@@ -118,8 +118,21 @@ namespace wfg::cue
         return bandRow (row, suffix) && suffix == "Gain" ? MoveDomain::decibels : MoveDomain::logarithm;
     }
 
+    bool isMovablePlaceRow (const std::string& row)
+    {
+        return row == "pan" || row == "width" || row == "balance";
+    }
+
+    void placeRowRange (const std::string& busAndRow, double& lowest, double& highest)
+    {
+        const auto slash = busAndRow.rfind ('/');
+        const auto row = slash == std::string::npos ? busAndRow : busAndRow.substr (slash + 1);
+        lowest = row == "width" ? 0.0 : -1.0;
+        highest = 1.0;
+    }
+
     std::vector<FadeMove> readFadeMoves (const std::string& sends, const std::string& eq,
-                                         const std::string& fx)
+                                         const std::string& fx, const std::string& places)
     {
         std::vector<FadeMove> out;
 
@@ -145,6 +158,20 @@ namespace wfg::cue
                 out.push_back ({ "fx/" + key, std::clamp (value, 0.0, 1.0), MoveDomain::linear });
         }
 
+        //  A send's place (§113, BCK): straight in the number, within the row's range.
+        for (const auto& [key, value] : parseMoveList (places))
+        {
+            std::string kind, name;
+            int index = -1;
+
+            if (! splitMoveEntry ("place/" + key, kind, name, index))
+                continue;
+
+            double lowest = 0.0, highest = 0.0;
+            placeRowRange (name, lowest, highest);
+            out.push_back ({ "place/" + key, std::clamp (value, lowest, highest), MoveDomain::linear });
+        }
+
         return out;
     }
 
@@ -166,6 +193,22 @@ namespace wfg::cue
 
             name = rest;
             return kind == "send" || (kind == "eq" ? isMovableEqRow (rest) : isMovableVideoRow (rest));
+        }
+
+        /*  A PLACE: `place/<bus>/<row>`, the row one of the three a fade
+            moves (§113, BCK). */
+        if (kind == "place")
+        {
+            const auto second = rest.find ('/');
+
+            if (second == std::string::npos || second == 0 || second + 1 >= rest.size())
+                return false;
+
+            if (! isMovablePlaceRow (rest.substr (second + 1)) || rest.find (':') != std::string::npos)
+                return false;
+
+            name = rest;
+            return true;
         }
 
         if (kind != "fx")
@@ -196,6 +239,7 @@ namespace wfg::cue
         if (kind == "eq")   return "eq";
         if (kind == "fx")   return "fx";
         if (kind == "video") return "video";
+        if (kind == "place") return "places";
         return "";
     }
 

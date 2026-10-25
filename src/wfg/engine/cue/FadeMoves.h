@@ -68,9 +68,16 @@ namespace wfg::cue
     /** The domain of an EQ row: a gain in dB, the rest logarithmic. */
     MoveDomain eqRowDomain (const std::string& row);
 
+    /*  A SEND'S PLACE A FADE MAY MOVE (namespace draft §113, BCK): its pan,
+        its width or its balance - `fade/places`, `<bus>/<row>:value`, the
+        entry `place/<bus>/<row>`. The swap is a switch and stays. A pan and a
+        balance run -1..1, a width 0..1, straight in the number. */
+    bool isMovablePlaceRow (const std::string& row);
+    void placeRowRange (const std::string& busAndRow, double& lowest, double& highest);
+
     /** Every entry of the three lists, in a stable order: sends, EQ, plugins. */
     std::vector<FadeMove> readFadeMoves (const std::string& sends, const std::string& eq,
-                                         const std::string& fx);
+                                         const std::string& fx, const std::string& places);
 
     /*  THE PICTURE'S ROWS A FADE MOVES (namespace draft §36, VS; §94): the
         `video` pairs - opacity, scale, offsetX, offsetY, rotation, a movie's

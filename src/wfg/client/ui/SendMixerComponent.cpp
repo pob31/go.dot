@@ -16,6 +16,8 @@
 
 #include <wfg/client/ui/SendMixerComponent.h>
 
+#include <wfg/client/ui/PlaceBar.h>
+
 #include <wfg/client/model/Fader.h>
 #include <wfg/client/ui/Look.h>
 #include <wfg/engine/osc/OscValue.h>
@@ -125,24 +127,10 @@ namespace wfg::client::ui
                     fader where the shape has one; a stereo cue into a stereo
                     mix has its width and its swap beside it. Double-click
                     puts a slider back to its rest, as the D700's press does. */
-                for (auto* slider : { &leanSlider, &widthSlider })
-                {
-                    slider->setSliderStyle (juce::Slider::LinearHorizontal);
-                    slider->setTextBoxStyle (juce::Slider::NoTextBox, true, 0, 0);
-                    slider->setWantsKeyboardFocus (false);
-                }
-
-                leanSlider.setRange (-1.0, 1.0, 0.01);
-                leanSlider.setDoubleClickReturnValue (true, 0.0);
-                leanSlider.setTooltip ("Where this cue sits in the mix: a mono cue's pan, a stereo cue's balance. "
-                                       "Double-click for the centre.");
-                leanSlider.onValueChange = [this] { owner.placeAt (at, send().leanRow(), placeText (leanSlider.getValue())); };
-
-                widthSlider.setRange (0.0, 1.0, 0.01);
-                widthSlider.setDoubleClickReturnValue (true, 1.0);
-                widthSlider.setTooltip ("How wide a stereo cue arrives: 100 % as the file is, 0 % mono. "
-                                        "Double-click for 100 %.");
-                widthSlider.onValueChange = [this] { owner.placeAt (at, "width", placeText (widthSlider.getValue())); };
+                leanBar = std::make_unique<PlaceBar> (owner.theme, PlaceBar::Kind::lean);
+                widthBar = std::make_unique<PlaceBar> (owner.theme, PlaceBar::Kind::width);
+                leanBar->onChange = [this] (double wanted) { owner.placeAt (at, send().leanRow(), placeText (wanted)); };
+                widthBar->onChange = [this] (double wanted) { owner.placeAt (at, "width", placeText (wanted)); };
 
                 swapButton.setButtonText ("L/R");
                 swapButton.setClickingTogglesState (false);
@@ -177,15 +165,20 @@ namespace wfg::client::ui
                 changed = true;
             };
 
-            want (leanSlider, lean);
-            want (widthSlider, wide);
+            want (*leanBar, lean);
+            want (*widthBar, wide);
             want (swapButton, wide);
 
             if (changed)
                 resized();
         }
 
-        bool hasPlaceRow() const noexcept { return leanSlider.getParentComponent() != nullptr; }
+        /** The place rows shown: the lean, and the width with its swap for a stereo cue into a stereo mix. */
+        int placeRows() const noexcept
+        {
+            return (leanBar != nullptr && leanBar->getParentComponent() != nullptr ? 1 : 0)
+                   + (widthBar != nullptr && widthBar->getParentComponent() != nullptr ? 1 : 0);
+        }
 
         const model::SendStrip& send() const { return owner.reading.sends[at - 1]; }
 
@@ -230,8 +223,7 @@ namespace wfg::client::ui
             area.removeFromBottom (scaled (isMaster ? 20 : 40, owner.theme));  // value, and the cross
 
             //  And the send's place under the value, where its shape has one (§113).
-            if (hasPlaceRow())
-                area.removeFromBottom (scaled (18, owner.theme));
+            area.removeFromBottom (scaled (18 * placeRows(), owner.theme));
 
             //  Over several cues, a line under it for "mixed" (§30.11).
             if (owner.many())
@@ -535,18 +527,17 @@ namespace wfg::client::ui
 
             value.setBounds (area.removeFromBottom (scaled (18, owner.theme)));
 
-            if (hasPlaceRow())
+            //  The width and its swap under the lean, each a row (§113).
+            if (widthBar != nullptr && widthBar->getParentComponent() != nullptr)
             {
                 auto row = area.removeFromBottom (scaled (18, owner.theme));
-
-                if (widthSlider.getParentComponent() != nullptr)
-                {
-                    swapButton.setBounds (row.removeFromRight (scaled (28, owner.theme)));
-                    widthSlider.setBounds (row.removeFromRight (row.getWidth() / 2));
-                }
-
-                leanSlider.setBounds (row);
+                swapButton.setBounds (row.removeFromRight (scaled (30, owner.theme)));
+                row.removeFromRight (scaled (2, owner.theme));
+                widthBar->setBounds (row);
             }
+
+            if (leanBar != nullptr && leanBar->getParentComponent() != nullptr)
+                leanBar->setBounds (area.removeFromBottom (scaled (18, owner.theme)));
         }
 
         SendMixerComponent& owner;
@@ -556,7 +547,7 @@ namespace wfg::client::ui
         juce::Label value;
         juce::TextButton drop;
         juce::ToggleButton onSwitch;
-        juce::Slider leanSlider, widthSlider;   // the send's place (§113)
+        std::unique_ptr<PlaceBar> leanBar, widthBar;    // the send's place (§113)
         juce::TextButton swapButton;
 
         double held = 0.0;      ///< where the level was when the hand went down
@@ -736,8 +727,10 @@ namespace wfg::client::ui
                 const auto placed = ! several && strip->send().present();
                 strip->showPlace (placed && (shape == "pan" || shape == "stereo" || shape == "fold"),
                                   placed && shape == "stereo");
-                strip->leanSlider.setValue (strip->send().lean(), juce::dontSendNotification);
-                strip->widthSlider.setValue (strip->send().width, juce::dontSendNotification);
+                strip->leanBar->setValue (strip->send().lean());
+                strip->leanBar->setLit (strip->send().on);
+                strip->widthBar->setValue (strip->send().width);
+                strip->widthBar->setLit (strip->send().on);
                 strip->swapButton.setToggleState (strip->send().swap, juce::dontSendNotification);
             }
 

@@ -74,6 +74,15 @@ namespace wfg::client::model
         double highest = 0.0;
         std::string unit;
         double home = 0.0;      ///< where a double click puts it: the row's own default
+
+        /*  A SEND'S PLACE (namespace draft §113, BCK): the lean the shape
+            hears - a pan or a balance - and, for a stereo cue into a stereo
+            mix, its width; each a door of its own, ticked by being in the
+            fade's `places` list, and where it stands when not. */
+        std::string placement;
+        std::string leanAddress, widthAddress;      ///< empty where the shape has no such row
+        double lean = 0.0, width = 1.0;
+        bool leanMoved = false, widthMoved = false;
     };
 
     /** One EQ number or plugin value the fade moves, by name. */

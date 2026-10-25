@@ -16,6 +16,8 @@
 
 #include <wfg/client/ui/FadeMixerComponent.h>
 
+#include <wfg/client/ui/PlaceBar.h>
+
 #include <wfg/client/model/Fader.h>
 #include <wfg/client/ui/Look.h>
 #include <wfg/engine/osc/OscValue.h>
@@ -116,15 +118,65 @@ namespace wfg::client::ui
             moves.setWantsKeyboardFocus (false);
             moves.onClick = [this] { owner.tickWanted (at, moves.getToggleState()); };
             addAndMakeVisible (moves);
+
+            /*  A SEND'S PLACE (namespace draft §113, BCK): the lean and, for a
+                stereo cue into a stereo mix, the width the fade takes it to,
+                each with a tick box of its own, as the level has. */
+            leanBar = std::make_unique<PlaceBar> (owner.theme, PlaceBar::Kind::lean);
+            widthBar = std::make_unique<PlaceBar> (owner.theme, PlaceBar::Kind::width);
+            leanBar->onChange = [this] (double wanted) { owner.placeWanted (at, false, wanted); };
+            widthBar->onChange = [this] (double wanted) { owner.placeWanted (at, true, wanted); };
+
+            for (auto* tick : { &leanTick, &widthTick })
+            {
+                tick->setWantsKeyboardFocus (false);
+                tick->setTooltip ("Whether the fade moves this place - clear to leave it alone");
+            }
+
+            leanTick.onClick = [this] { owner.placeTickWanted (at, false, leanTick.getToggleState()); };
+            widthTick.onClick = [this] { owner.placeTickWanted (at, true, widthTick.getToggleState()); };
         }
 
         const model::FadeStrip& strip() const { return owner.reading.fadeMix.strips[at]; }
+
+        /** The place rows where the shape has them. */
+        void showPlace (bool lean, bool wide)
+        {
+            auto changed = false;
+
+            const auto want = [this, &changed] (juce::Component& child, bool wanted)
+            {
+                if (wanted == (child.getParentComponent() != nullptr))
+                    return;
+
+                if (wanted)
+                    addAndMakeVisible (child);
+                else
+                    removeChildComponent (&child);
+
+                changed = true;
+            };
+
+            want (*leanBar, lean);
+            want (leanTick, lean);
+            want (*widthBar, wide);
+            want (widthTick, wide);
+
+            if (changed)
+                resized();
+        }
+
+        int placeRows() const noexcept
+        {
+            return (leanBar->getParentComponent() != nullptr ? 1 : 0) + (widthBar->getParentComponent() != nullptr ? 1 : 0);
+        }
 
         juce::Rectangle<int> throwArea() const
         {
             auto area = getLocalBounds().reduced (scaled (gap, owner.theme), 0);
             area.removeFromTop (scaled (26, owner.theme));      // the name and the word under it
             area.removeFromBottom (scaled (40, owner.theme));   // the number, and the tick box
+            area.removeFromBottom (scaled (18 * placeRows(), owner.theme));   // the place rows (§113)
             return area;
         }
 
@@ -259,6 +311,20 @@ namespace wfg::client::ui
             moves.setBounds (area.removeFromBottom (scaled (18, owner.theme)));
             area.removeFromBottom (scaled (4, owner.theme));
             value.setBounds (area.removeFromBottom (scaled (18, owner.theme)));
+
+            //  The width under the lean, each with its tick on the left.
+            const auto placeRow = [&] (PlaceBar& bar, juce::ToggleButton& tick)
+            {
+                if (bar.getParentComponent() == nullptr)
+                    return;
+
+                auto row = area.removeFromBottom (scaled (18, owner.theme));
+                tick.setBounds (row.removeFromLeft (scaled (18, owner.theme)));
+                bar.setBounds (row);
+            };
+
+            placeRow (*widthBar, widthTick);
+            placeRow (*leanBar, leanTick);
         }
 
         FadeMixerComponent& owner;
@@ -266,6 +332,8 @@ namespace wfg::client::ui
 
         juce::Label value;
         juce::ToggleButton moves;
+        std::unique_ptr<PlaceBar> leanBar, widthBar;
+        juce::ToggleButton leanTick, widthTick;
 
         double held = 0.0, shown = 0.0;
         bool dragging = false;
@@ -477,6 +545,15 @@ namespace wfg::client::ui
             if (! strip->value.isBeingEdited())
                 strip->value.setText (valueText (s, strip->here()), juce::dontSendNotification);
 
+            //  Its place (§113, BCK): the rows the shape has, lit where the fade moves them.
+            strip->showPlace (s.kind == "send" && ! s.leanAddress.empty(), s.kind == "send" && ! s.widthAddress.empty());
+            strip->leanBar->setValue (s.lean);
+            strip->leanBar->setLit (s.leanMoved);
+            strip->leanTick.setToggleState (s.leanMoved, juce::dontSendNotification);
+            strip->widthBar->setValue (s.width);
+            strip->widthBar->setLit (s.widthMoved);
+            strip->widthTick.setToggleState (s.widthMoved, juce::dontSendNotification);
+
             strip->repaint();
         }
 
@@ -503,6 +580,40 @@ namespace wfg::client::ui
             actions.set (strip.switchAddress, "true");
 
         actions.set (strip.address, text);
+    }
+
+    void FadeMixerComponent::placeWanted (std::size_t at, bool width, double value)
+    {
+        const auto& mix = reading.fadeMix;
+
+        if (at >= mix.strips.size() || ! actions.set)
+            return;
+
+        const auto& address = width ? mix.strips[at].widthAddress : mix.strips[at].leanAddress;
+
+        if (address.empty())
+            return;
+
+        //  Writing an entry ticks it (PF): the place is in the list once it has a value.
+        actions.set (address, osc::formatDouble (std::round (value * 100.0) / 100.0));
+    }
+
+    void FadeMixerComponent::placeTickWanted (std::size_t at, bool width, bool moves)
+    {
+        const auto& mix = reading.fadeMix;
+
+        if (at >= mix.strips.size() || ! actions.set)
+            return;
+
+        const auto& strip = mix.strips[at];
+        const auto& address = width ? strip.widthAddress : strip.leanAddress;
+
+        if (address.empty())
+            return;
+
+        //  Ticked, it is moved to where it stands; cleared, the entry goes (PF).
+        actions.set (address, moves ? osc::formatDouble (std::round ((width ? strip.width : strip.lean) * 100.0) / 100.0)
+                                    : std::string());
     }
 
     void FadeMixerComponent::tickWanted (std::size_t at, bool moves)

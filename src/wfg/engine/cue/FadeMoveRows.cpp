@@ -77,9 +77,10 @@ namespace wfg::cue
 
             /*  What the entry names has to be this show's: a send's a bus, or
                 an aux (namespace draft §93) - a shared rack channel. */
-            if (kind == "send")
+            if (kind == "send" || kind == "place")
             {
-                const auto bus = document.findById (name);
+                //  A place names its bus first: `<bus>/<row>` (§113, BCK).
+                const auto bus = document.findById (kind == "send" ? name : name.substr (0, name.find ('/')));
                 const auto aux = bus.isValid() && bus.hasType ("Channel")
                                    && bus.getProperty ("access").toString() == "shared";
 
@@ -131,6 +132,10 @@ namespace wfg::cue
                 else if (kind == "video")
                 {
                     videoRowRange (name, lowest, highest);
+                }
+                else if (kind == "place")
+                {
+                    placeRowRange (name, lowest, highest);
                 }
 
                 if (*parsed < lowest || *parsed > highest)

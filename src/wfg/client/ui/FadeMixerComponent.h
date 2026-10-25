@@ -98,6 +98,12 @@ namespace wfg::client::ui
         void tickWanted (std::size_t strip, bool moves);
         void untickMove (std::size_t row);
 
+        /*  A SEND'S PLACE (namespace draft §113, BCK), by the strip's index:
+            its lean or, `width`, its width - a value asked for, which ticks
+            it, and its tick box. */
+        void placeWanted (std::size_t strip, bool width, double value);
+        void placeTickWanted (std::size_t strip, bool width, bool moves);
+
         const model::FadeMixReading& mix() const noexcept { return reading.fadeMix; }
 
     private:

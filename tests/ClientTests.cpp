@@ -11420,6 +11420,10 @@ TEST_CASE ("client: a fade's mixer has a strip per slider, lit where the fade mo
     CHECK (send.value == doctest::Approx (-30.0));
     CHECK (send.address == "/godot/cue/" + fade.id + "/moves/send/" + bus.id);
 
+    //  Its place (§113, BCK): a door where the shape has a lean, none where it has none.
+    CHECK (send.leanAddress.empty() == (send.placement == "none"));
+    CHECK_FALSE (send.leanMoved);
+
     REQUIRE (mix.moves.size() == 1u);
     CHECK (mix.moves[0].entry == "eq/eqB2Gain");
     CHECK (mix.moves[0].label == "EQ Band 2 gain");

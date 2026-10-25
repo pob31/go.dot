@@ -6495,7 +6495,8 @@ namespace wfg::cue
         /*  A SEND'S PLACE (namespace draft §113): the show's rows, under what
             the lock is riding. A send made live has no <Send>, so its rows are
             the layer's alone; one with neither is at rest. */
-        const auto placementOf = [] (const juce::ValueTree& destination, const LiveEdits::Send* riding) -> SendPlace
+        const auto placementOf = [moved] (const juce::ValueTree& destination, const LiveEdits::Send* riding,
+                                          const std::string& busId) -> SendPlace
         {
             SendPlace place;
 
@@ -6525,6 +6526,21 @@ namespace wfg::cue
                     else if (row == "width")    place.width = *value;
                     else if (row == "balance")  place.balance = *value;
                 }
+
+            /*  AND WHERE A FADE HAS TAKEN IT TONIGHT (namespace draft §113,
+                BCK): the run's, newer than the lock's ride, as a send's level
+                is (§26, OZ). The swap is a switch, and no fade moves it. */
+            if (moved != nullptr)
+            {
+                if (const auto held = moved->find ("place/" + busId + "/pan"); held != moved->end())
+                    place.pan = held->second;
+
+                if (const auto held = moved->find ("place/" + busId + "/width"); held != moved->end())
+                    place.width = held->second;
+
+                if (const auto held = moved->find ("place/" + busId + "/balance"); held != moved->end())
+                    place.balance = held->second;
+            }
 
             return place;
         };
@@ -6644,7 +6660,7 @@ namespace wfg::cue
 
                 sentTo.push_back (busId);
 
-                if (! sendInto (bus, level, on, placementOf (destination, riding)))
+                if (! sendInto (bus, level, on, placementOf (destination, riding, busId)))
                     return {};
 
                 continue;
@@ -6722,7 +6738,7 @@ namespace wfg::cue
 
                 sentTo.push_back (send->bus);
 
-                if (! sendInto (bus, level, on, placementOf ({}, send)))
+                if (! sendInto (bus, level, on, placementOf ({}, send, send->bus)))
                     return {};
             }
         }
@@ -6765,7 +6781,7 @@ namespace wfg::cue
 
                 const auto bus = sendTargetNamed (busId);
 
-                if (bus.isValid() && ! sendInto (bus, level, true, SendPlace {}))
+                if (bus.isValid() && ! sendInto (bus, level, true, placementOf ({}, nullptr, busId)))
                     return {};
             }
 
@@ -6807,7 +6823,7 @@ namespace wfg::cue
             sends, EQ numbers and plugin values, each a job of its own under
             this fade's one report (PC). A DCA has none of them. */
         const auto moves = textOf (cue, "dca").empty()
-                             ? readFadeMoves (textOf (cue, "sends"), textOf (cue, "eq"), textOf (cue, "fx"))
+                             ? readFadeMoves (textOf (cue, "sends"), textOf (cue, "eq"), textOf (cue, "fx"), textOf (cue, "places"))
                              : std::vector<FadeMove> {};
 
         if (! levelOn && textOf (cue, "aux").empty()
@@ -6829,7 +6845,7 @@ namespace wfg::cue
         if (const auto auxId = textOf (cue, "aux"); ! auxId.empty())
         {
             beginAuxFade (tick, auxId, runId, levelOn, toDb,
-                          readFadeMoves (textOf (cue, "sends"), textOf (cue, "eq"), textOf (cue, "fx")),
+                          readFadeMoves (textOf (cue, "sends"), textOf (cue, "eq"), textOf (cue, "fx"), textOf (cue, "places")),
                           numberOf (cue, "duration"), fadeCurveFrom (textOf (cue, "curve")),
                           std::move (drawn.points));
             return;
@@ -7877,6 +7893,46 @@ namespace wfg::cue
 
             //  A mix the cue does not send into is silence, and fades up from it (PB).
             return -120.0;
+        }
+
+        /*  A SEND'S PLACE (namespace draft §113, BCK): the row of the cue's
+            send into that bus, under what the lock rides; a send made live,
+            its own; none, the row's rest - the centre, the full width. */
+        if (kind == "place")
+        {
+            const auto slash = name.find ('/');
+            const auto busId = name.substr (0, slash);
+            const auto row = slash == std::string::npos ? std::string {} : name.substr (slash + 1);
+            const auto rest = row == "width" ? 1.0 : 0.0;
+
+            const auto ridden = [&row] (const LiveEdits::Send* riding) -> std::optional<double>
+            {
+                if (riding == nullptr)
+                    return std::nullopt;
+
+                const auto held = riding->placement.find (row);
+                return held != riding->placement.end() ? osc::parseDouble (held->second) : std::nullopt;
+            };
+
+            for (const auto& child : cue)
+            {
+                if (! child.hasType ("Send") || child.getProperty ("bus").toString().toStdString() != busId)
+                    continue;
+
+                const auto sendId = child.getProperty ("id").toString().toStdString();
+
+                if (const auto value = ridden (liveLayer != nullptr ? liveLayer->sendOf (sendId) : nullptr))
+                    return *value;
+
+                return schema.number (child, "send", row.c_str());
+            }
+
+            if (liveLayer != nullptr)
+                for (const auto& sendId : liveLayer->createdSendsOf (cueId))
+                    if (const auto* send = liveLayer->sendOf (sendId); send != nullptr && send->bus == busId)
+                        return ridden (send).value_or (rest);
+
+            return rest;
         }
 
         if (kind == "eq")

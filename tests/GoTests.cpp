@@ -21353,6 +21353,61 @@ TEST_CASE ("fade moves: a send is taken from where it stands to the list's level
     CHECK (reportsOf (rig, "run.ended", fade) == 1);
 }
 
+TEST_CASE ("fade moves: a send's balance is taken from the centre to the list's lean, on the run - the far side going quiet (§113, BCK)")
+{
+    LaneRig rig;
+    const auto bus = mixWithSend (rig, "0");
+    const auto first = rig.document.findById (bus).getProperty ("firstChannel").toString().getIntValue();
+
+    const auto id = rig.launch();
+    const auto track = rig.runs.find (id)->track;
+
+    const auto gainAt = [&] (int channel)
+    {
+        auto gain = 0.0f;
+
+        if (const auto found = rig.audio.routings.find (track); found != rig.audio.routings.end())
+            for (const auto& one : found->second)
+                if (one.output == channel)
+                    gain = std::max (gain, one.gain);
+
+        return gain;
+    };
+
+    aimAtTheList (rig, "places", bus + "/balance:-1");
+    rig.fire (rig.fadeId);
+
+    REQUIRE (moveJobs (rig) == 1u);
+    const auto job = rig.runner.fades().front();
+    CHECK (job.move == "place/" + bus + "/balance");
+    CHECK (job.target == "move:" + id + ":place/" + bus + "/balance");
+    CHECK (job.fromValue == doctest::Approx (0.0));
+    CHECK (job.toValue == doctest::Approx (-1.0));
+
+    play (rig, 25);
+
+    const auto halfway = rig.runs.find (id)->moved.at ("place/" + bus + "/balance");
+    INFO ("halfway, at " << halfway);
+    CHECK (halfway < -0.2);
+    CHECK (halfway > -0.8);
+
+    //  The left output keeps the send at full; the right is on its way down.
+    CHECK (gainAt (first) == doctest::Approx (1.0f));
+    CHECK (gainAt (first + 1) < 0.8f);
+    CHECK (gainAt (first + 1) > 0.2f);
+
+    const auto fade = rig.runs.all().back().id;
+    CHECK (playUntil (rig, [&] { return rig.runs.find (fade)->isFinished(); }, 40));
+    CHECK (rig.runs.find (id)->moved.at ("place/" + bus + "/balance") == doctest::Approx (-1.0));
+    CHECK (gainAt (first) == doctest::Approx (1.0f));
+    CHECK (gainAt (first + 1) == doctest::Approx (0.0f));
+
+    //  The run's, never the cue's (OZ): the send still says the centre.
+    for (const auto& child : rig.document.findById (rig.mediaId))
+        if (child.hasType ("Send"))
+            CHECK (child.getProperty ("balance").toString().isEmpty());
+}
+
 TEST_CASE ("fade moves: a mix the cue does not send into is faded up from silence as a send of the run alone")
 {
     LaneRig rig;
@@ -21554,6 +21609,15 @@ TEST_CASE ("fade moves: the door sets one entry, an empty text takes it out, and
     //  The tick box cleared.
     REQUIRE (write (fade + "eq/eqB1Gain", "")->applied);
     CHECK (rig.document.getAttribute ("/godot/cue/" + rig.fadeId + "/eq").value_or ("") == "eqHpfFreq:120");
+
+    //  A send's place (§113, BCK): one row of the bus's send, in its own range; the swap is no fade's.
+    REQUIRE (write (fade + "place/" + bus.id + "/pan", "0.5")->applied);
+    CHECK (rig.document.getAttribute ("/godot/cue/" + rig.fadeId + "/places").value_or ("") == bus.id + "/pan:0.5");
+    REQUIRE (write (fade + "place/" + bus.id + "/pan", "")->applied);
+    CHECK (rig.document.getAttribute ("/godot/cue/" + rig.fadeId + "/places").value_or ("").empty());
+    CHECK_FALSE (write (fade + "place/" + bus.id + "/width", "2")->applied);
+    CHECK_FALSE (write (fade + "place/" + bus.id + "/swap", "1")->applied);
+    CHECK_FALSE (write (fade + "place/nowhere/pan", "0")->applied);
 
     //  Refused: a switch, a bus that is not there, a value out of range, a cue that is not a fade.
     CHECK_FALSE (write (fade + "eq/eqB1On", "true")->applied);

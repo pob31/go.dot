@@ -2535,6 +2535,12 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="places">
+          <a:documentation>Where the fade takes the target-s sends-places (namespace draft 113, BCK), as bus/row:value pairs space-separated, sorted - the row pan, width or balance of the send into that bus, in the rows-own ranges, -1..1 for a pan or a balance and 0..1 for a width. Moved straight in the number from where the send stands tonight, the run-s and never the cue-s, as a send-s level is (26). A swap is a switch, and no fade moves it. An entry on a mix the cue does not send into moves nothing. The tick box in the fade-s mixer is presence, as the sends list-s is.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="points">
           <a:documentation>A curve somebody drew, as (t, level) pairs: t a fraction of the duration and level in dB, within the -120..12 a fade&apos;s level may take. The fade meets each breakpoint at its time and runs straight in dB between them, which is what linear already means. Empty, the default, means curve applies - so a fade written before there was anything to draw with goes on meaning what it meant. Where it holds a curve it is the whole of the shape, and its last level is where the fade ends. The fade leaves from wherever the run&apos;s level is rather than from the first breakpoint&apos;s, for the reason a fade over a fade does: anything else is a jump, and a jump on a PA is a click. Refused, when written and when the show loads, unless it is pairs whose times climb strictly from exactly 0 to exactly 1.</a:documentation>
           <list>

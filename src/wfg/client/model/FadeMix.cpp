@@ -292,6 +292,7 @@ namespace wfg::client::model
 
         //  A send into every mix the show declares (PB).
         const auto sends = cue::parseMoveList (text (snapshot, fade + "sends"));
+        const auto places = cue::parseMoveList (text (snapshot, fade + "places"));
 
         for (const auto& send : readSends (snapshot, out.targetId))
         {
@@ -311,6 +312,25 @@ namespace wfg::client::model
             else
             {
                 strip.value = send.levelDb;
+            }
+
+            //  Its place (§113, BCK): the lean its shape hears, and a stereo one's width.
+            strip.placement = send.placement;
+
+            if (const auto leanRow = send.leanRow(); ! leanRow.empty())
+            {
+                strip.leanAddress = fadeMoveAddress (fadeId, "place/" + send.busId + "/" + leanRow);
+                const auto movedLean = places.find (send.busId + "/" + leanRow);
+                strip.leanMoved = movedLean != places.end();
+                strip.lean = strip.leanMoved ? movedLean->second : send.lean();
+            }
+
+            if (send.placement == "stereo")
+            {
+                strip.widthAddress = fadeMoveAddress (fadeId, "place/" + send.busId + "/width");
+                const auto movedWidth = places.find (send.busId + "/width");
+                strip.widthMoved = movedWidth != places.end();
+                strip.width = strip.widthMoved ? movedWidth->second : send.width;
             }
 
             out.strips.push_back (strip);

@@ -18507,6 +18507,8 @@ this should be a question when saving or closing." So:
 
 ## 26. A fade moves what the cue owns
 
+*(Amended 2026-10-25: a fade moves a send's place too - its pan, width or balance, a fourth list `fade/places` - by these rules; namespace draft §113, BCK.)*
+
 Written 2026-10-03, at the author's direction: *"Fades can act on DCA, these fades will make the DCA
 fader move. Otherwise fades will act on several possible parameters: global cue level, send levels,
 speed, eventually EQ and effect parameters. What is already represented as a slider should be a
@@ -34222,15 +34224,25 @@ buses that no fader, rotary or import option could read as a pan.
   does not send to reads *no send* and turns nothing - the Send page is where a send is made; a shape
   with no such row reads *mono*. Under the lock the rows ride live as a send's level does (§17.14, AK),
   kept or let go on unlock; the sends part (§30) copies them with the level and the switch.
-- **BCJ** *(proposed)* **In the window**: the send mixer's strip shows a lean slider under the fader where
-  the shape has one, and for a stereo cue into a stereo mix a width slider and an *L/R* button beside it;
-  double-click puts a slider back to its rest. Over several picked cues no place row is shown, their shapes
-  being each their own. The console's send inspector lists the rows. The foot follows a pan or width page
-  to the send mixer, as it follows the Send page.
+- **BCJ** *(proposed)* **In the window**: the send mixer's strip shows a lean bar under the fader where
+  the shape has one - drawn from the centre, its reading in the middle, a drag or a click setting it and a
+  double-click the centre - and for a stereo cue into a stereo mix a width bar and an *L/R* button under
+  it. Over several picked cues no place row is shown, their shapes being each their own. The console's
+  send inspector lists the rows. The foot follows a pan or width page to the send mixer, as it follows the
+  Send page. *(The bars replaced two stock sliders the same day: the author, "If the blue dots are dials
+  you can see them moving on screen... I see the values changing on the D700 screen, but not in the UI".)*
+- **BCK** (the author, 2026-10-25: *"it should be possible to automate the pans with fades"*) **A fade moves
+  a send's place** as it moves its level (§26): a fourth list, `fade/places`, of `<bus>/<row>:value` pairs
+  - the row pan, width or balance - each entry a job of its own, straight in the number from where the
+  send stands tonight (the lock's ride counted), the run's and never the cue's, with the takeover, Esc and
+  Doh! rules of §26. The swap is a switch and no fade moves it. The door is
+  `/godot/cue/<fade>/moves/place/<bus>/<row>`; the fade's mixer shows the lean and the width under each
+  send's strip with a tick box each, as the level has. A fade naming an aux moves the aux's sends' places
+  the same way.
 
 ### 113.2 Not in this round
 
-Fade moves of a pan or a balance (`moves/send/<bus>/pan`, §26), lanes on them (§28.5), auxes on the
+Lanes on a pan or a balance (§28.5), auxes on the
 Send and Pan pages (the pages list `/godot/audio/mixes`, which auxes are not in; the engine places a
 send into an aux by the same law), a pan on a `Route` or a `Feed` (their matrix already says it), Live's
 pan envelopes, and the words - *Pan*, *Width*, *swap*, *L 30 / C / R 30*, *Pair the outputs into stereo
@@ -34245,8 +34257,12 @@ the live layer's; `LiveEdits::Send::placement`; `CueParts` sends part; `Paramete
 `Law::stereoWidth`, `Action::panPage`, `SurfaceBridge::placeWrite`, `DeckBridge::nextSendPart`. Clients:
 `model::SendStrip::placement/pan/width/balance/swap`, `SendMixerComponent::placeAt`, the console's
 field table. Imports: `Sound::pan` (Live), `qlab::Send`, `Bus::width`, `WalkOptions::pairOutputs`,
-`ImportOptions::pairOutputs`, `ImportRequest::pairOutputs`, the window's tick. Tests: GoTests (the
-spread per shape, the round trip of the fit, the live ride, the published shape), CuePartTests,
+`ImportOptions::pairOutputs`, `ImportRequest::pairOutputs`, the window's tick. BCK: `fade/places`,
+`readFadeMoves`'s fourth list, `splitMoveEntry`'s `place` kind, `Runner::movedValueOf`'s place branch,
+`resolveRouting`'s `placementOf` reading the run's moves, `FadeStrip::leanAddress/widthAddress`,
+`FadeMixerComponent::placeWanted`, `ui/PlaceBar` (both mixers). Tests: GoTests (the
+spread per shape, the round trip of the fit, the live ride, the published shape, a balance faded to one
+side, the place door), CuePartTests,
 SurfacePagesTests, SurfaceBridgeTests, DeckBridgeTests, ClientTests, AlsWalkTests, AlsImportTests,
 QlabWalkTests, QlabImportTests, the two import blackboxes - C and fr_FR.
 

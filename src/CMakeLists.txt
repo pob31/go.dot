@@ -980,6 +980,8 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/RunPaneComponent.cpp
     wfg/client/ui/CurveEditorComponent.h
     wfg/client/ui/CurveEditorComponent.cpp
+    wfg/client/ui/PlaceBar.h
+    wfg/client/ui/PlaceBar.cpp
     wfg/client/ui/SendMixerComponent.h
     wfg/client/ui/SendMixerComponent.cpp
     wfg/client/ui/FadeMixerComponent.h
