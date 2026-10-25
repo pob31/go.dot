@@ -158,6 +158,13 @@ namespace wfg::tree
         bool skips = false;
         std::string skipWord;
 
+        /*  A COMMAND THAT ALSO GOES WITH NOTHING, from `GODOT.BARE` (the
+            author, 2026-10-25: "I get a type mismatch with the previous EOS
+            cues"): it takes what its TYPE says, or no argument at all - an Eos
+            cue's fire, "a float is the button edge, 1 down and 0 up, and no
+            argument presses and releases". A cue with no value sends it bare. */
+        bool bare = false;
+
         /*  HOW THE NODE IS SPELLED ON THE RCP WIRE (namespace draft §57, AFH;
             DP.7), from `GODOT.RCP`: the verb - `set`, or a scene recall's
             own - and how many of the address's trailing segments are the
@@ -297,6 +304,7 @@ namespace wfg::tree
         bool open() const noexcept                                     { return about().open; }
         bool skips() const noexcept                                    { return about().skips; }
         const std::string& skipWord() const noexcept                   { return about().skipWord; }
+        bool bare() const noexcept                                     { return about().bare; }
         const std::string& rcpVerb() const noexcept                    { return about().rcpVerb; }
         int rcpIndexes() const noexcept                                { return about().rcpIndexes; }
         const std::string& lineTemplate() const noexcept               { return about().lineTemplate; }

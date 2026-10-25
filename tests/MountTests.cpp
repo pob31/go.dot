@@ -553,6 +553,45 @@ TEST_CASE ("mount: under a part the description says is open, an address it does
     CHECK_FALSE (mounts.write ("/eos/nothing", osc::Value::float32 (1.0f)).ok);
 }
 
+TEST_CASE ("mount: a command that also goes bare is sent with no value as well as with its own, and one that does not is still checked")
+{
+    /*  The author, 2026-10-25: "I get a type mismatch with the previous EOS
+        cues" - cues on /eos/cue/1/11/fire with no value, a node whose TYPE is
+        the button edge's float. GODOT.BARE says it also goes with nothing
+        (presets/devices/README.md). */
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    MountTable mounts;
+    MountDeclaration eos;
+    eos.id = "EOSBARE1";
+    eos.prefix = "/eos";
+    eos.namespaceFile = "namespaces/eos.json";
+    eos.port = 3032;
+
+    REQUIRE (mounts.load (eos, R"JSON({"FULL_PATH": "/", "CONTENTS": {
+        "fire": {"FULL_PATH": "/fire", "TYPE": "f", "ACCESS": 2, "GODOT": {"BARE": true}},
+        "level": {"FULL_PATH": "/level", "TYPE": "f", "ACCESS": 2}}})JSON").ok);
+
+    REQUIRE (mounts.nodeAt ("/eos/fire") != nullptr);
+    CHECK (mounts.nodeAt ("/eos/fire")->bare());
+    CHECK_FALSE (mounts.nodeAt ("/eos/level")->bare());
+
+    const auto bare = mounts.write ("/eos/fire", osc::Values {});
+    CHECK (bare.ok);
+    CHECK (bare.values.empty());
+
+    const auto edge = mounts.write ("/eos/fire", osc::Value::float32 (1.0f));
+    CHECK (edge.ok);
+    REQUIRE (edge.values.size() == 1u);
+
+    //  Two values is still not what it takes; and a node that does not go bare still wants its one.
+    CHECK_FALSE (mounts.write ("/eos/fire", osc::Values { osc::Value::float32 (1.0f), osc::Value::float32 (0.0f) }).ok);
+
+    const auto refused = mounts.write ("/eos/level", osc::Values {});
+    CHECK_FALSE (refused.ok);
+    CHECK (refused.reason == reason::typeMismatch);
+}
+
 TEST_CASE ("mount: a retyped port keeps the nodes and the values")
 {
     INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));

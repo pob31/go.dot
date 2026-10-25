@@ -17,7 +17,9 @@ protocol's own spelling, so the address in a cue is the address in the device's 
   (an X32's `/ch`, `/bus`, `/dca`); a root of `/eos` or `/dbaudio1` mounts at that one root.
 - A node carries `TYPE`, `ACCESS` (2 a command, 3 a value), `RANGE` with `MIN`/`MAX` or `VALS`,
   `UNIT`, a `DESCRIPTION` that is a sentence, and under `GODOT`: `KIND`, `RATE_CAP`, `ANTICIPATABLE`,
-  `PANIC` as `docs/godot-namespace-draft-0.1.md` §3 reads them; `ROLE` (§57, AFM); and the wire's own
+  `PANIC` as `docs/godot-namespace-draft-0.1.md` §3 reads them; `ROLE` (§57, AFM); `BARE` (`true`: a
+  command that takes its TYPE's arguments or none at all, so a cue with no value sends it bare - an Eos
+  cue's `fire`, 2026-10-25); and the wire's own
   key where the address alone cannot say how to send it - `RCP`, `LINE`, `MIDI` (§57, AFJ).
 - On a part of the tree, `OPEN` (`true`: an address under it that the file does not list is sent as
   typed - an Eos cue numbered 98.1) and `SKIP` (`true`, or the word the menus offer it by: the level under it

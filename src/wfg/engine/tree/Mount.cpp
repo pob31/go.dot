@@ -496,6 +496,9 @@ namespace wfg::tree
             if (const auto* open = property (*godot, "OPEN"); open != nullptr && open->isBool())
                 out.open = open->asBool();
 
+            if (const auto* bare = property (*godot, "BARE"); bare != nullptr && bare->isBool())
+                out.bare = bare->asBool();
+
             if (const auto* skips = property (*godot, "SKIP"); skips != nullptr && skips->isBool())
                 out.skips = skips->asBool();
             else if (skips != nullptr && skips->isString())
@@ -1240,7 +1243,11 @@ namespace wfg::tree
             could be listed and never sent. */
         const auto takesNothing = node->typeTags.find_first_not_of ("NI") == std::string::npos;
 
-        if (takesNothing ? ! values.empty() : values.size() != node->typeTags.size())
+        /*  AND ONE THAT ALSO GOES BARE (GODOT.BARE, 2026-10-25): nothing is as
+            good as its arguments - an Eos cue fired with no value. */
+        const auto goesBare = values.empty() && node->bare();
+
+        if (! goesBare && (takesNothing ? ! values.empty() : values.size() != node->typeTags.size()))
             return { false, reason::typeMismatch, {}, {} };
 
         osc::Values coerced;

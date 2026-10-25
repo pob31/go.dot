@@ -76,7 +76,10 @@ def main():
     args = parser.parse_args()
 
     def fired(path, what, role=None):
-        return command(path, "Fire %s; a float is the button edge, 1 down and 0 up, and no argument presses and releases." % what, "f", role, EDGE)
+        # BARE (presets/devices/README.md): sent with no argument as well as with the edge, as the console takes it.
+        node = command(path, "Fire %s; a float is the button edge, 1 down and 0 up, and no argument presses and releases." % what, "f", role, EDGE)
+        node.setdefault("GODOT", {})["BARE"] = True
+        return node
 
     cue_lists = numbered("/eos/cue", "The cue lists.", args.lists, lambda lp, l: numbered(
         lp, "Cue list %d." % l, args.cues,
@@ -148,7 +151,7 @@ def main():
                         "number, the keys, submasters, macros, presets and palettes, channel and group levels, the command line, the OSC "
                         "user and faders. %d lists of %d cues, %d submasters, %d macros, %d channels." % (args.lists, args.cues, args.subs, args.macros, args.channels),
                 "etc-eos-osc", "ETC", "Eos family (OSC over TCP)", SOURCES, "scripts/presets/etc_eos.py",
-                transport="tcp", wire="osc", framing="length", port=3032, version=3, contents=contents,
+                transport="tcp", wire="osc", framing="length", port=3032, version=4, contents=contents,
                 readback="subscribe", subscribe="/eos/subscribe 1")
     write(tree, "etc-eos-osc", args.out)
     return 0
