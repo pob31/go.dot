@@ -28,8 +28,10 @@
 #include <wfg/client/model/Media.h>
 #include <wfg/client/ui/MediaCopier.h>
 
+#include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_core/juce_core.h>
 
+#include <memory>
 #include <string>
 
 using namespace wfg::client;
@@ -204,4 +206,69 @@ TEST_CASE ("media copier: a copy stopped part of the way leaves nothing behind, 
     CHECK_FALSE (work.why.empty());
     CHECK_FALSE (disk.media.getChildFile ("Long.wav").exists());
     CHECK (disk.everythingInMedia() == 0);              // the hidden part-file went too
+}
+
+TEST_CASE ("media copier: a compressed sound lands as a WAV under its WAV's name, and one nothing decodes is unreadable (2026-10-25)")
+{
+    Disk disk;
+
+    //  A real FLAC, which JUCE writes everywhere: the author's MP3 stands behind it.
+    const auto bell = disk.sounds.getChildFile ("Bell.flac");
+    {
+        juce::FlacAudioFormat format;
+        std::unique_ptr<juce::OutputStream> stream { bell.createOutputStream() };
+        REQUIRE (stream != nullptr);
+
+        auto writer = format.createWriterFor (stream, juce::AudioFormatWriterOptions {}
+                                                        .withSampleRate (44100.0)
+                                                        .withNumChannels (1)
+                                                        .withBitsPerSample (16));
+        REQUIRE (writer != nullptr);
+
+        juce::AudioBuffer<float> buffer { 1, 44100 };
+        juce::FloatVectorOperations::fill (buffer.getWritePointer (0), 0.25f, buffer.getNumSamples());
+        REQUIRE (writer->writeFromAudioSampleBuffer (buffer, 0, buffer.getNumSamples()));
+    }
+
+    //  The look already answers with the name it will land under.
+    auto work = ui::doMediaJob (look (bell), disk.media, never);
+    CHECK (work.found == model::Found::free);
+    CHECK (work.name == "Bell.wav");
+
+    work = ui::doMediaJob (copy (bell), disk.media, never);
+    REQUIRE (work.found == model::Found::copied);
+    CHECK (work.name == "Bell.wav");
+    CHECK (disk.everythingInMedia() == 1);              // the WAV, and no FLAC beside it
+
+    {
+        juce::AudioFormatManager formats;
+        formats.registerBasicFormats();
+        const std::unique_ptr<juce::AudioFormatReader> reader { formats.createReaderFor (disk.media.getChildFile ("Bell.wav")) };
+        REQUIRE (reader != nullptr);
+        CHECK (reader->getFormatName() == "WAV file");
+        CHECK (reader->numChannels == 1);
+        CHECK (reader->lengthInSamples == 44100);
+    }
+
+    //  Dropped again, it meets its own WAV - other bytes, so somebody is asked - and Keep both numbers the WAV.
+    work = ui::doMediaJob (look (bell), disk.media, never);
+    CHECK (work.found == model::Found::other);
+    CHECK (work.name == "Bell.wav");
+
+    work = ui::doMediaJob (copy (bell, model::Clash::keepBoth), disk.media, never);
+    REQUIRE (work.found == model::Found::copied);
+    CHECK (work.name == "Bell 2.wav");
+
+    /*  AN OLDER SHOW'S FLAC, picked out of `media/` itself: not the show's own
+        file yet, so its WAV is made beside it. */
+    REQUIRE (bell.copyFileTo (disk.media.getChildFile ("Chime.flac")));
+    work = ui::doMediaJob (copy (disk.media.getChildFile ("Chime.flac")), disk.media, never);
+    CHECK (work.found == model::Found::copied);
+    CHECK (work.name == "Chime.wav");
+
+    //  Named like a sound and holding none: unreadable, and nothing is left in `media/`.
+    const auto before = disk.everythingInMedia();
+    const auto fake = disk.pick ("Fake.mp3", "not a sound at all");
+    CHECK (ui::doMediaJob (copy (fake), disk.media, never).found == model::Found::unreadable);
+    CHECK (disk.everythingInMedia() == before);
 }

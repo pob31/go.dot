@@ -99,6 +99,7 @@
 #include <wfg/client/ui/PluginEditors.h>
 #include <wfg/client/ui/Shell.h>
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/audio/CompressedSound.h>
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/audio/TakePictures.h>
 #include <wfg/engine/cue/GroupMode.h>
@@ -4224,7 +4225,8 @@ namespace wfg::client
                 for (const auto& file : folder.findChildFiles (juce::File::findFiles, false))
                     present.push_back (file.getFileName().toStdString());
 
-                const auto keptAs = model::freeName (asked->picked, [&present, &folder] (const std::string& candidate)
+                const auto keptAs = model::freeName (wfg::audio::playableNameFor (asked->picked),
+                                                     [&present, &folder] (const std::string& candidate)
                 {
                     return ! model::nameAmong (present, candidate).empty()
                         || folder.getChildFile (juce::String (candidate)).exists();

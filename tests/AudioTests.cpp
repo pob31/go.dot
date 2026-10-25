@@ -41,6 +41,7 @@
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/audio/AudioHost.h>
 #include <wfg/engine/audio/CardSound.h>
+#include <wfg/engine/audio/CompressedSound.h>
 #include <wfg/engine/audio/CueMatrix.h>
 #include <wfg/engine/audio/MediaInfo.h>
 
@@ -9326,4 +9327,89 @@ TEST_CASE ("range end: a range past the file's end loops at the file's end, and 
     //  And an arm that takes clears the cause.
     CHECK (voice.rig.host.setTrackRanges (0, path, { { 0.0, 1.0, 1 } }));
     CHECK (voice.rig.host.lastArmRefusal() == audio::AudioHost::ArmRefusal::none);
+}
+
+TEST_CASE ("audio host: a compressed sound is refused at the arm, and the WAV made of it plays what it held (2026-10-25)")
+{
+    /*  THE AUTHOR'S MP3, played by FLAC: both are what Tracktion's cache will
+        not map, and FLAC is the one JUCE writes on every machine CI has. Until
+        this the arm took it, the slot's node was built, and isTrackSourceReady
+        never said yes - a GO that waited for ever and said nothing. */
+    constexpr int rate = 48000;
+
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = rate;
+    settings.blockSize = 128;
+    settings.outputChannels = 2;
+
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 2;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    const auto flac = rig.storage.folder.getChildFile ("tone.flac");
+    {
+        rig.storage.folder.createDirectory();
+        juce::FlacAudioFormat format;
+        std::unique_ptr<juce::OutputStream> stream { flac.createOutputStream() };
+        REQUIRE (stream != nullptr);
+
+        auto writer = format.createWriterFor (stream, juce::AudioFormatWriterOptions {}
+                                                        .withSampleRate (static_cast<double> (rate))
+                                                        .withNumChannels (2)
+                                                        .withBitsPerSample (16));
+        REQUIRE (writer != nullptr);
+
+        juce::AudioBuffer<float> buffer { 2, rate * 2 };
+
+        for (int channel = 0; channel < 2; ++channel)
+            juce::FloatVectorOperations::fill (buffer.getWritePointer (channel), sourceAmplitude (channel),
+                                               buffer.getNumSamples());
+
+        REQUIRE (writer->writeFromAudioSampleBuffer (buffer, 0, buffer.getNumSamples()));
+    }
+
+    CHECK (audio::isCompressedSound ("tone.flac"));
+    CHECK_FALSE (rig.host.setTrackSource (0, 0, flac.getFullPathName().toStdString()));
+    CHECK (rig.host.lastArmRefusal() == audio::AudioHost::ArmRefusal::notAudio);
+    CHECK (juce::String (rig.host.lastError()).contains ("compressed"));
+
+    //  Its WAV: the same width, rate and length, and the same samples out of the voice.
+    const auto wav = rig.storage.folder.getChildFile (audio::playableNameFor (flac.getFullPathName().toStdString()));
+    CHECK (wav.getFileName() == "tone.wav");
+    REQUIRE (audio::writeAsWav (flac, wav).ok);
+
+    {
+        juce::AudioFormatManager formats;
+        formats.registerBasicFormats();
+        const std::unique_ptr<juce::AudioFormatReader> reader { formats.createReaderFor (wav) };
+        REQUIRE (reader != nullptr);
+        CHECK (reader->getFormatName() == "WAV file");
+        CHECK (reader->numChannels == 2);
+        CHECK (reader->sampleRate == doctest::Approx (rate));
+        CHECK (reader->lengthInSamples == rate * 2);
+    }
+
+    REQUIRE (rig.host.setTrackSource (0, 0, wav.getFullPathName().toStdString()));
+
+    for (int i = 0; i < 8; ++i)
+        rig.host.processBlock();
+
+    REQUIRE (rig.host.waitForTrackSourceReady (0, 10000));
+    REQUIRE (rig.host.launchTrack (0));
+
+    for (int i = 0; i < 32; ++i)
+        rig.host.processBlock();
+
+    rig.host.resetTrackPeaks (0);
+
+    for (int i = 0; i < 100; ++i)
+        rig.host.processBlock();
+
+    CHECK (rig.host.isTrackPlaying (0));
+    CHECK (rig.host.trackInputPeak (0) == doctest::Approx (sourceAmplitude (0)).epsilon (0.02));
 }

@@ -16,6 +16,7 @@
 
 #include <wfg/engine/import/ImportCommon.h>
 
+#include <wfg/engine/audio/CompressedSound.h>
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/ShowDocument.h>
@@ -214,19 +215,30 @@ namespace wfg::import
             return placed;
         }
 
-        /*  ITS OWN NAME, unless another file already took it. */
-        auto name = source.getFileName().toStdString();
+        /*  ITS OWN NAME, unless another file already took it - and a
+            compressed sound copied in is its WAV, under the WAV's name
+            (audio/CompressedSound.h). One left where it is keeps its own. */
+        const auto converting = copy && audio::isCompressedSound (source.getFileName().toStdString());
+        const auto extension = converting ? std::string (".wav") : source.getFileExtension().toStdString();
+        auto name = source.getFileNameWithoutExtension().toStdString() + extension;
 
         for (int again = 2; book.namesUsed.count (name) != 0; ++again)
             name = source.getFileNameWithoutExtension().toStdString() + " (" + std::to_string (again) + ")"
-                     + source.getFileExtension().toStdString();
+                     + extension;
 
         book.namesUsed.insert (name);
         book.copied[key] = name;
 
         const auto destination = mediaFolder.getChildFile (juce::String::fromUTF8 (name.c_str()));
 
-        if (copy && ! (destination.existsAsFile() && destination.getSize() == source.getSize()))
+        if (converting)
+        {
+            if (say)
+                say ("converting " + source.getFileName().toStdString() + " to " + name);
+
+            placed.copyFailed = ! audio::writeAsWav (source, destination).ok;
+        }
+        else if (copy && ! (destination.existsAsFile() && destination.getSize() == source.getSize()))
         {
             if (say)
                 say ("copying " + name);

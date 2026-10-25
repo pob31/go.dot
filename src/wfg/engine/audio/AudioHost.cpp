@@ -1953,6 +1953,25 @@ namespace wfg::audio
                 return false;
             }
 
+            /*  A COMPRESSED SOUND IS A FAILED ARM TOO, for the same reason by
+                another road. A slot plays through the audio file cache, the
+                cache maps only WAV, AIFF and Tracktion's float files, and
+                Tracktion's own way round that - a proxy - is not taken by a
+                launcher clip (audio/CompressedSound.h). So an MP3 is valid, its
+                node is built, and isSlotSourceReady never says yes: the run
+                waited for ever, and said nothing (the author, 2026-10-25).
+                Asked with Tracktion's own predicate for it. A sound imported
+                since that day is in the show as a WAV; this is the one an
+                older show still names. */
+            if (te::AudioFile { *engine, file }.getInfo().needsCachedProxy)
+            {
+                error = "\"" + file.getFileName().toStdString()
+                          + "\" is a compressed sound, which a cue does not play: drop it on the cue again"
+                            " and Go.dot puts a WAV of it in the show";
+                refuse (AudioHost::ArmRefusal::notAudio);
+                return false;
+            }
+
             clip->getSourceFileReference().setToFile (file, te::SourceFileReference::PathStyle::alwaysAbsolute, false);
 
             /*  The new file's own loop info, not the placeholder's. Everything

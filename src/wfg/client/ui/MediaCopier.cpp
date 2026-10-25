@@ -15,6 +15,7 @@
 */
 
 #include <wfg/client/ui/MediaCopier.h>
+#include <wfg/engine/audio/CompressedSound.h>
 
 #include <juce_events/juce_events.h>
 
@@ -178,6 +179,28 @@ namespace wfg::client::ui
 
             return answered (model::Found::copied, target.getFileName().toStdString());
         }
+
+        /*  A COMPRESSED SOUND IS WRITTEN, NOT COPIED: decoded into a WAV
+            under `target`, which is already its WAV name (audio/
+            CompressedSound.h). One nothing here decodes is unreadable, as a
+            file that will not open is. */
+        model::MediaWork placeInto (const juce::File& source, const juce::File& target,
+                                    const std::function<bool()>& stopping)
+        {
+            if (! wfg::audio::isCompressedSound (source.getFileName().toStdString()))
+                return copyInto (source, target, stopping);
+
+            if (! source.existsAsFile())
+                return answered (model::Found::missing);
+
+            const auto written = wfg::audio::writeAsWav (source, target, stopping);
+
+            if (written.unreadable)
+                return answered (model::Found::unreadable);
+
+            return written.ok ? answered (model::Found::copied, target.getFileName().toStdString())
+                              : failed (written.why);
+        }
     }
 
     model::MediaWork doMediaJob (const model::MediaJob& job, const juce::File& folder,
@@ -191,7 +214,9 @@ namespace wfg::client::ui
         if (const auto made = folder.createDirectory(); made.failed())
             return failed ("the show's media folder could not be made: " + tail (made.getErrorMessage()));
 
-        const auto wanted = source.getFileName().toStdString();
+        /*  THE NAME IT LANDS UNDER, which for a compressed sound is its WAV's:
+            that is the name a clash is about. */
+        const auto wanted = wfg::audio::playableNameFor (source.getFileName().toStdString());
         const auto present = namesIn (folder);
 
         /*  TAKEN, as the rule says (case-blind, model::sameFileName) and as
@@ -205,14 +230,14 @@ namespace wfg::client::ui
 
         //  An answered copy: over the file it met, or beside it under the first free number.
         if (job.copy && job.answer == model::Clash::replace)
-            return copyInto (source, folder.getChildFile (juce::String (job.met)), stopping);
+            return placeInto (source, folder.getChildFile (juce::String (job.met)), stopping);
 
         if (job.copy && job.answer == model::Clash::keepBoth)
         {
             const auto name = model::freeName (wanted, taken);
 
             return name.empty() ? failed ("every name like it is taken")
-                                : copyInto (source, folder.getChildFile (juce::String (name)), stopping);
+                                : placeInto (source, folder.getChildFile (juce::String (name)), stopping);
         }
 
         /*  A LOOK - or a copy under the file's own name, which looks again
@@ -221,10 +246,14 @@ namespace wfg::client::ui
         model::Arrival arrival;
         arrival.exists = source.existsAsFile();
         arrival.readable = arrival.exists && juce::FileInputStream (source).openedOk();
-        arrival.inShow = arrival.exists && source.getParentDirectory() == folder;
+        /*  A compressed sound picked out of `media/` itself - an older show's,
+            copied before compressed sounds were converted - is not one of the
+            show's own files yet: its WAV is made beside it. */
+        arrival.inShow = arrival.exists && source.getParentDirectory() == folder
+                           && ! wfg::audio::isCompressedSound (source.getFileName().toStdString());
         arrival.meets = model::nameAmong (present, wanted);
 
-        if (arrival.meets.empty() && folder.getChildFile (source.getFileName()).existsAsFile())
+        if (arrival.meets.empty() && folder.getChildFile (juce::String (wanted)).existsAsFile())
             arrival.meets = wanted;
 
         const auto met = folder.getChildFile (juce::String (arrival.meets));
@@ -244,7 +273,7 @@ namespace wfg::client::ui
                 return answered (found, arrival.meets);
 
             case model::Found::free:
-                return job.copy ? copyInto (source, folder.getChildFile (source.getFileName()), stopping)
+                return job.copy ? placeInto (source, folder.getChildFile (juce::String (wanted)), stopping)
                                 : answered (found, wanted);
 
             case model::Found::missing:

@@ -34538,3 +34538,52 @@ nothing; a step aimed at loads that cue), and every jump case made load + GO (`J
 NetworkCueTests' §115 cases hold (the values go out at the load) and the scrub re-holds; the timecode,
 history and blackbox jumps press GO. Not in this round: a fade the second lands inside is seated over,
 not resumed (§115); the chase's `code.seat` sends no values.
+
+## 118. A compressed sound is copied in as a WAV
+
+**Reported 2026-10-25** by the author: *"mp3 files load, get copied and analysed, but don't play."* Then,
+on what to do about it: *"We can convert all compressed files to wav."*
+
+Why it never played: a voice plays through Tracktion's audio file cache, and the cache only holds the
+formats it can memory-map - WAV, AIFF and Tracktion's float files. Tracktion's own way round that is a
+proxy, a WAV it renders beside the clip, and a launcher slot - every Go.dot voice - takes none. So the arm
+took the MP3, the slot's node was built, and the run waited for a mapped reader that never came, saying
+nothing. FLAC and Ogg Vorbis, which the tester guides listed, went the same way (measured: a FLAC armed is
+still not ready after five seconds).
+
+The author's: compressed files are converted to WAV; where - **at the copy** (asked, the recommended of two:
+the other was a WAV made behind a cue that keeps naming the MP3).
+
+Mine *(proposed)*:
+
+- **BCS** **The show holds what plays.** A compressed sound dropped or linked is written into `media/` as
+  a WAV under its own stem - *song.mp3* lands as *song.wav*, and the cue names that. The import's last
+  word says so: *imported song.mp3 as song.wav*. The QLab and Live importers do the same when they copy;
+  told not to copy (`--no-media`), they leave the file and its name alone.
+- **BCT** **Compressed is said by the extension**, so the window knows the name before the worker opens
+  the file: `.mp3 .mp2 .m4a .aac .flac .ogg .oga .wma .caf`. A movie is not among them; its sound is
+  FFmpeg's to take out (§37.5).
+- **BCU** **Decoded by JUCE's basic formats**, the ones the analyser reads with, so a sound whose waveform
+  was drawn converts: MP3 and WMA through Media Foundation on Windows; MP3, AAC, M4A and CAF through Core
+  Audio on the Mac; FLAC and Ogg everywhere. Nothing reads MP3 on Linux, and such a drop fails as a file
+  that cannot be read. **Written as 32-bit float** at the file's own rate and width: a decoder's output
+  can pass full scale between samples, and 24 bits would clip it. A five-minute stereo MP3 makes a WAV of about 110 MB.
+- **BCV** **A drop that meets its own WAV is asked about**: the MP3 and the WAV are different bytes, so it
+  is the §30 question, with *Keep both* numbering the WAV. *Use the one in the show* (Escape) changes
+  nothing.
+- **BCW** **An older show's compressed file** - copied before this - is refused at the arm as `not-audio`,
+  with the sentence *"<file>" is a compressed sound, which a cue does not play: drop it on the cue again
+  and Go.dot puts a WAV of it in the show*. Picked out of `media/` itself, it is converted beside itself.
+
+As built: `audio/CompressedSound` (`isCompressedSound`, `playableNameFor`, `writeAsWav` - a hidden part-file
+moved over the target whole, as the copier's copies are); `ui::doMediaJob` looks for and lands on the WAV's
+name (`placeInto`); the window's *Keep both* name from `playableNameFor`; `import::placeFile` converts;
+`AudioHost::pointSlotAtFile` refuses by Tracktion's own `needsCachedProxy`. Tests: AudioTests "audio host:
+a compressed sound is refused at the arm, and the WAV made of it plays what it held" (a FLAC refused; its WAV
+the same width, rate and length, and the voice's level the file's); MediaCopierUiTests "a compressed sound
+lands as a WAV under its WAV's name" (the look's name, the WAV in `media/` and no FLAC, a second drop asked
+and Keep both, a FLAC already in `media/`, an MP3 holding no sound unreadable), C and fr_FR. The author's own
+MP3 (5 min 22 s, 44.1 kHz stereo) converted in 0.9 s in a Debug build and played at a peak of 0.89. Both
+tester guides say it under *Add sounds*.
+
+Owed: the author's try - the MP3 dropped on its cue again, played; and on the Mac, an M4A.

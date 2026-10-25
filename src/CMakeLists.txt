@@ -358,6 +358,8 @@ add_library(wfg_engine STATIC
     wfg/engine/audio/EditRenderer.h
     wfg/engine/audio/MediaInfo.h
     wfg/engine/audio/MediaInfo.cpp
+    wfg/engine/audio/CompressedSound.h
+    wfg/engine/audio/CompressedSound.cpp
     wfg/engine/audio/Timbre.h
     wfg/engine/audio/Timbre.cpp
     wfg/engine/audio/Peaks.h
