@@ -735,7 +735,13 @@ Rules:
   summing point and the table above says its width does not matter. The cue's
   fold switch, whose only other answer was a failed run, is retired. A file wider
   than two onto a narrower bus is still refused. Slots are unchanged. Namespace
-  draft §42.)
+  draft §42.) *(Amended 2026-10-25, at the author's request:* a **send** has a
+  place in its mix as well as a level - a pan where a mono cue meets a stereo
+  mix, a width, a balance and a swap where two channels meet two, a balance where
+  two meet one - by a law that is the spread above at rest and lowers only the
+  far side when moved, so placing never costs level; on the D700's Pan button,
+  the Stream Deck+'s Send key, in the send mixer, and carried by the Live and
+  QLab imports. Namespace draft §113.)
 - **The show declares the processor's inputs as slots** — a name, an address
   prefix, a width and the bus that feeds each *(amended in 0.8, at the author's
   direction, 2026-09-10 — decision P of 2026-09-07,

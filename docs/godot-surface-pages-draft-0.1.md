@@ -88,10 +88,10 @@ capture did not tabulate, to be read at the bench (§10).
 | Stop | note `0x5D` | Esc; a second press within 750 ms is double Esc |
 | Rec | note `0x5F` | `take.record` on the channel of the aimed mic cue - record, loop, a layer, loop (2026-09-27, namespace draft §19.6); nothing with no mic cue aimed. Lit while that take records, blinking while a layer is laid (§19.7) |
 | ↖ / ↘ arrows | notes `0x2E` / `0x2F` (MCU bank left / right) | the standby back / forward (2026-09-26, §5.7) |
-| Pan / EQ / Send / FX | notes `0x2A` / `0x2C` / `0x29` / `0x2B` | the page buttons of §5 - Pan is the Loop page (Phase 9c, namespace draft §19.7): the aimed mic cue's in, out, a slide of both and its level |
+| Pan / EQ / Send / FX | notes `0x2A` / `0x2C` / `0x29` / `0x2B` | the page buttons of §5 - Pan is the pan pages since 2026-10-25 (namespace draft §113): the aimed cue's sends' place, a mix channel a rotary, then their widths; it was the Loop page from Phase 9c to then |
 | `*` | note `0x36` under the Mackie preset (`0x5A` under Reaper's); `0x37` on a double click if enabled | nothing |
-| Metronome | note `0x59`, MCU *Click* — *to confirm* | nothing |
-| Loop | note `0x56`, MCU *Cycle* — *to confirm* | `take.loop` on the aimed mic cue's channel (Phase 9c, namespace draft §19.7) |
+| Metronome | note `0x59`, MCU *Click* — *to confirm* | `take.loop` on the aimed mic cue's channel (since 2026-10-25, namespace draft §113; it was Loop's) |
+| Loop | note `0x56`, MCU *Cycle* — *to confirm* | the Loop page (since 2026-10-25, §113): the aimed mic cue's in, out, a slide of both and its level; `take.loop` until then |
 | Master dial | turn: MCU jog, CC `0x3C`, with the Configurator's "volume encoders act as fader/Pitchbend" unticked - ticked, pitch bend on channel 9, 14-bit, absolute, as the row below; click: note `0x38`; double click: note `0x39` (both confirmed 2026-10-08) | the number last clicked in the window; click lets go, double click back to its default (2026-09-26); the pitch bend read as its moves (2026-10-08) |
 | Volume knob | pitch bend on channel 9, 14-bit, absolute, **no touch sense**; a click, if it has one, never captured - whether this is the master dial with "volume encoders act as fader/Pitchbend" ticked, or a knob of its own, is to see | nothing - or the dial's number, if it is the dial |
 
@@ -204,7 +204,7 @@ a ride, because the fader is not over a sample.
 |---|---|---|---|---|
 | **Show** (built) | none lit | sampler strips and DCA strips | on a DCA strip, the picture's curve or the sound's offset of the cues playing under it (namespace draft §50); on a sampler strip nothing | the strip's pad; on a DCA strip, switches between the two (§50, ACA) |
 | **Send** | Send | the focused cue's send levels, one per mix channel in output-list order — the desktop send mixer's model (`model/Sends.h`); raising a silent one creates the `Send` | fine trim of the same | that send back to 0 dB |
-| **Pan** | Pan | — | the focused cue's placement: its route gains today, a WFS source position later (question 2) | centre |
+| **Pan** (built 2026-10-25, namespace draft §113) | Pan | — | the aimed cue's sends' place, one a mix channel: a mono cue's pan, a stereo cue's balance; Pan again, their widths where a stereo cue meets a stereo mix | centre; on a width, swap the sides |
 | **EQ** | EQ | the band gains *(or none — §7.1)* | the focused cue's EQ (§7.1) | band on/off, or reset |
 | **FX** | FX | — | the focused cue's inserts, sixteen parameters at a time (§7.2) | reset to default |
 
@@ -353,6 +353,7 @@ Each with the recommendation made in the conversation.
    standby cue; or only a pick made on the surface. **Answered 2026-09-25:** SELECT on a sample
    strip, or a click on a running cue's name in the window (`surface.aim`); not the window's pick.
 2. **What Pan moves** — the route gains now; a WFS source position later; something else.
+   **Answered 2026-10-25:** the sends' place - pan, balance, width, swap (namespace draft §113).
 3. **Under the edit lock** — the editing pages unavailable (*recommended*), or allowed.
    **Answered 2026-09-25, against the recommendation:** EQ and Send ride live and unsaved; Keep or
    Discard once unlocked.

@@ -11849,7 +11849,8 @@ the take, and a stop landing while it records closing it held); the REC case in
   both and keeping the length, and the level — with a law fine enough for a loop point, the first
   thing the bench says. A **Loop** key, if the D700 has one (its protocol note lists Rec, Play and
   Stop), is `take.loop`. Under the lock the page writes as it always does: the points are not the
-  document.
+  document. *(Amended 2026-10-25, §113 BCD: Pan is the pan pages now; the Loop page is on the Loop
+  key, Mackie's Cycle, and `take.loop` on the Metronome, Mackie's Click.)*
 - **The window.** A sampling cue's foot shows the take's picture, drawn from peaks the looper keeps a
   block at a time and the desktop reads in its own process, growing as it records; the in and out as
   edges to drag; the playhead; the layers; and Rec, Loop, Overdub, Undo, Clear and Keep. The chain
@@ -11904,7 +11905,7 @@ recorder - `take-panel.png` and `fx-panel-take.png` under `WFG_SNAPSHOT_DIR`.
 
 *As built (9c.5), the D700.*
 
-- **Pan is the Loop page** (`Page::loop`, the word `loop`), one page whatever the rotaries, and Pan
+- **Pan is the Loop page** *(until 2026-10-25: Loop, Mackie's Cycle, since §113)* (`Page::loop`, the word `loop`), one page whatever the rotaries, and Pan
   again or `*` leaves it; its button is lit while it is up. It puts the aimed mic cue's take on the
   first four rotaries: **Loop in** and **Loop out**, where each stands in seconds to the
   millisecond with its ring at that place in the take; **Slide**, which says how long the loop is,
@@ -12067,7 +12068,7 @@ the strict build), 9c.6 `4d5ab77`, and 9c.7 - the measurements `2238346`, and th
 
 **Not built of what §19 drew:** Keep from the D700 and from a transport cue - Keep is the window's
 and a command's; a double click on Rec for Undo, and a Loop key, until the bench says the D700 has
-them (a Mackie's Cycle is `take.loop` already); and the page at `/ui`, which has no take panel (§19.10).
+them (a Mackie's Cycle was `take.loop` until §113 gave it the Loop page and Click the loop); and the page at `/ui`, which has no take panel (§19.10).
 
 **Waiting for the bench:** a take recorded on a mic cue through a real plugin on the MADIface and
 looped through another; the D700's Rec and its light, and which port lights its transport; the Loop
@@ -18939,7 +18940,10 @@ could not be read or a folder that could not be written.
 
 - **Session view only.** Arrangement clips, MIDI clips, follow actions, tempo changes and grooves
   are reported, not imported.
-- **No pan.** A pan away from centre is reported; Go.dot has no pan row.
+- **No pan** *(until 2026-10-25)*. A pan away from centre was reported; Go.dot had no pan row. **Since
+  §113 (BCH)** the sound's own track's pan rides into its sends - a pan on a mono file, a balance on a
+  stereo one - said as approximated (Live's centre is 3 dB down); the pans of carrier, group, return and
+  master tracks are noted, pan envelopes and hands dropped (no pan lane).
 - **No shared effects** (QE), and so no hand on them: a rotary on a parked effect is reported.
 - **A warp that is not one ratio** is averaged into `rate` and reported.
 - **The conduite and the script are not read.** The script is Choufleur's (PRD §3.23).
@@ -19012,6 +19016,10 @@ and one return, **A**, on outputs 1/2, with Probe in's send to it at 0 dB. One s
    the second clip plays at.
 6. **A start before the file.** Probe: the tone, its start marker four beats before the file's first
    sample.
+7. **The pan** *(added 2026-10-25, §113)*. Probe: the tone, its pan at hard left, then at a quarter left,
+   with Probe in's send to A at 0 dB and Probe's own output on 1/2 as well. Answers whether Live's sends
+   are taken before or after the pan (the import puts the pan on every send), and Live's pan law at the
+   centre and a quarter (the import's is full at the centre and lowers the far side, BCC).
 
 The export is Live's own: the session recorded into the arrangement while each scene is launched in
 turn, a few seconds apart, then exported as one WAV of outputs 1/2. AL.7's driver imports
@@ -22871,7 +22879,9 @@ Mine (proposed):
 - **ZU Routing.** Each cue output a cue uses is a mono `Bus`, in output order, named after QLab's output
   name; a cue's `Route/@gains` are ten to the (output fader plus crosspoint) over twenty, at or below the
   workspace's minimum volume nought. The main stays the cue's `level`, so the document says what the
-  designer set and the routing says where it goes.
+  designer set and the routing says where it goes. *(Amended 2026-10-25, §113 BCG: the outputs are paired
+  1-2, 3-4... into stereo mixes, and a matrix onto a pair that is a level and a place is a `Send`; one that
+  is not stays a `Route` onto the pair; `--no-pairs` and the window's tick keep this paragraph as it was.)*
 - **ZV Fades.** An absolute fade of the main is a `Fade` to its level, `stopWhenDone` as QLab's; a shape
   that is not QLab's default is sampled into `points`; a fade of the rate sets `rateOn`. A relative fade
   aimed at a group is that group's trim (decision O), the offsets summed in show order - right when the
@@ -34146,3 +34156,96 @@ level. A section's trim handle, drawn on the same scale, follows. Nothing heard 
 
 As built: `model::laneHeightFor` and `laneLevelForHeight` (model/Lane.cpp). ClientTests (the four points,
 the same slope either side of -60 and unity, rising everywhere, its own inverse), C and fr_FR.
+
+## 113. A send's place in its mix: pan, width, balance, swap
+
+**Asked 2026-10-25** by the author: *"Can the sends also have panoramic/balance controls? Mono to stereo >
+panoramic. Stereo to stereo > width mixing more or less of the opposite channel and balance lowering one
+side. And a toggle to swap L and R. When centered and width in normal position, the level of the stereo
+file comes out with no attenuation because of the balance/width controls. Stereo to mono > balance mixing
+more or less L and R together. This can be assigned to the surface rotaries, there's a pan switch. It
+would be nice to have it on the Streamdeck+ too. Include this in the Ableton Live and QLab imports."*
+
+A send was one number, a level, spread by a fixed rule (§42): a mono cue onto every channel of its mix at
+full, two sides onto two side to side, two sides onto one at half each. The Live import read a track's pan
+and dropped it (§29.4); the QLab import carried the level matrix whole, but as `Route/@gains` onto mono
+buses that no fader, rotary or import option could read as a pan.
+
+### 113.1 Decisions
+
+- **BCC** *(proposed)* **The law is "full at centre, lower the far side."** A mono cue into a stereo mix
+  has a **pan** p in -1..1: left at min(1, 1-p), right at min(1, 1+p). A stereo cue into a stereo mix has
+  a **swap**, then a **width** w in 0..1 - each output hears (1+w)/2 of its own side and (1-w)/2 of the
+  other, so 0 is mono and 1 the file as it is - then a **balance** b in -1..1 lowering one OUTPUT by the
+  same rule as the pan. A stereo cue into a mono mix has the balance alone: (1-b)/2 of the left and
+  (1+b)/2 of the right into the fold, nought being §42's half each. At rest every shape is exactly the
+  spread it always was, so a show saved before this sounds the same; a move away from the centre only turns
+  the far side down, so placing never costs level - the author's condition; and any pair of gains a matrix
+  could say (QLab's crosspoints, a desk's) is one level and one lean with nothing left over, which the
+  QLab import leans on. Live's constant-power pan is 3 dB lower at the centre, said as an approximation.
+  The rows are `send/pan`, `send/width`, `send/balance`, `send/swap`, every one kept whether the shape hears
+  it or not (the document holds what someone decided; a file replaced by a mono one tomorrow finds its pan
+  waiting), and the derived `send/placement` - `none`, `pan`, `stereo` or `fold` - from the cue's channel
+  count (a mic cue's input, an aux's class) and the bus's width (an aux's class), so the surfaces and the
+  strips need not work the shape out again. The cue's channels are its chain's: an insert that makes a mono
+  cue stereo makes it stereo here. The arithmetic and its inverse are `cue/SendPlacement`.
+- **BCD** (the author, offered the Loop page's move) **Pan is the pan pages.** The D700's Pan button
+  (`0x2A`) puts the aimed cue's sends' place on the rotaries, one a mix channel as the Send page lays them
+  (§17.14), in `/godot/audio/mixes` order, paged by the rotary count. The Loop page it held since Phase 9c
+  (§19.7) moves to the **Loop** button, Mackie's Cycle (`0x56`); the take's loop that Cycle pressed moves to
+  the **Metronome**, Mackie's Click (`0x59`) - one rule for the D700 and a Mackie alike. `surface/page`
+  gains the words `pan` and `width`; the Pan light answers for both, Loop's for the Loop page (a light on
+  Cycle is to confirm at the bench, as §19.7 already said).
+- **BCE** (the author, recommended) **Width is 0 to 100 %**: 0 mono, 100 the file as it is, the knob's top
+  the normal position. Nothing beyond: no subtracting of the other side.
+- **BCF** (the author, recommended) **The Stream Deck+ walks on from Send.** No key being free (§95), the
+  Send key pages the levels four a dial, then the pans, then the widths, then the levels again; its picture
+  says `Send`, `Pan` or `Width` and the page's count. The width part is skipped when the aimed cue has no
+  send two channels wide into two.
+- **BCG** (the author, recommended) **A QLab workspace's outputs are paired** 1-2, 3-4... into stereo mix
+  channels, an odd last output staying a mono direct bus; a sound whose crosspoints onto a pair are a
+  level and a place under BCC gets a `Send` with them, exactly (a mono pair of gains, a stereo diagonal,
+  symmetric cross terms, an anti-diagonal as a swap), and one whose matrix is not of that shape keeps a
+  `Route` with it onto the pair, said in the report. The import window offers the tick *Pair the outputs
+  into stereo mixes*, on; `wfg import-qlab --no-pairs` and the tick off keep every output a mono bus and
+  every matrix a route, as before, for a rig whose outputs are single speakers. ZU is amended.
+- **BCH** *(proposed)* **A Live track's pan rides into its sends**: a pan on a mono file, a balance on a
+  stereo one (Live's stereo pan is a balance too), on every send of the cue, into a stereo mix or the fold
+  of a mono one; said as approximated for the law's 3 dB. The pans of carrier, group, return and master
+  tracks are still only noted; pan envelopes and a hand on a pan are still dropped, there being no pan lane
+  - a hand on a pan is told it has the D700's Pan page. §29.4 is amended; §29.6 gains a probe.
+- **BCI** *(proposed)* **On a rotary and a dial**: a pan or a balance turns two hundredths a detent
+  (`pagePlacePerDetent`, fifty detents end to end) and a press puts it back to the centre; a width turns
+  the same and a press swaps the sides, the screen saying *swap* beside the mix's name while they are. A
+  lean is drawn from the centre (the D700's ring mode 1, Mackie's boost/cut), a width from the left. The
+  screen reads *C*, *L 30*, *R 100*, *100 %*, built digit by digit as every page's number is. A mix the cue
+  does not send to reads *no send* and turns nothing - the Send page is where a send is made; a shape
+  with no such row reads *mono*. Under the lock the rows ride live as a send's level does (§17.14, AK),
+  kept or let go on unlock; the sends part (§30) copies them with the level and the switch.
+- **BCJ** *(proposed)* **In the window**: the send mixer's strip shows a lean slider under the fader where
+  the shape has one, and for a stereo cue into a stereo mix a width slider and an *L/R* button beside it;
+  double-click puts a slider back to its rest. Over several picked cues no place row is shown, their shapes
+  being each their own. The console's send inspector lists the rows. The foot follows a pan or width page
+  to the send mixer, as it follows the Send page.
+
+### 113.2 Not in this round
+
+Fade moves of a pan or a balance (`moves/send/<bus>/pan`, §26), lanes on them (§28.5), auxes on the
+Send and Pan pages (the pages list `/godot/audio/mixes`, which auxes are not in; the engine places a
+send into an aux by the same law), a pan on a `Route` or a `Feed` (their matrix already says it), Live's
+pan envelopes, and the words - *Pan*, *Width*, *swap*, *L 30 / C / R 30*, *Pair the outputs into stereo
+mixes*, `--no-pairs` - which are the implementer's until the author has seen them.
+
+### 113.3 As built (2026-10-25)
+
+`cue/SendPlacement` (`SendPlace`, `placementWordOf`, `applyPlacement`, `fitPlacement`);
+`Runner::resolveRouting`'s `spreadOf` and `sendInto` take a place, the Send branch reads the rows under
+the live layer's; `LiveEdits::Send::placement`; `CueParts` sends part; `ParameterTree` derives
+`send/placement` for a cue's and an aux's sends. Surfaces: `Page::pan`, `Page::width`, `Law::pan`,
+`Law::stereoWidth`, `Action::panPage`, `SurfaceBridge::placeWrite`, `DeckBridge::nextSendPart`. Clients:
+`model::SendStrip::placement/pan/width/balance/swap`, `SendMixerComponent::placeAt`, the console's
+field table. Imports: `Sound::pan` (Live), `qlab::Send`, `Bus::width`, `WalkOptions::pairOutputs`,
+`ImportOptions::pairOutputs`, `ImportRequest::pairOutputs`, the window's tick. Tests: GoTests (the
+spread per shape, the round trip of the fit, the live ride, the published shape), CuePartTests,
+SurfacePagesTests, SurfaceBridgeTests, DeckBridgeTests, ClientTests, AlsWalkTests, AlsImportTests,
+QlabWalkTests, QlabImportTests, the two import blackboxes - C and fr_FR.
