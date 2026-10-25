@@ -79,6 +79,10 @@ namespace wfg::client::ui
             addAndMakeVisible (button);
         }
 
+        //  Pause / Play sends what its word says (PRD §3.34).
+        pauseButton.setWantsKeyboardFocus (false);
+        pauseButton.onClick = [this] { pressPause(); };
+        addAndMakeVisible (pauseButton);
         /*  THE PAIR'S BANNER (RD.11): hidden until the engine says something
             needs a hand, its button pressing whichever of the operator's five
             the banner is about - and, like every button here, never the
@@ -105,6 +109,7 @@ namespace wfg::client::ui
         /*  Doh! a little larger than the type: pressed in a hurry too, but
             read before it is pressed - it names the GO it would take back. */
         dohButton.getProperties().set (Look::fontScale(), 1.2);
+        pauseButton.getProperties().set (Look::fontScale(), 1.2);
 
         setWantsKeyboardFocus (true);
         applyTheme (theme);
@@ -224,7 +229,7 @@ namespace wfg::client::ui
             the record too, so the same refusal said again is said afresh. A
             write that failed and the clock gone are no news but a state, and
             stand while they are true. */
-        const auto lasts = ! reading.writeError.empty() || reading.status == "noClock";
+        const auto lasts = ! reading.writeError.empty() || reading.status == "noClock" || reading.showPaused();
         const auto key = errorNow + "\n" + text (reading.lastError);
 
         if (key != errorKey)
@@ -314,6 +319,7 @@ namespace wfg::client::ui
 
         /*  EVERY READING: the tick moves on each one, and the fade with it. */
         dressDoh();
+        dressPause();
 
         if (bannerShowing != wasShowing || pairShowing != pairWas)
         {
@@ -645,6 +651,34 @@ namespace wfg::client::ui
             dohButton.setEnabled (open);
     }
 
+    void TransportComponent::dressPause()
+    {
+        /*  THE WORD IS THE STATE (§4.8): "Pause" on the idle ground while the
+            show runs, "Play" on the held colour while it is held - and the
+            transport line says "Paused" in words beside it. */
+        const auto held = last.showPaused();
+        const auto ground = held ? Look::colour (theme, "paused") : Look::colour (theme, "go-idle");
+        const auto letters = held ? Look::colour (theme, "go-ink") : Look::colour (theme, "ink");
+
+        if (pauseButton.findColour (juce::TextButton::buttonColourId) != ground)
+            pauseButton.setColour (juce::TextButton::buttonColourId, ground);
+
+        if (pauseButton.findColour (juce::TextButton::textColourOffId) != letters)
+            pauseButton.setColour (juce::TextButton::textColourOffId, letters);
+
+        if (const auto caption = text (last.pauseCaption()); pauseButton.getButtonText() != caption)
+            pauseButton.setButtonText (caption);
+
+        if (const auto tip = text (last.pauseTip()); pauseButton.getTooltip() != tip)
+            pauseButton.setTooltip (tip);
+    }
+
+    void TransportComponent::pressPause()
+    {
+        if (actions.pause)
+            actions.pause (! last.showPaused());
+    }
+
     int TransportComponent::preferredHeight() const noexcept
     {
         const auto row = rowHeight();
@@ -845,6 +879,12 @@ namespace wfg::client::ui
         dohButton.setBounds (middle.removeFromRight (row * 2).reduced (2));
         middle.removeFromRight (pad);
 
+        /*  AND PAUSE / PLAY TO DOH!'S LEFT (PRD §3.34; the author: "Next to
+            Doh"), the same height and width: the show held is a hand on all of
+            it, as the three stops are, and away from GO with them. */
+        pauseButton.setBounds (middle.removeFromRight (row * 2).reduced (2));
+        middle.removeFromRight (pad);
+
         /*  THE NAME ON THE LEFT HALF, THE NOTES ON THE RIGHT: the eye reads
             outward from GO through the name into what to look out for. The
             notes take what the name does not need, and both rows of it. */
@@ -935,6 +975,20 @@ namespace wfg::client::ui
             return true;
         }
 
+        /*  F8 IS PAUSE / PLAY (PRD §3.34; the author's key, 2026-10-25), once
+            per key-down as F9 is: a held key that repeated would hold the show
+            and let it go and hold it again. */
+        if (key == juce::KeyPress (juce::KeyPress::F8Key))
+        {
+            if (! pauseKeyDown)
+            {
+                pauseKeyDown = true;
+                pressPause();
+            }
+
+            return true;
+        }
+
         /*  THE ACCELERATORS FOLLOW THEIR BUTTONS, every one of them: a key
             that fired a gesture the strip is not offering would be a second
             route to something this client has decided not to ask for - which
@@ -970,6 +1024,9 @@ namespace wfg::client::ui
 
         if (dohKeyDown && ! juce::KeyPress::isKeyCurrentlyDown (juce::KeyPress::F9Key))
             dohKeyDown = false;
+
+        if (pauseKeyDown && ! juce::KeyPress::isKeyCurrentlyDown (juce::KeyPress::F8Key))
+            pauseKeyDown = false;
 
         /*  Nothing is consumed: every other key's change is somebody else's. */
         return false;

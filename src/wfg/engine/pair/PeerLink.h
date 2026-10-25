@@ -580,6 +580,12 @@ namespace wfg::pair
             joins the one that is up, by when the hello arrived. */
         void afterTick (std::int64_t tick, double timeoutSeconds);
 
+        /*  THIS MACHINE'S PASS COUNT (TickThread::passCount), said in every
+            pong so the other machine knows the engine behind the socket is
+            alive - and still alive while the show is held, its tick standing
+            (PRD §3.34). The tick thread's, every pass; a relaxed store. */
+        void setPass (std::int64_t pass) noexcept { passNow.store (pass, std::memory_order_relaxed); }
+
         /*  What the `pair` rows publish on a main. `readInto` fills a reading kept
             from tick to tick, so the peer's text is copied only when it moved. */
         LinkReading reading (LinkClock::time_point now, double timeoutSeconds) const;
@@ -676,7 +682,7 @@ namespace wfg::pair
         //  Both.
         std::mutex inboxLock;
         std::vector<Arrival> inbox;
-        std::atomic<std::int64_t> tickNow { 0 };
+        std::atomic<std::int64_t> passNow { 0 };
         std::atomic<std::int64_t> ignoredCount { 0 };
         std::atomic<std::int64_t> relayCount { 0 };
     };
@@ -947,8 +953,9 @@ namespace wfg::pair
         void sendAll (std::vector<std::uint8_t> bytes);
 
         /*  THIS MACHINE'S TICK, carried in every ping so the main knows the
-            engine behind the socket is alive (RD.7). The tick thread's, every
-            tick; a relaxed store. */
+            engine behind the socket is alive (RD.7) - its PASS COUNT since PRD
+            §3.34, which moves while a held show's tick stands. The tick
+            thread's, every pass; a relaxed store. */
         void setTick (std::int64_t tick) noexcept;
 
         /** `host:port` read back into the two: an IPv6 host without its brackets. */

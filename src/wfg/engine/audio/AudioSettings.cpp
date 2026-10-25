@@ -188,6 +188,7 @@ namespace wfg::audio
                 && command != "audio.clockMoved" && command != "audio.settingsReady"
                 && command != "audio.editBuilt" && command != "audio.apply" && command != "audio.setup"
                 && ! recovery::isStop (command) && command != "go.doh" && command != "go.dohRelaunch"
+                && command != "run.pauseAll" && command != "run.playAll"
                 && command != "list.dohReport" && command != "audio.testStop"
                 && command != "audio.armed" && command != "run.failed" && command != "take.closed"
                 && command != "take.kept"

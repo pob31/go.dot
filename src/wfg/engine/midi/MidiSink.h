@@ -138,8 +138,9 @@ namespace wfg::midi
 
         /*  WHERE GO.DOT'S SAMPLES WERE AND WHEN, once a tick: the pairs the
             sending thread draws its line between samples and moments from
-            (clock/ClockEstimate.h). `nanos` is the machine's steady clock. */
-        virtual void feedClock (std::int64_t, std::int64_t, int) {}
+            (clock/ClockEstimate.h). `nanos` is the machine's steady clock;
+            the last, where the show will stand once held (PRD §3.34), or -1. */
+        virtual void feedClock (std::int64_t, std::int64_t, int, std::int64_t = -1) {}
 
         /*  The interface's output latency in samples, by which MTC is held
             back so it leaves when its sample is heard (AHP). */

@@ -2000,6 +2000,21 @@ add_test(NAME blackbox.doh.fr_FR
 set_tests_properties(blackbox.doh.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
+# Pause / Play end to end (PRD §3.34): a hosted session held and let go over
+# OSC - the ramp read back where a show that never paused would read it, a wait
+# that counts show time and not the pause, a GO refused paused, Esc while paused
+# leaving nothing of the paused sound - and the session replayed.
+add_test(NAME blackbox.pause.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/pause.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.pause.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.pause.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/pause.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.pause.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
 # A cue's insert, heard (Phase 9a, PR 9a.8): the test-gain child on a voice through
 # the sandbox - the render at a half, a value written through the p<n> door moving it,
 # the kill switch taking the child down and the voice silent, never dry, through the

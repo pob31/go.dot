@@ -6971,6 +6971,93 @@ TEST_CASE ("transport: F9 held sends one Doh!, through the Shell as the window d
     CHECK (dohs == 3);
 }
 
+/*  PAUSE / PLAY ON THE TRANSPORT (PRD §3.34; the author, 2026-10-25: "Next to
+    Doh, can we add a pause button to hold all actions until toggled back to
+    play?"): its own button, left of Doh! on GO's row and never in the air
+    before PANIC, its word the state's - "Pause" while the show runs, "Play"
+    while it is held, the transport line saying "Paused" in words (§4.8) - and a
+    click sends what the word says. Failed before: there was no such button. */
+TEST_CASE ("transport: Pause / Play sits left of Doh! on GO's row, says the state in its word and on the line, and a click sends what it says")
+{
+    std::vector<bool> pressed;
+
+    ui::TransportComponent::Actions actions;
+    actions.pause = [&pressed] (bool hold) { pressed.push_back (hold); };
+
+    const model::Theme theme;
+    ui::TransportComponent transport (theme, actions);
+
+    juce::TextButton* pause = nullptr;
+    juce::TextButton* doh = nullptr;
+    juce::TextButton* go = nullptr;
+
+    for (auto* child : transport.getChildren())
+        if (auto* button = dynamic_cast<juce::TextButton*> (child))
+        {
+            if (button->getButtonText() == "Pause")              pause = button;
+            if (button->getButtonText().startsWith ("Doh!"))     doh = button;
+            if (button->getButtonText() == "GO")                 go = button;
+        }
+
+    REQUIRE (pause != nullptr);
+    REQUIRE (doh != nullptr);
+    REQUIRE (go != nullptr);
+
+    for (const auto width : { 1200, 640 })
+    {
+        INFO ("width " << width);
+        transport.setSize (width, transport.preferredHeight());
+
+        const auto p = pause->getBounds();
+        const auto d = doh->getBounds();
+
+        CHECK (p.getY() == d.getY());
+        CHECK (p.getHeight() == d.getHeight());
+        CHECK (p.getWidth() == d.getWidth());
+        CHECK (p.getRight() < d.getX());
+        CHECK (p.getX() > go->getBounds().getRight());
+    }
+
+    pause->onClick();
+
+    model::TransportReading reading;
+    reading.status = "running";
+    reading.paused = model::Flag::yes;
+    transport.show (reading);
+
+    CHECK (pause->getButtonText() == "Play");
+    CHECK (pause->getTooltip().contains ("F8"));
+
+    pause->onClick();
+    CHECK (pressed == std::vector<bool> { true, false });
+
+    //  The line says it in words.
+    CHECK (reading.errorLine() == "Paused - press Play (F8) to go on");
+    CHECK (reading.goLine() == "paused");
+
+    reading.paused = model::Flag::no;
+    transport.show (reading);
+    CHECK (pause->getButtonText() == "Pause");
+}
+
+TEST_CASE ("transport: F8 held sends one Pause, through the Shell as the window delivers keys")
+{
+    std::vector<bool> pressed;
+
+    ui::TransportComponent::Actions actions;
+    actions.pause = [&pressed] (bool hold) { pressed.push_back (hold); };
+
+    ui::Shell shell (model::Theme {}, actions, {}, {}, {}, {}, {}, {}, {});
+
+    CHECK (shell.keyPressed (juce::KeyPress (juce::KeyPress::F8Key)));
+    CHECK (shell.keyPressed (juce::KeyPress (juce::KeyPress::F8Key)));
+    CHECK (pressed == std::vector<bool> { true });
+
+    shell.keyStateChanged (false);
+    CHECK (shell.keyPressed (juce::KeyPress (juce::KeyPress::F8Key)));
+    CHECK (pressed.size() == 2u);
+}
+
 /*  THE DOH NOTICE ON THE TRANSPORT'S LINE (2026-10-03, Doh! D4, namespace draft
     §24.14): the last Doh's report, shown in front of the line ONCE, when it
     arrives - another sentence put there since keeps it, until the next report

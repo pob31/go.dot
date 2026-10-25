@@ -59,6 +59,13 @@ namespace wfg
             (void) out;
             return false;
         }
+
+        /*  THE SHOW HELD (PRD §3.34; ShowHold.h): the audio side has stopped
+            running the graph, so this count stands still until Play - and the
+            tick thread, which waits on the count, drains commands at the frozen
+            tick instead of waiting for a sample that will not come. False for
+            every clock nobody holds. Any thread. */
+        virtual bool isHeld() const noexcept { return false; }
     };
 
     /*  A counter advanced by hand: the audio side calls advance() once per
@@ -99,8 +106,14 @@ namespace wfg
 
         bool lastBlock (BlockStamp::Reading& out) const noexcept override { return stamp.read (out); }
 
+        /*  Held by hand, as the audio side holds its count (PRD §3.34). Tests
+            and nothing else. */
+        void setHeld (bool value) noexcept { held.store (value, std::memory_order_release); }
+        bool isHeld() const noexcept override { return held.load (std::memory_order_acquire); }
+
     private:
         std::atomic<std::int64_t> samples { 0 };
+        std::atomic<bool> held { false };
         BlockStamp stamp;
     };
 }

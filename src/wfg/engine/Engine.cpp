@@ -134,6 +134,17 @@ namespace wfg
                 return r;
             }
         }
+        if (holdCheck)
+        {
+            const auto refusal = holdCheck (event.command, event.origin);
+            if (! refusal.empty())
+            {
+                r.kind = LogRecord::Kind::rejected;
+                r.reason = refusal;
+                r.args = std::move (check.args);
+                return r;
+            }
+        }
         context.tick = tickIndex;
         context.origin = &event.origin;
 

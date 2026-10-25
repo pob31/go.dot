@@ -40,6 +40,8 @@ namespace wfg::client::gesture
     Event stopAll() { return plain ("run.stopAll"); }
     Event killAll() { return plain ("run.killAll"); }
     Event doh()     { return plain ("go.doh"); }
+    Event pause()   { return plain ("run.pauseAll"); }
+    Event play()    { return plain ("run.playAll"); }
     Event flagLastGo() { return plain ("go.flag"); }
     Event midiRescan() { return plain ("midi.rescan"); }
     Event serialRescan() { return plain ("serial.rescan"); }

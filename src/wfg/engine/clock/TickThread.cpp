@@ -158,10 +158,19 @@ namespace wfg
             if (workgroups != nullptr)
                 workgroups->joinIfChanged (workgroupToken, workgroupSeen);
 
-            if (suspended.load())
+            /*  AN OUTAGE (PRD §6.2), OR THE SHOW HELD (PRD §3.34): the count
+                will not reach the next tick, so commands are drained at the
+                frozen one - Play, Esc, an edit - with what the hands, the
+                pair and the devices said heard first (`whileHeld`), and the
+                show's own time left standing. Polled, not woken: the audio
+                thread that holds the count cannot wake this one, so drain mode
+                begins within one wait. */
+            if (suspended.load() || samples.isHeld())
             {
                 lock.unlock();
                 const auto at = std::max<std::int64_t> (0, lastTick());
+                passes.fetch_add (1, std::memory_order_relaxed);
+                if (whileHeld) whileHeld (at);
                 const auto outcome = engine.processTick (at);
                 if (afterTick) afterTick (outcome);
                 wakeUp.wait (std::chrono::milliseconds (20));
@@ -189,6 +198,8 @@ namespace wfg
                     of one tick, never a wrong one. */
                 if (action.lateness > worstSince.load (std::memory_order_relaxed))
                     worstSince.store (action.lateness, std::memory_order_relaxed);
+
+                passes.fetch_add (1, std::memory_order_relaxed);
 
                 if (beforeTick != nullptr)
                     beforeTick (action.tick);

@@ -184,8 +184,11 @@ namespace wfg::midi
 
         /*  A pair of the clock line: where Go.dot's samples were (`sample`, at
             `sampleRate`) when the steady clock read `nanos`. Stored for the
-            lane's next look; nothing waits. */
-        void feedClock (std::int64_t sample, std::int64_t nanos, int sampleRate);
+            lane's next look; nothing waits. `heldAt` is the sample the show
+            will stand at once held (PRD §3.34), -1 while it is not: nothing
+            due at or after it leaves, and the code goes on after Play with a
+            full frame. */
+        void feedClock (std::int64_t sample, std::int64_t nanos, int sampleRate, std::int64_t heldAt = -1);
 
         //  The interface's output latency, in samples (AHP).
         void setOutputLatency (int samples) noexcept { latencySamples.store (std::max (0, samples), std::memory_order_relaxed); }
@@ -324,6 +327,7 @@ namespace wfg::midi
             std::int64_t nanos = 0;
             int sampleRate = 0;
             std::uint64_t serial = 0;
+            std::int64_t heldAt = -1;
         };
 
         std::mutex pairMutex;
@@ -334,6 +338,12 @@ namespace wfg::midi
 
         //  The lane thread's alone.
         ClockEstimate estimate;
+
+        //  Where the show stands while held (PRD §3.34), or -1: the last pair's.
+        std::int64_t heldAt = -1;
+
+        //  Whether a message due at `sample` waits for Play.
+        bool heldBack (std::int64_t sample) const noexcept { return heldAt >= 0 && sample >= heldAt; }
         std::vector<Command> drained;
         Program active;
         std::array<Program, pendingSize> pending;

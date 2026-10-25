@@ -89,6 +89,9 @@ namespace wfg::audio
             out.sample += offset;
             return true;
         }
+
+        // Held where the count it follows is held (PRD §3.34).
+        bool isHeld() const noexcept override { return source->isHeld(); }
     private:
         const SampleClock* source;
         std::int64_t offset = 0;

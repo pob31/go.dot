@@ -137,6 +137,7 @@
 #include <wfg/engine/audio/HostedAudioDriver.h>
 #include <wfg/engine/audio/InputCapture.h>
 #include <wfg/engine/clock/DummyAudioClock.h>
+#include <wfg/engine/clock/ShowHold.h>
 #include <wfg/engine/clock/TickThread.h>
 #include <wfg/engine/osc/SenderGate.h>
 #include <wfg/engine/tree/HeardBox.h>
@@ -4973,6 +4974,12 @@ namespace
         wfg::audio::cardsound::File cardSound { juce::File::getSpecialLocation (juce::File::tempDirectory)
                                                     .getChildFile ("godot-video").getFullPathName().toStdString() };
 
+        /*  THE SHOW HELD (PRD §3.34, Pause / Play): what every block source
+            asks before every block, made before any of them so that it
+            outlives them all - a pause outlasts a device reopened, and Play
+            is the run.playAll handler's, never a new driver's. */
+        wfg::ShowHold showHold;
+
         std::unique_ptr<wfg::audio::DeviceAudioDriver> deviceDriver;
 
         /*  THE DEVICE'S CALLBACK THREAD RAISED (Linux; app/RealtimeRights.h,
@@ -5013,6 +5020,7 @@ namespace
             activeDeviceRequest.inputCapture = capture.get();
             deviceDriver = std::make_unique<wfg::audio::DeviceAudioDriver> (
                 engineCacheFolder().getFullPathName().toStdString());
+            deviceDriver->host().setHold (&showHold);
             deviceDriver->host().setProxyServices (proxyServices);
             deviceDriver->host().setCardSound (cardSound.region());
             deviceDriver->setWorkgroups (&workgroups);
@@ -6739,6 +6747,7 @@ namespace
                 pressed play would travel with it. */
             driver = std::make_unique<wfg::audio::HostedAudioDriver> (
                          engineCacheFolder().getFullPathName().toStdString());
+            driver->host().setHold (&showHold);
 
             wfg::audio::HostedAudioDriver::Settings hostSettings;
             hostSettings.sampleRate = sampleRate;
@@ -6842,6 +6851,7 @@ namespace
         else
         {
             dummy = std::make_unique<wfg::DummyAudioClock> (sampleRate, blockSize);
+            dummy->setHold (&showHold);
             blockSource = &dummy->clock();
         }
 
@@ -6914,6 +6924,31 @@ namespace
         std::atomic<bool> clockForget { false };
         const wfg::cue::TriggerIndex noTriggers;
 
+        /*  AND THE CODES COMING IN FORGOTTEN AT PLAY (PRD §3.34): Go.dot's
+            count stood while a desk's LTC or MTC went on, so the line the
+            watchers drew through them is a line no more, and a time group
+            chasing one seats again from the first code after (§60). */
+        std::atomic<bool> codeForget { false };
+
+        /*  THE SHOW HELD, ASKED OF THE BLOCK SOURCE (PRD §3.34): the
+            `run.pauseAll` and `run.playAll` handlers' request, on the tick
+            thread, made into the hold every block asks. During an outage
+            nothing sounds, so the hold is taken at once rather than ramped
+            over blocks that do not come (the runner says so, `atOnce`). Play
+            forgets the clocks' lines, as an outage's end does: the clock
+            triggers it slept through are not all fired at once (decision DI). */
+        runner.setHoldRequest ([&showHold, &clockForget, &codeForget]
+                               (wfg::ShowHold::Want want, bool atOnce)
+        {
+            showHold.want (want, atOnce);
+
+            if (want == wfg::ShowHold::Want::open)
+            {
+                clockForget.store (true);
+                codeForget.store (true);
+            }
+        });
+
         /*  MIDI TIME CODE COMING IN (namespace draft §60, TG.4): the tick's
             reader and its clock line, and the show revision its port and `rx`
             were last read at - the tick thread's alone, as the clock's
@@ -6950,8 +6985,67 @@ namespace
         bool clockWatched = false;
         const std::string clockOrigin { "clock" };
 
-        ticks.setBeforeTick ([&] (std::int64_t tickIndex)
+        /*  The pass a hold began at, for the autosave's quiet; -1 while the
+            show runs. And, in passes since then, the last save asked and the
+            last edit seen, and the revision it was seen at. */
+        std::int64_t heldFromPass = -1, heldSavedAt = 0, heldChangedAt = -1;
+        std::uint64_t heldRevision = 0;
+
+        /*  WHERE THE SHOW WILL STAND ONCE HELD (PRD §3.34), on whichever count
+            a reader is fed: the hold says it on the block source's own count,
+            and what is left of the way down carries over to any other - -1
+            while the show is not being held. */
+        const auto heldAtOnCount = [&showHold, &sessionClock] (std::int64_t sampleNow)
+        {
+            const auto closes = showHold.closesAt();
+
+            return closes < 0 || sampleNow < 0
+                     ? std::int64_t { -1 }
+                     : sampleNow + (closes - sessionClock.counting().samplesElapsed());
+        };
+
+        const auto beforeEachTick = [&] (std::int64_t tickIndex, bool held)
                              {
+                                 /*  A CADENCE THAT KEEPS MOVING while the tick stands (PRD
+                                     §3.34): what is done every so many ticks is done
+                                     every so many passes while frozen, so a frozen
+                                     tick that happens to divide is not every pass. */
+                                 const auto cadence = held ? ticks.passCount() : tickIndex;
+
+                                 /*  AND THE AUTOSAVE'S QUIET, counted on through a
+                                     hold in passes from the tick it froze at: an
+                                     edit made while the show is paused is as safe
+                                     from a crash as one made while it runs (PRD
+                                     §4.3). Machine state, like the decision. */
+                                 if (! held)
+                                     heldFromPass = -1;
+                                 else if (heldFromPass < 0)
+                                 {
+                                     heldFromPass = ticks.passCount();
+                                     heldSavedAt = 0;
+                                     heldChangedAt = -1;
+                                     heldRevision = document.showRevision();
+                                 }
+
+                                 const auto heldFor = held ? ticks.passCount() - heldFromPass : 0;
+
+                                 /*  The record's tick and the session's stamps all
+                                     stand at the frozen tick, so while held the
+                                     quiet and the ceiling are measured here, in
+                                     passes since the hold began: an edit while
+                                     paused waits its quiet as one while playing
+                                     does, and a fader dragged is not a save a pass. */
+                                 if (held && document.showRevision() != heldRevision)
+                                 {
+                                     heldRevision = document.showRevision();
+                                     heldChangedAt = heldFor;
+                                 }
+
+                                 const auto autosaveHeldDue = held && wfg::doc::isDirty (document, session)
+                                     && session.autosavedRevision != document.showRevision()
+                                     && ((heldChangedAt >= 0 && heldFor - heldChangedAt >= wfg::doc::autosaveQuietTicks)
+                                           || heldFor - heldSavedAt >= wfg::doc::autosaveCeilingTicks);
+
                                  /*  THE PAIR BEFORE ANYTHING (namespace draft §58,
                                      RD.6, RD.7; AGF). What the other machine sent
                                      since the last tick is read here rather than
@@ -6976,7 +7070,7 @@ namespace
                                      const auto timeout = pairing.inForce.timeout;
                                      linkReceiver.drain (now, timeout);
                                      presence.drain();
-                                     dialler.setTick (tickIndex);
+                                     dialler.setTick (ticks.passCount());
 
                                      //  What this machine is, said down a connection the other machine just opened.
                                      for (const auto& channel : presence.opened())
@@ -7084,7 +7178,7 @@ namespace
                                          follower.beforeTick (tickIndex,
                                                               now - std::chrono::duration_cast<wfg::pair::LinkClock::duration> (
                                                                         std::chrono::duration<double> (lateBy)),
-                                                              roundTrip);
+                                                              roundTrip, held);
 
                                          /*  A cleared ledger: relays the leader never
                                              answered while the link stayed up are no
@@ -7215,11 +7309,17 @@ namespace
                                      trims and the touches it decides edges from,
                                      so a fader's write and the edge it causes
                                      land in the same order every time. */
+                                 /*  ON THE PASS COUNT, NOT THE TICK (PRD §3.34): a
+                                     double Stop's window, a kill's flash and a
+                                     blink are the surfaces' own time, never a
+                                     record's, and must keep moving while the show
+                                     is held - two Stops a minute apart while
+                                     paused are two Esc, not a double Esc. */
                                  if (surfaceBridge->beforeTick ([&engine] (wfg::Event event)
                                                                 {
                                                                     return engine.submit (std::move (event));
                                                                 },
-                                                                tickIndex))
+                                                                ticks.passCount()))
                                      parameters.markStale();
 
                                  /*  AND THE STREAM DECKS' HANDS (namespace draft
@@ -7228,7 +7328,7 @@ namespace
                                                              {
                                                                  return engine.submit (std::move (event));
                                                              },
-                                                             tickIndex))
+                                                             ticks.passCount()))
                                      parameters.markStale();
 
                                  /*  AND WHAT THE BINDINGS HEARD (namespace draft
@@ -7284,7 +7384,7 @@ namespace
                                          if (! decoded.ok)
                                              continue;
 
-                                         if (const auto heard = found->second.feed (decoded.packet, tickIndex))
+                                         if (const auto heard = found->second.feed (decoded.packet, ticks.passCount()))
                                              nameSpace.write ("mqtt:" + mountId,
                                                               wfg::osc::Packet::message (heard->address, heard->values));
                                      }
@@ -7292,7 +7392,10 @@ namespace
 
                                  for (auto& [mountId, mqttSession] : mqttSessions)
                                  {
-                                     for (const auto& packet : mqttSession.tick (mqttLinks.stateOf (mountId), tickIndex))
+                                     /*  The keepalive on the cadence (PRD §3.34): a
+                                         broker drops a session it has not heard
+                                         from, paused or not. */
+                                     for (const auto& packet : mqttSession.tick (mqttLinks.stateOf (mountId), ticks.passCount()))
                                      {
                                          std::string problem;
                                          if (const auto bytes = wfg::mqtt::encode (packet, problem))
@@ -7314,7 +7417,7 @@ namespace
                                  /*  NONE WHILE THE MACHINE HOLDS (RD.1, AGG): a
                                      keep-alive is a send, and the console keeps
                                      its feedback for the machine that sends. */
-                                 if (tickIndex % 450 == 0 && ! machineHold.held())
+                                 if (cadence % 450 == 0 && ! machineHold.held())
                                      for (const auto& mountId : wfg::tree::declaredMountIds (document))
                                      {
                                          const auto* declaration = mounts.declarationOf (mountId);
@@ -7455,9 +7558,9 @@ namespace
                                      from `pd` (namespace draft §51, ACN); a
                                      window just opened brought in front, and a
                                      patch handed to the one Pd once it listens. */
-                                 if (tickIndex % 25 == 0)
+                                 if (cadence % 25 == 0)
                                      patchEditing.tend();
-                                 if (tickIndex % 25 == 0)
+                                 if (cadence % 25 == 0)
                                      for (auto& [cue, text] : patchEditing.saved())
                                          engine.submit ("pd", "node.set",
                                                         { wfg::osc::Value::string ("/godot/cue/" + cue + "/patch"),
@@ -7465,7 +7568,7 @@ namespace
 
                                  /*  AND A SAVE IN THE SYSTEM'S EDITOR (§66, AMU):
                                      the script's source, from `editor`. */
-                                 if (tickIndex % 25 == 0)
+                                 if (cadence % 25 == 0)
                                      for (auto& [cue, text] : scriptEditing.saved())
                                          engine.submit ("editor", "node.set",
                                                         { wfg::osc::Value::string ("/godot/cue/" + cue + "/source"),
@@ -7493,392 +7596,407 @@ namespace
                                              ! pushed.empty())
                                              engine.submit ("surface:spacemouse", "curve.ride", std::move (pushed));
 
-                                 /*  NOT ON THE TICK A SEAT GOES IN (RD.8): what the
-                                     Runner's hooks would decide now they would
-                                     decide on the state the seat replaces, and
-                                     it would be applied after the seat, on the
-                                     leader's state - a member spawned under a
-                                     scene the seat ended, a standby prepared
-                                     under names drawn before the seat. The seat
-                                     is the leader's tick, its hooks and all, and
-                                     this machine's own hooks go on from the next. */
-                                 if (audioState.settingsStatus != "applying" && follower.seats() == seatsBefore)
-                                     runner.beforeTick (engine, tickIndex);
-
-                                 /*  THE RENDERER'S CLOCK, every tick and
-                                     whatever the audio settings are doing - the
-                                     clock the points were placed on - and the
-                                     show's canvases and outputs when they
-                                     changed. Stores into the region; nothing
-                                     waits. */
-                                 videoHost.tick (runner.videoClockNow(), runner.videoSampleRate());
-
-                                 /*  AND MTC'S (namespace draft §59, TC.5): the
-                                     same pair - the audio's samples when there
-                                     is audio, the tick's count without, so MTC
-                                     runs on a machine with no interface - for
-                                     the MIDI sender's lane to draw its own line
-                                     from, and the interface's output latency it
-                                     holds the code back by (AHP): the
-                                     `audio/outputLatency` the audio side's
-                                     record writes, handed over when it changes
-                                     (TC.6). A store each; nothing waits. */
-                                 const auto clockSample = runner.videoClockNow();
-                                 const auto clockNanos = std::chrono::duration_cast<std::chrono::nanoseconds> (
-                                                             std::chrono::steady_clock::now().time_since_epoch()).count();
-                                 const auto clockRate = runner.videoSampleRate();
-
-                                 midiOut.feedClock (clockSample, clockNanos, clockRate);
-
-                                 /*  AND MTC COMING IN (namespace draft §60, TG.4;
-                                     AIM): the port `sync/mtcIn` names and whether
-                                     its `rx` is on, read once a show revision -
-                                     the input told which port to take the code
-                                     off, the reader whether to read it - then the
-                                     reader's own clock line fed the very pair the
-                                     lane was, and everything the input took since
-                                     the last tick read in order, each moment a
-                                     sample on that line. TG.4 keeps what it read
-                                     and does nothing more with it: TG.5's watcher
-                                     fits its line through it. Nothing is logged,
-                                     and nothing waits but for the inbox's one
-                                     take. */
-                                 if (const auto revision = document.showRevision(); revision != mtcRevisionSeen)
+                                 /*  THE SHOW'S OWN TIME, and only while it runs (PRD §3.34): a
+                                     frozen pass - an outage, the show held - hears everything
+                                     above and moves nothing below. No Runner hook, no renderer
+                                     or MTC clock fed from a count that stands, no code read and
+                                     no clock trigger crossed; Play goes on from where this stood. */
+                                 if (! held)
                                  {
-                                     mtcRevisionSeen = revision;
-                                     const auto setting = wfg::midi::mtcInOf (document);
-                                     midiIn.listenForMtcOn (setting.port);
-                                     mtcInput.configure (setting);
+                                     /*  NOT ON THE TICK A SEAT GOES IN (RD.8): what the
+                                         Runner's hooks would decide now they would
+                                         decide on the state the seat replaces, and
+                                         it would be applied after the seat, on the
+                                         leader's state - a member spawned under a
+                                         scene the seat ended, a standby prepared
+                                         under names drawn before the seat. The seat
+                                         is the leader's tick, its hooks and all, and
+                                         this machine's own hooks go on from the next. */
+                                     if (audioState.settingsStatus != "applying" && follower.seats() == seatsBefore)
+                                         runner.beforeTick (engine, tickIndex);
 
-                                     /*  AND THE SOURCES THE WATCHERS NAME (TG.5): the
-                                         input `sync/ltcIn` names when it is an
-                                         `<Input>`, the port MTC is read on; a source
-                                         changed starts its watcher afresh. And the
-                                         show's rate, which a code is read at when
-                                         nothing better says (AIL). */
-                                     const auto ltcIn = document.getAttribute ("/godot/sync/ltcIn").value_or (std::string {});
-                                     const auto input = ltcIn.empty() ? juce::ValueTree {} : document.findById (ltcIn);
-                                     const auto ltcNow = input.isValid() && input.hasType ("Input") ? "ltc:" + ltcIn : std::string {};
-                                     const auto mtcNow = setting.port.empty() ? std::string {} : "mtc:" + setting.port;
+                                     /*  THE RENDERER'S CLOCK, every tick and
+                                         whatever the audio settings are doing - the
+                                         clock the points were placed on - and the
+                                         show's canvases and outputs when they
+                                         changed. Stores into the region; nothing
+                                         waits. */
+                                     videoHost.tick (runner.videoClockNow(), runner.videoSampleRate(),
+                                                     heldAtOnCount (runner.videoClockNow()));
 
-                                     if (ltcNow != ltcSource)
+                                     /*  AND MTC'S (namespace draft §59, TC.5): the
+                                         same pair - the audio's samples when there
+                                         is audio, the tick's count without, so MTC
+                                         runs on a machine with no interface - for
+                                         the MIDI sender's lane to draw its own line
+                                         from, and the interface's output latency it
+                                         holds the code back by (AHP): the
+                                         `audio/outputLatency` the audio side's
+                                         record writes, handed over when it changes
+                                         (TC.6). A store each; nothing waits. */
+                                     const auto clockSample = runner.videoClockNow();
+                                     const auto clockNanos = std::chrono::duration_cast<std::chrono::nanoseconds> (
+                                                                 std::chrono::steady_clock::now().time_since_epoch()).count();
+                                     const auto clockRate = runner.videoSampleRate();
+
+                                     midiOut.feedClock (clockSample, clockNanos, clockRate, heldAtOnCount (clockSample));
+
+                                     /*  AND MTC COMING IN (namespace draft §60, TG.4;
+                                         AIM): the port `sync/mtcIn` names and whether
+                                         its `rx` is on, read once a show revision -
+                                         the input told which port to take the code
+                                         off, the reader whether to read it - then the
+                                         reader's own clock line fed the very pair the
+                                         lane was, and everything the input took since
+                                         the last tick read in order, each moment a
+                                         sample on that line. TG.4 keeps what it read
+                                         and does nothing more with it: TG.5's watcher
+                                         fits its line through it. Nothing is logged,
+                                         and nothing waits but for the inbox's one
+                                         take. */
+                                     if (const auto revision = document.showRevision(); revision != mtcRevisionSeen)
                                      {
-                                         ltcSource = ltcNow;
-                                         ltcWatch.forget();
+                                         mtcRevisionSeen = revision;
+                                         const auto setting = wfg::midi::mtcInOf (document);
+                                         midiIn.listenForMtcOn (setting.port);
+                                         mtcInput.configure (setting);
+
+                                         /*  AND THE SOURCES THE WATCHERS NAME (TG.5): the
+                                             input `sync/ltcIn` names when it is an
+                                             `<Input>`, the port MTC is read on; a source
+                                             changed starts its watcher afresh. And the
+                                             show's rate, which a code is read at when
+                                             nothing better says (AIL). */
+                                         const auto ltcIn = document.getAttribute ("/godot/sync/ltcIn").value_or (std::string {});
+                                         const auto input = ltcIn.empty() ? juce::ValueTree {} : document.findById (ltcIn);
+                                         const auto ltcNow = input.isValid() && input.hasType ("Input") ? "ltc:" + ltcIn : std::string {};
+                                         const auto mtcNow = setting.port.empty() ? std::string {} : "mtc:" + setting.port;
+
+                                         if (ltcNow != ltcSource)
+                                         {
+                                             ltcSource = ltcNow;
+                                             ltcWatch.forget();
+                                         }
+
+                                         if (mtcNow != mtcSource)
+                                         {
+                                             mtcSource = mtcNow;
+                                             mtcWatch.forget();
+                                         }
+
+                                         const auto showRate = wfg::timecode::rateFromWord (
+                                                                   document.getAttribute ("/godot/sync/frameRate").value_or (std::string {}))
+                                                                   .value_or (wfg::timecode::Rate::fps25);
+                                         ltcWatch.setShowRate (showRate);
+                                         mtcWatch.setShowRate (showRate);
+
+                                         /*  AND WHETHER ANYTHING READS EACH CODE (TG.11's
+                                             faults, part 2): a time group on `ltc` or on
+                                             `mtc` anywhere in the show, as the clock's is
+                                             read below. Only then are a watcher's turns
+                                             written: a code arriving at a show that reads
+                                             none is what the machine happened to hear,
+                                             not anything somebody decided (PRD §4.10), and
+                                             TG.11 measured MTC's watcher writing every
+                                             second or two with no MTC group at all. The
+                                             watcher goes on all the same - the decoding,
+                                             the line, the readouts (below, in the after
+                                             hook), a backup's too (redundancy constraint
+                                             2) - and a group appearing is said at once:
+                                             `jumped` on the line it kept while the code
+                                             runs, `stopped` where it stopped, as when a
+                                             code appears. */
+                                         ltcWritten = document.holdsTimeGroupOn ("ltc");
+                                         mtcWritten = document.holdsTimeGroupOn ("mtc");
+                                         ltcWatch.setWriting (ltcWritten);
+                                         mtcWatch.setWriting (mtcWritten);
+
+                                         /*  AND WHETHER THE WALL CLOCK IS A SOURCE (TG.6):
+                                             a time group on `clock` anywhere in the show.
+                                             One that goes is forgotten, so the clock's
+                                             first reading after one comes back is a
+                                             `jumped` - nothing about the clock is in the
+                                             log of a show that never used it. */
+                                         if (const auto watchedNow = document.holdsTimeGroupOn ("clock");
+                                             watchedNow != clockWatched)
+                                         {
+                                             clockWatched = watchedNow;
+                                             clockWatch.forget();
+                                         }
                                      }
 
-                                     if (mtcNow != mtcSource)
+                                     /*  A COUNT THAT MOVED UNDER THE STEADY CLOCK -
+                                         an outage's end, an apply that opened another
+                                         interface, the session's clock rebased: the
+                                         flag the clock triggers below forget by, taken
+                                         here so MTC's reader forgets its count's line
+                                         on the same tick (TG.11's faults, part 2).
+                                         That line holds a slip two seconds before it
+                                         believes it, since a count running late looks
+                                         like one (timecode/CountLine.h); a count that
+                                         moved for a reason the engine knows is no
+                                         guess. */
+                                     const auto countMoved = clockForget.exchange (false);
+
+                                     if (countMoved)
+                                         mtcInput.forgetClock();
+
+                                     if (codeForget.exchange (false))
                                      {
-                                         mtcSource = mtcNow;
+                                         ltcWatch.forget();
                                          mtcWatch.forget();
                                      }
 
-                                     const auto showRate = wfg::timecode::rateFromWord (
-                                                               document.getAttribute ("/godot/sync/frameRate").value_or (std::string {}))
-                                                               .value_or (wfg::timecode::Rate::fps25);
-                                     ltcWatch.setShowRate (showRate);
-                                     mtcWatch.setShowRate (showRate);
+                                     mtcInput.feedClock (clockSample, clockNanos, clockRate);
+                                     mtcInput.drain (midiIn.mtcInbox());
 
-                                     /*  AND WHETHER ANYTHING READS EACH CODE (TG.11's
-                                         faults, part 2): a time group on `ltc` or on
-                                         `mtc` anywhere in the show, as the clock's is
-                                         read below. Only then are a watcher's turns
-                                         written: a code arriving at a show that reads
-                                         none is what the machine happened to hear,
-                                         not anything somebody decided (PRD §4.10), and
-                                         TG.11 measured MTC's watcher writing every
-                                         second or two with no MTC group at all. The
-                                         watcher goes on all the same - the decoding,
-                                         the line, the readouts (below, in the after
-                                         hook), a backup's too (redundancy constraint
-                                         2) - and a group appearing is said at once:
-                                         `jumped` on the line it kept while the code
-                                         runs, `stopped` where it stopped, as when a
-                                         code appears. */
-                                     ltcWritten = document.holdsTimeGroupOn ("ltc");
-                                     mtcWritten = document.holdsTimeGroupOn ("mtc");
-                                     ltcWatch.setWriting (ltcWritten);
-                                     mtcWatch.setWriting (mtcWritten);
-
-                                     /*  AND WHETHER THE WALL CLOCK IS A SOURCE (TG.6):
-                                         a time group on `clock` anywhere in the show.
-                                         One that goes is forgotten, so the clock's
-                                         first reading after one comes back is a
-                                         `jumped` - nothing about the clock is in the
-                                         log of a show that never used it. */
-                                     if (const auto watchedNow = document.holdsTimeGroupOn ("clock");
-                                         watchedNow != clockWatched)
+                                     /*  THE CODES COMING IN, WATCHED, AND THEIR TURNS
+                                         SAID (namespace draft §60, TG.5; AIO, AIQ,
+                                         AIR). What the audio side read of LTC since
+                                         the last tick, and what the MTC reader made of
+                                         its port, fed to their watchers in order, each
+                                         on Go.dot's own samples; then each says its
+                                         turn, if this tick has one, as `code.heard`
+                                         from the source's own origin - submitted here,
+                                         where the clock triggers are, so it is applied
+                                         in the tick it was decided at. Latency as the
+                                         audio side's logged record says it: an LTC
+                                         frame is heard the input's and the output's
+                                         latency before the sample it came in on, an
+                                         MTC piece the output's (AIQ). The grace a
+                                         silence is given is a tick and a block: how
+                                         late a frame can reach this hook. A machine
+                                         that has just stopped following says its own
+                                         state first, whatever it last said, so a
+                                         takeover finds the codes locked (AIP). A show
+                                         naming no source pays an empty take of the
+                                         audio side's frames and two string tests. */
                                      {
-                                         clockWatched = watchedNow;
-                                         clockWatch.forget();
-                                     }
-                                 }
+                                         const auto rate = runner.videoSampleRate();
+                                         const auto grace = static_cast<std::int64_t> (ticks.samplesPerTick())
+                                                              + (runner.player() != nullptr ? runner.player()->blockSize() : 0);
 
-                                 /*  A COUNT THAT MOVED UNDER THE STEADY CLOCK -
-                                     an outage's end, an apply that opened another
-                                     interface, the session's clock rebased: the
-                                     flag the clock triggers below forget by, taken
-                                     here so MTC's reader forgets its count's line
-                                     on the same tick (TG.11's faults, part 2).
-                                     That line holds a slip two seconds before it
-                                     believes it, since a count running late looks
-                                     like one (timecode/CountLine.h); a count that
-                                     moved for a reason the engine knows is no
-                                     guess. */
-                                 const auto countMoved = clockForget.exchange (false);
+                                         ltcWatch.setSampleRate (rate);
+                                         ltcWatch.setGrace (grace);
+                                         ltcWatch.setLatency (static_cast<std::int64_t> (audioState.inputLatency)
+                                                                + static_cast<std::int64_t> (audioState.outputLatency));
+                                         mtcWatch.setSampleRate (rate);
+                                         mtcWatch.setGrace (grace);
+                                         mtcWatch.setLatency (static_cast<std::int64_t> (audioState.outputLatency));
 
-                                 if (countMoved)
-                                     mtcInput.forgetClock();
+                                         if (auto* const audioSide = runner.player(); audioSide != nullptr)
+                                         {
+                                             audioSide->takeHeardLtc (ltcHeard);
 
-                                 mtcInput.feedClock (clockSample, clockNanos, clockRate);
-                                 mtcInput.drain (midiIn.mtcInbox());
-
-                                 /*  THE CODES COMING IN, WATCHED, AND THEIR TURNS
-                                     SAID (namespace draft §60, TG.5; AIO, AIQ,
-                                     AIR). What the audio side read of LTC since
-                                     the last tick, and what the MTC reader made of
-                                     its port, fed to their watchers in order, each
-                                     on Go.dot's own samples; then each says its
-                                     turn, if this tick has one, as `code.heard`
-                                     from the source's own origin - submitted here,
-                                     where the clock triggers are, so it is applied
-                                     in the tick it was decided at. Latency as the
-                                     audio side's logged record says it: an LTC
-                                     frame is heard the input's and the output's
-                                     latency before the sample it came in on, an
-                                     MTC piece the output's (AIQ). The grace a
-                                     silence is given is a tick and a block: how
-                                     late a frame can reach this hook. A machine
-                                     that has just stopped following says its own
-                                     state first, whatever it last said, so a
-                                     takeover finds the codes locked (AIP). A show
-                                     naming no source pays an empty take of the
-                                     audio side's frames and two string tests. */
-                                 {
-                                     const auto rate = runner.videoSampleRate();
-                                     const auto grace = static_cast<std::int64_t> (ticks.samplesPerTick())
-                                                          + (runner.player() != nullptr ? runner.player()->blockSize() : 0);
-
-                                     ltcWatch.setSampleRate (rate);
-                                     ltcWatch.setGrace (grace);
-                                     ltcWatch.setLatency (static_cast<std::int64_t> (audioState.inputLatency)
-                                                            + static_cast<std::int64_t> (audioState.outputLatency));
-                                     mtcWatch.setSampleRate (rate);
-                                     mtcWatch.setGrace (grace);
-                                     mtcWatch.setLatency (static_cast<std::int64_t> (audioState.outputLatency));
-
-                                     if (auto* const audioSide = runner.player(); audioSide != nullptr)
-                                     {
-                                         audioSide->takeHeardLtc (ltcHeard);
-
-                                         if (! ltcSource.empty())
-                                             for (const auto& ltcFrame : ltcHeard)
-                                                 ltcWatch.hear (ltcFrame);
-                                     }
-
-                                     if (! mtcSource.empty())
-                                     {
-                                         for (const auto& observation : mtcInput.observations())
-                                             mtcWatch.hear (observation);
-
-                                         mtcWatch.heardAt (mtcInput.lastHeardSample());
-                                     }
-
-                                     const auto say = [&engine] (const std::string& source,
-                                                                 const std::optional<wfg::timecode::CodeSaid>& said)
-                                     {
-                                         if (said.has_value())
-                                             engine.submit (source, wfg::timecode::codeheard::command,
-                                                            wfg::timecode::codeHeardArgs (source, *said));
-                                     };
-
-                                     if (codeResayOwed)
-                                     {
-                                         codeResayOwed = false;
-
-                                         if (! ltcSource.empty())
-                                             say (ltcSource, ltcWatch.resay());
+                                             if (! ltcSource.empty())
+                                                 for (const auto& ltcFrame : ltcHeard)
+                                                     ltcWatch.hear (ltcFrame);
+                                         }
 
                                          if (! mtcSource.empty())
-                                             say (mtcSource, mtcWatch.resay());
+                                         {
+                                             for (const auto& observation : mtcInput.observations())
+                                                 mtcWatch.hear (observation);
 
-                                         //  The clock's line as this machine reads it, from last tick (TG.6).
+                                             mtcWatch.heardAt (mtcInput.lastHeardSample());
+                                         }
+
+                                         const auto say = [&engine] (const std::string& source,
+                                                                     const std::optional<wfg::timecode::CodeSaid>& said)
+                                         {
+                                             if (said.has_value())
+                                                 engine.submit (source, wfg::timecode::codeheard::command,
+                                                                wfg::timecode::codeHeardArgs (source, *said));
+                                         };
+
+                                         if (codeResayOwed)
+                                         {
+                                             codeResayOwed = false;
+
+                                             if (! ltcSource.empty())
+                                                 say (ltcSource, ltcWatch.resay());
+
+                                             if (! mtcSource.empty())
+                                                 say (mtcSource, mtcWatch.resay());
+
+                                             //  The clock's line as this machine reads it, from last tick (TG.6).
+                                             if (clockWatched)
+                                                 say (clockOrigin, clockWatch.resay());
+                                         }
+
+                                         if (! ltcSource.empty())
+                                             say (ltcSource, ltcWatch.update (clockSample));
+
+                                         if (! mtcSource.empty())
+                                             say (mtcSource, mtcWatch.update (clockSample));
+                                     }
+
+                                     if (audioState.outputLatency != mtcLatencyTold)
+                                     {
+                                         midiOut.setTimecodeOutputLatency (audioState.outputLatency);
+                                         mtcLatencyTold = audioState.outputLatency;
+                                     }
+
+                                     if (const auto revision = document.showRevision();
+                                         revision != videoRevisionSeen || document.isLocked() != videoLockSeen)
+                                     {
+                                         videoRevisionSeen = revision;
+                                         videoLockSeen = document.isLocked();
+                                         videoHost.configure (document);
+                                     }
+
+                                     /*  THE PICKED CUE'S TILE (§47, AAH): asked again
+                                         when the window wants another cue or second,
+                                         and when the show moved - an edit is seen in
+                                         the tile as it is on a projector. */
+                                     {
+                                         std::string tileCue;
+                                         double tileSeconds = 0.0;
+                                         std::uint64_t tileSerial = 0;
+
+                                         {
+                                             const std::lock_guard<std::mutex> hold { tileWish.lock };
+                                             tileCue = tileWish.cue;
+                                             tileSeconds = tileWish.seconds;
+                                             tileSerial = tileWish.serial;
+                                         }
+
+                                         const auto revision = document.showRevision();
+
+                                         const auto rendersNow = renderer.changes();
+                                         const auto fieldsNow = textFields.revision();
+                                         const auto fontsNow = fontShelf.changes();
+
+                                         if (tileSerial != tileWishSeen
+                                               || (! tileCue.empty() && (revision != tileRevisionSeen || rendersNow != tileRendersSeen
+                                                                            || fieldsNow != tileFieldsSeen || fontsNow != tileFontsSeen)))
+                                         {
+                                             tileWishSeen = tileSerial;
+                                             tileRevisionSeen = revision;
+                                             tileRendersSeen = rendersNow;
+                                             tileFieldsSeen = fieldsNow;
+                                             tileFontsSeen = fontsNow;
+
+                                             const auto carried = fontShelf.current();
+                                             auto spec = tileCue.empty() ? wfg::video::LayerSpec {}
+                                                                         : wfg::cue::pictureSpecOf (document, tileCue, mediaFolder,
+                                                                                                    nullptr, &textFields, carried.get());
+
+                                             if (spec.source.empty())
+                                             {
+                                                 videoHost.hideTile();
+                                                 tileFileShown.clear();
+                                             }
+                                             else
+                                             {
+                                                 spec.id = tileCue;
+                                                 const auto opacity = wfg::osc::parseDouble (document.getAttribute ("/godot/cue/" + tileCue + "/opacity")
+                                                                                                 .value_or (std::string {})).value_or (100.0);
+
+                                                 /*  A MOVIE BEING EDITED (namespace draft §55.13, ADV
+                                                     amended): its render at the window's second -
+                                                     the dissolves as they play - or, while there is
+                                                     none yet, the source's frame where the edit maps
+                                                     it, nothing in its silence. The window never knows. */
+                                                 const auto frame = wfg::cue::tileFrameOf (document.findById (tileCue), tileSeconds,
+                                                                                         mediaInfo.durations().get(),
+                                                                                         renderer.snapshot().get());
+
+                                                 if (spec.source == "movie" && ! frame.file.empty())
+                                                     spec.file = wfg::audio::resolveMediaPath (mediaFolder, frame.file);
+
+                                                 tileFileShown = spec.source == "movie" ? frame.file : std::string {};
+                                                 videoHost.showTile (spec, frame.seconds, frame.shown ? opacity / 100.0 : 0.0);
+                                             }
+                                         }
+                                     }
+
+                                     {
+                                         /*  Both clocks, the steady one read either
+                                             side of the wall clock. The microseconds
+                                             between the reads are nothing beside the
+                                             two seconds a trigger's step has to
+                                             exceed; the bracket's middle is the
+                                             moment the wall clock was read, which the
+                                             clock's watcher measures it against to its
+                                             millisecond (TG.6). */
+                                         const auto steadyBefore = std::chrono::steady_clock::now();
+                                         const auto wall = juce::Time::getCurrentTime();
+                                         const auto steadyAfter = std::chrono::steady_clock::now();
+                                         const auto bracket = std::chrono::duration_cast<std::chrono::nanoseconds> (steadyAfter - steadyBefore).count();
+                                         const auto steadyNanos = std::chrono::duration_cast<std::chrono::nanoseconds> (
+                                                                      steadyBefore.time_since_epoch()).count()
+                                                                  + bracket / 2;
+
+                                         wfg::cue::ClockReading reading;
+                                         reading.date = wall.getYear() * 10000 + (wall.getMonth() + 1) * 100
+                                                          + wall.getDayOfMonth();
+                                         reading.millisecondOfDay = ((static_cast<std::int64_t> (wall.getHours()) * 60
+                                                                        + wall.getMinutes()) * 60 + wall.getSeconds()) * 1000
+                                                                      + wall.getMilliseconds();
+                                         reading.steadyMilliseconds = static_cast<std::int64_t> (steadyNanos / 1'000'000);
+
+                                         /*  An outage's end forgets the clock's line too:
+                                             Go.dot's samples stood while the wall clock
+                                             went on, and the next reading is a first. The
+                                             flag was taken above, for MTC's reader too. */
+                                         if (countMoved)
+                                         {
+                                             previousClock = {};
+                                             clockWatch.forget();
+                                         }
+
+                                         const auto index = triggerIndex;
+                                         const auto& triggers = index != nullptr ? *index : noTriggers;
+                                         const auto crossings = wfg::cue::clockCrossings (triggers, previousClock, reading);
+
+                                         /*  SAID ONCE, IN THE LOG: a step is a thing
+                                             the machine did that nobody decided, as
+                                             an interface going quiet is, and the
+                                             reading it moved to is the next one's
+                                             previous, so the next tick sees time
+                                             passing again. Never stderr (the
+                                             maintenance below says why). */
+                                         if (crossings.stepped)
+                                             engine.log().note (wfg::cue::clockStepNote (previousClock, reading,
+                                                                                        crossings.stepMilliseconds)
+                                                                  + ", by tick " + std::to_string (tickIndex));
+
+                                         if (! crossings.crossed.empty())
+                                             for (const auto& id : clockDays.admit (triggers, crossings.crossed))
+                                                 engine.submit ({ "clock", "trigger.fire",
+                                                                  { wfg::osc::Value::string (id) } });
+
+                                         previousClock = reading;
+
+                                         /*  THE WALL CLOCK AS A TIME GROUP'S SOURCE
+                                             (namespace draft §60, TG.6; AIO, AIQ): only
+                                             while the show holds a time group on it.
+                                             The watcher is fed the tick's clock pair -
+                                             the one the MTC lane and reader were fed -
+                                             then this reading, and says its turn, if
+                                             this tick has one, as `code.heard` from
+                                             origin `clock`, which a following backup's
+                                             gate drops (AGD): the wall clock is the
+                                             main's alone. A reading the thread was
+                                             interrupted in - more than a millisecond
+                                             between the two steady reads - is not
+                                             heard: its wall clock is anywhere in that
+                                             gap, and the next tick reads again. The
+                                             heard sample is the output latency before
+                                             the one read, as MTC's is (AIQ). */
                                          if (clockWatched)
-                                             say (clockOrigin, clockWatch.resay());
-                                     }
-
-                                     if (! ltcSource.empty())
-                                         say (ltcSource, ltcWatch.update (clockSample));
-
-                                     if (! mtcSource.empty())
-                                         say (mtcSource, mtcWatch.update (clockSample));
-                                 }
-
-                                 if (audioState.outputLatency != mtcLatencyTold)
-                                 {
-                                     midiOut.setTimecodeOutputLatency (audioState.outputLatency);
-                                     mtcLatencyTold = audioState.outputLatency;
-                                 }
-
-                                 if (const auto revision = document.showRevision();
-                                     revision != videoRevisionSeen || document.isLocked() != videoLockSeen)
-                                 {
-                                     videoRevisionSeen = revision;
-                                     videoLockSeen = document.isLocked();
-                                     videoHost.configure (document);
-                                 }
-
-                                 /*  THE PICKED CUE'S TILE (§47, AAH): asked again
-                                     when the window wants another cue or second,
-                                     and when the show moved - an edit is seen in
-                                     the tile as it is on a projector. */
-                                 {
-                                     std::string tileCue;
-                                     double tileSeconds = 0.0;
-                                     std::uint64_t tileSerial = 0;
-
-                                     {
-                                         const std::lock_guard<std::mutex> hold { tileWish.lock };
-                                         tileCue = tileWish.cue;
-                                         tileSeconds = tileWish.seconds;
-                                         tileSerial = tileWish.serial;
-                                     }
-
-                                     const auto revision = document.showRevision();
-
-                                     const auto rendersNow = renderer.changes();
-                                     const auto fieldsNow = textFields.revision();
-                                     const auto fontsNow = fontShelf.changes();
-
-                                     if (tileSerial != tileWishSeen
-                                           || (! tileCue.empty() && (revision != tileRevisionSeen || rendersNow != tileRendersSeen
-                                                                        || fieldsNow != tileFieldsSeen || fontsNow != tileFontsSeen)))
-                                     {
-                                         tileWishSeen = tileSerial;
-                                         tileRevisionSeen = revision;
-                                         tileRendersSeen = rendersNow;
-                                         tileFieldsSeen = fieldsNow;
-                                         tileFontsSeen = fontsNow;
-
-                                         const auto carried = fontShelf.current();
-                                         auto spec = tileCue.empty() ? wfg::video::LayerSpec {}
-                                                                     : wfg::cue::pictureSpecOf (document, tileCue, mediaFolder,
-                                                                                                nullptr, &textFields, carried.get());
-
-                                         if (spec.source.empty())
                                          {
-                                             videoHost.hideTile();
-                                             tileFileShown.clear();
+                                             clockWatch.feedClock (clockSample, clockNanos, clockRate);
+                                             clockWatch.setLatency (static_cast<std::int64_t> (audioState.outputLatency));
+
+                                             if (bracket <= 1'000'000)
+                                                 clockWatch.hear ({ reading.millisecondOfDay, steadyNanos });
+
+                                             if (const auto said = clockWatch.update())
+                                                 engine.submit (clockOrigin, wfg::timecode::codeheard::command,
+                                                                wfg::timecode::codeHeardArgs (clockOrigin, *said));
                                          }
-                                         else
-                                         {
-                                             spec.id = tileCue;
-                                             const auto opacity = wfg::osc::parseDouble (document.getAttribute ("/godot/cue/" + tileCue + "/opacity")
-                                                                                             .value_or (std::string {})).value_or (100.0);
-
-                                             /*  A MOVIE BEING EDITED (namespace draft §55.13, ADV
-                                                 amended): its render at the window's second -
-                                                 the dissolves as they play - or, while there is
-                                                 none yet, the source's frame where the edit maps
-                                                 it, nothing in its silence. The window never knows. */
-                                             const auto frame = wfg::cue::tileFrameOf (document.findById (tileCue), tileSeconds,
-                                                                                     mediaInfo.durations().get(),
-                                                                                     renderer.snapshot().get());
-
-                                             if (spec.source == "movie" && ! frame.file.empty())
-                                                 spec.file = wfg::audio::resolveMediaPath (mediaFolder, frame.file);
-
-                                             tileFileShown = spec.source == "movie" ? frame.file : std::string {};
-                                             videoHost.showTile (spec, frame.seconds, frame.shown ? opacity / 100.0 : 0.0);
-                                         }
-                                     }
-                                 }
-
-                                 {
-                                     /*  Both clocks, the steady one read either
-                                         side of the wall clock. The microseconds
-                                         between the reads are nothing beside the
-                                         two seconds a trigger's step has to
-                                         exceed; the bracket's middle is the
-                                         moment the wall clock was read, which the
-                                         clock's watcher measures it against to its
-                                         millisecond (TG.6). */
-                                     const auto steadyBefore = std::chrono::steady_clock::now();
-                                     const auto wall = juce::Time::getCurrentTime();
-                                     const auto steadyAfter = std::chrono::steady_clock::now();
-                                     const auto bracket = std::chrono::duration_cast<std::chrono::nanoseconds> (steadyAfter - steadyBefore).count();
-                                     const auto steadyNanos = std::chrono::duration_cast<std::chrono::nanoseconds> (
-                                                                  steadyBefore.time_since_epoch()).count()
-                                                              + bracket / 2;
-
-                                     wfg::cue::ClockReading reading;
-                                     reading.date = wall.getYear() * 10000 + (wall.getMonth() + 1) * 100
-                                                      + wall.getDayOfMonth();
-                                     reading.millisecondOfDay = ((static_cast<std::int64_t> (wall.getHours()) * 60
-                                                                    + wall.getMinutes()) * 60 + wall.getSeconds()) * 1000
-                                                                  + wall.getMilliseconds();
-                                     reading.steadyMilliseconds = static_cast<std::int64_t> (steadyNanos / 1'000'000);
-
-                                     /*  An outage's end forgets the clock's line too:
-                                         Go.dot's samples stood while the wall clock
-                                         went on, and the next reading is a first. The
-                                         flag was taken above, for MTC's reader too. */
-                                     if (countMoved)
-                                     {
-                                         previousClock = {};
-                                         clockWatch.forget();
-                                     }
-
-                                     const auto index = triggerIndex;
-                                     const auto& triggers = index != nullptr ? *index : noTriggers;
-                                     const auto crossings = wfg::cue::clockCrossings (triggers, previousClock, reading);
-
-                                     /*  SAID ONCE, IN THE LOG: a step is a thing
-                                         the machine did that nobody decided, as
-                                         an interface going quiet is, and the
-                                         reading it moved to is the next one's
-                                         previous, so the next tick sees time
-                                         passing again. Never stderr (the
-                                         maintenance below says why). */
-                                     if (crossings.stepped)
-                                         engine.log().note (wfg::cue::clockStepNote (previousClock, reading,
-                                                                                    crossings.stepMilliseconds)
-                                                              + ", by tick " + std::to_string (tickIndex));
-
-                                     if (! crossings.crossed.empty())
-                                         for (const auto& id : clockDays.admit (triggers, crossings.crossed))
-                                             engine.submit ({ "clock", "trigger.fire",
-                                                              { wfg::osc::Value::string (id) } });
-
-                                     previousClock = reading;
-
-                                     /*  THE WALL CLOCK AS A TIME GROUP'S SOURCE
-                                         (namespace draft §60, TG.6; AIO, AIQ): only
-                                         while the show holds a time group on it.
-                                         The watcher is fed the tick's clock pair -
-                                         the one the MTC lane and reader were fed -
-                                         then this reading, and says its turn, if
-                                         this tick has one, as `code.heard` from
-                                         origin `clock`, which a following backup's
-                                         gate drops (AGD): the wall clock is the
-                                         main's alone. A reading the thread was
-                                         interrupted in - more than a millisecond
-                                         between the two steady reads - is not
-                                         heard: its wall clock is anywhere in that
-                                         gap, and the next tick reads again. The
-                                         heard sample is the output latency before
-                                         the one read, as MTC's is (AIQ). */
-                                     if (clockWatched)
-                                     {
-                                         clockWatch.feedClock (clockSample, clockNanos, clockRate);
-                                         clockWatch.setLatency (static_cast<std::int64_t> (audioState.outputLatency));
-
-                                         if (bracket <= 1'000'000)
-                                             clockWatch.hear ({ reading.millisecondOfDay, steadyNanos });
-
-                                         if (const auto said = clockWatch.update())
-                                             engine.submit (clockOrigin, wfg::timecode::codeheard::command,
-                                                            wfg::timecode::codeHeardArgs (clockOrigin, *said));
                                      }
                                  }
 
@@ -7917,9 +8035,23 @@ namespace
                                      Engine origin, and no arguments: a save
                                      that happened is an event, and the bytes
                                      it wrote are not. */
-                                 if (wfg::doc::autosaveDue (document, session, tickIndex))
+                                 if (held ? autosaveHeldDue : wfg::doc::autosaveDue (document, session, tickIndex))
+                                 {
+                                     if (held)
+                                     {
+                                         heldSavedAt = heldFor;
+                                         heldChangedAt = -1;
+                                     }
+
                                      engine.submit (wfg::origin::engine, "document.autosave");
-                             });
+                                 }
+                             };
+
+        /*  EVERY TICK, and every frozen pass in its stead (TickThread::
+            setWhileHeld): one hook, told which, so what hears the pair, the
+            hands and the devices is the same code on both. */
+        ticks.setBeforeTick ([&beforeEachTick] (std::int64_t tickIndex) { beforeEachTick (tickIndex, false); });
+        ticks.setWhileHeld ([&beforeEachTick] (std::int64_t tickIndex) { beforeEachTick (tickIndex, true); });
 
         /*  THE SHOW REVISION THE LAST TICK ENDED ON, which is what lets the
             after-tick say "the show moved during this one" - and so stamp
@@ -8308,6 +8440,7 @@ namespace
                                     }
                                 }
 
+                                linkStream.setPass (ticks.passCount());
                                 linkStream.afterTick (outcome.tick, pairing.inForce.timeout);
                                 linkReceiver.drain (wfg::pair::LinkClock::now(), pairing.inForce.timeout);
 
@@ -9110,11 +9243,11 @@ namespace
                                     just published - motors, displays, LEDs,
                                     rings and colour, the differences only. */
                                 if (current != nullptr)
-                                    surfaceBridge->afterTick (current, touches, outcome.tick);
+                                    surfaceBridge->afterTick (current, touches, ticks.passCount());
 
                                 //  And what the Stream Decks show (§95), from the same tree.
                                 if (current != nullptr)
-                                    deckBridge->afterTick (current, outcome.tick);
+                                    deckBridge->afterTick (current, ticks.passCount());
 
                                 //  And which runs the bindings of a cue are live for (AQY).
                                 if (current != nullptr)
@@ -9175,6 +9308,8 @@ namespace
                 if (! deviceDriver)
                     deviceDriver = std::make_unique<wfg::audio::DeviceAudioDriver> (
                         engineCacheFolder().getFullPathName().toStdString());
+
+                deviceDriver->host().setHold (&showHold);
                 deviceDriver->host().setProxyServices (proxyServices);
                 deviceDriver->host().setCardSound (cardSound.region());
                 deviceDriver->setWorkgroups (&workgroups);
@@ -9219,6 +9354,7 @@ namespace
             else
             {
                 dummy = std::make_unique<wfg::DummyAudioClock> (rate, buffer);
+                dummy->setHold (&showHold);
                 blockSource = &dummy->clock();
                 dummy->start();
             }
@@ -9371,6 +9507,7 @@ namespace
                     clock of the same shape keeps the control plane ticking,
                     as audio.apply's own failure does. */
                 dummy = std::make_unique<wfg::DummyAudioClock> (rate, buffer);
+                dummy->setHold (&showHold);
                 blockSource = &dummy->clock();
                 dummy->start();
             }
@@ -9466,6 +9603,7 @@ namespace
             else
             {
                 dummy = std::make_unique<wfg::DummyAudioClock> (rate, buffer);
+                dummy->setHold (&showHold);
                 blockSource = &dummy->clock();
                 dummy->start();
             }

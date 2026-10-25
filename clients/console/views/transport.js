@@ -55,6 +55,28 @@ el("panic").addEventListener("click", () => {
 
 el("doh").addEventListener("click", () => gesture("doh", []));
 
+/*  PAUSE / PLAY (PRD §3.34): two commands, not a toggle - the button sends
+    what its word says, which is the engine's state as this page last read it,
+    so a press made a pass behind cannot undo itself. */
+function showPaused() {
+  return String(tree.get("/godot/engine/paused", false)) === "true";
+}
+
+el("pause").addEventListener("click", () => gesture(showPaused() ? "play" : "pause", []));
+
+function renderPause() {
+  const held = showPaused();
+  const button = el("pause");
+
+  if (!button) return;
+
+  button.dataset.held = held ? "yes" : "no";
+  setText(button, held ? "Play" : "Pause");
+  button.title = held ? "Play: everything held goes on from where it stood (F8)"
+                      : "Pause: hold everything Go.dot runs where it is, silent, until Play (F8)";
+  el("paused-note").hidden = !held;
+}
+
 /*  WHERE THE KEYBOARD IS, IN WORDS.
 
     A box with the focus keeps the arrows and the accelerators - stepping a
@@ -189,4 +211,4 @@ function renderPair() {
   }
 }
 
-export { renderPair };
+export { renderPair, renderPause, showPaused };

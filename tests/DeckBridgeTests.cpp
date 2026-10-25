@@ -347,30 +347,30 @@ TEST_CASE ("stream deck layout: a cart from the top left, the show's keys at the
     CHECK (three.keys[14].role == DeckRole::blank);
 
     const auto shown = rolesOf (surface::deckLayoutFor (mk2, true, 3, 0));
-    CHECK (std::vector<DeckRole> (shown.begin() + 10, shown.end())
-           == std::vector<DeckRole> { DeckRole::standbyUp, DeckRole::standbyDown, DeckRole::doh, DeckRole::esc,
-                                      DeckRole::go });
+    CHECK (std::vector<DeckRole> (shown.begin() + 9, shown.end())
+           == std::vector<DeckRole> { DeckRole::standbyUp, DeckRole::standbyDown, DeckRole::pause, DeckRole::doh,
+                                      DeckRole::esc, DeckRole::go });
 
-    //  Twenty pads and the show's keys: nine a page, the tenth key turns it.
+    //  Twenty pads and the show's six keys (Pause / Play since PRD §3.34): eight a page, the ninth key turns it.
     const auto long_ = surface::deckLayoutFor (mk2, true, 20, 1);
     CHECK (long_.pages == 3);
     CHECK (long_.page == 1);
-    CHECK (long_.keys[0].pad == 9);
-    CHECK (long_.keys[8].pad == 17);
-    CHECK (long_.keys[9].role == DeckRole::cartPage);
+    CHECK (long_.keys[0].pad == 8);
+    CHECK (long_.keys[7].pad == 15);
+    CHECK (long_.keys[8].role == DeckRole::cartPage);
     CHECK (surface::deckLayoutFor (mk2, true, 20, 3).page == 0);
     CHECK (surface::deckLayoutFor (mk2, true, 20, -1).page == 2);
 
     //  The last page has what is left.
     const auto last = surface::deckLayoutFor (mk2, true, 20, 2);
-    CHECK (last.keys[0].pad == 18);
-    CHECK (last.keys[1].pad == 19);
-    CHECK (last.keys[2].role == DeckRole::blank);
+    CHECK (last.keys[0].pad == 16);
+    CHECK (last.keys[3].pad == 19);
+    CHECK (last.keys[4].role == DeckRole::blank);
 
     //  Smaller decks, fewer show keys; the Pedal's three are all the show's.
     CHECK (surface::deckShowKeys (specOf ("mini")) == std::vector<DeckRole> { DeckRole::esc, DeckRole::go });
     CHECK (surface::deckShowKeys (specOf ("neo")).size() == 3);
-    CHECK (surface::deckShowKeys (specOf ("xl")).size() == 5);
+    CHECK (surface::deckShowKeys (specOf ("xl")).size() == 6);
     CHECK (rolesOf (surface::deckLayoutFor (specOf ("pedal"), true, 4, 0))
            == std::vector<DeckRole> { DeckRole::esc, DeckRole::go, DeckRole::doh });
     CHECK (rolesOf (surface::deckLayoutFor (specOf ("pedal"), false, 3, 0))
@@ -499,7 +499,7 @@ TEST_CASE ("stream deck bridge: a pad is pressed and let go of as the Cart tab's
     CHECK (desk.submitted.empty());
 }
 
-TEST_CASE ("stream deck bridge: the show's keys are GO, Esc and again, Doh! and the standby's arrows")
+TEST_CASE ("stream deck bridge: the show's keys are GO, Esc and again, Doh!, Pause and the standby's arrows")
 {
     Desk desk ("mk2", true);
 
@@ -508,7 +508,11 @@ TEST_CASE ("stream deck bridge: the show's keys are GO, Esc and again, Doh! and 
     CHECK (desk.host.keys[12].label == "Doh!");
     CHECK (desk.host.keys[12].dim);
 
-    for (const auto key : { 14, 13, 13, 12, 10, 11 })
+    //  PAUSE / PLAY (PRD §3.34): its word the state's, and the press what the word says.
+    CHECK (desk.host.keys[11].label == "Pause");
+    CHECK (desk.host.keys[11].bottom == "hold all");
+
+    for (const auto key : { 14, 13, 13, 12, 9, 10, 11 })
     {
         desk.host.keysDown ("AL12K1A00001", { key });
         desk.step();
@@ -517,7 +521,7 @@ TEST_CASE ("stream deck bridge: the show's keys are GO, Esc and again, Doh! and 
     }
 
     CHECK (desk.commands() == std::vector<std::string> { "go", "run.stopAll", "run.killAll", "go.doh",
-                                                         "standby.previous", "standby.next" });
+                                                         "standby.previous", "standby.next", "run.pauseAll" });
 
     //  Esc again after the window is Esc again.
     for (std::int64_t n = 0; n <= surface::doubleStopTicks; ++n)

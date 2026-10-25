@@ -33,8 +33,12 @@ namespace wfg::surface
         if (spec.model == DeckModel::pedal)
             return { DeckRole::esc, DeckRole::go, DeckRole::doh };      // GO under the middle foot
 
+        /*  PAUSE / PLAY ON THE DECKS WITH ROOM FOR IT (PRD §3.34; the
+            author's pick, 2026-10-25: fifteen keys and more), before Doh!: the
+            eight-key deck, the pedal and the Stream Deck+ keep their keys. */
         if (spec.keys >= 15)
-            return { DeckRole::standbyUp, DeckRole::standbyDown, DeckRole::doh, DeckRole::esc, DeckRole::go };
+            return { DeckRole::standbyUp, DeckRole::standbyDown, DeckRole::pause, DeckRole::doh, DeckRole::esc,
+                     DeckRole::go };
 
         if (spec.keys >= 8)
             return { DeckRole::doh, DeckRole::esc, DeckRole::go };

@@ -81,6 +81,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <map>
+#include <cstring>
 #include <memory>
 #include <new>
 #include <string>
@@ -256,6 +257,39 @@ TEST_CASE ("video region: the configuration written whole and read back, and tex
     CHECK (clock.sample == 123456);
     CHECK (clock.nanos == 987654321);
     CHECK (clock.sampleRate == 48000);
+    CHECK (clock.heldAt == -1);
+
+    /*  AND WHERE THE SHOW WILL STAND, held (PRD §3.34): said with the pair. */
+    video::region::writeClock (r, 123456, 987654321, 48000, 130000);
+    CHECK (video::region::readClock (r).heldAt == 130000);
+}
+
+TEST_CASE ("video region: a freshly stamped region is not held - a zeroed field would read held at nought")
+{
+    auto region = std::make_unique<video::region::Region>();
+    std::memset (static_cast<void*> (region.get()), 0, sizeof (video::region::Region));
+    video::region::stamp (*region);
+    CHECK (video::region::readClock (*region).heldAt == -1);
+}
+
+TEST_CASE ("video clock: forgotten after a hold, the line starts again from the next pair - not a pause slewed out over seconds")
+{
+    /*  PRD §3.34. The count stood 0.2 s while the steady clock went on: a
+        quarter of a second is under the jump that starts a line again, so
+        without `forget` the estimate would read 0.2 s ahead and creep back. */
+    video::ClockEstimate estimate;
+    constexpr int rate = 48000;
+
+    for (std::int64_t at = 0; at <= 1'000'000'000; at += 20'000'000)
+        estimate.feed (at * rate / 1'000'000'000, at, rate);
+
+    estimate.forget();
+    CHECK_FALSE (estimate.hasStarted());
+
+    //  Held from 1 s to 1.2 s: the count goes on from 48000 at 1.2 s.
+    estimate.feed (48000, 1'200'000'000, rate);
+    CHECK (estimate.sampleAt (1'200'000'000) == 48000);
+    CHECK (estimate.sampleAt (1'220'000'000) == 48960);
 }
 
 TEST_CASE ("video region: what to read ahead and what the renderer holds of it, both ways, cut to the region's room")

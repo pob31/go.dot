@@ -214,7 +214,7 @@ namespace wfg::midi
                                    std::int64_t zeroSample) override;
         void stopTimecode (std::uint64_t program, std::int64_t atSample, bool cut) override;
         void muteTimecode (bool on) override;
-        void feedClock (std::int64_t sample, std::int64_t nanos, int sampleRate) override;
+        void feedClock (std::int64_t sample, std::int64_t nanos, int sampleRate, std::int64_t heldAt = -1) override;
         void setTimecodeOutputLatency (int samples) override;
         std::uint32_t timecodeLate() const override;
         double timecodeWorstMs() const override;

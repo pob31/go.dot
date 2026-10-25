@@ -182,6 +182,13 @@ namespace wfg::client::model
                     (§4.8). */
                 { "doh",           0xFFFF6EB4 },
 
+                /*  THE SHOW HELD (PRD §3.34): Pause / Play's ground while the
+                    show stands still - a still blue, no state's colour and far
+                    from the stops' red and Doh!'s pink beside it. The button's
+                    word, "Play", and the transport line's "Paused" carry it
+                    (§4.8). Black letters on it, as on GO. */
+                { "paused",        0xFF5B9BD5 },
+
                 /*  A FLAGGED CUE'S FLAG (namespace draft §63, ALQ): a signal
                     orange, brighter than the standby's amber and the stopping
                     orange beside it, because a flag is there to be found down

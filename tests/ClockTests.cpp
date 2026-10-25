@@ -39,6 +39,7 @@
 #include <wfg/engine/clock/AudioClockSource.h>
 #include <wfg/engine/clock/DummyAudioClock.h>
 #include <wfg/engine/clock/SampleTime.h>
+#include <wfg/engine/clock/ShowHold.h>
 #include <wfg/engine/clock/TickClock.h>
 #include <wfg/engine/clock/TickThread.h>
 
@@ -560,6 +561,150 @@ TEST_CASE ("tick thread: suspended audio keeps commands responsive without advan
     REQUIRE (waitUntil ([&] { return thread.lastTick() == 1; }));
     thread.stop();
     CHECK (scheduled.load() == 2);
+}
+
+TEST_CASE ("tick thread: a held count drains commands at the frozen tick, hears through whileHeld, and goes on at the next tick")
+{
+    /*  PRD §3.34 (Pause / Play). The audio side holds the count; the thread
+        must not wait for a sample that will not come, or Play itself could
+        never be applied. It drains at the frozen tick, runs `whileHeld` (what
+        hears the hands and the pair) and never `beforeTick` (what moves the
+        show), and the pass count keeps moving while the index stands. */
+    Engine engine;
+    ManualClock counter;
+    const auto schedule = TickClock::create (48000);
+    REQUIRE (schedule.has_value());
+    TickThread thread { engine, counter, *schedule };
+    std::atomic<int> scheduled { 0 }, heard { 0 }, commands { 0 };
+    std::atomic<std::int64_t> heardAt { -1 };
+    thread.setBeforeTick ([&] (std::int64_t) { ++scheduled; });
+    thread.setWhileHeld ([&] (std::int64_t tick) { heardAt = tick; ++heard; });
+    engine.commands().add ({ "test.play", "Test control while the show is held", {}, false,
+        [&] (CommandContext&, const std::vector<osc::Value>& args)
+        { ++commands; return Outcome::ok (args); } });
+    thread.start();
+    REQUIRE (waitUntil ([&] { return thread.lastTick() == 0; }));
+
+    counter.setHeld (true);
+    REQUIRE (waitUntil ([&] { return heard.load() >= 3; }));
+    const auto passesHeld = thread.passCount();
+    REQUIRE (engine.submit ("test", "test.play"));
+    REQUIRE (waitUntil ([&] { return commands.load() == 1; }));
+    REQUIRE (waitUntil ([&] { return thread.passCount() > passesHeld + 2; }));
+
+    CHECK (thread.lastTick() == 0);
+    CHECK (heardAt.load() == 0);
+    CHECK (scheduled.load() == 1);
+
+    //  The count moved on and was let go: the next tick, and beforeTick again.
+    counter.advance (960);
+    counter.setHeld (false);
+    REQUIRE (waitUntil ([&] { return thread.lastTick() == 1; }));
+    thread.stop();
+    CHECK (scheduled.load() == 2);
+}
+
+TEST_CASE ("show hold: a linear ramp down to held, muted pulls at nought, a reversal turns where it stands, and at once skips the ramp")
+{
+    /*  clock/ShowHold.h, without a graph: the level is what applyGain
+        multiplies by, sample for sample. */
+    constexpr int ramp = 4800;
+    constexpr int block = 128;
+    ShowHold hold;
+    hold.prepare (ramp);
+
+    std::vector<float> ones (block, 1.0f);
+    float* channels[] = { ones.data() };
+    const auto run = [&]
+    {
+        std::fill (ones.begin(), ones.end(), 1.0f);
+        const auto pull = hold.beginBlock();
+
+        if (pull)
+            hold.applyGain (channels, 1, block);
+
+        return pull;
+    };
+
+    //  Open: untouched.
+    CHECK (run());
+    CHECK (ones.front() == doctest::Approx (1.0f));
+    CHECK (ones.back() == doctest::Approx (1.0f));
+    CHECK_FALSE (hold.held());
+
+    //  Held: one 4800th lower each sample, then not pulled.
+    hold.want (ShowHold::Want::hold);
+    CHECK (run());
+    CHECK (ones[0] == doctest::Approx (static_cast<float> (ramp - 1) / ramp));
+    CHECK (ones[block - 1] == doctest::Approx (static_cast<float> (ramp - block) / ramp));
+
+    int pulled = 1;
+
+    while (run())
+        ++pulled;
+
+    CHECK (pulled == (ramp + block - 1) / block);
+    CHECK (hold.held());
+    CHECK_FALSE (hold.level() > 0.0f);
+
+    //  Muted: pulled, every sample nought.
+    hold.want (ShowHold::Want::muted);
+    CHECK (run());
+    CHECK_FALSE (hold.held());
+    CHECK_FALSE (*std::max_element (ones.begin(), ones.end()) > 0.0f);
+
+    //  Open again, and turned round part way: down from where it stood.
+    hold.want (ShowHold::Want::open);
+
+    for (int i = 0; i < 10; ++i)
+        CHECK (run());
+
+    const auto reached = hold.level();
+    CHECK (reached == doctest::Approx (10.0f * block / ramp));
+
+    hold.want (ShowHold::Want::hold);
+    CHECK (run());
+    CHECK (ones[0] == doctest::Approx (reached - 1.0f / ramp));
+    CHECK (hold.level() == doctest::Approx (reached - static_cast<float> (block) / ramp));
+
+    //  At once: straight to held, no ramp; and straight back.
+    hold.want (ShowHold::Want::open, true);
+    CHECK (run());
+    CHECK (ones.front() == doctest::Approx (1.0f));
+
+    hold.want (ShowHold::Want::hold, true);
+    CHECK_FALSE (run());
+    CHECK (hold.held());
+
+    //  A source prepared while held starts held.
+    ShowHold later;
+    later.want (ShowHold::Want::hold);
+    later.prepare (ramp);
+    CHECK (later.held());
+    CHECK_FALSE (later.beginBlock());
+}
+
+TEST_CASE ("dummy clock: held, the count stands while the schedule goes on; let go, it moves again")
+{
+    ShowHold hold;
+    DummyAudioClock audio { 48000, 480 };
+    audio.setHold (&hold);
+    audio.start();
+
+    REQUIRE (waitUntil ([&audio] { return audio.clock().samplesElapsed() >= 4800; }));
+
+    hold.want (ShowHold::Want::hold);
+    REQUIRE (waitUntil ([&audio] { return audio.clock().isHeld(); }));
+
+    const auto stood = audio.clock().samplesElapsed();
+    const auto blocksThen = audio.blocksDelivered();
+    REQUIRE (waitUntil ([&] { return audio.blocksDelivered() >= blocksThen + 5; }));
+    CHECK (audio.clock().samplesElapsed() == stood);
+
+    hold.want (ShowHold::Want::open);
+    REQUIRE (waitUntil ([&] { return audio.clock().samplesElapsed() >= stood + 4800; }));
+    CHECK_FALSE (audio.clock().isHeld());
+    audio.stop();
 }
 
 TEST_CASE ("fine wait: a quarter-millisecond slice is not a system tick, and a wake ends a wait at once")

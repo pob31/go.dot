@@ -50,4 +50,13 @@ namespace wfg::recovery
     {
         return command == "run.stopAll" || command == "run.killAll" || command == "run.stop" || command == "run.kill";
     }
+
+    /*  PAUSE (PRD §3.34), which a backup taking over applies as it applies a
+        stop: made twice it is the same pause, and the main may well have held
+        the show. Play is not: a Play the main never confirmed may not have
+        happened, and a show left paused is the safe side of that doubt. */
+    inline bool isHold (std::string_view command) noexcept
+    {
+        return command == "run.pauseAll";
+    }
 }

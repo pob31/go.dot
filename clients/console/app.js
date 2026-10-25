@@ -26,7 +26,7 @@ import { renderLists } from "./views/didi.js";
 import { renderAim } from "./views/aim.js";
 import { renderRuns } from "./views/gogo.js";
 import { renderInspector } from "./views/inspector.js";
-import { renderPair } from "./views/transport.js";
+import { renderPair, renderPause } from "./views/transport.js";
 import "./gestures/clicks.js";
 import "./gestures/fields.js";
 import "./gestures/drag.js";
@@ -95,6 +95,7 @@ function render() {
 
   view.renderStrip();
   view.renderPair();
+  view.renderPause();
   view.renderLists();
   view.renderAim();
   view.renderRuns();
@@ -104,6 +105,7 @@ function render() {
 view.render = render;
 view.renderStrip = renderStrip;
 view.renderPair = renderPair;
+view.renderPause = renderPause;
 view.renderLists = renderLists;
 view.renderAim = renderAim;
 view.renderRuns = renderRuns;

@@ -168,6 +168,9 @@ namespace wfg::client
                 draft §106). */
             menuForgetRecent, menuCloseOthers,
 
+            /*  PAUSE / PLAY (PRD §3.34), under Show beside Doh!. */
+            menuGoPause,
+
             /*  THE SHOWS OPEN RECENT OFFERS, newest first, numbered from here
                 (§106): ten at most (app/RecentShows.h), so well short of 1000. */
             menuRecentFirst = 900,
@@ -200,6 +203,9 @@ namespace wfg::client
 
                 /*  DOH! (PRD §3.32): the command and nothing else (`doh`). */
                 actions.doh             = [this] { doh(); };
+
+                /*  PAUSE / PLAY (PRD §3.34): what the button's word says. */
+                actions.pause           = [this] (bool hold) { send (hold ? gesture::pause() : gesture::play()); };
 
                 /*  WHAT IS MISSING (namespace draft §64): a warning's page, opened
                     on Show settings; the missing files', the next such cue. */
@@ -1130,6 +1136,10 @@ namespace wfg::client
                         holds the latch that makes a held F9 one Doh!. */
                     case menuGoDoh:      return { juce::KeyPress::F9Key, 0, 0 };
 
+                    /*  F8 FOR PAUSE / PLAY (PRD §3.34), answered by the transport
+                        as F9 is, for the same latch. */
+                    case menuGoPause:    return { juce::KeyPress::F8Key, 0, 0 };
+
                     /*  F AND SHIFT+F (namespace draft §63, ALM), printed here and
                         answered by the cue list, which Shell::keyPressed asks
                         first: it holds the latch that makes a held F one flag. */
@@ -1255,6 +1265,9 @@ namespace wfg::client
                         show, not editing it - and whether there is a GO it can
                         take back is the engine's to say, in its own sentence. */
                     case menuGoDoh:      return true;
+
+                    //  And Pause / Play, which is running the show too (PRD §3.34).
+                    case menuGoPause:    return true;
 
                     /*  FLAGS UNDER THE LOCK TOO (§63, ALN): a flag is a note for
                         afterwards, kept with the standby, and never an edit of
@@ -1488,6 +1501,10 @@ namespace wfg::client
                         reaches for during a show rather than before it. */
                     addMenuItem (menu, menuGoDoh, "Doh! - take back the last GO");
 
+                    /*  PAUSE / PLAY BESIDE IT (PRD §3.34), its words the state's. */
+                    addMenuItem (menu, menuGoPause, last.showPaused() ? "Play - let the held show go on"
+                                                                      : "Pause - hold everything where it is");
+
                     /*  AND THE FLAGS (namespace draft §63, ALM): what an operator
                         marks during a run to look at once it is over. The first
                         says which way F would go for the cues picked now. */
@@ -1637,6 +1654,7 @@ namespace wfg::client
                     case menuRemoveList: removeList (listShown()); break;
                     case menuLock:      send (gesture::setLocked (! model::isYes (last.locked))); break;
                     case menuGoDoh:     doh(); break;
+                    case menuGoPause:   send (last.showPaused() ? gesture::play() : gesture::pause()); break;
                     case menuFlagPicked: flagChosen(); break;
                     case menuFlagLastGo: send (gesture::flagLastGo()); break;
                     case menuLoadToTime: toggleLoadToTime(); break;

@@ -1139,3 +1139,72 @@ TEST_CASE ("leadership: what the pair costs a tick - the presence read, the seat
     MESSAGE ("the live runs of a table of 500 counted: median " << counting[counting.size() / 2] << " us");
     CHECK (live == 500);
 }
+
+TEST_CASE ("pause: a backup taking over applies a Pause the main never confirmed, as it applies a stop, and drops a Play")
+{
+    /*  PRD §3.34: made twice, a pause is the same pause, and the main may
+        well have held the show; a Play never seen to land may not have, and a
+        show left paused is the safe side of the doubt. */
+    std::vector<Event> unconfirmed {
+        { "window", "run.pauseAll", {} },
+        { "window", "go", {} },
+        { "window", "run.playAll", {} },
+    };
+
+    const auto settled = pair::settle (unconfirmed);
+
+    REQUIRE (settled.applied.size() == 1u);
+    CHECK (settled.applied[0].command == "run.pauseAll");
+    CHECK (settled.dropped == 2);
+    CHECK (recovery::isHold ("run.pauseAll"));
+    CHECK_FALSE (recovery::isHold ("run.playAll"));
+    CHECK_FALSE (recovery::isStop ("run.pauseAll"));
+}
+
+TEST_CASE ("pause: two machines held are still two machines there - a pong's pass count moves while the beats' tick stands")
+{
+    /*  PRD §3.34. Held, a machine's tick index stands; its passes go on. A
+        channel is alive only when what it says has moved: the beats' tick,
+        frozen, says nothing new, and the pongs' passes keep it alive - where
+        before, both read as ticks, a paused pair read as two machines alone. */
+    pair::Presence held;
+    pair::Presence frozen;
+    const auto beat = [] (std::int64_t tick)
+    {
+        return osc::Packet::bundle (osc::TimeTag {}, { osc::Packet::message (pair::wire::beat,
+                                                                             { osc::Value::int64 (tick), osc::Value::int64 (1) }) });
+    };
+    const auto pong = [] (std::int64_t count)
+    {
+        return osc::Packet::message (pair::wire::pong, { osc::Value::int64 (0), osc::Value::int64 (count) });
+    };
+
+    for (auto* presence : { &held, &frozen })
+    {
+        presence->heard ("main", beat (100), t0);
+        presence->heard ("main", pong (100), t0);
+        presence->drain();
+    }
+
+    //  Five seconds held: the beats stand at tick 100; the passes go on, and say so.
+    for (int second = 1; second <= 5; ++second)
+    {
+        const auto at = t0 + std::chrono::seconds (second);
+        held.heard ("main", beat (100), at);
+        held.heard ("main", pong (100 + 50 * second), at);
+        held.drain();
+
+        frozen.heard ("main", beat (100), at);
+        frozen.heard ("main", pong (100), at);
+        frozen.drain();
+    }
+
+    const auto now = t0 + std::chrono::milliseconds (5200);
+    CHECK (held.linked (now, 1.0));
+    CHECK_FALSE (frozen.linked (now, 1.0));
+
+    //  And a beat behind the passes still counts once its tick moves - Play.
+    held.heard ("main", beat (101), now);
+    held.drain();
+    CHECK (held.linked (now, 1.0));
+}

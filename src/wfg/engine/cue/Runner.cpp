@@ -10124,6 +10124,116 @@ namespace wfg::cue
         pendingRelaunches.clear();
     }
 
+    //==============================================================================
+    bool Runner::pauseShow()
+    {
+        if (lists.paused())
+            return false;
+
+        lists.setPaused (true);
+
+        /*  A PAUSE INSIDE THE MUTE an Esc while held left: muted until the
+            voices it killed are quiet - a kill lands a tick on, and a hold
+            taken now would stand them still, unlanded, until Play - and then
+            held rather than opened (`openAfterHeldStop`). */
+        if (heldStopAt >= 0)
+            return true;
+
+        /*  IN AN OUTAGE (PRD §6.2), at once: nothing sounds to be de-clicked,
+            and the interface that comes back comes back held. */
+        if (holdRequest)
+            holdRequest (ShowHold::Want::hold, outage && outage());
+
+        return true;
+    }
+
+    bool Runner::playShow()
+    {
+        if (! lists.paused())
+            return false;
+
+        lists.setPaused (false);
+
+        //  And a Play inside that mute opens nothing early: the stop's hook opens it.
+        if (holdRequest && heldStopAt < 0)
+            holdRequest (ShowHold::Want::open, outage && outage());
+
+        return true;
+    }
+
+    void Runner::stopWhileHeld (std::int64_t tick)
+    {
+        if (! lists.paused())
+            return;
+
+        lists.setPaused (false);
+
+        if (! holdRequest)
+            return;
+
+        /*  EVERY VOICE THAT SOUNDED, killed where it stands: the graph is not
+            run while held, so a stop would only land when it runs again - and
+            it will run muted until these are quiet. What is only made ready is
+            not a voice anybody heard, and is left for the next GO, as Esc
+            leaves it. A Player call and no record: a replay has no voice. */
+        heldSilenced.clear();
+
+        if (audio != nullptr)
+            for (const auto& run : runs.all())
+                if (! run.isFinished() && run.track >= 0 && ! run.onlyPrepared())
+                {
+                    audio->kill (run.track);
+                    heldSilenced.push_back (run.track);
+                }
+
+        heldStopAt = tick;
+        holdRequest (ShowHold::Want::muted, false);
+    }
+
+    void Runner::openAfterHeldStop (std::int64_t tick)
+    {
+        if (heldStopAt < 0)
+            return;
+
+        if (! holdRequest)
+        {
+            heldStopAt = -1;
+            return;
+        }
+
+        /*  QUIET: a kill lands at the output stage a tick on and the matrix
+            takes a block to follow, and an insert's reset lands in its plugin's
+            own process, so a fifth of a second at least; then every voice
+            killed no longer playing. At a second, opened all the same - a
+            voice still reported playing then is a fault the log will name. */
+        auto quiet = tick >= heldStopAt + 2 * deClickTicks;
+
+        if (quiet && audio != nullptr)
+            for (const auto track : heldSilenced)
+                if (audio->isPlaying (track))
+                    quiet = false;
+
+        if (! quiet && tick < heldStopAt + 50)
+            return;
+
+        heldStopAt = -1;
+        heldSilenced.clear();
+
+        //  Paused again meanwhile: held, not opened.
+        holdRequest (lists.paused() ? ShowHold::Want::hold : ShowHold::Want::open, false);
+    }
+
+    bool Runner::refusedWhilePaused (const std::string& command)
+    {
+        static const std::set<std::string> refused {
+            "go", "go.doh", "cue.fire", "cue.fireNumber", "cue.press", "trigger.fire", "strip.press",
+            "take.pad", "take.record", "take.loop", "take.overdub", "list.loadToTime", "run.seek",
+            "run.advance", "run.fire", "standby.jump", "lane.record", "curve.record", "audio.apply", "audio.setup"
+        };
+
+        return refused.count (command) > 0;
+    }
+
     void Runner::markFire (Engine& engine, std::int64_t tick, const std::string& cueId,
                            const std::string& from, std::uint64_t cause)
     {
@@ -20784,6 +20894,9 @@ namespace wfg::cue
             same ticks, or it would not reproduce the session it is replaying. */
         currentTick = tick;
 
+        /*  AN ESC WHILE HELD, MUTED UNTIL ITS VOICES ARE QUIET (PRD §3.34). */
+        openAfterHeldStop (tick);
+
         /*  WHAT THIS TICK'S GIVE-BACKS PUT BACK, from nothing (Doh! D3). */
         restoredThisTick.clear();
 
@@ -26141,16 +26254,43 @@ namespace wfg::cue
                     namespace draft §23.17, the author's ruling): their second is
                     remembered before anything is brought down, and the pass a
                     step before the press opened is taken back. */
+                /*  AND WHILE THE SHOW IS HELD (PRD §3.34): the pause ends with
+                    the press, what sounded when it was held is killed and the
+                    graph runs muted while the stops land - no panic fade, since
+                    nothing is heard to fade. */
+                const auto held = runner.showPaused();
+
                 if (graceful)
                 {
                     runner.pausePersistent (context.tick);
-                    runner.beginPanicFade (context.tick);
+
+                    /*  HELD, as the panic fade's nought is: every stop still to
+                        come let go, or a stop cue's job still holding its target
+                        hands it its level back and it plays on after Esc; and
+                        every effect emptied, as a double Esc empties them - a
+                        reverb frozen mid-tail would ring out the paused sound
+                        the moment the graph opens (the author: not a sample of
+                        it heard again). */
+                    if (held)
+                    {
+                        runner.dropStopFades();
+                        runner.resetEffects();
+                        runner.stopWhileHeld (context.tick);
+                    }
+                    else
+                    {
+                        runner.beginPanicFade (context.tick);
+                    }
+
                     return before (context, args);
                 }
 
                 runner.dropStopFades();
                 runner.resetEffects();
                 runner.noteImmediateStop (context.tick);
+
+                if (held)
+                    runner.stopWhileHeld (context.tick);
 
                 auto outcome = before (context, args);
 
@@ -27070,6 +27210,60 @@ namespace wfg::cue
 
                             return Outcome::ok (args);
                         } });
+
+        //----------------------------------------------------------------------
+        /*  PAUSE AND PLAY (PRD §3.34; the author, 2026-10-25: "a pause button
+            to hold all actions until toggled back to play"). Two commands and
+            not a toggle, so a button sends what its word says and a second
+            press from a tablet a pass behind changes nothing: each is applied
+            and does nothing when the show already stands as it asks.
+
+            WHAT HOLDS is the block source (clock/ShowHold.h): a tenth of a
+            second's de-click, then no block run - every sound, fade, wait,
+            curve and movie where it was, the tick index with them - and Play
+            goes on from the next sample. The handler sets the flag and asks;
+            a replay, with nobody to ask, holds the same ticks by the flag.
+
+            Let through the lock, as Doh! is: it is an operator's hand on the
+            show, not an edit of it. */
+        registry.add ({ "run.pauseAll",
+                        "Pause: holds everything Go.dot runs where it is - every sound and live input"
+                        " goes silent over a tenth of a second, and every fade, wait, curve, movie and"
+                        " timecode stands still - until run.playAll. Nothing that starts a cue is let in"
+                        " meanwhile (refused paused); edits, the standby, Esc and double Esc are. Nothing"
+                        " is sent to the devices. Applied and nothing when already paused.",
+                        {},
+                        true,
+                        [&runner] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            runner.pauseShow();
+                            return Outcome::ok (args);
+                        } });
+
+        registry.add ({ "run.playAll",
+                        "Play: lets a paused show go on from where it stood, sounds coming back over a"
+                        " tenth of a second. What was refused while paused is not started now. Applied"
+                        " and nothing when not paused.",
+                        {},
+                        true,
+                        [&runner] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            runner.playShow();
+                            return Outcome::ok (args);
+                        } });
+
+        /*  AND WHAT IS REFUSED MEANWHILE: what starts a cue or moves a run
+            on, asked by anyone but the engine itself - whose records the show
+            owes as it ramps down are let in - or by the main a backup follows,
+            whose records were decided there. */
+        engine.setHoldCheck ([&runner] (const std::string& command, const std::string& from)
+        {
+            if (! runner.showPaused() || ! Runner::refusedWhilePaused (command)
+                  || from == origin::engine || from.rfind (origin::fromMain, 0) == 0)
+                return std::string {};
+
+            return std::string (reason::paused);
+        });
 
         //----------------------------------------------------------------------
         /*  A SCENE THE GO STOPPED, PUT BACK ONCE IT HAS ENDED (2026-10-03, Doh!

@@ -319,8 +319,14 @@ namespace wfg::pair
         /*  AT THE HEAD OF THE BEFORE-TICK HOOK of local tick `localTick`, which
             was due at `due` (now, less the tick's lateness): the beats since
             the last are measured, the offset fixed once there are enough, and
-            every record whose slot has come is submitted, in order. */
-        void beforeTick (std::int64_t localTick, LinkClock::time_point due, double roundTripSeconds);
+            every record whose slot has come is submitted, in order. `frozen`: a
+            pass at a frozen tick (an outage, the show held, PRD §3.34), where
+            no slot will come - nothing is measured, and every record that has
+            arrived goes in at once, Play among them, or a follower held with
+            its leader would wait for ever for a slot its own tick never
+            reaches. */
+        void beforeTick (std::int64_t localTick, LinkClock::time_point due, double roundTripSeconds,
+                         bool frozen = false);
 
         /*  EVERY RECORD THIS MACHINE WRITES (Engine::setAfterRecord): one this
             follower submitted - origin `main:` - is compared with the main's,
@@ -359,7 +365,7 @@ namespace wfg::pair
             LinkClock::time_point at {};
         };
 
-        void submitDue (std::int64_t localTick, bool all);
+        void submitDue (std::int64_t localTick, bool all, bool countLate = true);
         void compare (const LogRecord& mainRecord, const LogRecord& written);
 
         Submit submit;

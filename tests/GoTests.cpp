@@ -22795,3 +22795,255 @@ TEST_CASE ("go.flag: replayed from its log, it flags the same cue")
     CHECK (flaggedOf (fresh, rig.memoId) == "true");
     CHECK (flaggedOf (fresh, rig.mediaId) == "false");
 }
+
+//==============================================================================
+/*  PAUSE AND PLAY (PRD §3.34; the author, 2026-10-25: "a pause button to hold
+    all actions until toggled back to play"). The handlers set the flag and ask
+    the block source to hold; what is refused meanwhile is everything that
+    starts a cue, asked by anyone but the engine itself - the author's
+    "everything that starts a cue", with a GO "refused, said why" and nothing
+    queued. Edits, the standby, Play and Esc stay open. Every case here failed
+    on the code before, where run.pauseAll was an unknown command. */
+namespace
+{
+    struct HoldSeen
+    {
+        std::vector<std::pair<ShowHold::Want, bool>> asked;
+    };
+
+    void watchHold (Rig& rig, HoldSeen& seen)
+    {
+        rig.runner.setHoldRequest ([&seen] (ShowHold::Want want, bool atOnce) { seen.asked.emplace_back (want, atOnce); });
+    }
+
+    std::string pausedNode (Rig& rig)
+    {
+        tree::MountTable mounts;
+        tree::ParameterTree parameters { rig.document, rig.engine.commands(), mounts, rig.runs };
+        parameters.setListState (&rig.runner.listState());
+        parameters.markStale();
+
+        tree::EngineState state;
+        const auto snapshot = parameters.publish (rig.tick, state);
+        REQUIRE (snapshot != nullptr);
+        const auto* node = snapshot->find ("/godot/engine/paused");
+        REQUIRE (node != nullptr);
+        REQUIRE (node->soleValue().has_value());
+        return node->soleValue()->getBool() ? "true" : "false";
+    }
+}
+
+TEST_CASE ("pause: run.pauseAll holds, run.playAll lets go, each once - a second press is applied and asks nothing")
+{
+    Rig rig;
+    HoldSeen seen;
+    watchHold (rig, seen);
+
+    CHECK (pausedNode (rig) == "false");
+
+    CHECK (rig.submitAndTick ("run.pauseAll").rejected == 0);
+    CHECK (rig.runner.showPaused());
+    CHECK (pausedNode (rig) == "true");
+    CHECK (rig.submitAndTick ("run.pauseAll").rejected == 0);
+
+    CHECK (rig.submitAndTick ("run.playAll").rejected == 0);
+    CHECK_FALSE (rig.runner.showPaused());
+    CHECK (pausedNode (rig) == "false");
+    CHECK (rig.submitAndTick ("run.playAll").rejected == 0);
+
+    REQUIRE (seen.asked.size() == 2u);
+    CHECK (seen.asked[0].first == ShowHold::Want::hold);
+    CHECK_FALSE (seen.asked[0].second);
+    CHECK (seen.asked[1].first == ShowHold::Want::open);
+}
+
+TEST_CASE ("pause: while paused, everything that starts a cue is refused paused and nothing is queued; Play starts nothing")
+{
+    Rig rig;
+    rig.setStandby (rig.mediaId);
+    const auto steps = rig.runner.listState().stepsTaken();
+    REQUIRE (rig.submitAndTick ("run.pauseAll").rejected == 0);
+
+    const auto refused = [&rig] (const std::string& name, std::vector<osc::Value> args = {})
+    {
+        INFO (name);
+        const auto result = rig.submitAndTick (name, std::move (args));
+        CHECK (result.rejected == 1);
+        CHECK (refusedFor (rig, "paused"));
+    };
+
+    refused ("go");
+    refused ("go.doh");
+    refused ("cue.fire", { osc::Value::string (rig.memoId) });
+    refused ("list.loadToTime", { osc::Value::string (rig.listId) });
+
+    CHECK (rig.standby() == rig.mediaId);
+    CHECK (rig.runner.listState().stepsTaken() == steps);
+    CHECK (runsFor (rig, rig.memoId) == 0u);
+
+    //  Play: nothing that was refused starts now.
+    REQUIRE (rig.submitAndTick ("run.playAll").rejected == 0);
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runner.listState().stepsTaken() == steps);
+    CHECK (runsFor (rig, rig.memoId) == 0u);
+
+    //  And the GO pressed again goes.
+    CHECK (rig.submitAndTick ("go").rejected == 0);
+    CHECK (rig.standby() == rig.memoId);
+}
+
+TEST_CASE ("pause: edits, the standby and the lock - an edit and a standby move are let in, and the lock does not stop Pause or Play")
+{
+    Rig rig;
+    REQUIRE (rig.submitAndTick ("run.pauseAll").rejected == 0);
+
+    CHECK (rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/" + rig.memoId + "/name"),
+                                            osc::Value::string ("House out") }).rejected == 0);
+    CHECK (rig.submitAndTick ("standby.set", { osc::Value::string (rig.memoId) }).rejected == 0);
+    CHECK (rig.standby() == rig.memoId);
+
+    REQUIRE (rig.submitAndTick ("run.playAll").rejected == 0);
+
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    CHECK (rig.submitAndTick ("run.pauseAll").rejected == 0);
+    CHECK (rig.runner.showPaused());
+    CHECK (rig.submitAndTick ("run.playAll").rejected == 0);
+    CHECK_FALSE (rig.runner.showPaused());
+}
+
+TEST_CASE ("pause: the engine's own fire is let in while the show ramps down, and a main's record on a backup")
+{
+    /*  The tenth of a second the de-click takes is ordinary show time: a
+        start cue's target is fired by the engine then and is the show's, not
+        a hand's. And a backup applies what its main decided. */
+    Rig rig;
+    REQUIRE (rig.submitAndTick ("run.pauseAll").rejected == 0);
+
+    REQUIRE (rig.engine.submit (origin::engine, "cue.fire", { osc::Value::string (rig.memoId) }));
+    CHECK (rig.tickOnce().rejected == 0);
+    CHECK (runsFor (rig, rig.memoId) == 1u);
+
+    REQUIRE (rig.engine.submit ("main:cli", "cue.fire", { osc::Value::string (rig.memoId) }));
+    CHECK (rig.tickOnce().rejected == 0);
+}
+
+TEST_CASE ("pause: a paused session replays record for record")
+{
+    Rig session;
+    session.setStandby (session.mediaId);
+
+    REQUIRE (session.submitAndTick ("run.pauseAll").rejected == 0);
+    CHECK (session.submitAndTick ("go").rejected == 1);
+    REQUIRE (session.submitAndTick ("run.playAll").rejected == 0);
+    REQUIRE (session.submitAndTick ("go").rejected == 0);
+    REQUIRE (session.submitAndTick ("run.pauseAll").rejected == 0);
+
+    for (int n = 0; n < 5; ++n)
+        session.tickOnce();
+
+    const auto show = doc::CanonicalXml::write (session.document);
+    const auto original = LogFile::parse (session.engine.log().contents());
+    REQUIRE (original.errors.empty());
+
+    Rig fresh;
+    fresh.runner.setPlayer (nullptr);
+
+    doc::ReadResult read = doc::CanonicalXml::read (show, fresh.document);
+    REQUIRE (read.ok);
+
+    const auto result = replay (fresh.engine, original);
+
+    for (const auto& mismatch : result.mismatches)
+        INFO (mismatch);
+
+    CHECK (result.ok);
+    CHECK (fresh.runner.showPaused());
+}
+
+TEST_CASE ("pause: Esc while paused ends the pause, kills what sounded, runs muted with no panic fade, and opens once it is quiet")
+{
+    /*  The author's ruling (2026-10-25): Esc and double Esc both work while
+        paused and end the pause, and not a sample of what was paused is heard
+        again. The graph runs muted while the stops land, and the runner's hook
+        opens it once the voices it killed are quiet. */
+    for (const auto* press : { "run.stopAll", "run.killAll" })
+    {
+        INFO (press);
+        Rig rig;
+        REQUIRE (rig.document.setAttribute ("/godot/audio/panicFade", "1").ok);
+        HoldSeen seen;
+        watchHold (rig, seen);
+
+        rig.setStandby (rig.mediaId);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+        const auto run = hear (rig, rig.mediaId);
+        const auto track = rig.runs.find (run)->track;
+
+        REQUIRE (rig.submitAndTick ("run.pauseAll").rejected == 0);
+        seen.asked.clear();
+
+        REQUIRE (rig.submitAndTick (press).rejected == 0);
+        CHECK_FALSE (rig.runner.showPaused());
+        REQUIRE_FALSE (seen.asked.empty());
+        CHECK (seen.asked.front().first == ShowHold::Want::muted);
+        CHECK (rig.audio.playing.count (track) == 0);
+
+        //  No panic fade: the run is not left fading for a second.
+        for (int n = 0; n < 12; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.runs.find (run)->isFinished());
+        REQUIRE (seen.asked.size() == 2u);
+        CHECK (seen.asked.back().first == ShowHold::Want::open);
+
+        //  And a GO goes again.
+        CHECK (rig.submitAndTick ("go").rejected == 0);
+    }
+}
+
+TEST_CASE ("pause: a Pause inside the mute an Esc left stays muted until the voices are quiet, then holds - and a Play there opens nothing early")
+{
+    Rig rig;
+    HoldSeen seen;
+    watchHold (rig, seen);
+
+    rig.setStandby (rig.mediaId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+    hear (rig, rig.mediaId);
+
+    REQUIRE (rig.submitAndTick ("run.pauseAll").rejected == 0);
+    REQUIRE (rig.submitAndTick ("run.stopAll").rejected == 0);
+    REQUIRE (rig.submitAndTick ("run.pauseAll").rejected == 0);
+    CHECK (rig.runner.showPaused());
+
+    seen.asked.clear();
+
+    for (int n = 0; n < 12; ++n)
+        rig.tickOnce();
+
+    REQUIRE (seen.asked.size() == 1u);
+    CHECK (seen.asked[0].first == ShowHold::Want::hold);
+
+    //  Paused, Esc, Paused, Play inside the mute: still muted until quiet, then opened.
+    REQUIRE (rig.submitAndTick ("run.playAll").rejected == 0);
+    seen.asked.clear();
+    rig.setStandby (rig.memoId);
+    REQUIRE (rig.submitAndTick ("run.pauseAll").rejected == 0);
+    REQUIRE (rig.submitAndTick ("run.stopAll").rejected == 0);
+    REQUIRE (rig.submitAndTick ("run.pauseAll").rejected == 0);
+    REQUIRE (rig.submitAndTick ("run.playAll").rejected == 0);
+    CHECK_FALSE (rig.runner.showPaused());
+
+    REQUIRE (seen.asked.size() == 2u);
+    CHECK (seen.asked[0].first == ShowHold::Want::hold);
+    CHECK (seen.asked[1].first == ShowHold::Want::muted);
+
+    for (int n = 0; n < 12; ++n)
+        rig.tickOnce();
+
+    REQUIRE (seen.asked.size() == 3u);
+    CHECK (seen.asked[2].first == ShowHold::Want::open);
+}

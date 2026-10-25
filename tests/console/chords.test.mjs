@@ -42,8 +42,8 @@ test("a key event in the trigger spelling: modifiers in order, then the key", ()
   assert.equal(chordOf(event("F25", "F25")), "");
 });
 
-test("the show's own keys: GO, Esc and Doh! whatever the modifiers, and every shortcut", () => {
-  for (const kept of ["Space", "Mod+Space", "Shift+Escape", "F9", "Alt+F9", "F5", "F", "Shift+F",
+test("the show's own keys: GO, Esc, Doh! and Pause / Play whatever the modifiers, and every shortcut", () => {
+  for (const kept of ["Space", "Mod+Space", "Shift+Escape", "F9", "Alt+F9", "F8", "Shift+F8", "F5", "F", "Shift+F",
                       "ArrowUp", "Mod+Z", "Mod+Shift+Z", "Mod+S", "Delete"]) {
     assert.ok(isReserved(kept), kept);
   }

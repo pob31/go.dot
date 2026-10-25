@@ -3303,6 +3303,44 @@ TEST_CASE ("mtc lane: held, nothing leaves and nothing is late; let go, a full f
     }
 }
 
+TEST_CASE ("mtc lane: the show held, nothing due past where it stands leaves and nothing is late; Play, a full frame at the next cycle on the new line")
+{
+    /*  PRD §3.34 (Pause / Play). The count stands at 100 ms of show time while
+        the steady clock goes on: the lane must not run its line on past it and
+        send what nobody hears, and after Play the line starts again where the
+        count went on - 300 ms of wall time later - with a full frame, since a
+        desk chasing the code has heard nothing meanwhile. */
+    MtcRig rig;
+    REQUIRE (rig.start (1, timecode::Rate::fps25, { 1, 0, 0, 0 }, 0).empty());
+    rig.runTo (35'000'000);
+
+    //  The way down begins at 40 ms; the count will stand at 4800, 100 ms.
+    rig.outputs.feedClock (1920, 40'000'000, MtcRig::sampleRate, 4800);
+    rig.runTo (300'000'000);
+
+    std::size_t before = 0;
+
+    for (const auto& sent : rig.desk->wire())
+    {
+        ++before;
+        CHECK (sent.due < rig.momentOf (4800));
+    }
+
+    CHECK (before == 11u);                                      // the full frame and quarters 0 to 9: 0..90 ms
+    CHECK (rig.outputs.timecodeLate() == 0u);
+
+    //  Play at 300 ms: the count goes on from 4800. The next cycle is frame 4, 160 ms, 7680.
+    rig.outputs.feedClock (4800, 300'000'000, MtcRig::sampleRate, -1);
+    rig.runTo (400'000'000);
+
+    const auto wire = rig.desk->wire();
+    REQUIRE (wire.size() > before + 2);
+    CHECK (wire[before].bytes == fullFrameOf ({ 1, 0, 0, 4 }, timecode::Rate::fps25));
+    CHECK (wire[before].due == 300'000'000 + (7680 - 4800) * 1'000'000'000LL / MtcRig::sampleRate);
+    CHECK (wire[before + 1].bytes == midi::Bytes { 0xF1, 0x04 });
+    CHECK (rig.outputs.timecodeLate() == 0u);
+}
+
 TEST_CASE ("mtc lane: a quarter more than a quarter late is dropped and the code resumes at the next piece 0; a late full frame or a stall brings a full frame")
 {
     const timecode::Label from { 1, 0, 0, 0 };

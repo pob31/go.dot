@@ -3989,6 +3989,7 @@ namespace wfg::client::ui
                 else if (key.action == "go")          send (gesture::go());
                 else if (key.action == "esc")         send (gesture::stopAll());
                 else if (key.action == "doh")         send (gesture::doh());
+                else if (key.action == "pause")       send (key.label == "Play" ? gesture::play() : gesture::pause());
                 else if (key.action == "standbyUp")   send (gesture::standbyPrevious());
                 else if (key.action == "standbyDown") send (gesture::standbyNext());
             }
@@ -4101,6 +4102,7 @@ namespace wfg::client::ui
                 picture.glyph = a == "go" ? Glyph::go
                               : a == "esc" ? Glyph::esc
                               : a == "doh" ? Glyph::doh
+                              : a == "pause" ? Glyph::pause
                               : a == "standbyUp" ? Glyph::standbyUp
                               : a == "standbyDown" ? Glyph::standbyDown
                               : a == "cartPage" ? Glyph::pageNext

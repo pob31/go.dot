@@ -398,6 +398,9 @@ button:disabled { color: var(--ink-off); cursor: default; }
     PANIC - the widest stop on the page, red, in capitals, with what its next
     press does written under it (§4.8: the word, not the colour, says it). */
 #doh { margin-left: 6px; }
+#pause { margin-left: 6px; }
+#pause[data-held="yes"] { background: #5b9bd5; color: #000; }
+.paused-note { margin-left: 6px; color: #5b9bd5; font-weight: 600; }
 .panic { display: inline-flex; flex-direction: column; align-items: center; margin-left: 28px; gap: 1px; }
 #panic { background: var(--failed); color: #1b0606; border-color: var(--failed);
          font-weight: 700; letter-spacing: .12em; padding: 5px 18px; }

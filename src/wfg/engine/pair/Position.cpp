@@ -388,6 +388,9 @@ namespace wfg::pair
 
         Line (out, "lifted").h (at.liftedAt);
 
+        if (at.showPaused)
+            Line (out, "held").b (true);
+
         for (const auto& bed : at.paused)
             Line (out, "paused").s (bed.cue).s (bed.run).b (bed.resumes).d (bed.from).i (bed.range).s (bed.media);
 
@@ -773,6 +776,13 @@ namespace wfg::pair
             else if (word == "lifted")
             {
                 at.liftedAt = a.h();
+
+                if (! a.ok())
+                    return bad();
+            }
+            else if (word == "held")
+            {
+                at.showPaused = a.b();
 
                 if (! a.ok())
                     return bad();

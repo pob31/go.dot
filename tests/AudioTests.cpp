@@ -9506,3 +9506,216 @@ TEST_CASE ("audio host: a compressed sound is refused at the arm, and the WAV ma
     CHECK (rig.host.isTrackPlaying (0));
     CHECK (rig.host.trackInputPeak (0) == doctest::Approx (sourceAmplitude (0)).epsilon (0.02));
 }
+
+TEST_CASE ("audio host: the show held ramps every output to nought in a tenth of a second, stands the count, and comes back from the same sample - and LTC is never ramped")
+{
+    /*  PRD §3.34 (Pause / Play, the author's 2026-10-25): a 0.1 s de-click
+        out and in, and between them no block run - the count where it stood,
+        so Play goes on from the next sample. A steady tone makes the ramp
+        exact: each output sample is the tone times the level, the level one
+        4800th lower each sample. LTC on its own output is drawn after the
+        ramp and is not touched by it. Driven as a block source drives it:
+        beginBlock, then the block only if it says so. */
+    constexpr int rate = 48000;
+    constexpr int blockSize = 128;
+    constexpr int ramp = rate / 10;
+
+    HostRig rig;
+    ShowHold hold;
+    rig.host.setHold (&hold);
+
+    audio::HostSettings settings;
+    settings.sampleRate = rate;
+    settings.blockSize = blockSize;
+    settings.outputChannels = 4;
+
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 1;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    const auto tone = writeSteadyTone (rig.storage.folder, 1, rate, 4);
+    REQUIRE (tone.existsAsFile());
+    REQUIRE (rig.host.setTrackSource (0, 0, tone.getFullPathName().toStdString()));
+
+    auto* matrix = rig.host.trackMatrix (0);
+    REQUIRE (matrix != nullptr);
+    matrix->setLevelDb (0.0f);
+    matrix->setGain (0, 0, 1.0f);
+    matrix->snapToTargets();
+
+    Engine engine;
+    audio::HostPlayer player { rig.host, engine };
+    player.setTimecodeOutput (2, -18.0);
+
+    const auto pump = [&rig]
+    {
+        if (! rig.host.beginBlock())
+            return false;
+
+        rig.host.processBlock();
+        return true;
+    };
+
+    for (int i = 0; i < 8; ++i)
+        REQUIRE (pump());
+
+    REQUIRE (rig.host.waitForTrackSourceReady (0, 10000));
+    REQUIRE (rig.host.launchTrack (0));
+
+    for (int i = 0; i < 32; ++i)
+        REQUIRE (pump());
+
+    const auto rateOfCode = timecode::Rate::fps25;
+    REQUIRE (player.placeTimecode (5, rig.host.clock().samplesElapsed() + blockSize, 0, rateOfCode));
+
+    for (int i = 0; i < 8; ++i)
+        REQUIRE (pump());
+
+    RecordingSink sink;
+    sink.prepare (settings.outputChannels, 3 * rate);
+    rig.host.setBlockSink (&sink);
+
+    //  At full level, untouched.
+    REQUIRE (pump());
+    CHECK (sink.buffer.getMagnitude (0, 0, blockSize) == doctest::Approx (sourceAmplitude (0)).epsilon (0.02));
+
+    //  Held: the ramp, exact to the sample, while the count still moves.
+    hold.want (ShowHold::Want::hold);
+    const auto rampFrom = sink.written;
+    int pulled = 0;
+
+    while (pump())
+        ++pulled;
+
+    CHECK (pulled == (ramp + blockSize - 1) / blockSize);
+    CHECK (rig.host.clock().isHeld());
+    CHECK (hold.held());
+
+    const auto* out = sink.buffer.getReadPointer (0);
+    int wrong = 0;
+
+    for (int k = 0; k < ramp; ++k)
+    {
+        const auto expected = sourceAmplitude (0) * static_cast<float> (ramp - (k + 1)) / static_cast<float> (ramp);
+
+        if (std::abs (out[rampFrom + k] - expected) > 1.0e-3f)
+            ++wrong;
+    }
+
+    CHECK (wrong == 0);
+    CHECK_FALSE (sink.buffer.getMagnitude (0, rampFrom + ramp, sink.written - rampFrom - ramp) > 0.0f);
+
+    //  ... and LTC kept its level through the ramp.
+    const auto level = juce::Decibels::decibelsToGain (-18.0f);
+    CHECK (sink.buffer.getMagnitude (2, rampFrom + ramp / 2, ramp / 2) >= level * 0.999f);
+
+    //  While held: nothing runs, nothing is written, the count stands.
+    const auto stood = rig.host.clock().samplesElapsed();
+    const auto writtenWhileHeld = sink.written;
+
+    for (int i = 0; i < 50; ++i)
+        CHECK_FALSE (pump());
+
+    CHECK (rig.host.clock().samplesElapsed() == stood);
+    CHECK (sink.written == writtenWhileHeld);
+    CHECK (rig.host.clock().isHeld());
+
+    //  Play: the next sample, ramping back up, then at full level.
+    hold.want (ShowHold::Want::open);
+    const auto openFrom = sink.written;
+
+    for (int i = 0; i < 2 * ramp / blockSize; ++i)
+        REQUIRE (pump());
+
+    CHECK_FALSE (rig.host.clock().isHeld());
+    CHECK_FALSE (hold.held());
+    CHECK (out[openFrom] == doctest::Approx (sourceAmplitude (0) / ramp).epsilon (0.05));
+
+    wrong = 0;
+
+    for (int k = 0; k < ramp; ++k)
+    {
+        const auto expected = sourceAmplitude (0) * static_cast<float> (k + 1) / static_cast<float> (ramp);
+
+        if (std::abs (out[openFrom + k] - expected) > 1.0e-3f)
+            ++wrong;
+    }
+
+    CHECK (wrong == 0);
+    CHECK (out[openFrom + ramp + 10] == doctest::Approx (sourceAmplitude (0)).epsilon (0.001));
+
+    //  Muted: pulled, the count moving, nothing heard.
+    hold.want (ShowHold::Want::muted, true);
+    const auto mutedFrom = sink.written;
+    const auto before = rig.host.clock().samplesElapsed();
+
+    for (int i = 0; i < 4; ++i)
+        REQUIRE (pump());
+
+    CHECK (rig.host.clock().samplesElapsed() == before + 4 * blockSize);
+    CHECK_FALSE (sink.buffer.getMagnitude (0, mutedFrom, 4 * blockSize) > 0.0f);
+
+    rig.host.setBlockSink (nullptr);
+}
+
+TEST_CASE ("audio recovery: Pause and Play are let through an outage, and ask the hold at once - nothing sounds to de-click")
+{
+    /*  PRD §3.34 with §6.2: a show paused while its interface is gone comes
+        back held, with no tenth of a second of sound on the way down; and a
+        Play in the outage comes back playing. A GO is still refused - the
+        outage's reason first. */
+    Engine engine;
+    doc::ShowDocument document;
+    cue::RunTable runs;
+    cue::Focus focus;
+    auto runIds = doc::IdRegistry::withSeed (41);
+    cue::Runner runner { document, runs, runIds, focus };
+    audio::AudioState state;
+
+    doc::registerDocumentCommands (engine.commands(), document);
+    cue::registerCueCommands (engine.commands(), document, focus);
+    cue::registerRunCommands (engine.commands(), runs);
+    cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+    audio::registerAudioCommands (engine.commands(), state);
+    audio::registerAudioSettingsCommands (engine, document, runner, runs, state);
+
+    std::vector<std::pair<ShowHold::Want, bool>> asked;
+    runner.setHoldRequest ([&asked] (ShowHold::Want want, bool atOnce) { asked.emplace_back (want, atOnce); });
+
+    const auto listId = document.createList ("Show").id;
+    const auto first = document.createCue (listId, 0, "memo", "One").id;
+    REQUIRE (document.setAttribute (cue::standbyAddressOf (listId), first).ok);
+
+    state.status = "running";
+    engine.submit ("engine", "audio.connection", { osc::Value::boolean (false) });
+    REQUIRE (engine.processTick (11).applied == 1);
+    REQUIRE (state.status == "noClock");
+
+    engine.submit ("cli", "run.pauseAll", {});
+    CHECK (engine.processTick (11).applied == 1);
+    CHECK (runner.showPaused());
+
+    engine.submit ("cli", "go", {});
+    CHECK (engine.processTick (11).rejected == 1);
+    CHECK (engine.lastError().find ("audio-reconnecting") != std::string::npos);
+
+    engine.submit ("cli", "run.playAll", {});
+    CHECK (engine.processTick (11).applied == 1);
+    CHECK_FALSE (runner.showPaused());
+
+    REQUIRE (asked.size() == 2u);
+    CHECK (asked[0] == std::make_pair (ShowHold::Want::hold, true));
+    CHECK (asked[1] == std::make_pair (ShowHold::Want::open, true));
+
+    //  The interface back: a pause is ramped again.
+    state.resumePlayback = [] { return true; };
+    engine.submit ("engine", "audio.connection", { osc::Value::boolean (true) });
+    REQUIRE (engine.processTick (12).applied == 1);
+    engine.submit ("cli", "run.pauseAll", {});
+    CHECK (engine.processTick (13).applied == 1);
+    REQUIRE (asked.size() == 3u);
+    CHECK (asked[2] == std::make_pair (ShowHold::Want::hold, false));
+}

@@ -120,17 +120,30 @@ namespace wfg::video
             {
                 const auto pair = region::readClock (r);
 
+                /*  THE SHOW LET GO AFTER A HOLD (PRD §3.34): the count stood
+                    while the steady clock went on, so the line starts again
+                    from the next pair rather than slewing the pause out. */
+                if (pair.heldAt < 0 && wasHeld)
+                    estimate.forget();
+
+                wasHeld = pair.heldAt >= 0;
+
                 if (pair.nanos != lastNanos)
                 {
                     estimate.feed (pair.sample, pair.nanos, pair.sampleRate);
                     lastNanos = pair.nanos;
                 }
 
-                return estimate.sampleAt (nanos);
+                /*  AND WHILE IT IS HELD, no picture past where the count will
+                    stand: the line runs on, the pictures stop there - never
+                    ahead of the sound and then back. */
+                const auto at = estimate.sampleAt (nanos);
+                return pair.heldAt >= 0 && at > pair.heldAt ? pair.heldAt : at;
             }
 
             ClockEstimate estimate;
             std::int64_t lastNanos = 0;
+            bool wasHeld = false;
         };
 
         //==============================================================================

@@ -946,8 +946,8 @@ TEST_CASE ("key chord: one spelling, whatever order and case it came in")
     CHECK (chordOf (true, false, true, "k") == std::optional<std::string> ("Mod+Shift+K"));
     CHECK_FALSE (chordOf (false, false, false, "comma").has_value());
 
-    //  GO, Esc and Doh! whatever the modifiers, and every shortcut either client answers to.
-    for (const auto* kept : { "Space", "Mod+Space", "Shift+Escape", "Escape", "F9", "Alt+F9", "F5", "F",
+    //  GO, Esc, Doh! and Pause / Play whatever the modifiers, and every shortcut either client answers to.
+    for (const auto* kept : { "Space", "Mod+Space", "Shift+Escape", "Escape", "F9", "Alt+F9", "F8", "Mod+F8", "F5", "F",
                               "Shift+F", "ArrowUp", "ArrowDown", "Mod+Z", "Mod+Shift+Z", "Mod+S", "Mod+T", "Delete" })
     {
         INFO (kept);

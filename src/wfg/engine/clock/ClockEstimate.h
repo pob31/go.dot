@@ -129,6 +129,12 @@ namespace wfg
         }
 
         bool hasStarted() const noexcept       { return started; }
+
+        /*  THE LINE LET GO (PRD §3.34): the count stood while the steady
+            clock went on, so the line through them is no line - and a pause
+            shorter than a quarter of a second would otherwise be slewed out
+            over seconds rather than started again. The next pair starts it. */
+        void forget() noexcept                 { started = false; }
         double samplesPerSecond() const noexcept  { return slope * 1.0e9; }
 
     private:

@@ -181,6 +181,15 @@ namespace wfg
 
         void setBeforeTick (BeforeTick hook) { beforeTick = std::move (hook); }
 
+        /*  Run IN PLACE OF beforeTick on every pass made at a frozen tick -
+            an outage (PRD §6.2) or the show held (PRD §3.34) - with the frozen
+            tick's index, before the engine drains it. Serve gives it the half
+            of its before-tick that HEARS - the pair, the hands, the devices,
+            the autosave - and not the half that moves the show on, so a Play
+            from a Stream Deck arrives while nothing else moves. Set before
+            start() and never while running, like the hooks around it. */
+        void setWhileHeld (BeforeTick hook) { whileHeld = std::move (hook); }
+
         using AfterTick = std::function<void (const Engine::TickResult&)>;
 
         void setAfterTick (AfterTick hook) { afterTick = std::move (hook); }
@@ -239,6 +248,16 @@ namespace wfg
             return processed.load (std::memory_order_relaxed) + 1;
         }
 
+        /*  EVERY PASS this thread has made, ticks and frozen passes alike: a
+            count that keeps moving while the tick index stands (PRD §3.34). For
+            timing nothing logs - a double press, a keepalive, a link's
+            liveness - which a frozen tick would otherwise stretch for ever.
+            Never in a record: a replay makes no frozen passes. Any thread. */
+        std::int64_t passCount() const noexcept
+        {
+            return passes.load (std::memory_order_relaxed);
+        }
+
         /** Samples between the most recent tick's position and where the
             counter was when it ran. */
         std::int64_t lateness() const noexcept
@@ -286,6 +305,7 @@ namespace wfg
 
     private:
         BeforeTick beforeTick;
+        BeforeTick whileHeld;
         AfterTick afterTick;
         spatcore::rt::AudioWorkgroupCoordinator* workgroups = nullptr;
 
@@ -305,6 +325,7 @@ namespace wfg
         std::atomic<bool> elevated { false };
         std::atomic<int> elevatedBy { static_cast<int> (app::RealtimeBy::pending) };
         std::atomic<std::int64_t> processed { -1 };
+        std::atomic<std::int64_t> passes { 0 };
         std::atomic<std::int64_t> lastLateness { 0 };
         std::atomic<std::int64_t> maxLateness { 0 };
         std::atomic<std::int64_t> worstSince { 0 };

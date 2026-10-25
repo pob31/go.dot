@@ -156,12 +156,12 @@ namespace wfg::cue
 
     bool isReservedChord (std::string_view canonical)
     {
-        /*  GO, ESC AND DOH! WHATEVER THE MODIFIERS (AQK): the last part names
-            the key. */
+        /*  GO, ESC, DOH! AND PAUSE / PLAY WHATEVER THE MODIFIERS (AQK; F8,
+            PRD §3.34): the last part names the key. */
         const auto plus = canonical.rfind ('+');
         const auto key = plus == std::string_view::npos ? canonical : canonical.substr (plus + 1);
 
-        if (key == "Space" || key == "Escape" || key == "F9")
+        if (key == "Space" || key == "Escape" || key == "F9" || key == "F8")
             return true;
 
         return std::find (clientShortcuts.begin(), clientShortcuts.end(), canonical) != clientShortcuts.end();

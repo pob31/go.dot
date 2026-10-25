@@ -81,8 +81,15 @@ namespace wfg
 
         bool lastBlock (BlockStamp::Reading& out) const noexcept override { return stamp.read (out); }
 
+        /*  THE AUDIO THREAD, once a block, with what ShowHold::beginBlock
+            answered (PRD §3.34): a held count is one the graph is not moving.
+            One release store; the lipogram holds. */
+        void setHeld (bool value) noexcept { held.store (value, std::memory_order_release); }
+        bool isHeld() const noexcept override { return held.load (std::memory_order_acquire); }
+
     private:
         std::atomic<std::int64_t> samples { 0 };
+        std::atomic<bool> held { false };
         BlockStamp stamp;
     };
 }

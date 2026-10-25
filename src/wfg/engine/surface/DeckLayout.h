@@ -50,7 +50,7 @@
 
 namespace wfg::surface
 {
-    enum class DeckRole { blank, pad, learnt, cartPage, go, esc, doh, standbyUp, standbyDown,
+    enum class DeckRole { blank, pad, learnt, cartPage, go, esc, doh, pause, standbyUp, standbyDown,
                           pageSend, pageEq, pageFx, pageLoop,
                           aimPrevious, aimNext, controlsPrevious, controlsNext };
 

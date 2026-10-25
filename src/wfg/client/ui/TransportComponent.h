@@ -80,6 +80,12 @@ namespace wfg::client::ui
                 left of PANIC with a row of air between them, and F9 - once
                 per key-down. */
             std::function<void()> doh;
+
+            /*  PAUSE / PLAY (PRD §3.34): `true` holds the show, `false` lets it
+                go - what the button's word says, which is the reading's, so a
+                press made on a reading a pass behind cannot undo itself. Its
+                own button, left of Doh!, and F8 - once per key-down. */
+            std::function<void (bool hold)> pause;
             std::function<void()> undo;
             std::function<void()> redo;
             std::function<void()> save;
@@ -220,9 +226,17 @@ namespace wfg::client::ui
             the window runs out, and is disabled once it is over (`dressDoh`). */
         juce::TextButton dohButton { "Doh!" };
 
+        /*  PAUSE / PLAY (PRD §3.34; the author, 2026-10-25: "Next to Doh, can
+            we add a pause button to hold all actions until toggled back to
+            play?"): left of Doh!, the same height, its word the state's -
+            "Pause" while the show runs, "Play" while it is held - and its
+            ground a colour of its own while held, the word carrying it (§4.8). */
+        juce::TextButton pauseButton { "Pause" };
+
         /*  F9's latch: shut by the press that sent the Doh!, open again once
-            the key is up. */
+            the key is up. And F8's, for Pause / Play. */
         bool dohKeyDown = false;
+        bool pauseKeyDown = false;
 
         int rowHeight() const noexcept;
         juce::Rectangle<int> bannerArea() const;
@@ -242,6 +256,8 @@ namespace wfg::client::ui
 
         /** Doh! in its own colour while the window is open, fading, then idle and disabled. */
         void dressDoh();
+        void dressPause();
+        void pressPause();
 
         /** The pair's words on the title line and its banner, from the reading. */
         void dressPair (const model::PairReading& pair);

@@ -321,6 +321,7 @@ namespace wfg::cue
 
         at.suspended.assign (suspended.begin(), suspended.end());
         at.liftedAt = liftedAt;
+        at.showPaused = lists.paused();
 
         for (const auto& [cueId, bed] : paused)
             at.paused.push_back ({ cueId, bed.run, bed.resumes, bed.at.from, bed.at.range, bed.media });
@@ -474,6 +475,12 @@ namespace wfg::cue
 
         suspended = std::set<std::string> (at.suspended.begin(), at.suspended.end());
         liftedAt = at.liftedAt;
+
+        //  Paused as the leader is, and this machine's sound held with it (PRD §3.34).
+        if (at.showPaused)
+            pauseShow();
+        else
+            playShow();
         paused.clear();
 
         for (const auto& bed : at.paused)

@@ -14,6 +14,8 @@
   "gestures": {
     "go":           { "command": "go",               "args": [],                     "where": "the GO button" },
     "doh":          { "command": "go.doh",           "args": [],                     "where": "the Doh! button, left of PANIC (namespace draft 75)" },
+    "pause":        { "command": "run.pauseAll",     "args": [],                     "where": "the Pause button, left of Doh!, and F8 while the show runs (PRD 3.34)" },
+    "play":         { "command": "run.playAll",      "args": [],                     "where": "the same button reading Play, and F8 while the show is held (PRD 3.34)" },
     "panic-stop":   { "command": "run.stopAll",      "args": [],                     "where": "PANIC pressed once (namespace draft 75)" },
     "panic-kill":   { "command": "run.killAll",      "args": [],                     "where": "PANIC pressed again within 0.75 s (namespace draft 75)" },
     "park":         { "command": "standby.set",      "args": ["s"],                  "where": "a row's left edge, 'standby here' in the inspector, or Park the standby here in a cue's sheet" },

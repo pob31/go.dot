@@ -96,8 +96,17 @@ namespace wfg
                 woken late is still the block of that moment, and the schedule
                 catches up with it, so the line the tick thread puts through
                 these stamps is the schedule's and not the scheduler's. */
-            source.stampBlock (std::chrono::duration_cast<std::chrono::nanoseconds> (due.time_since_epoch()).count());
-            source.advance (block);
+            /*  THE SHOW HELD (PRD §3.34): no sound here to de-click, so the
+                count simply stands while held, and the schedule goes on. */
+            auto* holding = hold.load (std::memory_order_acquire);
+            const auto pull = holding == nullptr || holding->beginBlock (source.samplesElapsed());
+            source.setHeld (! pull);
+
+            if (pull)
+            {
+                source.stampBlock (std::chrono::duration_cast<std::chrono::nanoseconds> (due.time_since_epoch()).count());
+                source.advance (block);
+            }
 
             const auto late = durationToSamples (
                 std::chrono::duration_cast<std::chrono::nanoseconds> (Clock::now() - due), rate);

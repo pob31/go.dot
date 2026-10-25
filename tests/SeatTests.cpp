@@ -452,6 +452,15 @@ TEST_CASE ("seat: a position reads back as it was written - lists, runs, rounds,
     CHECK_FALSE (pair::readPosition ("position i:" + std::to_string (pair::Position::format + 1) + " h:1 h:1\nend\n").has_value());
     CHECK_FALSE (pair::readPosition ("position i:" + format + " h:1 h:1\nrun s:\"A\"\nend\n").has_value());
     CHECK (pair::readPosition ("position i:" + format + " h:1 h:1\nend\n").has_value());
+
+    //  THE SHOW HELD (PRD §3.34): said only when it is, and read back.
+    CHECK_FALSE (read->showPaused);
+    CHECK (text.find ("held") == std::string::npos);
+    auto paused = *read;
+    paused.showPaused = true;
+    const auto again = pair::readPosition (pair::toText (paused));
+    REQUIRE (again.has_value());
+    CHECK (again->showPaused);
 }
 
 //==============================================================================

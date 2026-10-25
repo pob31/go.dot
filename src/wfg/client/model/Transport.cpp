@@ -173,6 +173,19 @@ namespace wfg::client::model
         if (status == "noClock")
             return "Audio disconnected - cues paused; waiting for the interface and clock.";
 
+        /*  THE SHOW HELD (PRD §3.34), said for as long as it is - and a press
+            it refused said as that, since the pause is its whole reason. */
+        if (showPaused())
+        {
+            const auto said = words (lastError);
+
+            if (said.size() == 5 && said[3] == "paused")
+                return (said[4] == "go" ? std::string ("GO") : said[4])
+                       + " ignored: the show is paused - press Play (F8) to go on";
+
+            return "Paused - press Play (F8) to go on";
+        }
+
         /*  tick, sequence, origin, reason, command - and the command may carry
             no spaces, so five fields is exactly what a well-formed record has.
             What follows the fifth is where a refusal happened when the reason
@@ -392,8 +405,17 @@ namespace wfg::client::model
         return locked == Flag::yes ? "locked" : "";
     }
 
+    std::string TransportReading::pauseTip() const
+    {
+        return showPaused() ? "Play: everything held goes on from where it stood (F8)"
+                            : "Pause: hold everything Go.dot runs where it is, silent, until Play (F8)";
+    }
+
     std::string TransportReading::goLine() const
     {
+        if (showPaused())
+            return "paused";
+
         if (audioRunning())
             return {};
 
@@ -412,7 +434,7 @@ namespace wfg::client::model
                              r.listId, r.listName, r.standbyId, r.standbyName, r.standbyKind,
                              r.standbyNotes,
                              r.canUndo, r.canRedo, r.undoName, r.redoName,
-                             r.status, r.lastError, r.rateMoved, r.rateMovedTick, r.dial, r.writeError,
+                             r.status, r.lastError, r.paused, r.rateMoved, r.rateMovedTick, r.dial, r.writeError,
                              r.warningCount, r.warningFirst, r.revision,
                              r.doh, r.dohCue, r.dohWindow, r.resume, r.dohForget, r.dohForgetCue,
                              r.dohReport, r.dohReportList, r.pair);
@@ -466,6 +488,7 @@ namespace wfg::client::model
 
         reading.status = text (snapshot, "/godot/audio/status");
         reading.lastError = text (snapshot, "/godot/engine/lastError");
+        reading.paused = flag (snapshot, "/godot/engine/paused");
         reading.rateMoved = text (snapshot, "/godot/audio/rateMoved");
         reading.rateMovedTick = text (snapshot, "/godot/audio/rateMovedTick");
         reading.writeError = text (snapshot, "/godot/document/writeError");

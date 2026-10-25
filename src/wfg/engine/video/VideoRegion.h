@@ -66,7 +66,7 @@ namespace wfg::video::region
     constexpr std::uint32_t magic = 0x56746f47u;
 
     /** Bumped whenever the structure below changes shape. */
-    constexpr std::uint32_t version = 24;
+    constexpr std::uint32_t version = 25;
 
     constexpr int idChars = 16;
     constexpr int nameChars = 160;
@@ -201,6 +201,9 @@ namespace wfg::video::region
         std::atomic<std::int64_t> sample;
         std::atomic<std::int64_t> nanos;
         std::atomic<std::int32_t> sampleRate;
+
+        //  The sample the show stands at while held (PRD §3.34), or -1.
+        std::atomic<std::int64_t> heldAt;
     };
 
     struct Canvas
@@ -714,6 +717,9 @@ namespace wfg::video::region
         for (auto& layer : r.layers)
             layer.removeAt.store (notRemoved, std::memory_order_relaxed);
 
+        //  Not held: a zeroed field would read "held at nought".
+        r.clock.heldAt.store (-1, std::memory_order_relaxed);
+
         r.layoutHash.store (layoutHash(), std::memory_order_release);
     }
 
@@ -775,12 +781,14 @@ namespace wfg::video::region
 
     //==============================================================================
     /*  THE CLOCK PAIR, the engine's side and the renderer's. */
-    inline void writeClock (Region& r, std::int64_t sample, std::int64_t nanos, int sampleRate) noexcept
+    inline void writeClock (Region& r, std::int64_t sample, std::int64_t nanos, int sampleRate,
+                            std::int64_t heldAt = -1) noexcept
     {
         beginWrite (r.clock.seq);
         r.clock.sample.store (sample, std::memory_order_relaxed);
         r.clock.nanos.store (nanos, std::memory_order_relaxed);
         r.clock.sampleRate.store (sampleRate, std::memory_order_relaxed);
+        r.clock.heldAt.store (heldAt, std::memory_order_relaxed);
         endWrite (r.clock.seq);
     }
 
@@ -861,6 +869,7 @@ namespace wfg::video::region
         std::int64_t sample = -1;
         std::int64_t nanos = 0;
         int sampleRate = 0;
+        std::int64_t heldAt = -1;
     };
 
     inline ClockReading readClock (const Region& r)
@@ -872,6 +881,7 @@ namespace wfg::video::region
             out.sample = r.clock.sample.load (std::memory_order_relaxed);
             out.nanos = r.clock.nanos.load (std::memory_order_relaxed);
             out.sampleRate = r.clock.sampleRate.load (std::memory_order_relaxed);
+            out.heldAt = r.clock.heldAt.load (std::memory_order_relaxed);
         });
 
         return out;

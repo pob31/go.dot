@@ -29,7 +29,8 @@ const NAMED = new Map([
 ]);
 
 /*  EVERY SHORTCUT EITHER CLIENT ANSWERS TO, the engine's list word for word
-    (KeyChord.cpp) - and GO's Space, Esc and Doh!'s F9 whatever the modifiers. */
+    (KeyChord.cpp) - and GO's Space, Esc, Doh!'s F9 and Pause / Play's F8
+    whatever the modifiers. */
 const SHORTCUTS = new Set([
   "F5", "F", "Shift+F", "ArrowUp", "ArrowDown", "Mod+ArrowUp", "Mod+ArrowDown",
   "Enter", "Tab", "Shift+Tab", "Delete", "Backspace", "Mod+Backspace",
@@ -69,7 +70,7 @@ export function chordOf(event) {
 export function isReserved(chord) {
   const key = chord.slice(chord.lastIndexOf("+") + 1);
 
-  return key === "Space" || key === "Escape" || key === "F9" || SHORTCUTS.has(chord);
+  return key === "Space" || key === "Escape" || key === "F9" || key === "F8" || SHORTCUTS.has(chord);
 }
 
 /*  THE TRIGGERS A CHORD FIRES, from a reply's addresses: every key trigger

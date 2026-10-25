@@ -547,12 +547,12 @@ namespace wfg::video
         return *impl->sink;
     }
 
-    void VideoHost::tick (std::int64_t sampleNow, int sampleRate) noexcept
+    void VideoHost::tick (std::int64_t sampleNow, int sampleRate, std::int64_t heldAt) noexcept
     {
         if (impl->r == nullptr || sampleNow < 0)
             return;
 
-        region::writeClock (*impl->r, sampleNow, steadyNanos(), sampleRate);
+        region::writeClock (*impl->r, sampleNow, steadyNanos(), sampleRate, heldAt);
 
         /*  A SLOT IS LET GO a second after its removal was due: long enough
             for a renderer a frame or two behind to have drawn it gone. */

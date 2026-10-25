@@ -288,6 +288,14 @@ namespace wfg::cue
         void setDohReport (const DohReport& report) { dohReportNow = report; }
         const DohReport& dohReport() const noexcept { return dohReportNow; }
 
+        /*  THE SHOW HELD (PRD §3.34): set by `run.pauseAll`, cleared by
+            `run.playAll`, an Esc or a double Esc - handlers all, so a replay
+            holds the same ticks. ONE FOR THE WHOLE RUNNER: Pause stands every
+            list still. Published as `/godot/engine/paused`; never saved, so a
+            show opened again is not paused. */
+        void setPaused (bool value) noexcept { pausedNow = value; }
+        bool paused() const noexcept { return pausedNow; }
+
         /*  WHAT IS GOT READY AHEAD OF GO (namespace draft §48): one entry per
             cue the next GO starts that has a file - the focused list's
             standby's sounds, pictures and movies, then the other lists'
@@ -381,6 +389,7 @@ namespace wfg::cue
             resumes.clear();
             dohForgetNow = {};
             dohReportNow = {};
+            pausedNow = false;
         }
 
         static constexpr std::size_t kept = 64;
@@ -402,6 +411,7 @@ namespace wfg::cue
         std::map<std::string, std::string> resumes;
         DohForget dohForgetNow;
         DohReport dohReportNow;
+        bool pausedNow = false;
         std::vector<Ahead> aheadNow;
     };
 }

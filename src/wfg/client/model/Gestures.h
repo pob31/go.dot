@@ -66,6 +66,13 @@ namespace wfg::client::gesture
         and its own key; one named command, as §4.11 asks, and never Undo. */
     Event doh();
 
+    /*  PAUSE AND PLAY (PRD §3.34; the author, 2026-10-25): everything Go.dot
+        runs held where it stands, and let go. Two commands, not a toggle: the
+        button and F8 send what the button's word says, so a press made on a
+        reading a pass behind cannot undo itself. */
+    Event pause();
+    Event play();
+
     /*  SHIFT+F (namespace draft §63, ALM, ALO): the cue the last GO fired,
         flagged to look at afterwards - one named command, since which cue that
         was is the engine's to know. F on the picked cues is a `setNodes` of

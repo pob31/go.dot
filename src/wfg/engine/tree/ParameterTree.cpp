@@ -4362,6 +4362,9 @@ namespace wfg::tree
             else if (name == "rtForeignAllocations")
                                                text = std::to_string (state.rtForeignAllocations);
             else if (name == "lastError")      text = state.lastError;
+            /*  THE SHOW HELD (PRD §3.34): the runner's, not serve's - a
+                replay or a rig with a runner publishes it too. */
+            else if (name == "paused")         text = lists != nullptr && lists->paused() ? "true" : "false";
             else if (name == "analysisRebuilds")
                                                text = std::to_string (analysis.rebuilds());
             else if (name == "tickRealtime")   text = state.tickRealtime ? "true" : "false";

@@ -208,8 +208,10 @@ namespace wfg::video
 
         /*  The clock pair - Go.dot's sample now and the machine's steady time -
             and the layers whose removal has passed let go. Tick thread, once a
-            tick; three stores and a loop over sixty-four slots. */
-        void tick (std::int64_t sampleNow, int sampleRate) noexcept;
+            tick; three stores and a loop over sixty-four slots. `heldAt` is the
+            sample the show will stand at once held (PRD §3.34), -1 while it is
+            not: the renderer draws no picture past it. */
+        void tick (std::int64_t sampleNow, int sampleRate, std::int64_t heldAt = -1) noexcept;
 
         /*  THE SHOW'S CANVASES AND OUTPUTS, read off the document and written
             into the region only when they changed. Tick thread, when the show

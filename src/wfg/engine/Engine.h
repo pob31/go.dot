@@ -237,6 +237,15 @@ namespace wfg
             return ! admissionCheck || admissionCheck (command).empty();
         }
 
+        /*  THE SHOW HELD (PRD §3.34): a second gate, after the first, told
+            who asked as well as what - Pause refuses what starts a cue from a
+            hand, a device or a client, and lets the engine's own records in,
+            the ones the show's last tenth of a second owes as it ramps down.
+            Handler state only, like the first: a replay refuses the same. */
+        using HoldCheck = std::function<std::string (const std::string& command, const std::string& origin)>;
+
+        void setHoldCheck (HoldCheck check) { holdCheck = std::move (check); }
+
     private:
         LogRecord applyEvent (std::int64_t tickIndex, const Event& event, const Command*& found);
         void record (const LogRecord& r);
@@ -249,6 +258,7 @@ namespace wfg
         BeforeApply beforeApply;
         AfterRecord afterRecord;
         std::function<std::string (const std::string&)> admissionCheck;
+        HoldCheck holdCheck;
 
         Gate gate;
         std::atomic<bool> gated { false };

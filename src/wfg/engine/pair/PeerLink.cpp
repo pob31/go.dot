@@ -661,7 +661,7 @@ namespace wfg::pair
                     return std::chrono::duration_cast<std::chrono::nanoseconds> (at.time_since_epoch()).count();
                 };
 
-                send (origin, wire::encode (wire::pong, { a[0], osc::Value::int64 (tickNow.load (std::memory_order_relaxed)),
+                send (origin, wire::encode (wire::pong, { a[0], osc::Value::int64 (passNow.load (std::memory_order_relaxed)),
                                                           osc::Value::int64 (nanosOf (arrival)),
                                                           osc::Value::int64 (nanosOf (LinkClock::now())) }));
             }
@@ -921,8 +921,6 @@ namespace wfg::pair
 
     void Stream::afterTick (std::int64_t tick, double timeoutSeconds)
     {
-        tickNow.store (tick, std::memory_order_relaxed);
-
         {
             const std::lock_guard<std::mutex> held { inboxLock };
             arrivals.swap (inbox);

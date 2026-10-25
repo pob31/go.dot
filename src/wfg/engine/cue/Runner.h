@@ -50,6 +50,7 @@
 #include <wfg/engine/audio/EqSettings.h>
 #include <wfg/engine/audio/EditRenderTable.h>
 #include <wfg/engine/audio/MediaInfo.h>
+#include <wfg/engine/clock/ShowHold.h>
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/cue/GroupJoin.h>
 #include <wfg/engine/cue/CueList.h>
@@ -1952,6 +1953,42 @@ namespace wfg::cue
         void noteFireOnList (const std::string& cueId, const std::string& from, std::uint64_t cause);
         void noteEscape() noexcept;
 
+        /*  THE SHOW HELD (PRD §3.34, Pause / Play; the author, 2026-10-25:
+            "a pause button to hold all actions until toggled back to play").
+            The flag is handler state, in the list state, so a replay holds the
+            same ticks; what stands the sound and the count still is the block
+            source's hold (clock/ShowHold.h), asked through `holdRequest` -
+            serve's, and nobody's in a replay or a rig, where the flag alone
+            decides what is refused. `atOnce` skips the de-click: nothing
+            sounds to be de-clicked. */
+        using HoldRequest = std::function<void (ShowHold::Want want, bool atOnce)>;
+
+        void setHoldRequest (HoldRequest request) { holdRequest = std::move (request); }
+        bool showPaused() const noexcept { return lists.paused(); }
+
+        /*  `run.pauseAll`'s and `run.playAll`'s: false when there was nothing
+            to do - already held, or not held - which is applied and nothing,
+            so a second press from a tablet a pass behind changes nothing. */
+        bool pauseShow();
+        bool playShow();
+
+        /*  ESC OR DOUBLE ESC WHILE THE SHOW IS HELD (PRD §3.34; the author,
+            2026-10-25: both work, the pause ends, and not a sample of what was
+            paused is heard again). Called by both stops' handlers BEFORE the
+            run table's half: the flag goes, every voice that sounded when the
+            show was held is killed, and the block source is asked to run the
+            graph MUTED - so the stops land and the footers run with nothing
+            heard - until those voices are quiet, when this runner's hook opens
+            it. The panic fade is not begun: nothing is heard to fade. */
+        void stopWhileHeld (std::int64_t tick);
+
+        /*  Whether a command is refused while the show is held when a hand,
+            a device or a client asks it (PRD §3.34): everything that starts a
+            cue or moves a run on, the author's "everything that starts a cue"
+            (2026-10-25), and a change of the audio settings, which would
+            rebuild a graph standing still. */
+        static bool refusedWhilePaused (const std::string& command);
+
         /*  A START CUE'S TARGET FIRED UNDER THE GO THAT FIRED THE START CUE:
             `cue.fire`'s cause, set around the fire so what the target makes
             carries that GO, and tested first - a cause a Doh took back fires
@@ -3372,6 +3409,16 @@ namespace wfg::cue
         /*  See `setOverrideDocument`. Null in a runner nobody registered commands for,
             and then an enable or disable cue switches nothing. */
         doc::ShowDocument* overrideDocument = nullptr;
+
+        //  See `setHoldRequest`.
+        HoldRequest holdRequest;
+
+        /*  See `stopWhileHeld`: the tick of the stop and the voices it killed,
+            watched by the hook until they are quiet. Machine state: a replay,
+            with nobody to ask, never sets it. */
+        std::int64_t heldStopAt = -1;
+        std::vector<int> heldSilenced;
+        void openAfterHeldStop (std::int64_t tick);
 
         /*  An enable or disable cue's switch of its target (§27, PK), noted on
             the GO it belongs to for Doh! (PS), stepping the standby off a cue

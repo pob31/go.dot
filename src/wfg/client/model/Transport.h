@@ -105,6 +105,11 @@ namespace wfg::client::model
         std::string status;           ///< `/godot/audio/status`
         std::string lastError;        ///< `/godot/engine/lastError`; empty when nothing was refused
 
+        /*  `/godot/engine/paused` (PRD §3.34): the show held by Pause - said
+            in words on the line under the cues and in the button's own word,
+            never by its colour alone (§4.8). */
+        Flag paused = Flag::unsaid;
+
         /*  `/godot/audio/rateMoved` and its tick, as digits: the last time the
             show followed the interface onto another clock (PRD §6.2), in
             words - said until something newer is refused (`errorLine`). */
@@ -259,6 +264,13 @@ namespace wfg::client::model
             engine that has not said. Empty while running - the yellow is the
             ordinary state and needs no caption. */
         bool audioRunning() const noexcept { return status == "running"; }
+
+        /*  PAUSE / PLAY (PRD §3.34; the author's words, 2026-10-25): what the
+            button says - "Pause" while the show runs, "Play" while it is held -
+            which is also what a press sends; and its tooltip, the key named. */
+        bool showPaused() const noexcept { return isYes (paused); }
+        std::string pauseCaption() const { return showPaused() ? "Play" : "Pause"; }
+        std::string pauseTip() const;
         std::string goLine() const;
 
         /** "3 warnings · <the first>", or empty. Bounded, whatever the show says. */

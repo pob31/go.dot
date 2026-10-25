@@ -585,9 +585,9 @@ namespace wfg::midi
         lane.mute (on);
     }
 
-    void MidiSender::feedClock (std::int64_t sample, std::int64_t nanos, int sampleRate)
+    void MidiSender::feedClock (std::int64_t sample, std::int64_t nanos, int sampleRate, std::int64_t heldAt)
     {
-        lane.feedClock (sample, nanos, sampleRate);
+        lane.feedClock (sample, nanos, sampleRate, heldAt);
     }
 
     void MidiSender::setTimecodeOutputLatency (int samples)

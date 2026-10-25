@@ -313,7 +313,7 @@ namespace wfg::client::model
     std::vector<std::pair<std::string, std::string>> profileChoices();
 
     /*  ONE KEY OF A STREAM DECK, as `surface/<id>/keys` says it (namespace
-        draft §95): what it does - `cue` with the cue, `go`, `esc`, `doh`,
+        draft §95): what it does - `cue` with the cue, `go`, `esc`, `doh`, `pause`,
         `standbyUp`, `standbyDown`, a page's word, or nothing - and its words,
         its colour as #rrggbb, and whether it is lit or dim. */
     struct DeckKeyRow

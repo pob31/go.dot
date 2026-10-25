@@ -374,6 +374,17 @@ namespace wfg::audio
                 its schedule, so the line through the stamps is the schedule's. */
             audioHost.setBlockTime (std::chrono::duration_cast<std::chrono::nanoseconds> (due.time_since_epoch()).count());
 
+            /*  THE SHOW HELD (PRD §3.34): a block the hold does not run is
+                kept to the schedule and nothing else - no input read, nothing
+                captured or rendered, the count where it stood - so the render
+                holds show time and Play goes on from the next sample. */
+            if (! audioHost.beginBlock())
+            {
+                ++delivered;
+                lock.lock();
+                continue;
+            }
+
             /*  THE INPUTS AS THE GRAPH WILL HEAR THEM, captured on the sample
                 this block will be (RD.9b, audio/InputCapture.h). */
             const float* const* inputs = input != nullptr ? input->next (current.blockSize) : nullptr;

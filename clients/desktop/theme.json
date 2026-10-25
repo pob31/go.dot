@@ -35,6 +35,7 @@
   "go-ink": "#000000",
   "go-idle": "#4a4a52",
   "doh": "#ff6eb4",
+  "paused": "#5b9bd5",
 
   "eq-hp": "#e74c3c",
   "eq-1": "#e67e22",

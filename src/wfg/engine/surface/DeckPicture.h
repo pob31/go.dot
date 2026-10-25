@@ -52,7 +52,7 @@ namespace wfg::surface
         glyph, its word and sometimes a name under it. */
     struct KeyPicture
     {
-        enum class Glyph { none, go, esc, doh, standbyUp, standbyDown, pageNext,
+        enum class Glyph { none, go, esc, doh, pause, standbyUp, standbyDown, pageNext,
                            aimPrevious, aimNext, controlsPrevious, controlsNext,
                            pageSend, pageEq, pageFx, pageLoop };
 

@@ -175,8 +175,9 @@ namespace wfg::pair
             refused, not half read. 2 since TG.5, whose `code` lines a format-1
             reader would refuse as a word it does not know - so the refusal is
             said for what it is, the two builds' formats. 3 since VFX.5, whose
-            `field` lines a format-2 reader would refuse alike. */
-        static constexpr int format = 3;
+            `field` lines a format-2 reader would refuse alike. 4 since PRD
+            §3.34, whose `held` line says the show is paused. */
+        static constexpr int format = 4;
 
         std::uint64_t counter = 0;          // the last of the leader's stream applied by then
         std::int64_t tick = 0;              // the tick it is true at, after that tick ran
@@ -215,6 +216,10 @@ namespace wfg::pair
 
         std::vector<std::string> suspended;
         std::int64_t liftedAt = -1;
+
+        /*  THE SHOW HELD (PRD §3.34): a machine seated from this is paused
+            too, its own sound held where the leader's is. */
+        bool showPaused = false;
 
         struct Paused
         {

@@ -130,6 +130,12 @@ namespace wfg::pair
             std::string channel;
             LinkClock::time_point at {};
             std::int64_t tick = -1;             // -1: a message that carries none (RD.5's ping)
+
+            /*  Whether `tick` is the other machine's PASS COUNT - a ping's or
+                a pong's - rather than its tick, a beat's (PRD §3.34): the
+                passes go on while the show is held and the ticks stand, and
+                each is compared with its own kind. */
+            bool pass = false;
             double roundTrip = -1.0;            // < 0: none said
             wire::Hello hello;
             Ordered ordered;
@@ -140,6 +146,7 @@ namespace wfg::pair
             bool heardAny = false;
             LinkClock::time_point lastHeard {};
             std::int64_t lastTick = -1;
+            std::int64_t lastPass = -1;
             double roundTrip = 0.0;
             LinkClock::time_point tripAt {};
             bool tripSaid = false;

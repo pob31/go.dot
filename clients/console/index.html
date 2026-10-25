@@ -47,6 +47,11 @@
           press stops every cue gracefully (Esc), a second within 0.75 s drops
           everything (double Esc), and the word under it says which the next
           press will do. The keyboard keeps Esc and Esc Esc. -->
+    <!--  PAUSE / PLAY (PRD §3.34): left of Doh!, its word the state's - "Pause"
+          while the show runs, "Play" while it is held - and the note beside it
+          says "Paused" in words while it is (§4.8). F8 on the keyboard. -->
+    <button id="pause" data-held="no" title="Pause: hold everything Go.dot runs where it is, silent, until Play (F8)">Pause</button>
+    <span class="paused-note" id="paused-note" hidden>Paused - press Play (F8) to go on</span>
     <button id="doh" title="Doh!: take back the last GO, if it came too early">Doh!</button>
     <span class="panic" id="panic-wrap">
       <button id="panic" data-second="no">PANIC</button>

@@ -318,6 +318,12 @@ namespace wfg::audio
                 return;
             }
 
+            /*  THE SHOW HELD (PRD §3.34): once the de-click has reached
+                nought, no block is run, captured or counted - the outputs stay
+                the silence written above and the count stands, as it stands
+                through an outage. Atomics only (clock/ShowHold.h). */
+            if (! audioHost.beginBlock()) return;
+
             sink.destination = outputChannelData;
             sink.destinationChannels = numOutputChannels;
             sink.destinationFrames = numSamples;

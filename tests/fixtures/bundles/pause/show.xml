@@ -1,0 +1,25 @@
+<Show>
+  <Lists goDebounce="0">
+    <List id="PSSHW001" name="The show">
+      <Media id="PSRMP001" file="ramp.wav" name="The ramp" number="1">
+        <Route id="PSRTE001" bus="PSBSA001" gains="1 0"/>
+      </Media>
+      <Media id="PSWT0001" file="tone.wav" name="Later" number="2" preWait="3">
+        <Route id="PSRTE002" bus="PSBSB001" gains="1 0"/>
+      </Media>
+      <Media id="PSNXT001" file="tone.wav" name="Next" number="3">
+        <Route id="PSRTE003" bus="PSBSC001" gains="1 0"/>
+      </Media>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="4">
+    <Bus id="PSBSA001" name="Ramp" width="2"/>
+    <Bus id="PSBSB001" firstChannel="2" name="Later" width="2"/>
+    <Bus id="PSBSC001" firstChannel="4" name="Next" width="2"/>
+  </Audio>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces/>
+  <Dcas/>
+</Show>

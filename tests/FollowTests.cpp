@@ -419,6 +419,25 @@ TEST_CASE ("follow: every record of a main tick on one local tick, the main's ga
         CHECK (submitted[2].first == 581);
     }
 
+    SUBCASE ("held (PRD §3.34): a pass at a frozen tick lets every record that has arrived in at once, Play among them, and counts none late")
+    {
+        /*  The backup held with its main at 560: the main's Play, at its own
+            frozen tick 70, has a slot - 571 - the backup's tick will never
+            reach while it stands. */
+        submitted.clear();
+        follower.record (mainRecord (70, "run.playAll"));
+        follower.record (mainRecord (90, "go"));
+
+        localTick = 560;
+        follower.beforeTick (localTick, dueAt (localTick), 0.0004, true);
+
+        REQUIRE (submitted.size() == 2u);
+        CHECK (submitted[0].first == 560);
+        CHECK (submitted[0].second.command == "run.playAll");
+        CHECK (follower.late() == 1);
+        CHECK (follower.waiting() == 0u);
+    }
+
     SUBCASE ("the link lost: what waits goes in at once, and nothing more is held")
     {
         submitted.clear();

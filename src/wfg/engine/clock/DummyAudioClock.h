@@ -49,6 +49,7 @@
 */
 
 #include <wfg/engine/clock/AudioClockSource.h>
+#include <wfg/engine/clock/ShowHold.h>
 
 #include <atomic>
 #include <condition_variable>
@@ -87,6 +88,18 @@ namespace wfg
         int blockSize() const noexcept  { return block; }
 
         //======================================================================
+        /*  THE SHOW HELD (PRD §3.34; ShowHold.h), asked before every block:
+            held, the count stands. Not owned; null for none. Before start(),
+            as the hold's own `prepare` asks; the pacing thread reads it once a
+            block. */
+        void setHold (ShowHold* holdToAsk) noexcept
+        {
+            if (holdToAsk != nullptr)
+                holdToAsk->prepare (0);
+
+            hold.store (holdToAsk, std::memory_order_release);
+        }
+
         std::int64_t blocksDelivered() const noexcept
         {
             return blocks.load (std::memory_order_relaxed);
@@ -122,6 +135,7 @@ namespace wfg
         bool stopping = false;
 
         std::atomic<bool> running { false };
+        std::atomic<ShowHold*> hold { nullptr };
         std::atomic<std::int64_t> blocks { 0 };
         std::atomic<std::int64_t> lastLateness { 0 };
         std::atomic<std::int64_t> maxLateness { 0 };

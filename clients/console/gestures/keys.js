@@ -227,6 +227,18 @@ document.addEventListener("keydown", (event) => {
   if (event.code === "Space" && !!held && held.type === "checkbox" &&
       !event.ctrlKey && !event.metaKey && !event.altKey) return;
 
+  /*  F8 IS PAUSE / PLAY (PRD §3.34), once a key-down: a repeat would hold
+      the show and let it go and hold it again. What it sends is what the
+      button says, read off the same node. */
+  if (event.key === "F8") {
+    event.preventDefault();
+
+    if (!event.repeat)
+      gesture(String(tree.get("/godot/engine/paused", false)) === "true" ? "play" : "pause", []);
+
+    return;
+  }
+
   /*  A KEY BOUND TO CUES (namespace draft §74, AQW) fires each of their
       triggers, once: a held key's repeats are its own and swallowed, and its
       let-go below releases them, so a hold member plays while it is down.

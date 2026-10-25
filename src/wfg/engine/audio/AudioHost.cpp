@@ -427,6 +427,12 @@ namespace wfg::audio
                 how loud are the show's, set by the tick, and kept. */
             ltc.prepare (requested.sampleRate);
 
+            /*  THE HOLD'S DE-CLICK AT THIS RATE (PRD §3.34): a tenth of a
+                second, the author's (2026-10-25), and a host started while the
+                show is held starts held. */
+            if (hold != nullptr)
+                hold->prepare (requested.sampleRate / 10);
+
             /*  AND LTC COMING IN (namespace draft §60, TG.3): nothing heard,
                 the line read from nothing, the generation moved on with the
                 generator's. Which input it is read on is the show's, set by
@@ -1721,6 +1727,14 @@ namespace wfg::audio
                 ramp.applyGain (scratch.getWritePointer (channel), current.blockSize);
             }
 
+            /*  THE SHOW HELD (PRD §3.34): the de-click on the way out and back
+                in, or nought while muted, on every output alike - after each
+                output's own gain, and before LTC, which is never ramped: the
+                code stops with the count and does not fade. Ours, and
+                allocation-free: integers and a loop (clock/ShowHold.h). */
+            if (hold != nullptr)
+                hold->applyGain (scratch.getArrayOfWritePointers(), current.outputChannels, current.blockSize);
+
             /*  LTC (namespace draft §59, AHI), AFTER each output's gain and
                 before the block leaves: the generator replaces its channel with
                 the code - silence between runs - so no sound routed there leaks
@@ -2945,6 +2959,9 @@ namespace wfg::audio
 
         HostSettings current;
         BlockSink* sink = nullptr;
+
+        //  The show held (PRD §3.34): serve's, set with the audio stopped.
+        ShowHold* hold = nullptr;
         bool running = false;
         std::string error;
 
@@ -2981,6 +2998,21 @@ namespace wfg::audio
     { impl->processBlock (inputs, numInputs); }
 
     void AudioHost::setBlockTime (std::int64_t hostNanos) noexcept { impl->blockTime = hostNanos; }
+
+    void AudioHost::setHold (ShowHold* hold) noexcept
+    {
+        impl->hold = hold;
+
+        if (hold != nullptr && impl->running)
+            hold->prepare (impl->current.sampleRate / 10);
+    }
+
+    bool AudioHost::beginBlock() noexcept
+    {
+        const auto pull = impl->hold == nullptr || impl->hold->beginBlock (impl->samples.samplesElapsed());
+        impl->samples.setHeld (! pull);
+        return pull;
+    }
 
     void AudioHost::setBlockSink (BlockSink* sink) noexcept { impl->sink = sink; }
 

@@ -199,13 +199,13 @@ namespace wfg::midi
         post (std::move (command));
     }
 
-    void MtcLane::feedClock (std::int64_t sample, std::int64_t nanos, int sampleRate)
+    void MtcLane::feedClock (std::int64_t sample, std::int64_t nanos, int sampleRate, std::int64_t held)
     {
         if (sample < 0 || sampleRate <= 0)
             return;
 
         const std::lock_guard<std::mutex> lock { pairMutex };
-        newest = { sample, nanos, sampleRate, newest.serial + 1 };
+        newest = { sample, nanos, sampleRate, newest.serial + 1, held };
     }
 
     //==============================================================================
@@ -371,6 +371,20 @@ namespace wfg::midi
             return;
 
         fedSerial = pair.serial;
+
+        /*  LET GO AFTER A HOLD (PRD §3.34): the count stood while the steady
+            clock went on, so the line starts again from this pair, and the
+            code goes on with a full frame - a desk chasing it has heard none
+            for as long as the show was held. */
+        if (pair.heldAt < 0 && heldAt >= 0)
+        {
+            estimate.forget();
+
+            if (active.id != 0)
+                active.reseatOnNext = true;
+        }
+
+        heldAt = pair.heldAt;
         estimate.feed (pair.sample, pair.nanos, pair.sampleRate);
     }
 
@@ -442,6 +456,11 @@ namespace wfg::midi
             return std::nullopt;
 
         const auto& program = next == Next::pending ? pending[0] : active;
+
+        //  Held: nothing is due until Play, and the lane looks again later.
+        if (heldBack (program.cursor.next().dueSample))
+            return std::nullopt;
+
         return momentOf (program, program.cursor.next().dueSample);
     }
 
@@ -464,6 +483,10 @@ namespace wfg::midi
                 return;
 
             const auto message = (next == Next::pending ? pending[0] : active).cursor.next();
+
+            if (heldBack (message.dueSample))
+                return;
+
             const auto moment = momentOf (next == Next::pending ? pending[0] : active, message.dueSample);
 
             if (moment > nowNanos)

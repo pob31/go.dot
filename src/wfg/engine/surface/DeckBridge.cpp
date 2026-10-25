@@ -187,6 +187,7 @@ namespace wfg::surface
                 case DeckRole::go:               return "go";
                 case DeckRole::esc:              return "esc";
                 case DeckRole::doh:              return "doh";
+                case DeckRole::pause:            return "pause";
                 case DeckRole::standbyUp:        return "standbyUp";
                 case DeckRole::standbyDown:      return "standbyDown";
                 case DeckRole::pageSend:         return "send";
@@ -750,6 +751,13 @@ namespace wfg::surface
 
                 case DeckRole::doh:
                     submit (commandFrom (deck.origin, "go.doh"));
+                    break;
+
+                /*  PAUSE / PLAY (PRD §3.34): what the key says, read off the
+                    tree it was drawn from - two commands, never a toggle. */
+                case DeckRole::pause:
+                    submit (commandFrom (deck.origin, flagAt (at(), "/godot/engine/paused") ? "run.playAll"
+                                                                                            : "run.pauseAll"));
                     break;
 
                 case DeckRole::standbyUp:
@@ -1536,6 +1544,24 @@ namespace wfg::surface
 
                     break;
 
+                /*  ITS WORD THE STATE'S (§4.8): "Pause" while the show runs,
+                    "Play" and "PAUSED" while it is held. */
+                case DeckRole::pause:
+                    picture.glyph = Glyph::pause;
+
+                    if (flagAt (at(), "/godot/engine/paused"))
+                    {
+                        picture.label = "Play";
+                        picture.bottom = "PAUSED";
+                    }
+                    else
+                    {
+                        picture.label = "Pause";
+                        picture.bottom = "hold all";
+                    }
+
+                    break;
+
                 case DeckRole::standbyUp:
                     picture.glyph = Glyph::standbyUp;
                     picture.label = "Standby";
@@ -1608,6 +1634,7 @@ namespace wfg::surface
                 case DeckRole::go:
                 case DeckRole::esc:
                 case DeckRole::doh:
+                case DeckRole::pause:
                 case DeckRole::standbyUp:
                 case DeckRole::standbyDown:
                     return showKeyPicture (key.role);

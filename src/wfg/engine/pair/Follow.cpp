@@ -118,7 +118,7 @@ namespace wfg::pair
 
         for (auto& event : unconfirmed)
         {
-            if (recovery::isStop (event.command))
+            if (recovery::isStop (event.command) || recovery::isHold (event.command))
                 out.applied.push_back (std::move (event));
             else
                 ++out.dropped;
@@ -318,11 +318,22 @@ namespace wfg::pair
         return std::any_of (held.begin(), held.end(), [] (const Held& entry) { return entry.seat; });
     }
 
-    void Follower::beforeTick (std::int64_t localTick, LinkClock::time_point due, double roundTripSeconds)
+    void Follower::beforeTick (std::int64_t localTick, LinkClock::time_point due, double roundTripSeconds,
+                               bool frozen)
     {
         if (! following)
         {
             beats.clear();
+            return;
+        }
+
+        if (frozen)
+        {
+            beats.clear();
+
+            if (fixed)
+                submitDue (localTick, true, false);
+
             return;
         }
 
@@ -376,7 +387,7 @@ namespace wfg::pair
         }
     }
 
-    void Follower::submitDue (std::int64_t localTick, bool all)
+    void Follower::submitDue (std::int64_t localTick, bool all, bool countLate)
     {
         while (! held.empty())
         {
@@ -395,7 +406,7 @@ namespace wfg::pair
                 if (slot < localTick && ! entry.seat)
                     ++lateCount;
             }
-            else if (! entry.seat)
+            else if (! entry.seat && countLate)
             {
                 ++lateCount;
             }

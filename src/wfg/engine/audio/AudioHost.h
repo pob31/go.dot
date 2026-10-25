@@ -24,6 +24,7 @@
 #include <wfg/engine/plugin/ProxyHost.h>
 #include <wfg/engine/plugin/ProxyLane.h>
 #include <wfg/engine/clock/SampleClock.h>
+#include <wfg/engine/clock/ShowHold.h>
 #include <wfg/engine/timecode/LtcDecoder.h>
 #include <wfg/engine/timecode/LtcGenerator.h>
 
@@ -247,6 +248,19 @@ namespace wfg::audio
             on the audio thread without synchronisation, because a pointer that
             changed mid-block is a question nobody should have to ask. */
         void setBlockSink (BlockSink* sink) noexcept;
+
+        /*  THE SHOW HELD (PRD §3.34; clock/ShowHold.h): the Pause the block
+            sources ask before every block, and the de-click this applies to
+            what leaves. Not owned - serve's, which outlives every driver it
+            makes - and null for none, which is every test that drives blocks
+            by hand. Set with the audio stopped, as the sink is. */
+        void setHold (ShowHold* hold) noexcept;
+
+        /*  THE AUDIO THREAD, before anything else a block does: whether the
+            graph runs. A block source that hears false runs nothing, captures
+            nothing and advances nothing - the count stands, held. True when no
+            hold was given. */
+        bool beginBlock() noexcept;
 
         /*  The sample counter, for TickThread. It only ever moves forward: the
             type is an AudioClockSource and not a ManualClock precisely so that

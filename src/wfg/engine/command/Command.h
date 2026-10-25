@@ -219,6 +219,13 @@ namespace wfg
             this one would have. */
         inline constexpr const char* tooSoon          = "too-soon";
 
+        /*  THE SHOW HELD (PRD §3.34, the author's 2026-10-25): Pause stands
+            everything still until Play, and nothing that starts a cue - a GO,
+            a fire by name or number, a trigger, a pad, a load to time, Doh! -
+            is let in meanwhile. Nothing is queued: Play starts nothing, and
+            the press is to be made again. */
+        inline constexpr const char* paused           = "paused";
+
         /*  DOH! PRESSED AFTER ITS WINDOW (`list/dohWindow`, PRD §3.32,
             2026-10-01): the last GO is older than the show allows a Doh to
             reach back, or the window is nought and Doh! is off. Nothing moves. */

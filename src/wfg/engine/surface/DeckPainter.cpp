@@ -104,6 +104,7 @@ namespace wfg::surface::painter
                 case Glyph::go:     return juce::Colour (0xff1e8c3a);
                 case Glyph::esc:    return juce::Colour (0xffb3261e);
                 case Glyph::doh:    return juce::Colour (0xffc77c0e);
+                case Glyph::pause:  return juce::Colour (0xff2f6fb0);
                 case Glyph::none:
                 case Glyph::standbyUp:
                 case Glyph::standbyDown:
@@ -161,6 +162,7 @@ namespace wfg::surface::painter
                 case Glyph::go:
                 case Glyph::esc:
                 case Glyph::doh:
+                case Glyph::pause:
                 case Glyph::pageSend:
                 case Glyph::pageEq:
                 case Glyph::pageFx:

@@ -89,10 +89,14 @@ namespace wfg::pair
 
         /*  A PING carries the pinging machine's tick third (RD.7) and the round
             trip it measured second; RD.5's, without the tick, is heard as it
-            comes. A pong carries the answering machine's tick second. */
+            comes. A pong carries the answering machine's tick second. SINCE
+            PRD §3.34 BOTH SAY ITS PASSES, which move while a held show's tick
+            stands - a paused pair is two machines there, not two alone. A
+            build from before says its tick, which moves as passes do. */
         if (message.address == wire::ping && ! a.empty() && a.size() <= 3 && a[0].isInt64())
         {
             item.kind = Item::Kind::tick;
+            item.pass = true;
 
             if (a.size() >= 2 && a[1].isNumber() && std::isfinite (a[1].asDouble()) && a[1].asDouble() >= 0.0)
                 item.roundTrip = a[1].asDouble();
@@ -109,6 +113,7 @@ namespace wfg::pair
         {
             item.kind = Item::Kind::tick;
             item.tick = message.address == wire::pong ? a[1].getInt64() : a[0].getInt64();
+            item.pass = message.address == wire::pong;
             push (std::move (item));
         }
     }
@@ -172,6 +177,7 @@ namespace wfg::pair
                 says = std::move (item.hello);
                 ++helloCount;
                 channel.lastTick = -1;
+                channel.lastPass = -1;
                 alive = true;
                 break;
 
@@ -189,10 +195,11 @@ namespace wfg::pair
                 }
 
                 //  ALIVE ONLY WHEN ITS TICK HAS MOVED: a socket answering for a hung engine is not a machine there.
-                if (item.tick < 0 || item.tick > channel.lastTick)
+                if (auto& last = item.pass ? channel.lastPass : channel.lastTick;
+                    item.tick < 0 || item.tick > last)
                 {
                     if (item.tick >= 0)
-                        channel.lastTick = item.tick;
+                        last = item.tick;
 
                     alive = true;
                 }
