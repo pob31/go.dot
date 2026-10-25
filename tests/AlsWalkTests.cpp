@@ -103,7 +103,7 @@ namespace
         set.tempo = 120.0;
 
         for (std::size_t at = 0; at < scenes; ++at)
-            set.scenes.push_back ({ std::to_string (100 + at), "Q" + std::to_string (at + 1), {}, -1, false, 0.0, false });
+            set.scenes.push_back ({ std::to_string (100 + at), "Q" + std::to_string (at + 1), {}, -1, false, 0.0, false, {} });
 
         for (const auto& [id, name, pair] : { std::tuple<const char*, const char*, int> { "90", "A-Face", 0 },
                                               std::tuple<const char*, const char*, int> { "91", "B-Loin", 1 } })

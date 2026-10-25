@@ -492,7 +492,7 @@ namespace wfg::import::als
                 /*  A RETURN IS A DESTINATION: what reaches it is its mix. */
                 if (const auto found = returnIndex.find (trackId); found != returnIndex.end())
                 {
-                    out.push_back ({ "return:" + std::to_string (found->second), prefix });
+                    out.push_back ({ "return:" + std::to_string (found->second), prefix, {} });
                     return;
                 }
 
@@ -501,7 +501,7 @@ namespace wfg::import::als
                     const auto pre = send < set.sendsPre.size() && set.sendsPre[send];
                     auto terms = pre ? prefix : withVolume();
                     terms.push_back ({ trackId, Parameter::send, static_cast<int> (send) });
-                    out.push_back ({ "return:" + std::to_string (send), terms });
+                    out.push_back ({ "return:" + std::to_string (send), terms, {} });
                 }
 
                 switch (node->output.kind)
@@ -515,7 +515,7 @@ namespace wfg::import::als
                         break;
 
                     case Routing::Kind::master:
-                        out.push_back ({ "master", withVolume() });
+                        out.push_back ({ "master", withVolume(), {} });
                         break;
 
                     case Routing::Kind::external:
@@ -526,7 +526,7 @@ namespace wfg::import::als
                             if (! direct->into.empty())
                                 out.push_back ({ direct->into, withVolume(), direct->pan });
                             else if (direct->pair >= 0)
-                                out.push_back ({ direct->key, withVolume() });
+                                out.push_back ({ direct->key, withVolume(), {} });
                         }
                         break;
 
