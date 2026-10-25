@@ -1120,7 +1120,7 @@ namespace wfg::surface
                             D700's: the row the send's shape hears, the swap
                             under a width's press, nothing where the shape has
                             no such row. */
-                        const auto& shapeWord = textAt (at(), sendBase + "placement");
+                        const auto shapeWord = textAt (at(), sendBase + "placement");
                         control.placementAt = sendBase + "placement";
                         control.onAt = sendBase + "on";
 

@@ -1131,7 +1131,7 @@ namespace wfg::surface
                             width where two meet two - and nothing where the
                             shape has no such row. The press on a width is the
                             swap. */
-                        const auto& shapeWord = textAt (at, sendBase + "placement");
+                        const auto shapeWord = textAt (at, sendBase + "placement");
                         strip.placementAt = sendBase + "placement";
                         strip.onAt = sendBase + "on";
 

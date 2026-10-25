@@ -7131,7 +7131,7 @@ TEST_CASE ("import window: the named scenes that do something are ticked, and Im
     juce::File into;
 
     ui::ImportWindow::Actions actions;
-    actions.import = [&] (const std::vector<int>& ticked, const juce::File& where, const std::vector<std::string>&)
+    actions.import = [&] (const std::vector<int>& ticked, const juce::File& where, const std::vector<std::string>&, bool)
     {
         handed = ticked;
         into = where;
@@ -7192,7 +7192,7 @@ TEST_CASE ("import window: a QLab workspace's files counted, the missing listed,
     std::vector<std::string> foldersHanded { "something" };
 
     ui::ImportWindow::Actions actions;
-    actions.import = [&] (const std::vector<int>&, const juce::File&, const std::vector<std::string>& folders)
+    actions.import = [&] (const std::vector<int>&, const juce::File&, const std::vector<std::string>& folders, bool)
     {
         foldersHanded = folders;
     };
@@ -7257,7 +7257,7 @@ TEST_CASE ("import window: a QLab workspace's files counted, the missing listed,
     wfg::ImportScenes scenes;
     scenes.scenes = { { 0, "one", "", true, true } };
     ui::ImportWindow::Actions live;
-    live.import = [] (const std::vector<int>&, const juce::File&, const std::vector<std::string>&) {};
+    live.import = [] (const std::vector<int>&, const juce::File&, const std::vector<std::string>&, bool) {};
     ui::ImportWindow liveWindow (model::Theme {}, juce::StringArray { "set" }, scenes, parent, "set", live);
 
     addFolder = nullptr;

@@ -793,7 +793,7 @@ namespace wfg::import::qlab
     BuiltShow build (const Workspace& workspace, const Plan& plan,
                      const std::map<std::string, std::pair<std::string, int>>& media, doc::ShowDocument& document)
     {
-        Builder builder { workspace, plan, media, document, {}, Identities ("wfg-qlab:"), {}, {} };
+        Builder builder { workspace, plan, media, document, {}, Identities ("wfg-qlab:"), {}, {}, {} };
         builder.run();
         return std::move (builder.built);
     }
