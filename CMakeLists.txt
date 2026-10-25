@@ -110,7 +110,7 @@ endif()
 # it fails at generate time, not configure time, with a message about a missing
 # CMAKE_C_COMPILE_OBJECT rule.
 project(wfg
-    VERSION 0.1.16
+    VERSION 0.1.17
     DESCRIPTION "Go.dot — cross-platform show control"
     LANGUAGES C CXX)
 
