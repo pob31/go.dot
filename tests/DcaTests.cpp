@@ -45,6 +45,7 @@
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
+#include <wfg/engine/tree/Touches.h>
 
 #include <cmath>
 #include <cstdint>
@@ -659,4 +660,226 @@ TEST_CASE ("dca: an output plays at its own trim plus every DCA above it, and a 
     rig.set ("/godot/bus/" + front + "/dca", "");
     rig.tickOnce();
     CHECK (near (rig.audio.outputs.at (0), -3.0));
+}
+
+//==============================================================================
+/*  A DCA BACK TO NOUGHT WHEN ITS CUES ARE DONE (the author, 2026-10-25;
+    namespace draft §116): "once they have all completed, the DCA should return
+    to 0dB so it's reset for the next use. The DCA reset should not happen if
+    there's a finger on the fader (touch) or at the time of the next Go." */
+namespace
+{
+    void killRunOf (Rig& rig, const std::string& cueId)
+    {
+        const auto* run = rig.runOf (cueId);
+        REQUIRE (run != nullptr);
+        const auto runId = run->id;
+        rig.apply ("run.kill", { osc::Value::string (runId) });
+        REQUIRE (rig.tickUntil ([&rig, &cueId] { return rig.runOf (cueId)->isFinished(); }));
+    }
+
+    void ride (Rig& rig, const std::string& dcaId, double decibels)
+    {
+        rig.apply ("node.set", { osc::Value::string ("/godot/dca/" + dcaId + "/trim"), osc::Value::float64 (decibels) });
+    }
+}
+
+TEST_CASE ("dca: when the last cue under a DCA is done it goes back to nought, not before, and not at the next GO")
+{
+    Rig rig;
+    const auto band = rig.dca ("Band");
+    const auto guitar = rig.media (rig.listId, 0, "guitar", 0);
+    const auto bass = rig.media (rig.listId, 1, "bass", 0);
+    rig.set ("/godot/cue/" + guitar + "/dca", band);
+    rig.set ("/godot/cue/" + bass + "/dca", band);
+
+    rig.apply ("cue.fire", { osc::Value::string (guitar) });
+    rig.apply ("cue.fire", { osc::Value::string (bass) });
+    ride (rig, band, -6.0);
+    rig.tickOnce();
+    REQUIRE (near (rig.dcas.trimOf (band), -6.0));
+
+    //  One of the two done: the other still under it, the trim stays.
+    killRunOf (rig, guitar);
+    rig.tickOnce();
+    CHECK (near (rig.dcas.trimOf (band), -6.0));
+
+    //  The last one done: nought.
+    killRunOf (rig, bass);
+    rig.tickOnce();
+    CHECK (near (rig.dcas.trimOf (band), 0.0));
+    CHECK (rig.published ("/godot/dca/" + band + "/trim") == "0");
+
+    //  Set again by hand before the next GO: the GO keeps it.
+    ride (rig, band, -4.0);
+    rig.apply ("cue.fire", { osc::Value::string (guitar) });
+    rig.tickOnce();
+    CHECK (near (rig.dcas.trimOf (band), -4.0));
+    CHECK (near (rig.levelOf (guitar), -4.0));
+}
+
+TEST_CASE ("dca: a finger on the DCA's fader as its cues end keeps the trim, after the release too")
+{
+    Rig rig;
+    tree::TouchTable touches;
+    rig.runner.setTouches (&touches);
+
+    const auto band = rig.dca ("Band");
+    const auto guitar = rig.media (rig.listId, 0, "guitar", 0);
+    rig.set ("/godot/cue/" + guitar + "/dca", band);
+
+    rig.apply ("cue.fire", { osc::Value::string (guitar) });
+    ride (rig, band, -6.0);
+
+    const auto address = "/godot/dca/" + band + "/trim";
+    REQUIRE (touches.touch ("udp:10.0.0.9:9000", address));
+
+    killRunOf (rig, guitar);
+    rig.tickOnce();
+    CHECK (near (rig.dcas.trimOf (band), -6.0));
+
+    REQUIRE (touches.release ("udp:10.0.0.9:9000", address));
+    rig.tickOnce();
+    CHECK (near (rig.dcas.trimOf (band), -6.0));
+}
+
+TEST_CASE ("dca: a nested DCA and the one it sits in both go back once nothing under either plays; one an output rides stays")
+{
+    Rig rig;
+    const auto everything = rig.dca ("Everything");
+    const auto band = rig.dca ("Band");
+    const auto room = rig.dca ("Room");
+    rig.set ("/godot/dca/" + band + "/dca", everything);
+
+    const auto front = rig.document.createBus ("direct", 2).id;
+    REQUIRE (! front.empty());
+    rig.set ("/godot/bus/" + front + "/dca", room);
+
+    const auto guitar = rig.media (rig.listId, 0, "guitar", 0);
+    rig.set ("/godot/cue/" + guitar + "/dca", band);
+    const auto bed = rig.media (rig.listId, 1, "bed", 0);
+    rig.set ("/godot/cue/" + bed + "/dca", room);
+
+    rig.apply ("cue.fire", { osc::Value::string (guitar) });
+    rig.apply ("cue.fire", { osc::Value::string (bed) });
+    ride (rig, band, -6.0);
+    ride (rig, everything, -2.0);
+    ride (rig, room, -3.0);
+    rig.tickOnce();
+
+    killRunOf (rig, guitar);
+    killRunOf (rig, bed);
+    rig.tickOnce();
+
+    CHECK (near (rig.dcas.trimOf (band), 0.0));
+    CHECK (near (rig.dcas.trimOf (everything), 0.0));
+
+    //  An output rides Room: there it is the room's level, and it stays.
+    CHECK (near (rig.dcas.trimOf (room), -3.0));
+}
+
+TEST_CASE ("dca: a fade moving the DCA as its cues end finishes first, then the DCA goes back to nought")
+{
+    Rig rig;
+    const auto band = rig.dca ("Band");
+    const auto guitar = rig.media (rig.listId, 0, "guitar", 0);
+    rig.set ("/godot/cue/" + guitar + "/dca", band);
+
+    const auto down = rig.document.createCue (rig.listId, 1, "fade", "Band down").id;
+    rig.set ("/godot/cue/" + down + "/dca", band);
+    rig.set ("/godot/cue/" + down + "/level", "-20");
+    rig.set ("/godot/cue/" + down + "/duration", "1");
+
+    rig.apply ("cue.fire", { osc::Value::string (guitar) });
+    rig.apply ("cue.fire", { osc::Value::string (down) });
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    killRunOf (rig, guitar);
+    rig.tickOnce();
+
+    //  The fade still moving it: left to the fade.
+    CHECK (rig.dcas.trimOf (band) < -1.0);
+    CHECK (rig.dcas.trimOf (band) > -20.0);
+
+    REQUIRE (rig.tickUntil ([&rig, &down] { return rig.runOf (down)->isFinished(); }));
+    rig.tickOnce();
+    rig.tickOnce();
+    CHECK (near (rig.dcas.trimOf (band), 0.0));
+}
+
+TEST_CASE ("dca: a GO taken back by Doh! leaves the DCA where the hand had set it before that GO")
+{
+    Rig rig;
+    rig.set ("/godot/list/goDebounce", "0");
+
+    const auto band = rig.dca ("Band");
+    const auto guitar = rig.media (rig.listId, 0, "guitar", 0);
+    rig.set ("/godot/cue/" + guitar + "/dca", band);
+    rig.document.createCue (rig.listId, 1, "memo", "After");
+
+    //  Set for tonight before the GO, then the GO pressed early and taken back.
+    ride (rig, band, -5.0);
+    rig.set (cue::standbyAddressOf (rig.listId), guitar);
+    rig.tickOnce();
+    rig.apply ("go", {});
+    rig.tickOnce();
+    REQUIRE (rig.runOf (guitar) != nullptr);
+
+    rig.apply ("go.doh", {});
+
+    /*  This rig's sound never starts, so Doh!'s stop has nothing to fade out:
+        the run is ended here, as the stop would have ended it. */
+    for (int n = 0; n < 60 && ! rig.runOf (guitar)->isFinished(); ++n)
+        rig.tickOnce();
+
+    if (! rig.runOf (guitar)->isFinished())
+        killRunOf (rig, guitar);
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    CHECK (near (rig.dcas.trimOf (band), -5.0));
+}
+
+TEST_CASE ("dca: a double Esc leaves the DCA where the hand left it; a plain Esc frees it as an ending does")
+{
+    /*  PRD §4.4: after a double Esc nothing Go.dot started writes anything -
+        GoTests' "nothing Go.dot started keeps writing" and the surfaces
+        blackbox's "Esc is not a fader" - while Esc is the path of an ending,
+        entered early. */
+    SUBCASE ("double Esc")
+    {
+        Rig rig;
+        const auto band = rig.dca ("Band");
+        const auto guitar = rig.media (rig.listId, 0, "guitar", 0);
+        rig.set ("/godot/cue/" + guitar + "/dca", band);
+
+        rig.apply ("cue.fire", { osc::Value::string (guitar) });
+        ride (rig, band, -6.0);
+        rig.apply ("run.killAll", {});
+        REQUIRE (rig.tickUntil ([&rig, &guitar] { return rig.runOf (guitar)->isFinished(); }));
+
+        for (int n = 0; n < 5; ++n)
+            rig.tickOnce();
+
+        CHECK (near (rig.dcas.trimOf (band), -6.0));
+    }
+
+    SUBCASE ("Esc")
+    {
+        Rig rig;
+        const auto band = rig.dca ("Band");
+        const auto guitar = rig.media (rig.listId, 0, "guitar", 0);
+        rig.set ("/godot/cue/" + guitar + "/dca", band);
+
+        rig.apply ("cue.fire", { osc::Value::string (guitar) });
+        ride (rig, band, -6.0);
+        rig.apply ("run.stopAll", {});
+        REQUIRE (rig.tickUntil ([&rig, &guitar] { return rig.runOf (guitar)->isFinished(); }));
+        rig.tickOnce();
+
+        CHECK (near (rig.dcas.trimOf (band), 0.0));
+    }
 }

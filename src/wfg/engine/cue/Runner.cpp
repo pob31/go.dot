@@ -8059,6 +8059,101 @@ namespace wfg::cue
         return total <= silenceDb ? total : total + mark->offsetDb;
     }
 
+    void Runner::resetDcasLetGo (std::int64_t tick)
+    {
+        if (dcas == nullptr)
+            return;
+
+        /*  WHAT EVERY LIVE RUN REACHES: its cue's mark and each group's above
+            it, nested DCAs included - the DCAs whose trims `applyLevels` adds
+            to it. A run being prepared is not live yet (`runState::preparing`):
+            the standby's anticipation reaches no DCA until its GO. */
+        std::set<std::string> reached;
+        const auto& all = runs.all();
+
+        for (const auto& run : all)
+        {
+            if (run.isFinished() || run.state == runState::preparing)
+                continue;
+
+            for (const auto& dcaId : dcaChainOf (run.cue))
+                reached.insert (dcaId);
+
+            auto parent = run.parent;
+
+            for (std::size_t guard = 0; guard <= all.size() && ! parent.empty(); ++guard)
+            {
+                const auto* above = runs.find (parent);
+
+                if (above == nullptr)
+                    break;
+
+                for (const auto& dcaId : dcaChainOf (above->cue))
+                    reached.insert (dcaId);
+
+                parent = above->parent;
+            }
+        }
+
+        for (const auto& dcaId : reached)
+            dcasInUse.emplace (dcaId, tick);
+
+        if (dcasInUse.size() == reached.size())
+            return;
+
+        //  THE ROOMS' DCAS, read once per show revision: every output's and canvas's, nesting included.
+        if (! dcasOfRoomsRead || dcasOfRoomsRevision != document.showRevision())
+        {
+            dcasOfRooms.clear();
+            dcasOfRoomsRead = true;
+            dcasOfRoomsRevision = document.showRevision();
+
+            const auto take = [this] (const juce::ValueTree& owner)
+            {
+                for (const auto& dcaId : dcaNestingFrom (owner.getProperty ("dca").toString().toStdString()))
+                    dcasOfRooms.insert (dcaId);
+            };
+
+            for (const auto& bus : document.root().getChildWithName ("Audio"))
+                if (bus.hasType ("Bus"))
+                    take (bus);
+
+            for (const auto& canvas : document.root().getChildWithName ("Canvases"))
+                take (canvas);
+        }
+
+        for (auto it = dcasInUse.begin(); it != dcasInUse.end();)
+        {
+            const auto& dcaId = it->first;
+
+            if (reached.count (dcaId) > 0)
+            {
+                ++it;
+                continue;
+            }
+
+            //  A fade still moving it: asked again when the fade is done.
+            const auto fading = std::any_of (running.begin(), running.end(), [&dcaId] (const FadeJob& job)
+                                             { return job.dca == dcaId && ! job.retired; });
+
+            if (fading)
+            {
+                ++it;
+                continue;
+            }
+
+            const auto held = touches != nullptr && ! touches->holdersOf ("/godot/dca/" + dcaId + "/trim").empty();
+            const auto dohSince = lastDohTick >= it->second;
+            const auto immediateSince = lastImmediateStopTick >= it->second;
+
+            if (! held && ! dohSince && ! immediateSince && dcasOfRooms.count (dcaId) == 0
+                  && ! juce::exactlyEqual (dcas->trimOf (dcaId), 0.0))
+                dcas->set (dcaId, 0.0);
+
+            it = dcasInUse.erase (it);
+        }
+    }
+
     std::vector<std::string> Runner::dcaNestingFrom (std::string first) const
     {
         /*  UP THE NESTING, bounded by how many DCAs there are: the door
@@ -20383,6 +20478,7 @@ namespace wfg::cue
         flushDohWrites (engine);
 
         advanceFades (engine, tick);
+        resetDcasLetGo (tick);
         applyLevelEdits();
         applyJoins();
         applyLanes();
@@ -25458,6 +25554,7 @@ namespace wfg::cue
 
                 runner.dropStopFades();
                 runner.resetEffects();
+                runner.noteImmediateStop (context.tick);
 
                 auto outcome = before (context, args);
 

@@ -284,7 +284,7 @@ Go.dot has an Android app for a tablet or a phone. It stays connected in the bac
 | *Script* | Choufleur's script page, once its address is set (below) |
 | *Connections* | The computers, a main and its backup together with their *Take over* buttons; the tablet's name; Find this tablet; Choufleur and its wrist buzzer; *Quit the remote* |
 
-**Riding levels in a locked show.** A cue's own level is part of the show, so the lock keeps it. Ride the trim of the sound playing, or a DCA: both are tonight's and never saved. EQ and sends ride live, as on the D700.
+**Riding levels in a locked show.** A cue's own level is part of the show, so the lock keeps it. Ride the trim of the sound playing, or a DCA: both are tonight's and never saved. A DCA goes back to 0 dB once every cue on it has finished, ready for its next use, unless your finger is on its fader at that moment; set it again before the next GO and that GO keeps it. EQ and sends ride live, as on the D700.
 
 **Find this tablet.** In Go.dot, *Show settings > Network* lists the connected tablets with a **Find** button: the tablet flashes its screen and its camera light, sounds its alarm and vibrates until it is touched.
 

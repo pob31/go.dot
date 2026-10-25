@@ -2757,6 +2757,44 @@ namespace wfg::cue
             trims, and its offset - which never lifts silence (ABV). */
         double dcaTermsOf (const std::string& cueId);
 
+        /*  A DCA BACK TO NOUGHT WHEN ITS CUES ARE DONE (the author, 2026-10-25:
+            "When some cues are assigned to a DCA, once they have all completed,
+            the DCA should return to 0dB so it's reset for the next use. The DCA
+            reset should not happen if there's a finger on the fader (touch) or
+            at the time of the next Go"; namespace draft §116).
+
+            Once a tick, before the levels: the DCAs some live run reaches - its
+            cue's mark and its groups', nesting included. A DCA that had one
+            and has none now goes back to nought, in that tick - not at the next
+            GO, so a hand that sets it between the end and the next GO is kept.
+            Not when a finger is on its fader then: that hand is setting it for
+            next time, and nothing comes back to it later. Not while a fade is
+            moving it: when the fade is done. Not after a Doh! since it was
+            first reached: Doh! puts back what the GO changed, and the hand's
+            setting from before that GO with it. Not after a double Esc since:
+            nothing Go.dot started writes anything after that press (PRD §4.4),
+            and the DCA is left where the hand left it - a plain Esc, the same
+            path as an ending entered early, frees it as an ending does. And
+            never a DCA an output or a canvas rides (§38.7, §38.8): there it is
+            the room's level, not a cue's. A set, not a hand's write, so the
+            next fade on it begins from nought. */
+        void resetDcasLetGo (std::int64_t tick);
+
+    public:
+        /** A double Esc pressed at `tick`: no DCA its runs reached goes back to nought (`resetDcasLetGo`). */
+        void noteImmediateStop (std::int64_t tick) noexcept { lastImmediateStopTick = tick; }
+
+    private:
+        std::int64_t lastImmediateStopTick = -1;
+
+        //  The DCAs a live run reaches, each with the tick it was first reached since it was last free.
+        std::map<std::string, std::int64_t> dcasInUse;
+
+        //  The DCAs an output or a canvas rides, read once per show revision.
+        std::set<std::string> dcasOfRooms;
+        std::uint64_t dcasOfRoomsRevision = 0;
+        bool dcasOfRoomsRead = false;
+
         void advanceFades (Engine& engine, std::int64_t tick);
 
         /*  THE OSC CUES' CURVES, ONE TICK (namespace draft 45, O.4): each

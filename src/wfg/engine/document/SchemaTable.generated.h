@@ -5434,7 +5434,7 @@ namespace wfg::doc::generated
           nullptr, 0,
           "dB", 50.0, false, "park",
           "",
-          "The trim this DCA is applying now, in dB, added to the level of every run whose cue is marked with it and of every run under a group so marked. Nought is the resting value and what a show opens with. Never stored: it is what a fader is doing tonight and not a decision about the show (PRD 4.10), which is also why writing it is not undoable. Written with node.set from a strip, a panel or the page, and moved by a fade cue that names this DCA." },
+          "The trim this DCA is applying now, in dB, added to the level of every run whose cue is marked with it and of every run under a group so marked. Nought is the resting value and what a show opens with, and what it goes back to once every cue on it is done (namespace draft 116). Never stored: it is what a fader is doing tonight and not a decision about the show (PRD 4.10), which is also why writing it is not undoable. Written with node.set from a strip, a panel or the page, and moved by a fade cue that names this DCA." },
         { "plugins", "changed",
           ValueType::boolean, 'T', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "false",

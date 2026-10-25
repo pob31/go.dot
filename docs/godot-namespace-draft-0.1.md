@@ -34378,3 +34378,47 @@ row in §13.9 corrected: it takes `s list, [s run…]` and reads the list's aim 
 
 Not in this round: a fade the instant lands inside is not resumed (its trim is); the chase's `code.seat`
 and the follower's `pair.seat` send no values (the follower carries the desk its own way, §58).
+
+## 116. A DCA back to nought when its cues are done
+
+**Asked 2026-10-25** by the author: *"When some cues are assigned to a DCA, once they have all completed, the
+DCA should return to 0dB so it's reset for the next use. The DCA reset should not happen if there's a finger
+on the fader (touch) or at the time of the next Go because a user might move the DCA fader between the end of
+the previous cues assigned to it and the next Go if they feel it needs to be slightly higher or lower on that
+performance."*
+
+A DCA's trim is tonight's (PRD §4.10, `dca/trim`): a hand or a fade sets it, it starts at nought when a show
+opens, and until now it stayed wherever it was last left. Now, **the tick the last run a DCA reaches is
+finished, its trim goes back to nought** - the reset happens when the cues end, never at the next GO, so a
+fader moved in between is what the next GO plays at.
+
+The author's: the reset, when the last cue is done; none under a finger; none at the GO.
+
+Mine *(proposed)*:
+
+- **BCE** **What a DCA reaches is what `applyLevels` sums**: a live run's cue mark and each group's above it,
+  nested DCAs included - a DCA inside another frees both. A run being prepared (the standby's anticipation)
+  reaches nothing until its GO. A cue on a DCA and a persistent bed paused by Esc both keep it reached.
+- **BCF** **A finger on its fader then keeps the trim** - `node.touch` on `/godot/dca/<id>/trim` from any
+  surface or the window's panel - and nothing comes back for it on the release: that hand is setting it for
+  next time.
+- **BCG** **A fade moving the DCA is left to finish**, then the trim goes back: a DCA faded to silence as its
+  cues stop is ready again at nought.
+- **BCH** **Not after a Doh! since the DCA was first reached**: Doh! puts back what the GO changed, and a
+  setting the hand made before that GO stands.
+- **BCK** **Not after a double Esc since the DCA was first reached**: after that press nothing Go.dot started
+  writes anything (PRD §4.4) and the DCA stays where the hand left it ("Esc is not a fader", the surfaces
+  blackbox). A plain Esc is the path of an ending entered early, and frees it as an ending does.
+- **BCI** **Never a DCA an output or a canvas rides** (§38.7, §38.8, §109): there it is the room's level,
+  and resetting it when some cues end would move everything else on that output.
+- **BCJ** **A set, not a hand's write**, so a fade on it next begins from nought and gives way to no hand.
+
+As built: `Runner::resetDcasLetGo`, once a tick after the fades and before the levels; `dcasInUse` (each DCA
+with the tick it was first reached), `dcasOfRooms` (read per show revision). Tests: DcaTests (the last of two
+cues frees it, not the first; a hand's setting before the next GO kept; a finger on the fader keeps it,
+release too; nesting frees both; an output's DCA stays; a fade finishes first; a Doh!'d GO keeps the hand's
+setting; a double Esc keeps it, an Esc frees it), C and fr_FR; GoTests' "nothing Go.dot started keeps writing"
+after a double Esc, and blackbox.phase6-surfaces, green with it. Both tester guides say it under *Riding levels in a locked show*.
+
+Owed: the author's try on the D700 - a DCA ridden during a scene, the scene ending with and without a finger
+on the fader.
