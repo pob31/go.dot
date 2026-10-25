@@ -786,6 +786,8 @@ namespace wfg::import::als
                         scene.colour = integer (element, "Color", -1);
                         scene.tempoEnabled = flag (element, "IsTempoEnabled");
                         scene.tempo = number (element, "Tempo", 0.0);
+                        scene.timeSignatureEnabled = flag (element, "IsTimeSignatureEnabled");
+                        scene.timeSignature = timeSignatureOf (integer (element, "TimeSignatureId", 201));
                         scene.followAction = flag (element, "FollowAction/FollowActionEnabled");
                         scene.key = mappingIn (element);
                         set.scenes.push_back (std::move (scene));
@@ -897,6 +899,7 @@ namespace wfg::import::als
                 {
                     set.master = readTrack (*master, Track::Kind::master);
                     set.tempo = number (master, "DeviceChain/Mixer/Tempo/Manual", 120.0);
+                    set.timeSignature = timeSignatureOf (integer (master, "DeviceChain/Mixer/TimeSignature/Manual", 201));
                 }
 
                 for (auto& [element, track] : pending)
@@ -1038,6 +1041,20 @@ namespace wfg::import::als
             return a.seconds;
 
         return std::clamp (seconds, -1.0e9, 1.0e9);
+    }
+
+    TimeSignature timeSignatureOf (int liveId) noexcept
+    {
+        /*  Live offers denominators 1, 2, 4, 8 and 16 and numerators 1 to 99;
+            a number outside that is no signature Live writes. */
+        TimeSignature out;
+
+        if (liveId < 0 || liveId >= 99 * 5)
+            return out;
+
+        out.numerator = liveId % 99 + 1;
+        out.denominator = 1 << (liveId / 99);
+        return out;
     }
 
     double beatsPerSecond (const Clip& clip)

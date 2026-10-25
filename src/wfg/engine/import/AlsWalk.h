@@ -273,8 +273,10 @@ namespace wfg::import::als
 
         /*  THE TEMPO THE SCENE SETS (BDR, §122): a transport cue's tempo verb
             first in the GO, when it differs from the tempo running. Nought
-            for none. */
+            for none. And its bar, in whole beats, when its time signature
+            changes the one running (BEG); nought for none. */
         double tempo = 0.0;
+        int beatsPerBar = 0;
 
         bool empty() const noexcept { return sounds.empty() && fades.empty() && stops.empty() && midi.empty(); }
     };
@@ -317,6 +319,11 @@ namespace wfg::import::als
     };
 
     Walk walk (const LiveSet&, const WalkOptions& = {});
+
+    /*  A BAR IN GO.DOT'S BEATS (namespace draft §121, BEG): Live's bar in
+        quarter notes, held to the whole number the grid counts - 7/8's three
+        and a half is four - from one to thirty-two. */
+    int wholeBeatsPerBar (const TimeSignature&) noexcept;
 
     /*  Whether a scene does anything at all - launches a clip or stops a track
         - which is what the window's list ticks by default when it is named. */

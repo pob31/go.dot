@@ -2699,6 +2699,16 @@ are different sources of launch commands against one running clock. This is
 where drift immunity (§3.19d), sample-accurate scheduling, and a single timebase
 for video and the 50 Hz tick all come from, for free.
 
+*2026-10-25:* the fixed tempo is the Edit's and stays a unit — one beat a second
+— whatever the show's music does. A show that needs a tempo of its own (the
+author: *"We need to have adjustable tempo in Go.dot"*, so a cue can start on the
+next bar as Live's do) has one in Go.dot: a **beat grid** laid over the same
+running clock, its tempo and bar the show's, moved by a tempo cue, and asked for
+cue by cue — *"Not all cues should be on the grid"*. Anchored by the first such
+GO while nothing is on it (the author's pick of three). How it waits and places a
+launch is *(proposed)*, namespace draft §122 (BEB–BEF). The Edit's tempo is
+never touched.
+
 #### Cues are launcher clips in pre-allocated slots on a fixed track set
 
 **Fixed graph, dynamic content.** Launching a clip into an existing slot does not

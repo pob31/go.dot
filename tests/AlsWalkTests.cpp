@@ -103,7 +103,7 @@ namespace
         set.tempo = 120.0;
 
         for (std::size_t at = 0; at < scenes; ++at)
-            set.scenes.push_back ({ std::to_string (100 + at), "Q" + std::to_string (at + 1), {}, -1, false, 0.0, false, {} });
+            set.scenes.push_back ({ std::to_string (100 + at), "Q" + std::to_string (at + 1), {}, -1, false, 0.0, false, {}, false, {} });
 
         for (const auto& [id, name, pair] : { std::tuple<const char*, const char*, int> { "90", "A-Face", 0 },
                                               std::tuple<const char*, const char*, int> { "91", "B-Loin", 1 } })
@@ -732,6 +732,56 @@ TEST_CASE ("walk: Live's launch quantisation is the cue's quantise - the set's f
     const auto plain = walk (set);
     CHECK (plain.steps[0].sounds.at (0).quantise.empty());
     CHECK (plain.steps[1].sounds.at (0).quantise.empty());
+}
+
+TEST_CASE ("walk: Live's time signature is a bar of whole beats - the set's for the show, a scene's on its GO's tempo cue (namespace draft §121, BEG)")
+{
+    //  Live's number: the numerator less one, plus 99 a power of two in the denominator.
+    CHECK (timeSignatureOf (201) == TimeSignature { 4, 4 });
+    CHECK (timeSignatureOf (200) == TimeSignature { 3, 4 });
+    CHECK (timeSignatureOf (302) == TimeSignature { 6, 8 });
+    CHECK (timeSignatureOf (-1) == TimeSignature { 4, 4 });
+    CHECK (wholeBeatsPerBar ({ 6, 8 }) == 3);
+    CHECK (wholeBeatsPerBar ({ 7, 8 }) == 4);
+
+    auto set = setOf (3);
+    set.timeSignature = { 3, 4 };
+    set.scenes[1].timeSignatureEnabled = true;
+    set.scenes[1].timeSignature = { 7, 8 };          // three and a half beats: four, said
+    set.scenes[2].timeSignatureEnabled = true;
+    set.scenes[2].timeSignature = { 7, 8 };          // the same again: nothing new
+
+    auto source = trackOf ("1", "1", 3, 2);
+    source.sends[0] = 1.0;
+    source.slots[0].clip = clipOf ("one", 0.0, 8.0);
+    source.slots[1].clip = clipOf ("two", 0.0, 8.0);
+    source.slots[2].clip = clipOf ("three", 0.0, 8.0);
+    set.tracks.push_back (source);
+
+    const auto walked = walk (set);
+    REQUIRE (walked.steps.size() == 3u);
+    CHECK (walked.steps[0].beatsPerBar == 0);
+    CHECK (walked.steps[1].beatsPerBar == 4);
+    CHECK (walked.steps[2].beatsPerBar == 0);
+
+    CHECK (std::any_of (walked.notes.begin(), walked.notes.end(), [] (const Note& note)
+    {
+        return note.kind == Note::Kind::approximated && note.text.find ("7/8") != std::string::npos;
+    }));
+
+    /*  A SCENE THAT ONLY CHANGES THE BAR is a GO of its tempo cue. */
+    auto barOnly = setOf (2);
+    barOnly.scenes[1].timeSignatureEnabled = true;
+    barOnly.scenes[1].timeSignature = { 3, 4 };
+    auto lone = trackOf ("1", "1", 2, 2);
+    lone.sends[0] = 1.0;
+    lone.slots[0].clip = clipOf ("one", 0.0, 8.0);
+    barOnly.tracks.push_back (lone);
+
+    const auto twice = walk (barOnly);
+    REQUIRE (twice.steps.size() == 2u);
+    CHECK (twice.steps[1].empty());
+    CHECK (twice.steps[1].beatsPerBar == 3);
 }
 
 TEST_CASE ("walk: a track wired straight to the interface is a direct out, and a return on channels another holds is an aux into it (namespace draft §121, BDS, BDT)")

@@ -251,6 +251,23 @@ namespace wfg::import::als
         std::vector<Slot> slots;    ///< one per scene
     };
 
+    /*  A TIME SIGNATURE, as Live's one number spells it (`TimeSignatureId`,
+        the master's `TimeSignature`): the numerator less one, plus 99 for each
+        power of two in the denominator - 201 is 4/4, 200 3/4, 302 6/8. Its
+        bar in Live's beats, which are quarter notes whatever the denominator,
+        is `numerator * 4 / denominator` (namespace draft §121, BEG). */
+    struct TimeSignature
+    {
+        int numerator = 4;
+        int denominator = 4;
+
+        double beatsPerBar() const noexcept { return numerator * 4.0 / denominator; }
+        bool operator== (const TimeSignature&) const = default;
+    };
+
+    /** Live's number for a time signature, read; 4/4 for one no signature has. */
+    TimeSignature timeSignatureOf (int liveId) noexcept;
+
     /*  A CONTROL A HAND MOVED: a MIDI channel (one-based, as a desk says it), a
         controller or a note, and what it was mapped to. */
     struct Mapping
@@ -276,6 +293,8 @@ namespace wfg::import::als
         int colour = -1;
         bool tempoEnabled = false;
         double tempo = 0.0;
+        bool timeSignatureEnabled = false;      ///< the scene sets a time signature (`IsTimeSignatureEnabled`)
+        TimeSignature timeSignature;
         bool followAction = false;
         std::optional<Mapping> key; ///< a note or controller that launches the scene itself (§121, BEA)
     };
@@ -284,6 +303,7 @@ namespace wfg::import::als
     {
         std::string creator;        ///< "Ableton Live 11.2.6"
         double tempo = 120.0;
+        TimeSignature timeSignature;    ///< the master's
 
         /*  THE SET'S GLOBAL LAUNCH QUANTISATION, Live's index (§121, BDZ): 0
             none, 1 eight bars, 2 four, 3 two, 4 one bar, 5 a half, 7 a quarter,

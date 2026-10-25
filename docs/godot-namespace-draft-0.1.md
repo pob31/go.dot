@@ -34945,9 +34945,25 @@ beat, a half and the finer divisions a beat and said; the GO's group carries the
 share (a sound whose own differs is said), a sound alone its own; a scene's tempo a `tempo` transport cue
 first in its GO, a scene that only sets a tempo a GO of that cue alone; `sync/bpm` the set's tempo.
 
+The bar, the same day (**BEG**, mine *(proposed)*): Live keeps a time signature as one number - the
+numerator less one, plus 99 for each power of two in the denominator, 201 for 4/4 - on the master and on
+each scene that sets one (`IsTimeSignatureEnabled`). Its bar in Live's beats, which are quarter notes, is
+`numerator × 4 / denominator`, held to the whole beats the grid counts (7/8's three and a half is four, said
+approximated). The set's is the show's `sync/beatsPerBar`; a scene's that changes the bar rides its GO's
+tempo cue as `beatsPerBar` - a tempo cue of its own, "Bar of 3", where the scene sets no tempo - and a scene
+that only changes the bar is a GO of that cue.
+
+A member's `quantise`: the group starts its members on its own time (`spawnChild` reads no quantise), and a
+member fired on its own - by name, a start cue, a key or a trigger - goes through the fire that does. So the
+row is not greyed on a member; its tooltip says when it is read, and the parameter table's sentence says it
+too.
+
 Tests: GoTests "beat grid:" (a quantised GO in silence starting at once and anchoring, the next landing two
 seconds after it to the sample; a plain cue never waiting and the grid not live once its runs are gone;
 a tempo verb moving the grid with the beat kept, the readout following), the GO cases unchanged;
 AlsWalkTests and AlsImportTests (the quantise words from Live's numbers, a tempo cue first in the GO, the
-show's tempo). Owed: the words, mine; the author's try on the D700 and a listen with the Sturbzep stems
-against Live; a member's own quantise in a group; a hold and the anchor; the probe set's question 10.
+show's tempo; Live's time signature numbers, a scene's bar on its tempo cue alone and beside a tempo, the
+set's bar the show's). Owed: the words, mine; the author's try on the D700 and a listen with the Sturbzep
+stems against Live; a group playing a member by the member's own quantise, if it is wanted; a hold and the
+anchor (the author's to decide: shift the grid by the held time, or let the bars count through it); the
+probe set's question 10.

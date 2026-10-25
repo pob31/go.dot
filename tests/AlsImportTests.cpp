@@ -42,6 +42,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <tuple>
 #include <utility>
 
 using namespace wfg;
@@ -676,8 +677,47 @@ TEST_CASE ("als import: a GO on the grid carries its sounds' quantise, a scene's
     CHECK (at (document, "/godot/cue/" + tempo + "/bpm") == "100");
     CHECK (document.findById (group).getChild (0).getProperty ("id").toString().toStdString() == tempo);
 
-    //  The show's tempo is the set's 120.
+    //  The show's tempo is the set's 120, in its 4/4.
     CHECK (at (document, "/godot/sync/bpm") == "120");
+    CHECK (at (document, "/godot/sync/beatsPerBar") == "4");
+}
+
+TEST_CASE ("als import: a scene's bar rides its GO's tempo cue, alone or beside a tempo, and the set's bar is the show's (namespace draft §121, BEG)")
+{
+    auto set = sessionFixture();
+    set.timeSignature = { 6, 8 };
+
+    Walk walked;
+
+    for (const auto& [sceneId, tempo, bar] : { std::tuple<const char*, double, int> { "37", 100.0, 3 },
+                                               std::tuple<const char*, double, int> { "39", 0.0, 5 } })
+    {
+        Step step;
+        step.scene = static_cast<int> (walked.steps.size());
+        step.number = step.scene + 1;
+        step.sceneId = sceneId;
+        step.name = std::string ("Scene ") + sceneId;
+        step.tempo = tempo;
+        step.beatsPerBar = bar;
+        walked.steps.push_back (step);
+    }
+
+    doc::ShowDocument document;
+    build (set, walked, "Session", {}, document);
+
+    INFO ("problems: " << (document.validate().empty() ? std::string ("none") : document.validate().front()));
+    CHECK (document.validate().empty());
+    CHECK (at (document, "/godot/sync/beatsPerBar") == "3");
+
+    const auto both = idFor ("tempo:37");
+    CHECK (at (document, "/godot/cue/" + both + "/bpm") == "100");
+    CHECK (at (document, "/godot/cue/" + both + "/beatsPerBar") == "3");
+    CHECK (at (document, "/godot/cue/" + both + "/name") == "Tempo 100, bar of 3");
+
+    const auto barAlone = idFor ("tempo:39");
+    CHECK (at (document, "/godot/cue/" + barAlone + "/bpm") == "0");
+    CHECK (at (document, "/godot/cue/" + barAlone + "/beatsPerBar") == "5");
+    CHECK (at (document, "/godot/cue/" + barAlone + "/name") == "Bar of 5");
 }
 
 TEST_CASE ("als import: a VST3's state is written as JUCE keeps one, an AU's as it is, a VST2's not at all")

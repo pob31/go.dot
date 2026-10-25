@@ -637,6 +637,11 @@ namespace wfg::import::als
         return out;
     }
 
+    int wholeBeatsPerBar (const TimeSignature& signature) noexcept
+    {
+        return static_cast<int> (std::clamp<long> (std::lround (signature.beatsPerBar()), 1L, 32L));
+    }
+
     bool sceneDoesSomething (const LiveSet& set, int scene)
     {
         if (scene < 0)
@@ -685,6 +690,10 @@ namespace wfg::import::als
                 night runs them in order, and Live keeps the last it was given. */
             double beatsPerRealSecond;
 
+            /*  THE BAR AS THE SCENES GO BY (BEG): the master's time signature,
+                then each scene's that sets one. */
+            TimeSignature signature;
+
             /*  THE CONTROLS THE SET'S OWN MIDI CLIPS SEND (namespace draft
                 §121, BDX, BDY): channel and controller, from every MIDI clip on
                 a track with an output port. A mapping on one of these is driven
@@ -695,7 +704,8 @@ namespace wfg::import::als
             Walker (const LiveSet& setToUse, const WalkOptions& optionsToUse)
                 : set (setToUse), options (optionsToUse), laws (optionsToUse.laws),
                   graph (setToUse, optionsToUse.laws, out.notes),
-                  beatsPerRealSecond ((setToUse.tempo > 0.0 ? setToUse.tempo : 120.0) / 60.0)
+                  beatsPerRealSecond ((setToUse.tempo > 0.0 ? setToUse.tempo : 120.0) / 60.0),
+                  signature (setToUse.timeSignature)
             {
                 for (const auto& track : set.tracks)
                     state.held[track.id] = { track.volume, track.sends, track.active };
@@ -1961,9 +1971,31 @@ namespace wfg::import::als
                                                "launches is stretched to it, and a warped sound still playing is "
                                                "re-stretched (BDR, §122)" });
 
-                    /*  A SCENE THAT ONLY SETS A TEMPO is a GO once Go.dot has a
-                        grid (§122): its tempo cue moves the bars for what follows. */
-                    if (! sceneDoesSomething (set, index) && ! tempoChanges)
+                    /*  AND THE BAR (BEG): a scene's time signature, from here on,
+                        as Live keeps it. */
+                    const auto signatureBefore = signature;
+
+                    if (scene.timeSignatureEnabled)
+                        signature = scene.timeSignature;
+
+                    const auto barChanges = wholeBeatsPerBar (signature) != wholeBeatsPerBar (signatureBefore);
+
+                    if (! (signature == signatureBefore))
+                        out.notes.push_back ({ barChanges && ! same (signature.beatsPerBar(), std::round (signature.beatsPerBar()))
+                                                 ? Note::Kind::approximated : Note::Kind::info,
+                                               index, {}, "the scene sets the time signature to "
+                                               + std::to_string (signature.numerator) + "/" + std::to_string (signature.denominator)
+                                               + ": a bar of " + osc::formatDouble (signature.beatsPerBar()) + " beats"
+                                               + (same (signature.beatsPerBar(), std::round (signature.beatsPerBar()))
+                                                    ? std::string() : ", which the grid counts as "
+                                                                        + std::to_string (wholeBeatsPerBar (signature))
+                                                                        + " - it holds whole beats")
+                                               + (barChanges ? ", set by the GO's tempo cue (BEG)" : std::string (", the same bar")) });
+
+                    /*  A SCENE THAT ONLY SETS A TEMPO OR A BAR is a GO once Go.dot
+                        has a grid (§122): its tempo cue moves the bars for what
+                        follows. */
+                    if (! sceneDoesSomething (set, index) && ! tempoChanges && ! barChanges)
                         continue;
 
                     Step step;
@@ -1973,6 +2005,7 @@ namespace wfg::import::als
                     step.notes = scene.annotation;
                     step.colour = scene.colour;
                     step.tempo = tempoChanges ? scene.tempo : 0.0;
+                    step.beatsPerBar = barChanges ? wholeBeatsPerBar (signature) : 0;
 
                     if (scene.followAction)
                         out.notes.push_back ({ Note::Kind::dropped, index, {}, "the scene has a follow action, which is "
@@ -2124,7 +2157,7 @@ namespace wfg::import::als
                         }
                     }
 
-                    if (step.empty() && step.tempo <= 0.0)
+                    if (step.empty() && step.tempo <= 0.0 && step.beatsPerBar <= 0)
                         continue;
 
                     step.number = ++number;
@@ -2359,6 +2392,16 @@ namespace wfg::import::als
 
             void noteTheSet()
             {
+                /*  THE SET'S BAR (BEG), the show's `sync/beatsPerBar`: said when
+                    it is not a whole number of beats. */
+                if (const auto bar = set.timeSignature.beatsPerBar(); ! same (bar, std::round (bar)))
+                    out.notes.push_back ({ Note::Kind::approximated, -1, {}, "the set is in "
+                                           + std::to_string (set.timeSignature.numerator) + "/"
+                                           + std::to_string (set.timeSignature.denominator) + ", a bar of "
+                                           + osc::formatDouble (bar) + " beats, which the show's grid counts as "
+                                           + std::to_string (wholeBeatsPerBar (set.timeSignature))
+                                           + " - it holds whole beats (BEG)" });
+
                 if (set.arrangementClips > 0)
                     out.notes.push_back ({ Note::Kind::dropped, -1, {}, std::to_string (set.arrangementClips)
                                            + " clip(s) in Arrangement view are not imported: Session view only" });

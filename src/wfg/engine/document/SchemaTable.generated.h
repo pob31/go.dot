@@ -1131,7 +1131,7 @@ namespace wfg::doc::generated
           enum_cue_quantise, 6,
           "", 50.0, false, "park",
           "",
-          "Whether this cue waits for the beat grid before it starts (namespace draft 122, BEB): none, the default, starts as every cue always has; beat, bar, 2bars, 4bars or 8bars start it on the grid-s next such boundary. The grid is anchored by the first quantised GO while no run launched on it still sounds - that one starts at once and the bars count from it (BEC) - at the show-s sync/bpm and sync/beatsPerBar until a transport cue-s tempo verb moves them. A group-s applies to its entry, as its preWait does; the wait is a pre-wait the engine lengthens, so a replay waits the same ticks, and a sound is then placed on the grid-s own sample." },
+          "Whether this cue waits for the beat grid before it starts (namespace draft 122, BEB): none, the default, starts as every cue always has; beat, bar, 2bars, 4bars or 8bars start it on the grid-s next such boundary. The grid is anchored by the first quantised GO while no run launched on it still sounds - that one starts at once and the bars count from it (BEC) - at the show-s sync/bpm and sync/beatsPerBar until a transport cue-s tempo verb moves them. A group-s applies to its entry, as its preWait does; a member the group starts is started on the group-s own time and its quantise is read only when it is fired on its own - by name, a start cue, a key or a trigger. The wait is a pre-wait the engine lengthens, so a replay waits the same ticks, and a sound is then placed on the grid-s own sample." },
         { "cue", "postWait",
           ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           true, "0",

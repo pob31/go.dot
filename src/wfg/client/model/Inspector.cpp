@@ -2017,6 +2017,19 @@ namespace wfg::client::model
             //  WHERE ANY CUE STARTS ON THE BEAT GRID, in words (namespace draft §122).
             wordTheQuantise (decided);
 
+            /*  AND WHEN IT IS READ, for a member of a group: the group starts
+                its members on its own time, so a member's own `starts on` is
+                read only when it is fired alone. Said on the row, not greyed -
+                a member fired by name, a start cue, a key or a trigger does
+                wait for the grid. */
+            if (const auto parent = text (snapshot, "/godot/cue/" + cueId + "/parent");
+                  ! parent.empty() && text (snapshot, "/godot/cue/" + parent + "/kind") == "group")
+                for (auto& field : decided)
+                    if (field.name == "quantise")
+                        field.description = "Inside a group: the group starts it on the group's own time, and this is "
+                                            "read only when it is fired on its own - by name, a start cue, a key or a "
+                                            "trigger. " + field.description;
+
             /*  A VIDEO CUE'S CANVAS is a menu of the show's (Phase 8a). */
             if (out.kind == "video")
                 offerTheCanvases (snapshot, decided);

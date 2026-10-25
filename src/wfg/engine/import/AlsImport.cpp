@@ -738,11 +738,12 @@ namespace wfg::import::als
 
         //  THE GRID'S TEMPO: the set's, the scenes' own as tempo cues (§121, BDZ; §122).
         write ("/godot/sync/bpm", number (set.tempo > 0.0 ? set.tempo : 120.0, 3), -1);
+        write ("/godot/sync/beatsPerBar", std::to_string (wholeBeatsPerBar (set.timeSignature)), -1);
 
         for (const auto& step : walked.steps)
         {
             const auto items = step.sounds.size() + step.fades.size() + step.stops.size() + step.midi.size()
-                                 + (step.tempo > 0.0 ? 1u : 0u);
+                                 + (step.tempo > 0.0 || step.beatsPerBar > 0 ? 1u : 0u);
             const auto alone = items == 1 && step.sounds.size() == 1;
             const auto numberText = std::to_string (step.number);
 
@@ -791,13 +792,26 @@ namespace wfg::import::als
 
             ++built.gos;
 
-            //  --- Its tempo, first (§121 BDR, §122 BED) --------------------------
-            if (step.tempo > 0.0)
+            //  --- Its tempo and its bar, first (§121 BDR, BEG; §122 BED) ---------
+            if (step.tempo > 0.0 || step.beatsPerBar > 0)
             {
-                const auto made = document.createCue (parent, doc::endOfSequence, "transport",
-                                                      "Tempo " + osc::formatDouble (std::round (step.tempo * 100.0) / 100.0),
-                                                      ids.of ("tempo:" + step.sceneId),
-                                                      { { "verb", "tempo" }, { "bpm", number (step.tempo, 3) } });
+                doc::ShowDocument::Attributes attributes { { "verb", "tempo" } };
+                std::string name;
+
+                if (step.tempo > 0.0)
+                {
+                    attributes.push_back ({ "bpm", number (step.tempo, 3) });
+                    name = "Tempo " + osc::formatDouble (std::round (step.tempo * 100.0) / 100.0);
+                }
+
+                if (step.beatsPerBar > 0)
+                {
+                    attributes.push_back ({ "beatsPerBar", std::to_string (step.beatsPerBar) });
+                    name += (name.empty() ? "Bar of " : ", bar of ") + std::to_string (step.beatsPerBar);
+                }
+
+                const auto made = document.createCue (parent, doc::endOfSequence, "transport", name,
+                                                      ids.of ("tempo:" + step.sceneId), attributes);
 
                 if (! made.ok)
                     said (Note::Kind::dropped, step.scene, {}, "the tempo cue could not be made (" + made.reason + ")");
