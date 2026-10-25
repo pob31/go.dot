@@ -195,6 +195,10 @@ namespace wfg::import::als
 
         std::string dcaTrack;       ///< the track whose fader a hand rode, when one did (QN)
         int colour = -1;
+
+        /*  WHERE IT STARTS ON THE BEAT GRID (§121, BDZ; §122): Go.dot's word -
+            `beat`, `bar`, `2bars`, `4bars`, `8bars` - or empty for at once. */
+        std::string quantise;
     };
 
     /*  A FADE: a carrier launched without its sound, on the sound its track is
@@ -266,6 +270,11 @@ namespace wfg::import::als
         std::vector<FadeOut> fades;
         std::vector<StopOut> stops;
         std::vector<MidiOut> midi;
+
+        /*  THE TEMPO THE SCENE SETS (BDR, §122): a transport cue's tempo verb
+            first in the GO, when it differs from the tempo running. Nought
+            for none. */
+        double tempo = 0.0;
 
         bool empty() const noexcept { return sounds.empty() && fades.empty() && stops.empty() && midi.empty(); }
     };

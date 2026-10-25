@@ -960,6 +960,12 @@ namespace wfg::cue
 
                             Found by the arming: the moment standby armed a cue
                             ahead, the pre-wait test stopped seeing a wait. */
+                        /*  AND ON THE BEAT GRID (namespace draft §122, BEB): a
+                            cue that asks waits for the grid's next boundary, or
+                            anchors the grid - decided at the GO, not the arm. */
+                        armed->quantise = textOf (cue, "quantise");
+                        quantiseLaunch (*armed, tick);
+
                         if (armed->preWaitTicks > 0)
                         {
                             armed->state = runState::waiting;
@@ -1078,6 +1084,12 @@ namespace wfg::cue
             during the wait changes the next run and not this one. */
         run->preWaitTicks = ticksFor (numberOf (cue, "preWait"));
         run->postWaitTicks = ticksFor (numberOf (cue, "postWait"));
+
+        //  AND ON THE BEAT GRID (namespace draft §122, BEB), at a fire and not an arm.
+        run->quantise = textOf (cue, "quantise");
+
+        if (fireAtOnce)
+            quantiseLaunch (*run, tick);
 
         /*  A BED ESC PAUSED, CARRIED ON (K8): the assertion's resume point is
             this run's own start, as a jump's would be - a second of the file,
@@ -7294,6 +7306,36 @@ namespace wfg::cue
             return;
         }
 
+        /*  TEMPO (namespace draft §122, BED): the beat grid's tempo and bar from
+            here on, the beat it is on kept - the next bar falls where the new
+            tempo says from the beat the grid had reached. With no grid anchored
+            yet, what the next anchor runs at. Nought leaves either as it is. */
+        if (verb == "tempo")
+        {
+            const auto bpm = numberOf (cue, "bpm");
+            const auto beats = static_cast<int> (numberOf (cue, "beatsPerBar"));
+
+            if (grid.anchored)
+            {
+                const auto beatNow = gridBeatAt (tick);
+
+                if (grid.anchorSample > 0)
+                    grid.anchorSample += (tick - grid.anchorTick) * samplesPerTick;
+
+                grid.anchorTick = tick;
+                grid.anchorBeat = beatNow;
+            }
+
+            if (std::isfinite (bpm) && bpm > 0.0)
+                grid.bpm = bpm;
+
+            if (beats >= 1 && beats <= 32)
+                grid.beatsPerBar = beats;
+
+            finishing.push_back (runId);
+            return;
+        }
+
         if (verb == "jump")
         {
             const auto target = textOf (cue, "target");
@@ -9440,6 +9482,145 @@ namespace wfg::cue
             `waitingForWrites` stays, and the settle is let go. Hook state. */
         owedPutBacks.clear();
         prepareAfterPutBack = -1;
+    }
+
+    //==============================================================================
+    /*  THE BEAT GRID (namespace draft §122). */
+    bool Runner::gridLive() const
+    {
+        if (! grid.anchored)
+            return false;
+
+        for (const auto& snapshot : runs.current())
+            if (snapshot.onGrid && ! snapshot.isFinished())
+                return true;
+
+        return false;
+    }
+
+    const Runner::BeatGrid& Runner::beatGrid() const noexcept
+    {
+        return grid;
+    }
+
+    double Runner::gridBpm() const
+    {
+        if (grid.bpm > 0.0)
+            return grid.bpm;
+
+        const auto bpm = osc::parseDouble (document.getAttribute ("/godot/sync/bpm").value_or ("120")).value_or (120.0);
+        return std::isfinite (bpm) && bpm > 0.0 ? bpm : 120.0;
+    }
+
+    int Runner::gridBeatsPerBar() const
+    {
+        if (grid.beatsPerBar > 0)
+            return grid.beatsPerBar;
+
+        const auto beats = osc::parseDouble (document.getAttribute ("/godot/sync/beatsPerBar").value_or ("4")).value_or (4.0);
+        return std::isfinite (beats) && beats >= 1.0 && beats <= 32.0 ? static_cast<int> (beats) : 4;
+    }
+
+    int Runner::quantiseBeatsOf (const std::string& quantise, int beatsPerBar) noexcept
+    {
+        if (quantise == "beat")  return 1;
+        if (quantise == "bar")   return beatsPerBar;
+        if (quantise == "2bars") return 2 * beatsPerBar;
+        if (quantise == "4bars") return 4 * beatsPerBar;
+        if (quantise == "8bars") return 8 * beatsPerBar;
+        return 0;
+    }
+
+    double Runner::gridBeatAt (std::int64_t tick) const noexcept
+    {
+        if (! grid.anchored || ! (grid.bpm > 0.0))
+            return 0.0;
+
+        return grid.anchorBeat + static_cast<double> (tick - grid.anchorTick) / TickClock::rateHz * grid.bpm / 60.0;
+    }
+
+    std::int64_t Runner::gridSampleOf (double beat) const noexcept
+    {
+        if (grid.anchorSample <= 0 || audio == nullptr || audio->sampleRate() <= 0 || ! (grid.bpm > 0.0))
+            return 0;
+
+        return grid.anchorSample + std::llround ((beat - grid.anchorBeat) * 60.0 / grid.bpm
+                                                   * static_cast<double> (audio->sampleRate()));
+    }
+
+    void Runner::quantiseLaunch (Run& run, std::int64_t tick)
+    {
+        const auto step = quantiseBeatsOf (run.quantise, gridBeatsPerBar());
+
+        if (step <= 0)
+            return;
+
+        /*  NOT LIVE: this run starts as a plain one does, and the bars count
+            from it (BEC) - at the show's tempo, or where a tempo verb left it. */
+        if (! gridLive())
+        {
+            grid.anchored = true;
+            grid.anchorTick = tick + run.preWaitTicks;
+            grid.anchorBeat = 0.0;
+            grid.bpm = gridBpm();
+            grid.beatsPerBar = gridBeatsPerBar();
+            grid.anchorRun = run.id;
+            grid.anchorSample = 0;
+            run.onGrid = true;
+            run.anchorsGrid = true;
+            run.gridBeat = 0.0;
+            return;
+        }
+
+        /*  LIVE: the first boundary at or after the moment it could start - its
+            own pre-wait over and, for what is placed on a sample, its launch
+            lead ahead - and the wait that fires it a lead before that boundary,
+            so the hook lands it on the boundary's own sample. */
+        const auto onASample = run.kind == "media" || run.kind == "mic" || run.kind == "timecode" || run.kind == "video"
+                                 || run.kind == "group";
+        const auto lead = onASample ? latencyTicks() + 1 : 0;
+        const auto earliest = tick + run.preWaitTicks + lead;
+        const auto boundary = std::ceil (gridBeatAt (earliest) / step - 1.0e-9) * step;
+        const auto ticksPerBeat = TickClock::rateHz * 60.0 / grid.bpm;
+        const auto boundaryTick = static_cast<double> (grid.anchorTick) + (boundary - grid.anchorBeat) * ticksPerBeat;
+        const auto fireTick = static_cast<std::int64_t> (std::floor (boundaryTick + 1.0e-9)) - lead;
+
+        run.preWaitTicks = static_cast<int> (std::max<std::int64_t> (run.preWaitTicks, fireTick - tick));
+        run.gridBeat = boundary;
+        run.onGrid = true;
+    }
+
+    void Runner::gridTick (std::int64_t tick)
+    {
+        lists.setTempo (gridLive() ? grid.bpm : 0.0);
+
+        if (! grid.anchored || audio == nullptr || samplesPerTick <= 0)
+            return;
+
+        /*  THE ANCHOR'S SAMPLE for an anchor that places no launch - a fade, a
+            network cue, a group - or whose launch never came: the sample its
+            tick's launch would have been placed on. One that does place a
+            launch sets it there (`launchIfDue`). */
+        if (grid.anchorSample <= 0 && tick >= grid.anchorTick)
+        {
+            const auto* anchor = runs.find (grid.anchorRun);
+            const auto placesALaunch = anchor != nullptr && (anchor->kind == "media" || anchor->kind == "mic"
+                                                              || anchor->kind == "timecode" || anchor->kind == "video");
+
+            if (anchor == nullptr || ! placesALaunch || anchor->isFinished())
+                grid.anchorSample = launchTarget (grid.anchorTick,
+                                                  audio->samplesElapsed() - (tick - grid.anchorTick) * samplesPerTick,
+                                                  latencyTicks());
+        }
+
+        /*  A QUANTISED GROUP STARTS ON ITS BEAT'S SAMPLE, which its members
+            inherit as they do a vamp's end (AYN). */
+        for (const auto& snapshot : runs.current())
+            if (snapshot.kind == "group" && snapshot.gridBeat >= 0.0 && ! snapshot.anchorsGrid
+                  && snapshot.launchNotBefore <= 0 && snapshot.isWaiting())
+                if (auto* run = runs.find (snapshot.id))
+                    if (const auto onGrid = gridSampleOf (snapshot.gridBeat); onGrid > 0)
+                        run->launchNotBefore = onGrid;
     }
 
     bool Runner::goTooSoon (std::int64_t tick) const
@@ -20966,6 +21147,7 @@ namespace wfg::cue
             configuration every replay is in. A wait that only elapsed when
             there was a sound card would be a cue list that only worked in a
             theatre. */
+        gridTick (tick);
         advanceWaits (engine, tick);
         advanceGroups (engine);
         mirrorSeekable();
@@ -22385,6 +22567,13 @@ namespace wfg::cue
             /*  OR LATER, FOR A SOUND A FOLLOWER WAS SEATED WITH (RD.8): at the
                 sample its offset was worked out for, when its disk answered in
                 time - the second the leader's sound is at then. */
+            /*  OR ON ITS BEAT (namespace draft §122, BEF): a quantised sound,
+                fired a lead before its boundary, placed on the boundary's own
+                sample, from the anchor's. */
+            if (run->gridBeat >= 0.0 && ! run->anchorsGrid && run->launchNotBefore <= 0)
+                if (const auto onGrid = gridSampleOf (run->gridBeat); onGrid > 0)
+                    run->launchNotBefore = onGrid;
+
             auto target = run->launchNotBefore > 0 ? std::max (now + lead, run->launchNotBefore) : placed;
 
             /*  A SEATED SOUND WHOSE COLD ARM ANSWERED AFTER ITS SAMPLE (RD.8):
@@ -22466,6 +22655,10 @@ namespace wfg::cue
                 run->launchedAtSample = target;
                 run->launchNotBefore = 0;
                 run->seatSample = false;
+
+                //  THE GRID'S ANCHOR, where its anchoring sound starts (§122, BEC).
+                if (run->anchorsGrid && grid.anchorRun == run->id && grid.anchorSample <= 0)
+                    grid.anchorSample = target;
 
                 /*  ON THE LEADER'S SAMPLES OR NOT (RD.9): a summary laid
                     against the leader's takes this back off its playhead -

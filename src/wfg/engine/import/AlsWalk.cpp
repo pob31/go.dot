@@ -1123,6 +1123,37 @@ namespace wfg::import::als
                     note (Note::Kind::dropped, "transposed " + std::to_string (clip.pitchCoarse) + " semitones in Live; "
                                                "Go.dot moves pitch only with speed, so it plays untransposed");
 
+                /*  WHERE IT STARTS ON THE BEAT GRID (namespace draft §121, BDZ):
+                    Live's launch quantisation, the set's for a clip at Global -
+                    0 Global, 1 None, 2 eight bars, 3 four, 4 two, 5 one bar, 6 a
+                    half, 8 a quarter, the rest finer or triplets, which the probe
+                    set is to confirm. A quarter is a beat; a half and the finer
+                    ones become a beat, said. */
+                {
+                    const auto global = clip.quantisation == 0;
+                    const auto index = global ? set.globalQuantisation + 1 : clip.quantisation;   // onto the clip's scale
+
+                    static const std::map<int, const char*> words { { 2, "8bars" }, { 3, "4bars" }, { 4, "2bars" }, { 5, "bar" },
+                                                                    { 8, "beat" } };
+
+                    if (const auto found = words.find (index); found != words.end())
+                    {
+                        sound.quantise = found->second;
+                    }
+                    else if (index >= 6)
+                    {
+                        sound.quantise = "beat";
+                        note (Note::Kind::approximated, "launched in Live on a division finer than a beat, or a triplet "
+                                                        "(quantisation " + std::to_string (index) + "): it starts on the "
+                                                        "next beat");
+                    }
+
+                    if (! sound.quantise.empty())
+                        note (Note::Kind::info, std::string ("starts on the grid's next ") + sound.quantise
+                                                + (global ? " (the set's launch quantisation)" : " (the clip's)")
+                                                + ", as it does in Live (BDZ)");
+                }
+
                 const auto fileStart = sampleSecondsAt (clip, startBeat, set.tempo);
                 const auto fileEnd = sampleSecondsAt (clip, endBeat, set.tempo);
 
@@ -1926,10 +1957,13 @@ namespace wfg::import::als
 
                     if (tempoChanges)
                         out.notes.push_back ({ Note::Kind::info, index, {}, "the scene sets the tempo to "
-                                               + osc::formatDouble (scene.tempo) + ": what it launches is stretched "
-                                               "to it, and a warped sound still playing is re-stretched (BDR)" });
+                                               + osc::formatDouble (scene.tempo) + ": a tempo cue leads the GO, what it "
+                                               "launches is stretched to it, and a warped sound still playing is "
+                                               "re-stretched (BDR, §122)" });
 
-                    if (! sceneDoesSomething (set, index) && ! (tempoChanges && ! state.playing.empty()))
+                    /*  A SCENE THAT ONLY SETS A TEMPO is a GO once Go.dot has a
+                        grid (§122): its tempo cue moves the bars for what follows. */
+                    if (! sceneDoesSomething (set, index) && ! tempoChanges)
                         continue;
 
                     Step step;
@@ -1938,6 +1972,7 @@ namespace wfg::import::als
                     step.name = scene.name;
                     step.notes = scene.annotation;
                     step.colour = scene.colour;
+                    step.tempo = tempoChanges ? scene.tempo : 0.0;
 
                     if (scene.followAction)
                         out.notes.push_back ({ Note::Kind::dropped, index, {}, "the scene has a follow action, which is "
@@ -2089,7 +2124,7 @@ namespace wfg::import::als
                         }
                     }
 
-                    if (step.empty())
+                    if (step.empty() && step.tempo <= 0.0)
                         continue;
 
                     step.number = ++number;

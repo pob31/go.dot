@@ -736,11 +736,31 @@ namespace wfg::import::als
         std::vector<std::string> inputPatch;            // the live inputs' channels of the interface, in their order (BDU)
         std::map<std::string, std::string> portOf;      // Live's MIDI port by name to the Port declared for it (BDV)
 
+        //  THE GRID'S TEMPO: the set's, the scenes' own as tempo cues (§121, BDZ; §122).
+        write ("/godot/sync/bpm", number (set.tempo > 0.0 ? set.tempo : 120.0, 3), -1);
+
         for (const auto& step : walked.steps)
         {
-            const auto items = step.sounds.size() + step.fades.size() + step.stops.size() + step.midi.size();
+            const auto items = step.sounds.size() + step.fades.size() + step.stops.size() + step.midi.size()
+                                 + (step.tempo > 0.0 ? 1u : 0u);
             const auto alone = items == 1 && step.sounds.size() == 1;
             const auto numberText = std::to_string (step.number);
+
+            /*  WHERE THE GO STARTS ON THE GRID (BDZ): the quantisation its sounds
+                share goes on the group, which places its members together as
+                Live's scene does; a sound whose own differs is said. */
+            std::string groupQuantise;
+
+            for (const auto& sound : step.sounds)
+                if (! sound.quantise.empty())
+                {
+                    if (groupQuantise.empty())
+                        groupQuantise = sound.quantise;
+                    else if (groupQuantise != sound.quantise)
+                        said (Note::Kind::approximated, step.scene, sound.trackName, "\"" + sound.name + "\" starts on the "
+                              "next " + sound.quantise + " in Live where the scene's other sounds start on the next "
+                              + groupQuantise + ": the GO starts them together, on the " + groupQuantise);
+                }
 
             std::string parent = listId;
 
@@ -751,6 +771,9 @@ namespace wfg::import::als
 
                 if (! step.notes.empty())
                     attributes.push_back ({ "notes", step.notes });
+
+                if (! groupQuantise.empty())
+                    attributes.push_back ({ "quantise", groupQuantise });
 
                 const auto made = document.createCue (listId, doc::endOfSequence, "group",
                                                       step.name.empty() ? "Scene " + std::to_string (step.scene + 1)
@@ -767,6 +790,18 @@ namespace wfg::import::als
             }
 
             ++built.gos;
+
+            //  --- Its tempo, first (§121 BDR, §122 BED) --------------------------
+            if (step.tempo > 0.0)
+            {
+                const auto made = document.createCue (parent, doc::endOfSequence, "transport",
+                                                      "Tempo " + osc::formatDouble (std::round (step.tempo * 100.0) / 100.0),
+                                                      ids.of ("tempo:" + step.sceneId),
+                                                      { { "verb", "tempo" }, { "bpm", number (step.tempo, 3) } });
+
+                if (! made.ok)
+                    said (Note::Kind::dropped, step.scene, {}, "the tempo cue could not be made (" + made.reason + ")");
+            }
 
             //  --- Its sounds ----------------------------------------------------
             for (const auto& sound : step.sounds)
@@ -854,6 +889,9 @@ namespace wfg::import::als
 
                     if (! step.notes.empty())
                         attributes.push_back ({ "notes", step.notes });
+
+                    if (! sound.quantise.empty())
+                        attributes.push_back ({ "quantise", sound.quantise });
                 }
 
                 /*  WHAT LIVE DID TO IT THAT GO.DOT DOES NOT, under any notes it

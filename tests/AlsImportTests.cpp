@@ -637,6 +637,49 @@ TEST_CASE ("als import: a controller the set maps nowhere is a MIDI cue on a Por
     CHECK (at (document, "/godot/cue/" + cue + "/fadeTime") == "2");
 }
 
+TEST_CASE ("als import: a GO on the grid carries its sounds' quantise, a scene's tempo leads it as a tempo cue, and the show's tempo is the set's (namespace draft §121, BDZ; §122)")
+{
+    Walk walked;
+    Step step;
+    step.scene = 0;
+    step.number = 1;
+    step.sceneId = "37";
+    step.name = "top start";
+    step.tempo = 100.0;
+
+    Sound sound;
+    sound.key = "sound:37:14";
+    sound.scene = 0;
+    sound.trackId = "14";
+    sound.trackName = "1";
+    sound.name = "rain";
+    sound.file.name = "rain.wav";
+    sound.quantise = "bar";
+    step.sounds.push_back (sound);
+    walked.steps.push_back (step);
+
+    doc::ShowDocument document;
+    build (sessionFixture(), walked, "Session", { { "sound:37:14", { "rain.wav", 2 } } }, document);
+
+    INFO ("problems: " << (document.validate().empty() ? std::string ("none") : document.validate().front()));
+    CHECK (document.validate().empty());
+
+    const auto group = idFor ("go:37");
+    const auto tempo = idFor ("tempo:37");
+    const auto rain = idFor ("sound:37:14");
+    REQUIRE (elementOf (document, group) == "Group");
+    CHECK (at (document, "/godot/cue/" + group + "/quantise") == "bar");
+    CHECK (at (document, "/godot/cue/" + rain + "/quantise") != "bar");
+
+    REQUIRE (elementOf (document, tempo) == "Transport");
+    CHECK (at (document, "/godot/cue/" + tempo + "/verb") == "tempo");
+    CHECK (at (document, "/godot/cue/" + tempo + "/bpm") == "100");
+    CHECK (document.findById (group).getChild (0).getProperty ("id").toString().toStdString() == tempo);
+
+    //  The show's tempo is the set's 120.
+    CHECK (at (document, "/godot/sync/bpm") == "120");
+}
+
 TEST_CASE ("als import: a VST3's state is written as JUCE keeps one, an AU's as it is, a VST2's not at all")
 {
     PluginInfo vst3 { "VST3", "Verb", {}, "0123456789ABCDEF0123456789ABCDEF", { 1, 2, 3 }, { 4, 5 } };

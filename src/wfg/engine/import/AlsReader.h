@@ -284,6 +284,11 @@ namespace wfg::import::als
     {
         std::string creator;        ///< "Ableton Live 11.2.6"
         double tempo = 120.0;
+
+        /*  THE SET'S GLOBAL LAUNCH QUANTISATION, Live's index (§121, BDZ): 0
+            none, 1 eight bars, 2 four, 3 two, 4 one bar, 5 a half, 7 a quarter,
+            the rest finer or triplets - what a clip at Global takes. */
+        int globalQuantisation = 0;
         std::vector<Scene> scenes;
         std::vector<Track> tracks;  ///< audio, MIDI and group tracks, in Live's order
         std::vector<Track> returns; ///< in Live's order, which is the order of every track's sends

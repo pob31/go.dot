@@ -625,6 +625,135 @@ TEST_CASE ("go: a cue armed in advance launches on the tick GO arrives")
 /*  A SOUND HELD BACK (namespace draft 70): placed `delayBy` after the sample
     it is due on, on the sample - not rounded to a tick as a pre-wait is - and
     after the pre-wait, never instead of it. */
+/*  THE BEAT GRID (namespace draft §122, BEB-BEF): a quantised GO while nothing
+    is on the grid starts at once and anchors it; the next waits for the bar and
+    lands on its sample; a plain cue never waits; a tempo verb moves the grid
+    keeping the beat it is on. 120 BPM in four: a bar is two seconds, 96000
+    samples at the fake's 48 kHz, a hundred ticks. */
+namespace
+{
+    struct GridRig : Rig
+    {
+        GridRig()
+        {
+            clockRuns = true;
+            document.setAttribute ("/godot/sync/bpm", "120");
+            document.setAttribute ("/godot/sync/beatsPerBar", "4");
+            secondId = document.createCue (listId, 2, "media", "Second").id;
+            document.setAttribute ("/godot/cue/" + secondId + "/file", "thunder.wav");
+        }
+
+        /** GO on a cue parked at standby, its disk answering, and the sample it launches on. */
+        std::int64_t fire (const std::string& cueId)
+        {
+            const auto before = audio.launches.size();
+            setStandby (cueId);
+            goTick = tick;      // the GO's own tick: standby spent one getting ready
+            submitAndTick ("go");
+            audio.completeArms (engine);
+            REQUIRE (tickUntil ([this, before] { return audio.launches.size() > before; }));
+
+            //  A launched voice plays until it is stopped, as a real one does: the grid stays live on it.
+            audio.playing.insert (audio.launches.back().first);
+            return audio.launches.back().second;
+        }
+
+        std::string secondId;
+        std::int64_t goTick = 0;
+    };
+}
+
+TEST_CASE ("beat grid: a quantised GO while nothing is on the grid starts at once and anchors it; the next lands on the bar's sample")
+{
+    GridRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/quantise", "bar").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.secondId + "/quantise", "bar").ok);
+
+    const auto anchor = rig.fire (rig.mediaId);
+
+    //  Started as a plain one does: a lead ahead of its GO, no bar waited for.
+    CHECK (anchor - rig.goTick * 960 < 20 * 960);
+    CHECK (rig.runner.listState().tempo() == doctest::Approx (120.0));
+
+    //  Ten ticks on, the second waits for the bar: two seconds after the anchor, to the sample.
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    const auto second = rig.fire (rig.secondId);
+    CHECK (second - anchor == 96000);
+}
+
+TEST_CASE ("beat grid: a cue that does not ask never waits, and the grid is not live once its runs are gone")
+{
+    GridRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/quantise", "bar").ok);
+
+    const auto anchor = rig.fire (rig.mediaId);
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    const auto plain = rig.fire (rig.secondId);
+    CHECK (plain - anchor < 96000);
+    CHECK (plain - rig.goTick * 960 < 20 * 960);
+
+    //  Everything stopped: the grid is not live, and the next quantised GO anchors afresh.
+    rig.submitAndTick ("run.stopAll");
+    REQUIRE (rig.tickUntil ([&rig] { return ! rig.runner.gridLive(); }, 200));
+    rig.tickOnce();     // the readout is the next hook's
+    CHECK (rig.runner.listState().tempo() == doctest::Approx (0.0));
+
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.secondId + "/quantise", "bar").ok);
+    const auto again = rig.fire (rig.secondId);
+    CHECK (again - rig.goTick * 960 < 20 * 960);
+}
+
+TEST_CASE ("beat grid: a tempo verb moves the grid from its moment on, the beat it is on kept")
+{
+    GridRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/quantise", "bar").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.secondId + "/quantise", "beat").ok);
+
+    const auto tempoId = rig.document.createCue (rig.listId, 3, "transport", "Slower").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + tempoId + "/verb", "tempo").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + tempoId + "/bpm", "60").ok);
+
+    const auto anchor = rig.fire (rig.mediaId);
+    const auto anchorGo = rig.goTick;
+
+    for (int n = 0; n < 7; ++n)
+        rig.tickOnce();
+
+    //  THE TEMPO CUE: fired as a GO, it moves the grid on its own tick.
+    rig.setStandby (tempoId);
+    const auto tempoGo = rig.tick;
+    rig.submitAndTick ("go");
+    rig.tickOnce();
+    rig.tickOnce();     // the verb fires on the record after the GO's; the readout is the hook after that
+    CHECK (rig.runner.listState().tempo() == doctest::Approx (60.0));
+
+    //  The next beat at 60 BPM is a whole second from where the grid stood when the verb fired.
+    const auto second = rig.fire (rig.secondId);
+
+    /*  WHERE THE GRID STOOD THEN: beats at 120 since the anchor's tick, and
+        the anchor's sample moved to that tick - the verb's own record, which is
+        the GO's tick or the one after it, as a cue fired from standby is. One
+        of the two is the grid's, to the sample. */
+    auto nearest = 1.0;
+
+    for (const auto tempoTick : { tempoGo, tempoGo + 1, tempoGo + 2 })
+    {
+        const auto beatThen = static_cast<double> (tempoTick - anchorGo) / 50.0 * 2.0;
+        const auto anchorThen = anchor + (tempoTick - anchorGo) * 960;
+        const auto beats = static_cast<double> (second - anchorThen) / 48000.0 + beatThen;
+        nearest = std::min (nearest, std::abs (beats - std::round (beats)));
+    }
+
+    CHECK (rig.runner.beatGrid().bpm == doctest::Approx (60.0));
+    CHECK (nearest < 1.0e-6);
+    CHECK (second > anchor);
+}
+
 TEST_CASE ("go: a sound held back is placed its delay later, on the sample, after its pre-wait")
 {
     const auto lead = [] (const char* delay, const char* delayBy, const char* preWait)

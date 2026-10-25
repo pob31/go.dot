@@ -1326,6 +1326,18 @@ namespace wfg::cue
             sounds with it. */
         std::int64_t launchNotBefore = 0;
 
+        /*  ON THE BEAT GRID (namespace draft §122, BEB-BEC): the cue's
+            `quantise`, copied at the fire as the waits are; `gridBeat` the beat
+            of the grid this run waits for, -1 for none; `onGrid` that it was
+            launched on the grid, which is what keeps the grid live; and
+            `anchorsGrid` that its launch is the grid's anchor. Handler state,
+            every one: the wait they lengthen is a pre-wait, so a replay waits the
+            same ticks; the sample a hook places the launch on is the hook's. */
+        std::string quantise;
+        double gridBeat = -1.0;
+        bool onGrid = false;
+        bool anchorsGrid = false;
+
         /*  ITS `launchNotBefore` IS A SEAT'S, NOT YET MISSED (RD.8): a sound
             whose cold arm answers after that sample is moved into its file by
             the lateness, once (`launchIfDue`), rather than started late from

@@ -43,6 +43,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_pair_peerShowMatch[] = { "unknown", "yes", "no" };
     inline constexpr std::string_view enum_list_kind[] = { "show", "cart" };
     inline constexpr std::string_view enum_cue_kind[] = { "memo", "group", "media", "fade", "transport", "osc", "midi", "start", "mic", "video", "process", "timecode", "script" };
+    inline constexpr std::string_view enum_cue_quantise[] = { "none", "beat", "bar", "2bars", "4bars", "8bars" };
     inline constexpr std::string_view enum_cue_role[] = { "member", "header", "footer", "persistent" };
     inline constexpr std::string_view enum_cue_override[] = { "file", "on", "off" };
     inline constexpr std::string_view enum_cue_prepare[] = { "idle", "preparing", "pending", "partial", "armed", "verified", "loaded" };
@@ -62,7 +63,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_binding_type[] = { "controlChange", "controlChange14", "noteVelocity", "pitchBend", "channelPressure" };
     inline constexpr std::string_view enum_binding_control[] = { "absolute", "relative", "rate" };
     inline constexpr std::string_view enum_fade_curve[] = { "linear", "sCurve" };
-    inline constexpr std::string_view enum_transport_verb[] = { "hard", "fade", "afterMember", "afterIteration", "advance", "record", "loop", "overdub", "clear", "enable", "disable", "jump" };
+    inline constexpr std::string_view enum_transport_verb[] = { "hard", "fade", "afterMember", "afterIteration", "advance", "record", "loop", "overdub", "clear", "enable", "disable", "jump", "tempo" };
     inline constexpr std::string_view enum_transport_curve[] = { "linear", "sCurve" };
     inline constexpr std::string_view enum_osc_wait[] = { "none", "sent", "verified" };
     inline constexpr std::string_view enum_osc_doh[] = { "device", "takeBack", "leave" };
@@ -267,6 +268,14 @@ namespace wfg::doc::generated
           "", 1.0, false, "park",
           "",
           "Whether the show is held (PRD 3.34, Pause): run.pauseAll stands every sound, live input, fade, wait, curve, movie and timecode still where it was, silent after a tenth of a second, until run.playAll lets it go on from the same sample. While true, nothing that starts a cue is let in - a GO, a fire by name or number, a trigger, a pad, a load to time, Doh! - and each press is refused paused, not queued. Never saved: a show opened again is not paused." },
+        { "engine", "tempo",
+          ValueType::number, 'd', false, Access::read, Kind::state, Persist::none, Scope::show,
+          true, "0",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 1.0, false, "park",
+          "",
+          "The tempo the beat grid runs at now, in beats a minute (namespace draft 122): the show-s sync/bpm as the grid was anchored, or where a tempo verb has taken it; nought while no run launched on the grid sounds, which is when the next quantised GO anchors it again. A readout, never saved." },
         { "engine", "analysisRebuilds",
           ValueType::integer, 'i', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "0",
@@ -1115,6 +1124,14 @@ namespace wfg::doc::generated
           "s", 50.0, false, "park",
           "",
           "How long after entry before this cue starts. A group has one of its own, and it runs before its members begin their own pre-waits, so raising it defers the whole group." },
+        { "cue", "quantise",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "none",
+          false, 0.0, false, 0.0,
+          enum_cue_quantise, 6,
+          "", 50.0, false, "park",
+          "",
+          "Whether this cue waits for the beat grid before it starts (namespace draft 122, BEB): none, the default, starts as every cue always has; beat, bar, 2bars, 4bars or 8bars start it on the grid-s next such boundary. The grid is anchored by the first quantised GO while no run launched on it still sounds - that one starts at once and the bars count from it (BEC) - at the show-s sync/bpm and sync/beatsPerBar until a transport cue-s tempo verb moves them. A group-s applies to its entry, as its preWait does; the wait is a pre-wait the engine lengthens, so a replay waits the same ticks, and a sound is then placed on the grid-s own sample." },
         { "cue", "postWait",
           ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           true, "0",
@@ -2407,7 +2424,7 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           true, "hard",
           false, 0.0, false, 0.0,
-          enum_transport_verb, 12,
+          enum_transport_verb, 13,
           "", 50.0, false, "park",
           "",
           "How it stops. Hard stops now and takes Tracktion's own click suppression with it; fade runs a fade to silence first and stops when it arrives. The verb is separate from the duration so that a stop with a duration nobody meant cannot become a slow one by accident. afterMember and afterIteration are the two GRACEFUL ones, and they are only meaningful against a group: they let the scene reach a boundary it was going to reach anyway - the end of the member playing now, or the end of this round - and stop there, which is how an infinite loop is left without a cut. Against anything else they are a hard stop, because there is no boundary to wait for. advance is the third graceful one and belongs to a ranged media cue (PRD 3.24): it lets the range playing now finish the pass it is on and then leaves it, either into the next range or into silence - which is how an infinite ambience is got out of without a cut. Against a cue with no ranges it is a hard stop, for the same reason: there is no boundary. record, loop, overdub and clear are not stops at all (Phase 9c, namespace draft 19.6): aimed at a sounding mic cue on a sampling channel they are the press of that name on its take - Rec, Loop, a layer begun or closed, the channel emptied - and against anything else they are applied and do nothing, as a stop aimed at a cue that is not running is. enable, disable and jump are not stops either (namespace draft 27): enable and disable switch the target on or off FOR THIS RUN - the show file is never written, reopening the show forgets it, and Doh! of the GO puts it back - and jump moves the standby pointer of this cue's own list onto the target, firing it too when andGo is on." },
@@ -2459,6 +2476,22 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "",
           "The shape of that fade. Ignored by a hard stop." },
+        { "transport", "bpm",
+          ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "0",
+          true, 0.0, true, 400.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "",
+          "With the tempo verb (namespace draft 122, BED): the tempo the beat grid takes from this cue on, in beats a minute, the beat it is on kept - the next bar falls where the new tempo says from the beat the grid had reached. Nought leaves the tempo as it is, so a cue may move the bar alone." },
+        { "transport", "beatsPerBar",
+          ValueType::integer, 'i', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "0",
+          true, 0.0, true, 32.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "",
+          "With the tempo verb: how many beats a bar has from this cue on. Nought leaves it as it is." },
         { "osc", "address",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           false, "",
@@ -4147,6 +4180,22 @@ namespace wfg::doc::generated
           "dB", 1.0, false, "park",
           "",
           "How loud LTC plays, in dB below full scale (namespace draft 59, AHH): -18 by default, which is 0 dBu on a desk aligned as the EBU aligns one." },
+        { "sync", "bpm",
+          ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "120",
+          true, 20.0, true, 400.0,
+          nullptr, 0,
+          "", 1.0, false, "park",
+          "",
+          "The show-s tempo in beats a minute (namespace draft 122, BEE): what the beat grid runs at when a quantised GO anchors it. A transport cue-s tempo verb moves the grid for the night and leaves this row alone; engine/tempo says what the grid runs at now. 120 by default, as Live-s." },
+        { "sync", "beatsPerBar",
+          ValueType::integer, 'i', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "4",
+          true, 1.0, true, 32.0,
+          nullptr, 0,
+          "", 1.0, false, "park",
+          "",
+          "How many beats a bar of the grid has (namespace draft 122, BEE): what a cue quantised to a bar waits for. Four by default. A tempo verb-s beatsPerBar moves it for the night." },
         { "sync", "mtcLate",
           ValueType::integer, 'i', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "0",

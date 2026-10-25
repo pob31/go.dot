@@ -104,6 +104,13 @@ namespace wfg::client::model
         if (const auto level = at ("ltcLevel"); ! level.empty())
             row.ltcLevel = level;
 
+        //  The beat grid's rows (namespace draft §122), the engine's defaults when unsaid.
+        if (const auto bpm = at ("bpm"); ! bpm.empty())
+            row.bpm = bpm;
+
+        if (const auto beats = at ("beatsPerBar"); ! beats.empty())
+            row.beatsPerBar = beats;
+
         row.mtcLate = count (at ("mtcLate"));
         row.ltcLate = count (at ("ltcLate"));
         row.mtcWorstMs = osc::parseDouble (at ("mtcWorst")).value_or (0.0);

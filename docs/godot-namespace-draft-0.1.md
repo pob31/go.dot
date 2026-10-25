@@ -34886,3 +34886,68 @@ MIDI track read; a mic cue, a MIDI cue and a direct bus built.
 
 Owed: the probe set's questions 8-11; the words of the new report lines, mine; a listen to the Sturbzep
 import against Live playing the same set; §122, the tempo.
+
+## 122. A tempo in Go.dot: the beat grid
+
+**Asked 2026-10-25** by the author, on §121's finding that Live starts the Sturbzep song stems and a loop on
+the next bar (Live's launch quantisation, 24 clips at Global, one bar): *"We need to have adjustable tempo
+in Go.dot then for this"*, *"The transport menu can be used to add tempo indications"*, and *"Not all cues
+should be on the grid, this is an option in a cue or group."* Asked which of three the grid's anchoring
+should be, the author took the recommended: a quantised GO while nothing is on the grid starts at once and
+the bars count from it. Go.dot had no tempo at all: the Edit's 60 BPM is a fixed unit (PRD §3.25, one beat
+one second) and is not touched here.
+
+Mine *(proposed)*, the codes continuing after §121's:
+
+- **BEB** **The grid is opt-in, cue by cue.** `cue/quantise` - `none` by default, else `beat`, `bar`,
+  `2bars`, `4bars` or `8bars` - on a cue or a group; a cue or group without it fires exactly as before and
+  never waits for, starts or moves the grid. A group's applies to its entry, as its pre-wait does.
+- **BEC** **The grid anchors on a quantised GO when it is not live.** The grid is live while any run
+  launched on it still sounds. A quantised GO while it is not live starts at once - after its own pre-wait -
+  and the bars count from it; while it is live, the GO waits for the grid's next beat or bar, counted
+  from the moment it could otherwise start. No clock is started or stopped by hand; an Esc that ends
+  every run on the grid ends the grid, and the next quantised GO anchors it again.
+- **BED** **A tempo change is a transport verb**, `tempo`, with `bpm` and `beatsPerBar` rows (nought
+  leaves either as it is), from the Add menu's transport list. It moves the grid from its own moment on,
+  the beat it is on kept: the next bar falls where the new tempo says from the beat the grid had reached.
+  Fired before any grid is anchored, it sets what the next anchor runs at.
+- **BEE** **The show's tempo lives under Sync**: `sync/bpm` (120) and `sync/beatsPerBar` (4), two rows on
+  Show settings' Timecode page, read when the grid is anchored; `engine/tempo` is the readout - the
+  tempo the grid runs at now, nought while it is not live.
+- **BEF** **The wait is a record, the sample a hook's.** At the fire, in the handler, a quantised run's
+  pre-wait is lengthened to the tick a launch lead before its boundary and the beat is noted on the run,
+  so a replay waits the same ticks; the hook then places a sound, a live input, a code or a picture on the
+  boundary's own sample, counted from the anchor's launch sample - the anchoring sound's, or the sample
+  its tick's launch would have had for an anchor that places none - and a quantised group's start is
+  placed there for its members to inherit. A fade, an OSC or a MIDI cue fires on the boundary's tick.
+
+Not here: a member's own `quantise` inside a running group (its entry is the group's), the "starts in"
+readout counting the grid wait apart from the pre-wait, a hold's effect on the anchor's sample, and the
+importer's writing of `quantise` from Live's launch quantisation (§121, BDZ), which follows.
+
+**As built, 2026-10-25.** The rows: `cue,quantise`, `sync,bpm`, `sync,beatsPerBar`, `transport,bpm`,
+`transport,beatsPerBar`, the verb `tempo`, and the readout `engine,tempo` (`docs/parameters/`, the table and
+`show.rng` regenerated). The engine: `Run::quantise`, `gridBeat`, `onGrid`, `anchorsGrid`;
+`Runner::BeatGrid` (`anchorTick`, `anchorBeat`, `bpm`, `beatsPerBar`, `anchorRun`, and `anchorSample`, the
+hook's); `quantiseLaunch` at the two fires - a cue armed at standby and a cue fired cold, after the waits
+are copied - anchoring the grid or lengthening the pre-wait to the tick a lead before the boundary and
+noting the beat; `launchIfDue` placing a sound on `gridSampleOf (gridBeat)` and setting the anchor's sample
+where the anchoring sound starts; `gridTick`, before `advanceWaits` each tick, giving an anchor that places
+no launch its tick's sample, a waiting quantised group its beat's sample for its members to inherit (AYN's
+road), and `ListState::tempo` to the readout; `fireStop`'s `tempo` verb moving the grid with its beat kept.
+The client: the inspector's "when" block gains `starts on` with its menu in words, the transport rows
+`tempo` and `beats per bar` greyed unless the verb is `tempo` (and the target greyed when it is), the Add
+menu's transport list a "Tempo" line, and Show settings > Timecode two fields under the LTC level.
+
+The importer (§121, BDZ, the same day): `LiveSet::globalQuantisation`; a sound's `quantise` from the
+clip's launch quantisation, the set's for a clip at Global - eight, four, two bars, a bar, a quarter as a
+beat, a half and the finer divisions a beat and said; the GO's group carries the quantise its sounds
+share (a sound whose own differs is said), a sound alone its own; a scene's tempo a `tempo` transport cue
+first in its GO, a scene that only sets a tempo a GO of that cue alone; `sync/bpm` the set's tempo.
+
+Tests: GoTests "beat grid:" (a quantised GO in silence starting at once and anchoring, the next landing two
+seconds after it to the sample; a plain cue never waiting and the grid not live once its runs are gone;
+a tempo verb moving the grid with the beat kept, the readout following), the GO cases unchanged;
+AlsWalkTests and AlsImportTests (the quantise words from Live's numbers, a tempo cue first in the GO, the
+show's tempo). Owed: the words, mine; the author's try on the D700 and a listen with the Sturbzep stems
+against Live; a member's own quantise in a group; a hold and the anchor; the probe set's question 10.

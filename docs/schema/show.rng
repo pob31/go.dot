@@ -231,6 +231,19 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="quantise">
+          <a:documentation>Whether this cue waits for the beat grid before it starts (namespace draft 122, BEB): none, the default, starts as every cue always has; beat, bar, 2bars, 4bars or 8bars start it on the grid-s next such boundary. The grid is anchored by the first quantised GO while no run launched on it still sounds - that one starts at once and the bars count from it (BEC) - at the show-s sync/bpm and sync/beatsPerBar until a transport cue-s tempo verb moves them. A group-s applies to its entry, as its preWait does; the wait is a pre-wait the engine lengthens, so a replay waits the same ticks, and a sound is then placed on the grid-s own sample.</a:documentation>
+          <choice>
+            <value>none</value>
+            <value>beat</value>
+            <value>bar</value>
+            <value>2bars</value>
+            <value>4bars</value>
+            <value>8bars</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="shortName">
           <a:documentation>The cue&apos;s name for a seven-character display, written by somebody rather than cut by the machine (PRD 3.16: authored short names, never auto-truncation). Empty, a strip display cuts the name to its width and says nothing about it.</a:documentation>
           <data type="string"/>
@@ -404,6 +417,19 @@
         <attribute name="preset">
           <a:documentation>The ancestor group whose header prepares this cue, or empty for the ordinary case - prepared with its own group, as everything is. THE MARK IS THE DECISION AND THE HEADER LINE IS A READING OF IT (PRD 4.10): nothing is copied into the Header element, so editing the line is editing the member, deleting the member removes the line with no repair rule to write, and the two can never come to disagree because there is only one of them. It names an ANCESTOR rather than being a tickbox, because a cue three groups deep can be got ready by its own group, by the act, or by the opening scene, and which one is a decision about how early. A value naming a group that is not an ancestor is a validate warning and is ignored - not a refusal, because the repair is somebody dragging it somewhere sensible and yesterday-s show must still open.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="quantise">
+          <a:documentation>Whether this cue waits for the beat grid before it starts (namespace draft 122, BEB): none, the default, starts as every cue always has; beat, bar, 2bars, 4bars or 8bars start it on the grid-s next such boundary. The grid is anchored by the first quantised GO while no run launched on it still sounds - that one starts at once and the bars count from it (BEC) - at the show-s sync/bpm and sync/beatsPerBar until a transport cue-s tempo verb moves them. A group-s applies to its entry, as its preWait does; the wait is a pre-wait the engine lengthens, so a replay waits the same ticks, and a sound is then placed on the grid-s own sample.</a:documentation>
+          <choice>
+            <value>none</value>
+            <value>beat</value>
+            <value>bar</value>
+            <value>2bars</value>
+            <value>4bars</value>
+            <value>8bars</value>
+          </choice>
         </attribute>
       </optional>
       <optional>
@@ -952,6 +978,19 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="quantise">
+          <a:documentation>Whether this cue waits for the beat grid before it starts (namespace draft 122, BEB): none, the default, starts as every cue always has; beat, bar, 2bars, 4bars or 8bars start it on the grid-s next such boundary. The grid is anchored by the first quantised GO while no run launched on it still sounds - that one starts at once and the bars count from it (BEC) - at the show-s sync/bpm and sync/beatsPerBar until a transport cue-s tempo verb moves them. A group-s applies to its entry, as its preWait does; the wait is a pre-wait the engine lengthens, so a replay waits the same ticks, and a sound is then placed on the grid-s own sample.</a:documentation>
+          <choice>
+            <value>none</value>
+            <value>beat</value>
+            <value>bar</value>
+            <value>2bars</value>
+            <value>4bars</value>
+            <value>8bars</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="rangeJoin">
           <a:documentation>How a sound&apos;s ranges loop (PRD 3.24; namespace draft 69, AOJ): gapless wraps each pass on its sample, as the clip&apos;s own loop always has; crossfade crosses every wrap of a looping range over rangeJoinLength - the end of the pass read on under the start of the next, equal power - so a loop cut anywhere does not click. A pass is then shorter by the crossfade, and the last plays to the out point. Read at each range&apos;s start; a sound at a speed other than one, backwards, bouncing, or with its points moved while it plays, wraps gapless.</a:documentation>
           <choice>
@@ -1434,6 +1473,19 @@
         <attribute name="preset">
           <a:documentation>The ancestor group whose header prepares this cue, or empty for the ordinary case - prepared with its own group, as everything is. THE MARK IS THE DECISION AND THE HEADER LINE IS A READING OF IT (PRD 4.10): nothing is copied into the Header element, so editing the line is editing the member, deleting the member removes the line with no repair rule to write, and the two can never come to disagree because there is only one of them. It names an ANCESTOR rather than being a tickbox, because a cue three groups deep can be got ready by its own group, by the act, or by the opening scene, and which one is a decision about how early. A value naming a group that is not an ancestor is a validate warning and is ignored - not a refusal, because the repair is somebody dragging it somewhere sensible and yesterday-s show must still open.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="quantise">
+          <a:documentation>Whether this cue waits for the beat grid before it starts (namespace draft 122, BEB): none, the default, starts as every cue always has; beat, bar, 2bars, 4bars or 8bars start it on the grid-s next such boundary. The grid is anchored by the first quantised GO while no run launched on it still sounds - that one starts at once and the bars count from it (BEC) - at the show-s sync/bpm and sync/beatsPerBar until a transport cue-s tempo verb moves them. A group-s applies to its entry, as its preWait does; the wait is a pre-wait the engine lengthens, so a replay waits the same ticks, and a sound is then placed on the grid-s own sample.</a:documentation>
+          <choice>
+            <value>none</value>
+            <value>beat</value>
+            <value>bar</value>
+            <value>2bars</value>
+            <value>4bars</value>
+            <value>8bars</value>
+          </choice>
         </attribute>
       </optional>
       <optional>
@@ -1955,6 +2007,19 @@
           <choice>
             <value>true</value>
             <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="quantise">
+          <a:documentation>Whether this cue waits for the beat grid before it starts (namespace draft 122, BEB): none, the default, starts as every cue always has; beat, bar, 2bars, 4bars or 8bars start it on the grid-s next such boundary. The grid is anchored by the first quantised GO while no run launched on it still sounds - that one starts at once and the bars count from it (BEC) - at the show-s sync/bpm and sync/beatsPerBar until a transport cue-s tempo verb moves them. A group-s applies to its entry, as its preWait does; the wait is a pre-wait the engine lengthens, so a replay waits the same ticks, and a sound is then placed on the grid-s own sample.</a:documentation>
+          <choice>
+            <value>none</value>
+            <value>beat</value>
+            <value>bar</value>
+            <value>2bars</value>
+            <value>4bars</value>
+            <value>8bars</value>
           </choice>
         </attribute>
       </optional>
@@ -2573,6 +2638,19 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="quantise">
+          <a:documentation>Whether this cue waits for the beat grid before it starts (namespace draft 122, BEB): none, the default, starts as every cue always has; beat, bar, 2bars, 4bars or 8bars start it on the grid-s next such boundary. The grid is anchored by the first quantised GO while no run launched on it still sounds - that one starts at once and the bars count from it (BEC) - at the show-s sync/bpm and sync/beatsPerBar until a transport cue-s tempo verb moves them. A group-s applies to its entry, as its preWait does; the wait is a pre-wait the engine lengthens, so a replay waits the same ticks, and a sound is then placed on the grid-s own sample.</a:documentation>
+          <choice>
+            <value>none</value>
+            <value>beat</value>
+            <value>bar</value>
+            <value>2bars</value>
+            <value>4bars</value>
+            <value>8bars</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="rate">
           <a:documentation>The speed a fade with rateOn takes its target to, over its duration and along its curve - straight or S-shaped in the ratio itself, since nought has no logarithm (EA). One is the file&apos;s own speed; nought is a tape stop in varispeed and a held sound in timestretch. The drawn points stay the level&apos;s. Below nought the target plays backwards (namespace draft 41): a fade through nought turns the sound round where it crosses it.</a:documentation>
           <data type="double">
@@ -2641,6 +2719,24 @@
             <value>true</value>
             <value>false</value>
           </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="beatsPerBar">
+          <a:documentation>With the tempo verb: how many beats a bar has from this cue on. Nought leaves it as it is.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">32</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="bpm">
+          <a:documentation>With the tempo verb (namespace draft 122, BED): the tempo the beat grid takes from this cue on, in beats a minute, the beat it is on kept - the next bar falls where the new tempo says from the beat the grid had reached. Nought leaves the tempo as it is, so a cue may move the bar alone.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">400</param>
+          </data>
         </attribute>
       </optional>
       <optional>
@@ -2716,6 +2812,19 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="quantise">
+          <a:documentation>Whether this cue waits for the beat grid before it starts (namespace draft 122, BEB): none, the default, starts as every cue always has; beat, bar, 2bars, 4bars or 8bars start it on the grid-s next such boundary. The grid is anchored by the first quantised GO while no run launched on it still sounds - that one starts at once and the bars count from it (BEC) - at the show-s sync/bpm and sync/beatsPerBar until a transport cue-s tempo verb moves them. A group-s applies to its entry, as its preWait does; the wait is a pre-wait the engine lengthens, so a replay waits the same ticks, and a sound is then placed on the grid-s own sample.</a:documentation>
+          <choice>
+            <value>none</value>
+            <value>beat</value>
+            <value>bar</value>
+            <value>2bars</value>
+            <value>4bars</value>
+            <value>8bars</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="range">
           <a:documentation>Which slice of the target to go to, by identifier, when the verb is advance - and empty, which is what advance has always meant, is the NEXT one. Naming a slice is how a bed is sent to its outro from wherever it has got to rather than stepped through everything in between, which on a loop that never ends is the difference between a gesture and a wait. The slice still finishes the pass it is on before the jump, because that is what makes an advance graceful; a slice of some other cue is a warning and the run goes to the next one instead.</a:documentation>
           <data type="string"/>
@@ -2758,6 +2867,7 @@
             <value>enable</value>
             <value>disable</value>
             <value>jump</value>
+            <value>tempo</value>
           </choice>
         </attribute>
       </optional>
@@ -2825,6 +2935,19 @@
         <attribute name="preset">
           <a:documentation>The ancestor group whose header prepares this cue, or empty for the ordinary case - prepared with its own group, as everything is. THE MARK IS THE DECISION AND THE HEADER LINE IS A READING OF IT (PRD 4.10): nothing is copied into the Header element, so editing the line is editing the member, deleting the member removes the line with no repair rule to write, and the two can never come to disagree because there is only one of them. It names an ANCESTOR rather than being a tickbox, because a cue three groups deep can be got ready by its own group, by the act, or by the opening scene, and which one is a decision about how early. A value naming a group that is not an ancestor is a validate warning and is ignored - not a refusal, because the repair is somebody dragging it somewhere sensible and yesterday-s show must still open.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="quantise">
+          <a:documentation>Whether this cue waits for the beat grid before it starts (namespace draft 122, BEB): none, the default, starts as every cue always has; beat, bar, 2bars, 4bars or 8bars start it on the grid-s next such boundary. The grid is anchored by the first quantised GO while no run launched on it still sounds - that one starts at once and the bars count from it (BEC) - at the show-s sync/bpm and sync/beatsPerBar until a transport cue-s tempo verb moves them. A group-s applies to its entry, as its preWait does; the wait is a pre-wait the engine lengthens, so a replay waits the same ticks, and a sound is then placed on the grid-s own sample.</a:documentation>
+          <choice>
+            <value>none</value>
+            <value>beat</value>
+            <value>bar</value>
+            <value>2bars</value>
+            <value>4bars</value>
+            <value>8bars</value>
+          </choice>
         </attribute>
       </optional>
       <optional>
@@ -2924,6 +3047,19 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="quantise">
+          <a:documentation>Whether this cue waits for the beat grid before it starts (namespace draft 122, BEB): none, the default, starts as every cue always has; beat, bar, 2bars, 4bars or 8bars start it on the grid-s next such boundary. The grid is anchored by the first quantised GO while no run launched on it still sounds - that one starts at once and the bars count from it (BEC) - at the show-s sync/bpm and sync/beatsPerBar until a transport cue-s tempo verb moves them. A group-s applies to its entry, as its preWait does; the wait is a pre-wait the engine lengthens, so a replay waits the same ticks, and a sound is then placed on the grid-s own sample.</a:documentation>
+          <choice>
+            <value>none</value>
+            <value>beat</value>
+            <value>bar</value>
+            <value>2bars</value>
+            <value>4bars</value>
+            <value>8bars</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="shortName">
           <a:documentation>The cue&apos;s name for a seven-character display, written by somebody rather than cut by the machine (PRD 3.16: authored short names, never auto-truncation). Empty, a strip display cuts the name to its width and says nothing about it.</a:documentation>
           <data type="string"/>
@@ -3014,6 +3150,19 @@
         <attribute name="preset">
           <a:documentation>The ancestor group whose header prepares this cue, or empty for the ordinary case - prepared with its own group, as everything is. THE MARK IS THE DECISION AND THE HEADER LINE IS A READING OF IT (PRD 4.10): nothing is copied into the Header element, so editing the line is editing the member, deleting the member removes the line with no repair rule to write, and the two can never come to disagree because there is only one of them. It names an ANCESTOR rather than being a tickbox, because a cue three groups deep can be got ready by its own group, by the act, or by the opening scene, and which one is a decision about how early. A value naming a group that is not an ancestor is a validate warning and is ignored - not a refusal, because the repair is somebody dragging it somewhere sensible and yesterday-s show must still open.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="quantise">
+          <a:documentation>Whether this cue waits for the beat grid before it starts (namespace draft 122, BEB): none, the default, starts as every cue always has; beat, bar, 2bars, 4bars or 8bars start it on the grid-s next such boundary. The grid is anchored by the first quantised GO while no run launched on it still sounds - that one starts at once and the bars count from it (BEC) - at the show-s sync/bpm and sync/beatsPerBar until a transport cue-s tempo verb moves them. A group-s applies to its entry, as its preWait does; the wait is a pre-wait the engine lengthens, so a replay waits the same ticks, and a sound is then placed on the grid-s own sample.</a:documentation>
+          <choice>
+            <value>none</value>
+            <value>beat</value>
+            <value>bar</value>
+            <value>2bars</value>
+            <value>4bars</value>
+            <value>8bars</value>
+          </choice>
         </attribute>
       </optional>
       <optional>
@@ -3115,6 +3264,19 @@
         <attribute name="preset">
           <a:documentation>The ancestor group whose header prepares this cue, or empty for the ordinary case - prepared with its own group, as everything is. THE MARK IS THE DECISION AND THE HEADER LINE IS A READING OF IT (PRD 4.10): nothing is copied into the Header element, so editing the line is editing the member, deleting the member removes the line with no repair rule to write, and the two can never come to disagree because there is only one of them. It names an ANCESTOR rather than being a tickbox, because a cue three groups deep can be got ready by its own group, by the act, or by the opening scene, and which one is a decision about how early. A value naming a group that is not an ancestor is a validate warning and is ignored - not a refusal, because the repair is somebody dragging it somewhere sensible and yesterday-s show must still open.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="quantise">
+          <a:documentation>Whether this cue waits for the beat grid before it starts (namespace draft 122, BEB): none, the default, starts as every cue always has; beat, bar, 2bars, 4bars or 8bars start it on the grid-s next such boundary. The grid is anchored by the first quantised GO while no run launched on it still sounds - that one starts at once and the bars count from it (BEC) - at the show-s sync/bpm and sync/beatsPerBar until a transport cue-s tempo verb moves them. A group-s applies to its entry, as its preWait does; the wait is a pre-wait the engine lengthens, so a replay waits the same ticks, and a sound is then placed on the grid-s own sample.</a:documentation>
+          <choice>
+            <value>none</value>
+            <value>beat</value>
+            <value>bar</value>
+            <value>2bars</value>
+            <value>4bars</value>
+            <value>8bars</value>
+          </choice>
         </attribute>
       </optional>
       <optional>
@@ -3226,6 +3388,19 @@
         <attribute name="preset">
           <a:documentation>The ancestor group whose header prepares this cue, or empty for the ordinary case - prepared with its own group, as everything is. THE MARK IS THE DECISION AND THE HEADER LINE IS A READING OF IT (PRD 4.10): nothing is copied into the Header element, so editing the line is editing the member, deleting the member removes the line with no repair rule to write, and the two can never come to disagree because there is only one of them. It names an ANCESTOR rather than being a tickbox, because a cue three groups deep can be got ready by its own group, by the act, or by the opening scene, and which one is a decision about how early. A value naming a group that is not an ancestor is a validate warning and is ignored - not a refusal, because the repair is somebody dragging it somewhere sensible and yesterday-s show must still open.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="quantise">
+          <a:documentation>Whether this cue waits for the beat grid before it starts (namespace draft 122, BEB): none, the default, starts as every cue always has; beat, bar, 2bars, 4bars or 8bars start it on the grid-s next such boundary. The grid is anchored by the first quantised GO while no run launched on it still sounds - that one starts at once and the bars count from it (BEC) - at the show-s sync/bpm and sync/beatsPerBar until a transport cue-s tempo verb moves them. A group-s applies to its entry, as its preWait does; the wait is a pre-wait the engine lengthens, so a replay waits the same ticks, and a sound is then placed on the grid-s own sample.</a:documentation>
+          <choice>
+            <value>none</value>
+            <value>beat</value>
+            <value>bar</value>
+            <value>2bars</value>
+            <value>4bars</value>
+            <value>8bars</value>
+          </choice>
         </attribute>
       </optional>
       <optional>
@@ -3500,6 +3675,19 @@
         <attribute name="preset">
           <a:documentation>The ancestor group whose header prepares this cue, or empty for the ordinary case - prepared with its own group, as everything is. THE MARK IS THE DECISION AND THE HEADER LINE IS A READING OF IT (PRD 4.10): nothing is copied into the Header element, so editing the line is editing the member, deleting the member removes the line with no repair rule to write, and the two can never come to disagree because there is only one of them. It names an ANCESTOR rather than being a tickbox, because a cue three groups deep can be got ready by its own group, by the act, or by the opening scene, and which one is a decision about how early. A value naming a group that is not an ancestor is a validate warning and is ignored - not a refusal, because the repair is somebody dragging it somewhere sensible and yesterday-s show must still open.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="quantise">
+          <a:documentation>Whether this cue waits for the beat grid before it starts (namespace draft 122, BEB): none, the default, starts as every cue always has; beat, bar, 2bars, 4bars or 8bars start it on the grid-s next such boundary. The grid is anchored by the first quantised GO while no run launched on it still sounds - that one starts at once and the bars count from it (BEC) - at the show-s sync/bpm and sync/beatsPerBar until a transport cue-s tempo verb moves them. A group-s applies to its entry, as its preWait does; the wait is a pre-wait the engine lengthens, so a replay waits the same ticks, and a sound is then placed on the grid-s own sample.</a:documentation>
+          <choice>
+            <value>none</value>
+            <value>beat</value>
+            <value>bar</value>
+            <value>2bars</value>
+            <value>4bars</value>
+            <value>8bars</value>
+          </choice>
         </attribute>
       </optional>
       <optional>
@@ -5549,6 +5737,24 @@
 
   <define name="Sync">
     <element name="Sync">
+      <optional>
+        <attribute name="beatsPerBar">
+          <a:documentation>How many beats a bar of the grid has (namespace draft 122, BEE): what a cue quantised to a bar waits for. Four by default. A tempo verb-s beatsPerBar moves it for the night.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">1</param>
+            <param name="maxInclusive">32</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="bpm">
+          <a:documentation>The show-s tempo in beats a minute (namespace draft 122, BEE): what the beat grid runs at when a quantised GO anchors it. A transport cue-s tempo verb moves the grid for the night and leaves this row alone; engine/tempo says what the grid runs at now. 120 by default, as Live-s.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">20</param>
+            <param name="maxInclusive">400</param>
+          </data>
+        </attribute>
+      </optional>
       <optional>
         <attribute name="chaseCrossfade">
           <a:documentation>How long a jumping member&apos;s crossfade takes, in milliseconds (namespace draft 60, AIN): 10 by default, the crossfaded jump a slice moved while it sounds already makes.</a:documentation>

@@ -1476,6 +1476,32 @@ namespace wfg::cue
         ListState& listState() noexcept { return lists; }
         const ListState& listState() const noexcept { return lists; }
 
+        /** Whether a run launched on the beat grid still sounds (namespace draft §122, BEC). */
+        bool gridLive() const;
+
+        //======================================================================
+        /*  THE BEAT GRID (namespace draft §122, BEC): a tempo and a bar, anchored
+            by a quantised GO while no run launched on the grid still sounds -
+            that GO starts at once and the bars count from it - and moved by a
+            transport cue's tempo verb, the beat it is on kept. Handler state,
+            so a replay waits the same ticks, but for the anchor's SAMPLE: the
+            hook's, set when the anchoring run launches, from which a quantised
+            sound's own sample is placed (`gridSampleOf`). A tempo or a bar of
+            nought reads the show's `sync/bpm` and `sync/beatsPerBar`. */
+        struct BeatGrid
+        {
+            bool anchored = false;
+            std::int64_t anchorTick = 0;
+            double anchorBeat = 0.0;
+            double bpm = 0.0;
+            int beatsPerBar = 0;
+            std::string anchorRun;
+            std::int64_t anchorSample = 0;
+        };
+
+        /** The grid as it stands, for a test to read. */
+        const BeatGrid& beatGrid() const noexcept;
+
         /*  WHETHER A SHOWING MOVIE PLAYS THIS FILE, by its name relative to the
             media folder (namespace draft §55.5, ADP): a render a newer one has
             replaced waits while a picture is up on it, as a sounding run keeps
@@ -4561,6 +4587,23 @@ namespace wfg::cue
         bool isInside (const std::string& cueId, const std::string& ancestorId) const;
         bool reaches (const std::string& standby, const std::string& marked) const;
         bool isPast (const std::string& listId, const std::string& fired, const std::string& marked) const;
+
+        BeatGrid grid;
+
+        double gridBpm() const;
+        int gridBeatsPerBar() const;
+        double gridBeatAt (std::int64_t tick) const noexcept;
+        std::int64_t gridSampleOf (double beat) const noexcept;
+        static int quantiseBeatsOf (const std::string& quantise, int beatsPerBar) noexcept;
+
+        /*  A quantised run at its fire: anchors the grid, or lengthens its
+            pre-wait to the grid's next boundary and notes the beat. */
+        void quantiseLaunch (Run& run, std::int64_t tick);
+
+        /*  The hook's side, each tick: the anchor's sample for an anchor that
+            places no launch of its own, a quantised group's start on its beat,
+            and the readout. */
+        void gridTick (std::int64_t tick);
 
         std::uint64_t goCount = 0, currentGo = 0;
         GoRecord goRecord;

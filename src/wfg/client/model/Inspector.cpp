@@ -58,7 +58,7 @@ namespace wfg::client::model
         /*  `flagged` AFTER THE NOTES (namespace draft §63, ALQ): the two
             things somebody leaves on a cue for afterwards, side by side. */
         const std::vector<std::string> saidFirst { "number", "name", "shortName", "colour", "notes", "flagged" };
-        const std::vector<std::string> when      { "preWait", "duration", "postWait" };
+        const std::vector<std::string> when      { "preWait", "quantise", "duration", "postWait" };
         const std::vector<std::string> saidLast  { "enabled", "preset" };
 
         /*  WHAT ONLY A HAND ON A STRIP ASKS OF A MEDIA CUE (PRD §3.27): where
@@ -125,7 +125,7 @@ namespace wfg::client::model
                     both's shape, so it comes after both. */
                 { "fade",    { "target", "dca", "aux", "levelOn", "level", "rateOn", "rate", "curve", "points", "video",
                                "stopWhenDone" } },
-                { "transport", { "target", "verb", "andGo", "range", "thenNext", "curve" } },
+                { "transport", { "target", "verb", "andGo", "range", "thenNext", "curve", "bpm", "beatsPerBar" } },
                 { "start",   { "target" } },
                 //  A process cue (namespace draft §51): its MIDI; its patch is the canvas's (§65, AMY).
                 { "process", { "midiIn", "midiOut" } },
@@ -188,6 +188,10 @@ namespace wfg::client::model
                 { "midiOut", "MIDI out" },
                 { "stopWhenDone", "stop when done" },
                 { "andGo", "and Go" },
+                //  The beat grid (namespace draft §122). Words mine, owed.
+                { "quantise", "starts on" },
+                { "bpm", "tempo" },
+                { "beatsPerBar", "beats per bar" },
                 { "shortName", "short name" },
                 { "secondPress", "second press" },
                 { "velocityFloor", "velocity floor" },
@@ -541,6 +545,7 @@ namespace wfg::client::model
                 { "enable", "enable the target for this run" },
                 { "disable", "disable the target for this run" },
                 { "jump", "jump standby to the target" },
+                { "tempo", "set the beat grid's tempo" },
             };
 
             std::string verb = "hard";
@@ -578,6 +583,11 @@ namespace wfg::client::model
                     field.applies = verb == "advance";
                     field.label = "then GO next";
                 }
+                //  The tempo verb moves the grid and aims at nothing (namespace draft §122, BED).
+                else if (field.name == "bpm" || field.name == "beatsPerBar")
+                    field.applies = verb == "tempo";
+                else if (field.name == "target")
+                    field.applies = verb != "tempo";
             }
         }
 
@@ -664,6 +674,25 @@ namespace wfg::client::model
 
                 field.choices.emplace_back (option, word);
             }
+        }
+
+        /*  WHERE A CUE STARTS ON THE BEAT GRID (namespace draft §122, BEB), in
+            words: the stored words are the grid's, the said ones a person's. */
+        void wordTheQuantise (std::vector<Field>& decided)
+        {
+            static const std::vector<std::pair<std::string, std::string>> said
+            {
+                { "none", "at once" },
+                { "beat", "the next beat" },
+                { "bar", "the next bar" },
+                { "2bars", "the next 2 bars" },
+                { "4bars", "the next 4 bars" },
+                { "8bars", "the next 8 bars" },
+            };
+
+            for (auto& field : decided)
+                if (field.name == "quantise")
+                    wordTheOptions (field, said);
         }
 
         /*  WHAT A CODE ASKS OF THIS CUE (namespace draft §60): whether it is a
@@ -1984,6 +2013,9 @@ namespace wfg::client::model
             //  A picture's strip, a menu as a sound's is (namespace draft §49).
             if (out.kind == "video")
                 offerTheStrips (snapshot, cueId, decided);
+
+            //  WHERE ANY CUE STARTS ON THE BEAT GRID, in words (namespace draft §122).
+            wordTheQuantise (decided);
 
             /*  A VIDEO CUE'S CANVAS is a menu of the show's (Phase 8a). */
             if (out.kind == "video")

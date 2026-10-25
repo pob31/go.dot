@@ -8775,7 +8775,10 @@ namespace wfg::client::ui
                      { std::tuple { &tolerance, timeWords::inStepWithin, timeWords::milliseconds, "/godot/sync/chaseTolerance" },
                        std::tuple { &jumpPast, timeWords::jumpsPast, timeWords::seconds, "/godot/sync/chaseJump" },
                        std::tuple { &catchUp, timeWords::catchesUpBy, timeWords::percent, "/godot/sync/chaseRate" },
-                       std::tuple { &crossfade, timeWords::jumpCrossfade, timeWords::milliseconds, "/godot/sync/chaseCrossfade" } })
+                       std::tuple { &crossfade, timeWords::jumpCrossfade, timeWords::milliseconds, "/godot/sync/chaseCrossfade" },
+                       //  The beat grid's two (namespace draft §122, BEE), written the same way.
+                       std::tuple { &tempo, words::tempo, words::tempoUnit, "/godot/sync/bpm" },
+                       std::tuple { &beatsPerBar, words::beatsPerBar, "", "/godot/sync/beatsPerBar" } })
                 {
                     field->address = address;
                     field->label.setText (said, juce::dontSendNotification);
@@ -8834,7 +8837,9 @@ namespace wfg::client::ui
                 for (auto [field, now] : { std::pair { &tolerance, &sync.chaseTolerance },
                                            std::pair { &jumpPast, &sync.chaseJump },
                                            std::pair { &catchUp, &sync.chaseRate },
-                                           std::pair { &crossfade, &sync.chaseCrossfade } })
+                                           std::pair { &crossfade, &sync.chaseCrossfade },
+                                           std::pair { &tempo, &sync.bpm },
+                                           std::pair { &beatsPerBar, &sync.beatsPerBar } })
                 {
                     field->shown = *now;
 
@@ -8885,6 +8890,14 @@ namespace wfg::client::ui
                 auto levelLine = row (levelLabel, level, 70);
                 levelLine.removeFromLeft (6);
                 levelUnit.setBounds (levelLine.removeFromLeft (60));
+
+                //  The beat grid, under the timecode rows (namespace draft §122).
+                for (auto* field : { &tempo, &beatsPerBar })
+                {
+                    auto line = row (field->label, field->editor, 70);
+                    line.removeFromLeft (6);
+                    field->unit.setBounds (line.removeFromLeft (60));
+                }
 
                 area.removeFromTop (14);
                 late.setBounds (area.removeFromTop (24));
@@ -9042,6 +9055,7 @@ namespace wfg::client::ui
             juce::ComboBox ltcIn, mtcIn;
             MenuHold rateHold, mtcHold, ltcHold, ltcInHold, mtcInHold;
             Number tolerance, jumpPast, catchUp, crossfade;
+            Number tempo, beatsPerBar;      ///< the beat grid's rows (namespace draft §122)
         };
 
         /*  THIS COMPUTER IN A PAIR (namespace draft §58, RD.11; the author's

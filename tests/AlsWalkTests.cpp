@@ -690,6 +690,50 @@ TEST_CASE ("walk: the hands table says what fires a scene and what switches a tr
     }));
 }
 
+TEST_CASE ("walk: Live's launch quantisation is the cue's quantise - the set's for a clip at Global - and a scene's tempo its GO's tempo cue (namespace draft §121, BDZ)")
+{
+    auto set = setOf (3);
+    set.globalQuantisation = 4;          // one bar
+    set.scenes[1].tempoEnabled = true;
+    set.scenes[1].tempo = 90.0;
+
+    auto source = trackOf ("1", "1", 3, 2);
+    source.sends[0] = 1.0;
+
+    auto global = clipOf ("global", 0.0, 8.0);
+    global.quantisation = 0;             // Global: the set's bar
+    source.slots[0].clip = global;
+
+    auto quarter = clipOf ("quarter", 0.0, 8.0);
+    quarter.quantisation = 8;            // a quarter note: a beat
+    source.slots[1].clip = quarter;
+
+    auto half = clipOf ("half", 0.0, 8.0);
+    half.quantisation = 6;               // a half: a beat, said
+    source.slots[2].clip = half;
+    set.tracks.push_back (source);
+
+    const auto walked = walk (set);
+    REQUIRE (walked.steps.size() == 3u);
+    CHECK (walked.steps[0].sounds.at (0).quantise == "bar");
+    CHECK (walked.steps[0].tempo == doctest::Approx (0.0));
+    CHECK (walked.steps[1].sounds.at (0).quantise == "beat");
+    CHECK (walked.steps[1].tempo == doctest::Approx (90.0));
+    CHECK (walked.steps[2].sounds.at (0).quantise == "beat");
+
+    CHECK (std::any_of (walked.notes.begin(), walked.notes.end(), [] (const Note& note)
+    {
+        return note.kind == Note::Kind::approximated && note.text.find ("finer than a beat") != std::string::npos;
+    }));
+
+    //  A set at None, a clip at None: no grid.
+    set.globalQuantisation = 0;
+    set.tracks[0].slots[1].clip->quantisation = 1;
+    const auto plain = walk (set);
+    CHECK (plain.steps[0].sounds.at (0).quantise.empty());
+    CHECK (plain.steps[1].sounds.at (0).quantise.empty());
+}
+
 TEST_CASE ("walk: a track wired straight to the interface is a direct out, and a return on channels another holds is an aux into it (namespace draft §121, BDS, BDT)")
 {
     auto set = setOf (1);   // Face on pair 0 (channels 0/1), Loin on pair 1 (2/3)

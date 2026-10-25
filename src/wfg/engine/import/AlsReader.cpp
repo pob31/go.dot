@@ -909,6 +909,8 @@ namespace wfg::import::als
                         set.tracks.push_back (std::move (track));
                 }
 
+                set.globalQuantisation = integer (liveSet, "GlobalQuantisation", 0);
+
                 if (const auto* pre = at (liveSet, "SendsPre"))
                     for (auto* one : pre->getChildIterator())
                         set.sendsPre.push_back (one->getStringAttribute ("Value") == "true");

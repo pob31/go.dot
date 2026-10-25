@@ -206,6 +206,11 @@ has stood in front of the thing.
   title line has a button per Show settings tab with a problem that opens that
   tab, and the settings window marks the same tabs. Its device menus look for
   devices again as they open.
+- **The beat grid** (namespace draft §122). A cue or group may start on the
+  next beat or bar (`quantise`, off by default); the first such GO while
+  nothing is on the grid anchors it, the rest land on their boundary to the
+  sample; a transport cue's `tempo` verb moves the tempo and the bar from its
+  moment on, keeping the beat; Show settings > Timecode holds the show's.
 - **Importing.** Ableton Live sets (`wfg import-als`, several sets making a tour
   with a performance for each venue; scene tempos, direct outs, live inputs as
   mic cues and MIDI clips' controller curves since §121) and QLab 4 and 5 workspaces

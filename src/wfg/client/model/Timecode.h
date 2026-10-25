@@ -79,6 +79,11 @@ namespace wfg::client::model
         inline constexpr const char* ltcLevelUnit = "dBFS";
         inline constexpr const char* none = "None";
 
+        //  The beat grid's two rows (namespace draft §122, BEE). Words mine, owed.
+        inline constexpr const char* tempo = "Tempo";
+        inline constexpr const char* tempoUnit = "BPM";
+        inline constexpr const char* beatsPerBar = "Beats per bar";
+
         //  Under the LTC row while an output is chosen.
         inline constexpr const char* timecodeOnly = "This output carries timecode only: no sound is heard on it.";
 
@@ -156,6 +161,10 @@ namespace wfg::client::model
         std::string mtcOut;                 ///< a `<Port>`'s identifier, empty for none
         std::string ltcOut;                 ///< a `<Bus>`'s identifier, empty for none
         std::string ltcLevel { "-18" };     ///< dBFS, as the tree wrote it
+
+        //  The beat grid (namespace draft §122, BEE), as the rows store them.
+        std::string bpm { "120" };
+        std::string beatsPerBar { "4" };
 
         long long mtcLate = 0;              ///< MTC messages that left more than 2 ms after their moment
         double mtcWorstMs = 0.0;            ///< the latest of them

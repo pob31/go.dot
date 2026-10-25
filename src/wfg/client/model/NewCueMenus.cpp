@@ -169,6 +169,12 @@ namespace wfg::client::model
             { "Advance", "a ranged cue leaves the slice it is on", "transport",
               { { "verb", "advance" } }, "Stop", false, true, {} },
 
+            /*  THE BEAT GRID'S TEMPO (the author, 2026-10-25: "the transport
+                menu can be used to add tempo indications"; namespace draft
+                §122, BED). Aimed at nothing: it moves the grid, not a cue. */
+            { "Tempo", "the beat grid's tempo and bar from here on", "transport",
+              { { "verb", "tempo" } }, "Tempo", false, false, {} },
+
             /*  START IS ITS OWN KIND (the author, 2026-09-27: the list, not a
                 merge), listed here because it is what the others are - a cue
                 that does something to another cue. */
