@@ -34619,6 +34619,13 @@ Mine *(proposed)*:
   jumps to that end where it cannot.
 - **BCZ** **A speed turned round on a bounce's way back sends the file out again.** It went on back, so a
   fade through nought on the way back was heard as nothing at all.
+- **BDA** **A GO on a standby whose arm an edit has left behind arms it again first** *(the author: "You can
+  fix these issues", 2026-10-25)*. A standby edited is armed again once its edits stop, a fifth of a second
+  later; a GO inside that fifth launched the arm from before the edit - the old points, the old bounce, and
+  for ranges just made no slices at all, so the playhead drew a loop the voice was not playing. Now the GO
+  compares the arm with the cue - its slices' points, bounce and number, its offset, the file it plays -
+  and when they differ asks for the arm again; the launch waits for it, as a cold GO's does, and `run.late`
+  says by how much. The GO itself is applied as ever (§4.1). A GO on an arm that is up to date arms nothing.
 
 As built: `Runner::flipBounce`, asked every tick while `Run::bounceOwed`; `travelAt` (which way the file
 goes, from the run's last turn) and `unfoldedSecond` - the reader counts one way through a bounce and on
@@ -34633,6 +34640,10 @@ passes ending at four seconds across a flip; an out pulled in behind and ahead o
 standby armed again), AudioTests "slice move: a bouncing loop moved on its way back carries on back, placed
 in the reader's mirror" (on a ramp: every sample where it should be) and "audio host: a bouncing range
 turned round on its way back goes out again" (the playhead climbs and the sweep's pitch rises; without BCZ
-it fell), C and fr_FR. Both tester guides say it under *In and out points, loops*.
+it fell), C and fr_FR. BDA: RangeTests "slice move: a GO inside the fifth of a second after an edit arms the
+standby again first" and "a GO on a standby armed with what its cue says arms nothing again"; and the §41
+case "a range that bounces plays out and back..." now refuses a step in its playhead - it had counted a
+loop's jump back to its in-point as a turn, and passed on a GO that launched no bounce at all. Both tester
+guides say it under *In and out points, loops*.
 
 Owed: the author's try - ⇄ clicked under a sounding loop, both ways.

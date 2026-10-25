@@ -2361,6 +2361,11 @@ namespace wfg::cue
         void applySlices (Engine& engine, std::int64_t tick);
         void moveSoundingSlice (Run& run, const RangeSpec& wanted, std::int64_t now);
 
+        /*  Whether an armed run's slots hold other slices than its cue has
+            now - points, bounce, how many - or, with none, another offset:
+            what an arm made before an edit no longer plays. */
+        bool armIsBehind (const Run& run, const juce::ValueTree& cue) const;
+
         /*  AND ITS BOUNCE TURNED ON OR OFF WHILE IT SOUNDS (namespace draft
             §41, BCX): heard with no step - on, a horizon ahead; off, a horizon
             ahead while the file goes the run's way, else where it next turns

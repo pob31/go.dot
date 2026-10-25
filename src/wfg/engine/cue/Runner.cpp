@@ -925,6 +925,30 @@ namespace wfg::cue
                             stampSubtree (armed->id, currentGo);
                         }
 
+                        /*  AN ARM AN EDIT HAS LEFT BEHIND IS MADE AGAIN FIRST
+                            (BDA). A standby edited is armed again once its edits
+                            stop, a fifth of a second later, and a GO inside that
+                            fifth launched what had been armed before the edit -
+                            the old points, the old bounce, no slices at all for
+                            ranges just made, and a playhead reading slices the
+                            voice did not have. The GO is applied as ever (§4.1);
+                            the launch waits for the disk, as a cold GO's does,
+                            and `run.late` says by how much. */
+                        if (audio != nullptr && armed->kind == "media" && armed->armConfirmed && armed->track >= 0)
+                        {
+                            const auto played = playedMediaOf (cue, durations, renders);
+                            const auto newFile = ! played.name.empty() && played.name != armed->media;
+
+                            if (newFile || armed->rearmEditedAt >= 0 || armIsBehind (*armed, cue))
+                            {
+                                if (newFile)
+                                    armed->media = played.name;
+
+                                armed->armConfirmed = false;
+                                requestArmOn (engine, cue, *armed, armed->ownLevel);
+                            }
+                        }
+
                         /*  AND IT STILL WAITS. A cue armed at standby has had
                             its voice and its file made ready; what it has not
                             had is its pre-wait, which starts when the cue is
@@ -24333,20 +24357,7 @@ namespace wfg::cue
                 {
                     run->slicesRevision = revision;
 
-                    const auto ranges = rangesOf (cue);
-                    auto differs = ranges.size() != run->armedSlices.size();
-
-                    for (std::size_t i = 0; ! differs && i < ranges.size(); ++i)
-                        differs = ! juce::exactlyEqual (ranges[i].in, run->armedSlices[i].in)
-                                  || ! juce::exactlyEqual (ranges[i].out, run->armedSlices[i].out)
-                                  || ranges[i].pingPong != run->armedSlices[i].pingPong;
-
-                    /*  The offset only where the run's own does not win: a
-                        seek's is a decision about this run (§4.10). */
-                    if (! differs && run->startOffset <= 0.0 && ranges.empty())
-                        differs = ! juce::exactlyEqual (numberOf (cue, "startOffset"), run->armedStartOffset);
-
-                    if (differs)
+                    if (armIsBehind (*run, cue))
                         run->rearmEditedAt = tick;
                 }
 
@@ -24602,6 +24613,24 @@ namespace wfg::cue
             audio->stopAtSample (run->track, 0, at);
             run->turnEndPlaced = at;
         }
+    }
+
+    bool Runner::armIsBehind (const Run& run, const juce::ValueTree& cue) const
+    {
+        const auto ranges = rangesOf (cue);
+        auto differs = ranges.size() != run.armedSlices.size();
+
+        for (std::size_t i = 0; ! differs && i < ranges.size(); ++i)
+            differs = ! juce::exactlyEqual (ranges[i].in, run.armedSlices[i].in)
+                      || ! juce::exactlyEqual (ranges[i].out, run.armedSlices[i].out)
+                      || ranges[i].pingPong != run.armedSlices[i].pingPong;
+
+        /*  The offset only where the run's own does not win: a seek's is a
+            decision about this run (§4.10). */
+        if (! differs && run.startOffset <= 0.0 && ranges.empty())
+            differs = ! juce::exactlyEqual (numberOf (cue, "startOffset"), run.armedStartOffset);
+
+        return differs;
     }
 
     void Runner::moveSoundingSlice (Run& run, const RangeSpec& wanted, std::int64_t at)

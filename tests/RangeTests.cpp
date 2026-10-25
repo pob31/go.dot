@@ -1280,6 +1280,65 @@ TEST_CASE ("slice move: a cue armed at standby is armed again once its edits sto
     CHECK (rig.audio.arms.size() == 1u);
 }
 
+TEST_CASE ("slice move: a GO inside the fifth of a second after an edit arms the standby again first (BDA)")
+{
+    SchedulerRig rig;
+    const auto bed = rig.addRange (0.0, 2.0, 0);
+
+    rig.ticks (5);
+    REQUIRE (rig.audio.arms.size() == 1u);
+    rig.audio.completeArms (rig.engine);
+    rig.ticks (2);
+
+    /*  An out pulled in and the bounce turned on, then GO on the very next
+        tick: the arm with the old points is not what is launched. */
+    REQUIRE (rig.document.setAttribute ("/godot/range/" + bed + "/out", "1.5").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/range/" + bed + "/pingPong", "true").ok);
+    rig.tickOnce();
+    rig.submitAndTick ("go");
+
+    REQUIRE (rig.audio.arms.size() == 1u);
+    REQUIRE (rig.audio.arms.front().ranges.size() == 1u);
+    CHECK (rig.audio.arms.front().ranges.front().out == doctest::Approx (1.5));
+    CHECK (rig.audio.arms.front().ranges.front().pingPong);
+
+    /*  The launch waits for the disk, as a cold GO's does. */
+    rig.ticks (3);
+    CHECK (rig.audio.launches.empty());
+
+    rig.audio.completeArms (rig.engine);
+    rig.ticks (20);
+    REQUIRE (rig.audio.launches.size() == 1u);
+
+    REQUIRE_FALSE (rig.runs.all().empty());
+    const auto* run = rig.run (rig.runs.all().front().id);
+    REQUIRE (run->playingSlices.size() == 1u);
+    CHECK (run->playingSlices.front().out == doctest::Approx (1.5));
+    CHECK (run->playingSlices.front().pingPong);
+    CHECK (run->bent);
+
+    //  And no second arm once the edits' fifth of a second has gone by.
+    rig.ticks (15);
+    CHECK (rig.audio.arms.empty());
+}
+
+TEST_CASE ("slice move: a GO on a standby armed with what its cue says arms nothing again")
+{
+    SchedulerRig rig;
+    rig.addRange (0.0, 2.0, 0);
+
+    rig.ticks (5);
+    REQUIRE (rig.audio.arms.size() == 1u);
+    rig.audio.completeArms (rig.engine);
+    rig.ticks (2);
+
+    rig.submitAndTick ("go");
+    CHECK (rig.audio.arms.empty());
+
+    rig.ticks (20);
+    CHECK (rig.audio.launches.size() == 1u);
+}
+
 TEST_CASE ("slice move: a move the reader met late puts the clock where the reader applied it")
 {
     SchedulerRig rig;

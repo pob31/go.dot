@@ -9242,8 +9242,12 @@ TEST_CASE ("audio host: a range that bounces plays out and back between its poin
 
     REQUIRE (show.go());
 
-    //  Three seconds of it, the playhead read every tick.
-    double lowest = 10.0, highest = -10.0;
+    /*  Three seconds of it, the playhead read every tick. A turn is the way
+        changing with no step: a loop going round jumps back to its in-point,
+        a step of its whole length, and is not a bounce. The GO comes straight
+        after the edits, inside the fifth of a second before the standby would
+        have been armed again with them - the GO arms it again itself (BDA). */
+    double lowest = 10.0, highest = -10.0, biggestStep = 0.0;
     int turns = 0;
     double previous = show.tone().position;
     int heading = 0;
@@ -9254,6 +9258,7 @@ TEST_CASE ("audio host: a range that bounces plays out and back between its poin
         const auto now = show.tone().position;
         lowest = std::min (lowest, now);
         highest = std::max (highest, now);
+        biggestStep = std::max (biggestStep, std::abs (now - previous));
 
         const auto way = now > previous + 1.0e-6 ? 1 : now < previous - 1.0e-6 ? -1 : 0;
 
@@ -9266,10 +9271,11 @@ TEST_CASE ("audio host: a range that bounces plays out and back between its poin
         previous = now;
     }
 
-    INFO ("playhead between " << lowest << " and " << highest << ", " << turns << " turns");
+    INFO ("playhead between " << lowest << " and " << highest << ", " << turns << " turns, its biggest step " << biggestStep);
     CHECK (lowest >= 0.99);
     CHECK (highest <= 2.01);
     CHECK (turns >= 2);
+    CHECK (biggestStep < 0.05);
     CHECK (show.rig.host.trackPlayState (0).playing);
 }
 
@@ -9329,8 +9335,6 @@ TEST_CASE ("audio host: a bouncing range turned round on its way back goes out a
     REQUIRE (show.document.setAttribute ("/godot/range/" + range.id + "/loops", "0").ok);
     REQUIRE (show.document.setAttribute ("/godot/range/" + range.id + "/pingPong", "true").ok);
 
-    //  The standby armed again with its range, once the edits have stopped.
-    show.ticks (15);
     REQUIRE (show.go());
 
     //  On its way back, part-way down.
