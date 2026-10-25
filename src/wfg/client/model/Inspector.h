@@ -250,6 +250,11 @@ namespace wfg::client::model
             whatever else comes to point at an object by identifier. */
         std::vector<std::pair<std::string, std::string>> choices;
 
+        /*  A PATH MENU THAT ALSO TAKES TYPING (model::PathStep::typable): what
+            is typed is written as `typedBefore` + "/" + it + `typedAfter`. */
+        bool typable = false;
+        std::string typedBefore, typedAfter;
+
         /*  WHETHER THIS ROW MEANS ANYTHING FOR THIS CUE, as opposed to being
             legal for its kind. A fold is a statement about a two-channel file
             and says nothing about a mono one, so it is drawn greyed rather

@@ -903,6 +903,10 @@ namespace wfg::client::ui
             if (line.menuHold.holds (line.choice))
                 return;
 
+            //  Nor while a number is being typed into a path's box (2026-10-25).
+            if (line.choice.isTextEditable() && line.choice.hasKeyboardFocus (true))
+                return;
+
             switch (line.field.control)
             {
                 case model::Control::toggle:
@@ -973,6 +977,7 @@ namespace wfg::client::ui
                     }
 
                     line.choice.setSelectedId (idForChoice (field), juce::dontSendNotification);
+                    line.choice.setEditableText (field.control == model::Control::pathRef && field.typable);
                     break;
 
                 case model::Control::loopCount:
@@ -1139,6 +1144,19 @@ namespace wfg::client::ui
             it stands, the author's "the previous message is in the field and
             can be edited too". */
         return juce::String (field.value.empty() ? field.placeholder : field.value);
+    }
+
+    std::string InspectorComponent::typedPart (const juce::String& text)
+    {
+        /*  WHAT WAS TYPED, without the menu's " ›" if it was left on, and only
+            as one part of an address: no slash, no space, nothing empty. */
+        auto part = text.upToFirstOccurrenceOf (juce::String (juce::CharPointer_UTF8 (" \xe2\x80\xba")), false, false)
+                        .trim();
+
+        if (part.isEmpty() || part.containsAnyOf ("/ \t"))
+            return {};
+
+        return part.toStdString();
     }
 
     int InspectorComponent::idForChoice (const model::Field& field)
@@ -1396,6 +1414,13 @@ namespace wfg::client::ui
                 line->choice.setSelectedId (idForChoice (field), juce::dontSendNotification);
                 line->choice.setWantsKeyboardFocus (false);
 
+                /*  A PATH'S NUMBER TYPED (the author, 2026-10-25: "Could the cue
+                    number be entered from the keyboard instead of picking an
+                    item out of 200"): the box takes typing as well as the
+                    menu, and what is typed goes between the address before it
+                    and the rest after it (model::PathStep::typable). */
+                line->choice.setEditableText (field.control == model::Control::pathRef && field.typable);
+
                 auto* raw = line.get();
 
                 line->choice.onChange = [this, raw]
@@ -1403,8 +1428,15 @@ namespace wfg::client::ui
                     const auto at_ = raw->choice.getSelectedId() - 1;
 
                     if (at_ >= 0 && at_ < static_cast<int> (raw->field.choices.size()))
+                    {
                         commitField (raw->field,
                                      raw->field.choices[static_cast<std::size_t> (at_)].first);
+                        return;
+                    }
+
+                    if (raw->field.typable)
+                        if (const auto typed = typedPart (raw->choice.getText()); ! typed.empty())
+                            commitField (raw->field, raw->field.typedBefore + "/" + typed + raw->field.typedAfter);
                 };
 
                 content.addAndMakeVisible (line->choice);

@@ -150,9 +150,13 @@ namespace wfg::tree
             under this node are optional, and an address that leaves one out
             goes on as though under the first of them - an Eos cue fired in
             the console's current list, `/eos/cue/98.1/fire`, beside one in a
-            list named, `/eos/cue/2/98.1/fire`. Read by the menus only. */
+            list named, `/eos/cue/2/98.1/fire`. Read by the menus only. SKIP
+            may be a word instead of `true`, which the menus offer it by - the
+            Eos preset's "current", the author's (2026-10-25); `true` is
+            "skip". */
         bool open = false;
         bool skips = false;
+        std::string skipWord;
 
         /*  HOW THE NODE IS SPELLED ON THE RCP WIRE (namespace draft §57, AFH;
             DP.7), from `GODOT.RCP`: the verb - `set`, or a scene recall's
@@ -292,6 +296,7 @@ namespace wfg::tree
         const std::string& role() const noexcept                       { return about().role; }
         bool open() const noexcept                                     { return about().open; }
         bool skips() const noexcept                                    { return about().skips; }
+        const std::string& skipWord() const noexcept                   { return about().skipWord; }
         const std::string& rcpVerb() const noexcept                    { return about().rcpVerb; }
         int rcpIndexes() const noexcept                                { return about().rcpIndexes; }
         const std::string& lineTemplate() const noexcept               { return about().lineTemplate; }

@@ -34249,3 +34249,34 @@ field table. Imports: `Sound::pan` (Live), `qlab::Send`, `Bus::width`, `WalkOpti
 spread per shape, the round trip of the fit, the live ride, the published shape), CuePartTests,
 SurfacePagesTests, SurfaceBridgeTests, DeckBridgeTests, ClientTests, AlsWalkTests, AlsImportTests,
 QlabWalkTests, QlabImportTests, the two import blackboxes - C and fr_FR.
+
+## 114. Eos: [current], and a cue number typed
+
+**Asked 2026-10-25** by the author, after 0.1.15: *"Can the eos 'skip' be renamed 'current' instead? Could
+the cue number be entered from the keyboard instead of picking an item out of 200 in a drop down menu? The
+selection in a long list to eventually edit the OSC path is not helping the workflow. The other drop down
+menus are fine."*
+
+1. **[current]**, his word, where §110 had **[skip]**: the Eos menu of lists ends with *[current]*, the
+   console's current list. The word is the preset's: `GODOT.SKIP` may now be a word instead of `true`, and
+   the menus offer the level's leaving-out by it - `true` still reads *[skip]*. The Eos preset says
+   `"current"`, version 3.
+2. **A cue number typed.** The cue's menu in the inspector is a box that takes typing as well as its menu.
+   What is typed goes in place of that part of the address and the rest stays: on `/eos/cue/98.1/fire`,
+   typing 98.2 writes `/eos/cue/98.2/fire`; on a list picked with no cue yet, the cue lands down to its
+   *fire*. The other menus are unchanged.
+
+Mine *(proposed)*:
+
+- **BCC** **A level is typed when it is all numbers under an open part** (`model::PathStep::typable`): the
+  Eos cues, in a list or the current one - not the lists' menu (it holds *fire* and *[current]*), not a
+  submaster's (not open). Typed: one part, no slash or space, the menu's ` ›` taken off; the address is the
+  part before it, the typed part, and what followed it - or the first leaf when nothing did.
+- **BCD** **The poll leaves a typed box alone while it has the keyboard**, as it leaves an open menu
+  (§110, BBW).
+
+As built: `NodeShape::skipWord`; `Walk::skips` a map to the word; `PathStep::typable`, `typedBefore`,
+`typedAfter`, carried to the inspector's `Field`; `InspectorComponent` makes a typable path's ComboBox
+editable and commits what is typed (`typedPart`). Tests: ClientTests (the word, which levels are typed and
+what they keep), RunPaneUiTests (typing into the box, the arrow and spaces dropped, a part with a slash
+refused, a pick as before, the lists' menu not typable), AuthoringTests (version 3), C and fr_FR.

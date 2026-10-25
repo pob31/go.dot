@@ -54,6 +54,16 @@ namespace wfg::client::model
     {
         std::string picked;
         std::vector<std::pair<std::string, std::string>> choices;
+
+        /*  A PART TYPED RATHER THAN PICKED (the author, 2026-10-25: "Could the
+            cue number be entered from the keyboard instead of picking an item
+            out of 200 in a drop down menu?"): a level of numbers under a part
+            that takes what it does not list (GODOT.OPEN). What is typed is
+            written between these two - the address before the part, and what
+            followed it, or down to the first leaf when nothing did - so the
+            rest of the address stays as it was. */
+        bool typable = false;
+        std::string typedBefore, typedAfter;
     };
 
     /*  The menus that lead to `address` on its device: the root's children,

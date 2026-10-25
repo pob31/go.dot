@@ -14336,7 +14336,7 @@ TEST_CASE ("client: a described device's tree is one menu per part of the addres
     }
 }
 
-TEST_CASE ("client: the Eos preset's cue menus offer [skip] for the current list, and show a decimal cue typed in the address")
+TEST_CASE ("client: the Eos preset's cue menus offer [current] for the current list, show a decimal cue typed in the address, and take a cue number typed")
 {
     /*  The author, 2026-10-24: "/eos/cue/98.1/fire" - a decimal cue, fired in
         the console's current list. The preset's /eos/cue is OPEN and SKIPs
@@ -14346,13 +14346,13 @@ TEST_CASE ("client: the Eos preset's cue menus offer [skip] for the current list
     const auto file = juce::File (juce::String (WFG_REPO_ROOT) + "/presets/devices/etc-eos-osc.json");
     REQUIRE (file.existsAsFile());
 
-    const auto created = rig.document.createMount ("/eos", "namespaces/etc-eos-osc-v2.json");
+    const auto created = rig.document.createMount ("/eos", "namespaces/etc-eos-osc-v3.json");
     REQUIRE (created.ok);
 
     tree::MountDeclaration eos;
     eos.id = created.id;
     eos.prefix = "/eos";
-    eos.namespaceFile = "namespaces/etc-eos-osc-v2.json";
+    eos.namespaceFile = "namespaces/etc-eos-osc-v3.json";
     eos.port = 3032;
     REQUIRE (rig.mounts.load (eos, file.loadFileAsString().toStdString()).ok);
 
@@ -14377,15 +14377,50 @@ TEST_CASE ("client: the Eos preset's cue menus offer [skip] for the current list
 
     const std::string opens = " \xe2\x80\xba";
 
-    SUBCASE ("the lists' menu: the four lists, the fire by number, and [skip] last, writing cue 1 of the current list")
+    REQUIRE (snapshot->find ("/eos/cue") != nullptr);
+    CHECK (snapshot->find ("/eos/cue")->skipWord() == "current");     // the author's word, 2026-10-25
+
+    SUBCASE ("the lists' menu: the four lists, the fire by number, and [current] last, writing cue 1 of the current list")
     {
         const auto steps = model::pathSteps (*snapshot, devices, "/eos/cue");
         REQUIRE (steps.size() == 2u);
         CHECK (steps[0].picked == "/eos/cue");
         CHECK (steps[1].picked.empty());
         CHECK (labels (steps[1]) == std::vector<std::string> { "1" + opens, "2" + opens, "3" + opens, "4" + opens,
-                                                               "fire", "[skip]" + opens });
-        CHECK (keyFor (steps[1], "[skip]" + opens) == "/eos/cue/1/fire");
+                                                               "fire", "[current]" + opens });
+        CHECK (keyFor (steps[1], "[current]" + opens) == "/eos/cue/1/fire");
+
+        //  The lists are picked, not typed: they are not all numbers.
+        CHECK_FALSE (steps[1].typable);
+    }
+
+    SUBCASE ("a cue's number is typed: what is typed goes after the list, and the rest of the address stays")
+    {
+        const auto current = model::pathSteps (*snapshot, devices, "/eos/cue/3/fire");
+        REQUIRE (current.size() == 4u);
+        CHECK (current[2].typable);
+        CHECK (current[2].typedBefore == "/eos/cue");
+        CHECK (current[2].typedAfter == "/fire");
+        CHECK_FALSE (current[3].typable);                       // fire is a word, picked
+
+        const auto named = model::pathSteps (*snapshot, devices, "/eos/cue/2/98.1/fire");
+        REQUIRE (named.size() == 4u);
+        CHECK (named[2].typable);
+        CHECK (named[2].typedBefore == "/eos/cue/2");
+        CHECK (named[2].typedAfter == "/fire");
+
+        //  A list picked and no cue yet: a number typed lands down to the fire.
+        const auto listOnly = model::pathSteps (*snapshot, devices, "/eos/cue/2");
+        REQUIRE (listOnly.size() == 3u);
+        CHECK (listOnly[2].typable);
+        CHECK (listOnly[2].typedBefore == "/eos/cue/2");
+        CHECK (listOnly[2].typedAfter == "/fire");
+
+        //  Submasters are not open: their menu stays a menu.
+        const auto sub = model::pathSteps (*snapshot, devices, "/eos/sub/3");
+        REQUIRE (sub.size() == 3u);                             // a submaster holds its fire
+        CHECK (sub[1].picked == "/eos/sub/3");
+        CHECK_FALSE (sub[1].typable);
     }
 
     SUBCASE ("a cue of the current list: [skip] picked, then the cue, then fire; each cue's key whole")
@@ -14438,13 +14473,13 @@ TEST_CASE ("client: the Eos preset's cue menus offer [skip] for the current list
         CHECK (steps[1].picked.empty());
     }
 
-    SUBCASE ("the nested menu of a further message has [skip] too, its cues fired in the current list")
+    SUBCASE ("the nested menu of a further message has [current] too, its cues fired in the current list")
     {
         const auto items = model::treeMenu (*snapshot, devices, "/eos/cue/1/1/fire");
         const auto cue = std::find_if (items.begin(), items.end(), [] (const model::TreeMenuItem& item) { return item.label == "cue"; });
         REQUIRE (cue != items.end());
         REQUIRE_FALSE (cue->children.empty());
-        CHECK (cue->children.back().label == "[skip]");
+        CHECK (cue->children.back().label == "[current]");
 
         const auto& skipped = cue->children.back().children;
         REQUIRE (skipped.size() >= 3u);

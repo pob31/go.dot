@@ -498,6 +498,11 @@ namespace wfg::tree
 
             if (const auto* skips = property (*godot, "SKIP"); skips != nullptr && skips->isBool())
                 out.skips = skips->asBool();
+            else if (skips != nullptr && skips->isString())
+            {
+                out.skipWord = skips->asString();
+                out.skips = ! out.skipWord.empty();
+            }
 
             //  And the RCP spelling, where the file gives one (AFH, DP.7).
             if (const auto* rcp = property (*godot, "RCP"); rcp != nullptr)

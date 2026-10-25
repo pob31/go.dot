@@ -156,7 +156,8 @@ namespace wfg::client::model
         struct Walk
         {
             Children children;
-            std::set<std::string> open, skips;
+            std::set<std::string> open;
+            std::map<std::string, std::string> skips;     ///< part -> the word it is offered by
         };
 
         bool isUnder (const std::string& at, const std::string& root)
@@ -179,7 +180,7 @@ namespace wfg::client::model
                 if (at == root || isUnder (at, root))
                 {
                     if (node->open())  walk.open.insert (at);
-                    if (node->skips()) walk.skips.insert (at);
+                    if (node->skips()) walk.skips[at] = node->skipWord().empty() ? std::string ("skip") : node->skipWord();
                 }
 
                 if (! isUnder (at, root))
@@ -258,9 +259,33 @@ namespace wfg::client::model
             return found != children.end() && found->second.count (name) > 0;
         }
 
-        //  The author's word for leaving a level out (2026-10-24).
-        constexpr const char* skipWord = "[skip]";
+        /*  The choice that leaves a level out, by the word its part offers it
+            by: "[skip]", the author's first word (2026-10-24), or the preset's
+            own - "[current]" on Eos (2026-10-25). */
+        std::string skipLabel (const Walk& walk, const std::string& described)
+        {
+            const auto found = walk.skips.find (described);
+            return "[" + (found != walk.skips.end() ? found->second : std::string ("skip")) + "]";
+        }
+
         constexpr const char* opens = " \xe2\x80\xba";
+
+        //  A part spelled as a number: "98", "98.1".
+        bool numeric (const std::string& name)
+        {
+            if (name.empty())
+                return false;
+
+            auto dots = 0;
+
+            for (const auto c : name)
+                if (c == '.')
+                    ++dots;
+                else if (! isDigit (c))
+                    return false;
+
+            return dots <= 1 && name != ".";
+        }
 
         /*  `described` is where the file's tree is read, `real` what the
             address says: the same until a level is skipped, when the menu goes
@@ -292,7 +317,7 @@ namespace wfg::client::model
                 if (const auto first = firstUnder (walk.children, described); ! first.empty())
                 {
                     TreeMenuItem item;
-                    item.label = skipWord;
+                    item.label = skipLabel (walk, described);
                     item.children = itemsUnder (walk, described + "/" + first, real, true);
 
                     if (! item.children.empty())
@@ -360,7 +385,7 @@ namespace wfg::client::model
             {
                 const auto firstInside = firstUnder (children, shape);
                 const auto skipKey = real + "/" + firstInside + firstLeafTail (children, shape + "/" + firstInside);
-                step.choices.push_back ({ skipKey, std::string (skipWord) + opens });
+                step.choices.push_back ({ skipKey, skipLabel (walk, described) + opens });
 
                 auto skipped = false;
 
@@ -381,6 +406,23 @@ namespace wfg::client::model
                     afterSkip = true;
                     continue;
                 }
+            }
+
+            /*  A LEVEL OF NUMBERS UNDER AN OPEN PART IS TYPED (PathStep::typable):
+                whatever followed the part stays after it, or the first leaf
+                when nothing did. */
+            if (openAt (walk, described)
+                  && std::all_of (found->second.begin(), found->second.end(),
+                                  [] (const auto& child) { return numeric (child.first); }))
+            {
+                step.typable = true;
+                step.typedBefore = real;
+
+                for (auto after = level + 1; after < wanted.size(); ++after)
+                    step.typedAfter += "/" + wanted[after];
+
+                if (step.typedAfter.empty())
+                    step.typedAfter = firstLeafTail (children, described + "/" + first);
             }
 
             auto partHoldsOthers = false;

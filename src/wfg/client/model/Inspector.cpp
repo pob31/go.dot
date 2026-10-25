@@ -1549,7 +1549,12 @@ namespace wfg::client::model
                     step.typeTags = field.typeTags;
                     step.writable = true;
                     step.choices = steps[level].choices;
-                    step.description = level == 0
+                    step.typable = steps[level].typable;
+                    step.typedBefore = steps[level].typedBefore;
+                    step.typedAfter = steps[level].typedAfter;
+                    step.description = steps[level].typable
+                                         ? "Type the number, or pick it: what follows it in the address stays."
+                                         : level == 0
                                          ? "The device's own tree, one menu per part of the address: picking here"
                                            " rewrites the address below and clears the menus after it."
                                          : "The next part of the address, among what the part above holds.";

@@ -32,8 +32,9 @@ a button edge, 1 down and 0 up. --lists (4) cue lists with --cues (200) each,
 
 A cue number is a decimal on the console - 98.1 - and a description can only
 list whole ones, so /eos/cue is OPEN: an address under it that the file does
-not list goes out as the cue spells it (namespace draft §110). And it SKIPs:
-its level of lists may be left out, which the menus offer as [skip].
+not list goes out as the cue spells it (namespace draft §110), and a cue
+number is typed rather than picked (§114). And it SKIPs: its level of lists
+may be left out, which the menus offer as [current], the console's current list.
 
 Run from anywhere: `python3 scripts/presets/etc_eos.py`.
 """
@@ -85,7 +86,7 @@ def main():
     cue_lists["CONTENTS"]["fire"] = command("/eos/cue/fire", "Fire a cue of the active list by number.", "f", "scene.recall", span(0.0, 9999.999))
     cue_lists["DESCRIPTION"] = ("The cue lists, each of its cues; a cue of the console's current list without the list, "
                                 "/eos/cue/98.1/fire, and a decimal cue typed into the address, which goes out as typed.")
-    cue_lists["GODOT"] = {"OPEN": True, "SKIP": True}
+    cue_lists["GODOT"] = {"OPEN": True, "SKIP": "current"}
 
     keys = container("/eos/key", "The console's keys, by name; a float is the button edge, 1 down and 0 up.", {
         name: command("/eos/key/" + name, "Press the %s key." % name.replace("_", " "), "f",
@@ -147,7 +148,7 @@ def main():
                         "number, the keys, submasters, macros, presets and palettes, channel and group levels, the command line, the OSC "
                         "user and faders. %d lists of %d cues, %d submasters, %d macros, %d channels." % (args.lists, args.cues, args.subs, args.macros, args.channels),
                 "etc-eos-osc", "ETC", "Eos family (OSC over TCP)", SOURCES, "scripts/presets/etc_eos.py",
-                transport="tcp", wire="osc", framing="length", port=3032, version=2, contents=contents,
+                transport="tcp", wire="osc", framing="length", port=3032, version=3, contents=contents,
                 readback="subscribe", subscribe="/eos/subscribe 1")
     write(tree, "etc-eos-osc", args.out)
     return 0

@@ -289,6 +289,8 @@ namespace wfg::client::ui
             identifier is in the menu nowhere - an output deleted out from
             under a cue - which leaves the menu showing nothing rather than
             silently picking the first one. */
+        /** A part of an address typed into a path's box, or empty when it is not one. */
+        static std::string typedPart (const juce::String& text);
         static int idForChoice (const model::Field& field);
 
         Actions actions;

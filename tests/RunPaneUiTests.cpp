@@ -2204,6 +2204,93 @@ TEST_CASE ("inspector: an opener is a button that asks the window to open the pa
     CHECK_FALSE (eq->getToggleState());
 }
 
+TEST_CASE ("inspector: a path's cue number is typed into its box - the rest of the address kept - or picked; a plain path menu takes no typing")
+{
+    /*  The author, 2026-10-25: "Could the cue number be entered from the
+        keyboard instead of picking an item out of 200 in a drop down menu?
+        ... The other drop down menus are fine." (namespace draft §114) */
+    std::vector<std::pair<std::string, std::string>> written;
+
+    ui::InspectorComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& text)
+    { written.emplace_back (address, text); };
+
+    ui::InspectorComponent inspector (model::Theme {}, actions);
+    inspector.setSize (320, 300);
+
+    const std::string opens = " \xe2\x80\xba";
+
+    model::Field lists;
+    lists.address = "/godot/cue/CUE00001/address";
+    lists.name = "path2";
+    lists.label = "path 2";
+    lists.typeTags = "s";
+    lists.value = "/eos/cue/1/fire";
+    lists.writable = true;
+    lists.control = model::Control::pathRef;
+    lists.choices = { { "/eos/cue/1", "1" + opens }, { "/eos/cue/fire", "fire" }, { "/eos/cue/1/fire", "[current]" + opens } };
+
+    model::Field cue = lists;
+    cue.name = "path3";
+    cue.label = "path 3";
+    cue.value = "/eos/cue/3/fire";
+    cue.choices = { { "/eos/cue/1/fire", "1" + opens }, { "/eos/cue/3/fire", "3" + opens } };
+    cue.typable = true;
+    cue.typedBefore = "/eos/cue";
+    cue.typedAfter = "/fire";
+
+    model::Inspection inspection;
+    inspection.cueId = "CUE00001";
+    inspection.cueName = "Lights";
+    inspection.kind = "osc";
+    inspection.count = 1;
+    inspection.blocks.push_back ({ "what it does", { lists, cue } });
+    inspector.show (inspection);
+
+    std::vector<juce::ComboBox*> menus;
+
+    std::function<void (juce::Component&)> walk = [&] (juce::Component& at)
+    {
+        for (auto* child : at.getChildren())
+        {
+            if (auto* box = dynamic_cast<juce::ComboBox*> (child))
+                menus.push_back (box);
+
+            walk (*child);
+        }
+    };
+
+    walk (inspector);
+    REQUIRE (menus.size() == 2u);
+
+    auto* listMenu = menus[0];
+    auto* cueMenu = menus[1];
+    CHECK_FALSE (listMenu->isTextEditable());
+    CHECK (cueMenu->isTextEditable());
+    CHECK (cueMenu->getText() == juce::String::fromUTF8 (("3" + opens).c_str()));
+
+    //  Typed: between the list and the rest.
+    cueMenu->setText ("98.1", juce::sendNotificationSync);
+    REQUIRE (written.size() == 1u);
+    CHECK (written[0].first == "/godot/cue/CUE00001/address");
+    CHECK (written[0].second == "/eos/cue/98.1/fire");
+
+    //  The menu's own arrow left on, and spaces around, are not part of it.
+    cueMenu->setText (juce::String::fromUTF8 ((" 98.2" + opens).c_str()), juce::sendNotificationSync);
+    REQUIRE (written.size() == 2u);
+    CHECK (written[1].second == "/eos/cue/98.2/fire");
+
+    //  What cannot be one part of an address is not written.
+    cueMenu->setText ("9/8", juce::sendNotificationSync);
+    cueMenu->setText ("", juce::sendNotificationSync);
+    CHECK (written.size() == 2u);
+
+    //  And picked from its menu, as before.
+    cueMenu->setSelectedItemIndex (0, juce::sendNotificationSync);
+    REQUIRE (written.size() == 3u);
+    CHECK (written[2].second == "/eos/cue/1/fire");
+}
+
 TEST_CASE ("inspector: Doh!'s row on a cue is a menu of words that writes their keys")
 {
     /*  The worded-choice commit path namespace draft §24.10 named owed (D5,

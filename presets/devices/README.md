@@ -20,8 +20,9 @@ protocol's own spelling, so the address in a cue is the address in the device's 
   `PANIC` as `docs/godot-namespace-draft-0.1.md` §3 reads them; `ROLE` (§57, AFM); and the wire's own
   key where the address alone cannot say how to send it - `RCP`, `LINE`, `MIDI` (§57, AFJ).
 - On a part of the tree, `OPEN` (`true`: an address under it that the file does not list is sent as
-  typed - an Eos cue numbered 98.1) and `SKIP` (`true`: the level under it may be left out, offered in
-  the menus as *[skip]* - an Eos cue in the console's current list); §110.
+  typed - an Eos cue numbered 98.1) and `SKIP` (`true`, or the word the menus offer it by: the level under it
+  may be left out, offered as *[skip]* or *[word]* - Eos's *[current]*, a cue in the console's current list);
+  §110, §114. A level of numbers under an `OPEN` part is typed into its box rather than picked.
 
 ## Your presets
 
