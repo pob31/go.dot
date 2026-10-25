@@ -60,8 +60,9 @@ namespace wfg::import::als
         on its track's chain and one of its parameters by its path inside it
         (`DryWet`, `Bands.3/ParameterA/Freq`); `modulation` is a clip's own
         relative envelope on the track's volume (`VolumeModulationTarget`),
-        and `otherModulation` one on anything else a clip may modulate. */
-    enum class Parameter { volume, pan, send, device, modulation, otherModulation, unknown };
+        and `otherModulation` one on anything else a clip may modulate;
+        `active` is the track activator (`Speaker`), a switch (§121, BEA). */
+    enum class Parameter { volume, pan, send, device, modulation, otherModulation, active, unknown };
 
     struct Target
     {
@@ -190,8 +191,8 @@ namespace wfg::import::als
 
     struct Device
     {
-        std::string kind;           ///< Live's element: `Eq8`, `Reverb`, `PluginDevice`...
-        std::string name;           ///< a plugin's own name, or the device's user name
+        std::string kind;           ///< Live's element: `Eq8`, `Reverb`, `PluginDevice`, `MxDeviceAudioEffect`...
+        std::string name;           ///< a plugin's own name, or the device's user name, or a Max for Live device's `.amxd`
         bool on = true;
         std::map<std::string, double> values;   ///< every automatable number by its path, as saved
         std::vector<EqBand> bands;  ///< an EQ Eight's eight, empty for anything else
@@ -233,6 +234,16 @@ namespace wfg::import::als
         std::vector<Slot> slots;    ///< one per scene
     };
 
+    /*  A CONTROL A HAND MOVED: a MIDI channel (one-based, as a desk says it), a
+        controller or a note, and what it was mapped to. */
+    struct Mapping
+    {
+        int channel = 0;
+        int number = 0;
+        bool note = false;
+        Target target;
+    };
+
     struct Scene
     {
         std::string id;
@@ -242,16 +253,7 @@ namespace wfg::import::als
         bool tempoEnabled = false;
         double tempo = 0.0;
         bool followAction = false;
-    };
-
-    /*  A CONTROL A HAND MOVED: a MIDI channel (one-based, as a desk says it), a
-        controller or a note, and what it was mapped to. */
-    struct Mapping
-    {
-        int channel = 0;
-        int number = 0;
-        bool note = false;
-        Target target;
+        std::optional<Mapping> key; ///< a note or controller that launches the scene itself (§121, BEA)
     };
 
     struct LiveSet

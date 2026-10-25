@@ -376,6 +376,7 @@ namespace wfg::import::als
 
                 note (at (mixer, "Volume"), of (Parameter::volume));
                 note (at (mixer, "Pan"), of (Parameter::pan));
+                note (at (mixer, "Speaker"), of (Parameter::active));
 
                 if (const auto* sends = at (mixer, "Sends"))
                 {
@@ -414,6 +415,14 @@ namespace wfg::import::als
                         device.name = text (element, "PluginDesc/AuPluginInfo/Name");
                     if (device.name.empty())
                         device.name = text (element, "UserName");
+
+                    /*  A MAX FOR LIVE DEVICE is named by its patch's file
+                        (§121, BEA), which is what its author called it. */
+                    if (device.name.empty() && device.kind.rfind ("MxDevice", 0) == 0)
+                    {
+                        const auto patch = text (element, "PatchSlot/Value/MxDPatchRef/FileRef/RelativePath");
+                        device.name = patch.substr (patch.find_last_of ('/') + 1);
+                    }
 
                     device.plugin = pluginOf (element);
 
@@ -687,6 +696,7 @@ namespace wfg::import::als
                         scene.tempoEnabled = flag (element, "IsTempoEnabled");
                         scene.tempo = number (element, "Tempo", 0.0);
                         scene.followAction = flag (element, "FollowAction/FollowActionEnabled");
+                        scene.key = mappingIn (element->getChildByName ("KeyMidi"));
                         set.scenes.push_back (std::move (scene));
                     }
 

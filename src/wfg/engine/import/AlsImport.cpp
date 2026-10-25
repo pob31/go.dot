@@ -208,7 +208,10 @@ namespace wfg::import::als
                    "them (QU).\n\n";
 
             out << "## What came over\n\n";
-            out << "- " << outcome.gos << " GO(s), " << outcome.sounds << " sound(s).\n";
+            out << "- " << outcome.gos << " GO(s), " << outcome.sounds << " sound(s)"
+                << (outcome.lives > 0 ? ", " + std::to_string (outcome.lives) + " live input(s) as mic cues (namespace draft §121, BDU)"
+                                      : std::string())
+                << ".\n";
 
             int fades = 0, speedFades = 0, stops = 0, lanes = 0, sendLanes = 0;
 
@@ -512,9 +515,12 @@ namespace wfg::import::als
             if ((mix.pair >= 0 || mix.aux) && sentTo.count (mix.key) != 0)
                 mixes.push_back (&mix);
 
-        std::stable_sort (mixes.begin(), mixes.end(), [] (const Mix* a, const Mix* b)
+        //  By their first channel of the interface: a mono one's is its channel, a pair's twice its number.
+        const auto firstChannel = [] (const Mix* mix) { return mix->pair < 0 ? -1 : mix->mono ? mix->pair : 2 * mix->pair; };
+
+        std::stable_sort (mixes.begin(), mixes.end(), [&firstChannel] (const Mix* a, const Mix* b)
         {
-            return a->pair < b->pair;
+            return firstChannel (a) < firstChannel (b);
         });
 
         std::map<std::string, std::string> busOf;
@@ -714,6 +720,7 @@ namespace wfg::import::als
         //  --- The GOs ---------------------------------------------------------
         std::map<std::string, std::string> cueOf;       // walk key to cue id
         std::map<std::string, EqFit> eqOf;              // sound key to its EQ's fit
+        std::vector<std::string> inputPatch;            // the live inputs' channels of the interface, in their order (BDU)
 
         for (const auto& step : walked.steps)
         {
@@ -755,12 +762,49 @@ namespace wfg::import::als
 
                 const auto named = media.find (sound.key);
                 const auto file = named != media.end() ? named->second.first : sound.file.name;
-                const auto channels = named != media.end() ? named->second.second : 0;
+                const auto channels = sound.live ? (sound.inputStereo ? 2 : 1)
+                                    : named != media.end() ? named->second.second : 0;
 
-                attributes.push_back ({ "file", file });
+                /*  A LIVE INPUT IS A MIC CUE (namespace draft §121, BDU): on a
+                    named input of the interface, patched to the channel Live
+                    listened to, through an exclusive rack channel of its own. */
+                if (sound.live)
+                {
+                    const auto inputId = ids.of ("in:" + sound.key);
+                    const auto channelId = ids.of ("chan:" + sound.key);
+                    const auto madeInput = document.createInput (sound.inputStereo ? 2 : 1, -1, inputId);
+                    const auto madeChannel = document.createRackChannel (sound.inputStereo ? "stereo" : "mono", channelId);
 
-                if (channels > 0)
-                    attributes.push_back ({ "channels", std::to_string (channels) });
+                    if (! madeInput.ok || ! madeChannel.ok)
+                    {
+                        said (Note::Kind::dropped, step.scene, sound.trackName, "the live input \"" + sound.name
+                              + "\" could not be made (" + (madeInput.ok ? madeChannel.reason : madeInput.reason) + ")");
+                        continue;
+                    }
+
+                    write ("/godot/input/" + inputId + "/name", sound.name, step.scene);
+                    write ("/godot/slot/" + channelId + "/name", sound.name, step.scene);
+
+                    if (sound.inputStereo)
+                    {
+                        inputPatch.push_back (std::to_string (2 * sound.inputChannel));
+                        inputPatch.push_back (std::to_string (2 * sound.inputChannel + 1));
+                    }
+                    else
+                    {
+                        inputPatch.push_back (std::to_string (sound.inputChannel));
+                    }
+
+                    attributes.push_back ({ "input", inputId });
+                    attributes.push_back ({ "channel", channelId });
+                }
+                else
+                {
+                    attributes.push_back ({ "file", file });
+
+                    if (channels > 0)
+                        attributes.push_back ({ "channels", std::to_string (channels) });
+                }
 
                 if (std::abs (sound.levelDb) > 0.005)
                     attributes.push_back ({ "level", number (std::clamp (sound.levelDb, -120.0, 12.0), 2) });
@@ -815,7 +859,8 @@ namespace wfg::import::als
                 }
 
                 const auto cueName = alone && ! step.name.empty() ? step.name : sound.name;
-                const auto made = document.createCue (parent, doc::endOfSequence, "media", cueName, cueId, attributes);
+                const auto made = document.createCue (parent, doc::endOfSequence, sound.live ? "mic" : "media", cueName,
+                                                      cueId, attributes);
 
                 if (! made.ok)
                 {
@@ -825,18 +870,18 @@ namespace wfg::import::als
                 }
 
                 cueOf[sound.key] = cueId;
-                ++built.sounds;
+                (sound.live ? built.lives : built.sounds) += 1;
 
                 //  --- Its ranges --------------------------------------------------
                 const auto fileLength = sound.file.sampleRate > 0.0
                                           ? static_cast<double> (sound.file.frames) / sound.file.sampleRate : 0.0;
-                const auto whole = sound.in < 0.0005 && fileLength > 0.0 && std::abs (sound.out - fileLength) < 0.0005;
+                const auto whole = sound.live || (sound.in < 0.0005 && fileLength > 0.0 && std::abs (sound.out - fileLength) < 0.0005);
 
                 /*  A RANGE LIVE PLAYS TO THE FILE'S END RUNS TO THE END (§99): so a
                     file bounced again or replaced still plays to its own. */
                 const auto loopToEnd = cue::reachesTheEnd (sound.loopOut, fileLength);
 
-                if (sound.loops)
+                if (sound.loops && ! sound.live)
                 {
                     if (std::abs (sound.in - sound.loopIn) < 0.0005)
                     {
@@ -1034,6 +1079,17 @@ namespace wfg::import::als
             }
         }
 
+        //  THE LIVE INPUTS ON THE CHANNELS LIVE LISTENED TO (BDU).
+        if (! inputPatch.empty())
+        {
+            std::string text;
+
+            for (const auto& channel : inputPatch)
+                text += (text.empty() ? "" : " ") + channel;
+
+            write ("/godot/audio/inputPatch", text, -1);
+        }
+
         /*  STANDBY ON THE FIRST GO, where a show made by hand has it once its
             first cue is made: with no standby, GO has nothing to fire. */
         if (const auto first = std::find_if (walked.steps.begin(), walked.steps.end(),
@@ -1152,6 +1208,7 @@ namespace wfg::import::als
             outcome.show = folder;
             outcome.gos = built.gos;
             outcome.sounds = built.sounds;
+            outcome.lives = built.lives;
 
             for (const auto& note : notes)
             {

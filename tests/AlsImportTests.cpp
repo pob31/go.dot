@@ -533,6 +533,67 @@ TEST_CASE ("als import: a direct out is a direct bus on the cue, and a return on
     CHECK (at (document, "/godot/send/" + idFor ("sound:37:14:send:return:2") + "/bus") == aux);
 }
 
+TEST_CASE ("als import: a live input is a mic cue on a named input and a rack channel of its own, patched where Live listened (namespace draft §121, BDU)")
+{
+    /*  The fixture's "4 track in" made a live input: its input the
+        interface's fourth channel rather than track 4, which then feeds
+        nothing. Its carrier clip in the second scene is a fade on the mic cue. */
+    auto set = sessionFixture();
+
+    for (auto& track : set.tracks)
+    {
+        if (track.id == "28")
+        {
+            track.input.kind = Routing::Kind::external;
+            track.input.stereo = false;
+            track.input.channel = 3;
+        }
+
+        if (track.id == "27")
+            track.output.kind = Routing::Kind::none;
+    }
+
+    WalkOptions options;
+    options.scenes = { 0, 1, 2 };
+    const auto walked = walk (set, options);
+
+    std::map<std::string, std::pair<std::string, int>> media;
+
+    for (const auto& step : walked.steps)
+        for (const auto& sound : step.sounds)
+            if (! sound.live)
+                media[sound.key] = { sound.file.name, 2 };
+
+    doc::ShowDocument document;
+    const auto shown = build (set, walked, "Session", media, document);
+
+    INFO ("problems: " << (document.validate().empty() ? std::string ("none") : document.validate().front()));
+    CHECK (document.validate().empty());
+    CHECK (shown.lives == 1);
+
+    const auto mic = idFor ("live:28");
+    const auto input = idFor ("in:live:28");
+    const auto channel = idFor ("chan:live:28");
+    REQUIRE (elementOf (document, mic) == "Mic");
+    CHECK (parentOf (document, mic) == idFor ("go:37"));
+    CHECK (at (document, "/godot/cue/" + mic + "/name") == "4 track in");
+    CHECK (at (document, "/godot/cue/" + mic + "/input") == input);
+    CHECK (at (document, "/godot/cue/" + mic + "/channel") == channel);
+    CHECK (at (document, "/godot/input/" + input + "/name") == "4 track in");
+    CHECK (at (document, "/godot/input/" + input + "/width") == "1");
+    CHECK (at (document, "/godot/slot/" + channel + "/class") == "mono");
+    CHECK (at (document, "/godot/slot/" + channel + "/access") != "shared");
+    CHECK (at (document, "/godot/audio/inputPatch") == "3");
+
+    //  Its sends, as the track's stand: Face at 0 dB, Loin at -12.
+    CHECK (at (document, "/godot/send/" + idFor ("live:28:send:return:0") + "/level") == "0");
+
+    //  The fade in the second GO aims at it.
+    const auto fade = idFor ("fade:39:28");
+    REQUIRE (elementOf (document, fade) == "Fade");
+    CHECK (at (document, "/godot/cue/" + fade + "/target") == mic);
+}
+
 TEST_CASE ("als import: a VST3's state is written as JUCE keeps one, an AU's as it is, a VST2's not at all")
 {
     PluginInfo vst3 { "VST3", "Verb", {}, "0123456789ABCDEF0123456789ABCDEF", { 1, 2, 3 }, { 4, 5 } };

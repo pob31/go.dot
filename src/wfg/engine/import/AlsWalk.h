@@ -150,14 +150,24 @@ namespace wfg::import::als
         double levelDb = 0.0;       ///< the return's own fader: an aux's level, or folded into every send to a mix
     };
 
-    /*  ONE SOUND: what a media cue is made of. Seconds are the FILE's. */
+    /*  ONE SOUND: what a media cue is made of. Seconds are the FILE's.
+
+        OR A LIVE INPUT (namespace draft §121, BDU): a track whose monitoring is
+        In on an input of the interface - a mic cue in Go.dot, with no file, on
+        an input and a rack channel of its own, fired in the first GO where its
+        track is on and kept running; its level, sends, EQ and devices read as
+        a sound's are, from where its mixer stands. */
     struct Sound
     {
-        std::string key;            ///< "sound:<scene id>:<track id>" - stable across venues (QQ)
+        std::string key;            ///< "sound:<scene id>:<track id>" - stable across venues (QQ); "live:<track id>"
         int scene = -1;
         std::string trackId, trackName;
         std::string name;
         FileReference file;
+
+        bool live = false;          ///< a live input, a mic cue (BDU)
+        int inputChannel = -1;      ///< with `live`: the interface's input, or pair, from nought
+        bool inputStereo = false;
 
         double preWait = 0.0;       ///< silence before the file starts, in seconds of the room
         double in = 0.0, out = 0.0; ///< the file's seconds played first

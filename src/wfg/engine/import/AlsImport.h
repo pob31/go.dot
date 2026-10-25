@@ -111,6 +111,7 @@ namespace wfg::import::als
 
         int gos = 0;
         int sounds = 0;
+        int lives = 0;                  ///< live inputs made mic cues (§121, BDU)
         int approximated = 0;
         int dropped = 0;
         std::vector<std::string> missingMedia;
@@ -157,6 +158,7 @@ namespace wfg::import::als
         std::vector<Note> notes;
         int gos = 0;
         int sounds = 0;
+        int lives = 0;                  ///< live inputs made mic cues (§121, BDU)
 
         /*  FILES THE SHOW NEEDS BESIDE IT, by their path in the bundle: an aux's
             plugin's state as Live saved it, under `plugins/` (§93). */

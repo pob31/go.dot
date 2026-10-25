@@ -153,6 +153,7 @@ namespace wfg::import::als
         {
             double volume = 1.0;
             std::vector<double> sends;
+            bool active = true;         ///< the track activator, as the scenes leave it
         };
 
         struct Graph
@@ -690,12 +691,21 @@ namespace wfg::import::als
                   beatsPerRealSecond ((setToUse.tempo > 0.0 ? setToUse.tempo : 120.0) / 60.0)
             {
                 for (const auto& track : set.tracks)
-                    state.held[track.id] = { track.volume, track.sends };
+                    state.held[track.id] = { track.volume, track.sends, track.active };
 
                 for (const auto& ret : set.returns)
-                    state.held[ret.id] = { ret.volume, ret.sends };
+                    state.held[ret.id] = { ret.volume, ret.sends, ret.active };
 
                 out.mixes = graph.mixes;
+            }
+
+            /*  A LIVE INPUT (namespace draft §121, BDU): a track listening with
+                its monitoring In to an input of the interface. Its clips are
+                carriers still (isCarrier), shaping what it hears. */
+            static bool isLive (const Track& track)
+            {
+                return track.kind == Track::Kind::audio && track.monitoring == Track::Monitoring::in
+                         && track.input.kind == Routing::Kind::external && track.input.channel >= 0;
             }
 
             const Mix* mixNamed (const std::string& key) const
@@ -1284,6 +1294,9 @@ namespace wfg::import::als
                             continue;
                         }
 
+                        if (device.kind.rfind ("MxDevice", 0) == 0)   // said once for the set (BEA)
+                            continue;
+
                         const auto named = (device.name.empty() ? device.kind : device.name) + " on \""
                                              + crossed->name + "\"";
                         const auto switched = deviceSwitchedOn (clip, launchedHere, *crossed, static_cast<int> (at));
@@ -1336,6 +1349,61 @@ namespace wfg::import::als
                 return found != nullptr ? found->name : trackId;
             }
 
+            //==================================================================
+            /*  A LIVE INPUT FIRED (BDU): a sound with no file, read from where
+                the track's mixer stands - a clip launched with it shaping it as
+                a carrier's would, though a mic cue has no file to draw a lane
+                over, so a curve is taken at its first value and said. */
+            Sound liveFor (int sceneIndex, const Scene& scene, const Track& track, const Clip* clip,
+                           const std::map<std::string, std::pair<const Clip*, double>>& launchedHere)
+            {
+                Clip silent;
+                silent.name = track.name;
+                silent.loopEnd = 1.0;
+
+                auto sound = soundFor (sceneIndex, scene, track, clip != nullptr ? *clip : silent, launchedHere);
+                sound.key = "live:" + track.id;
+                sound.name = track.name;
+                sound.live = true;
+                sound.inputChannel = track.input.channel;
+                sound.inputStereo = track.input.stereo;
+                sound.file = {};
+                sound.preWait = sound.in = sound.out = 0.0;
+                sound.loops = false;
+                sound.rate = 1.0;
+                sound.timestretch = false;
+                sound.beatsPerFileSecond = 0.0;
+
+                bool flattened = false;
+
+                if (! sound.levelLane.empty())
+                {
+                    sound.levelDb = clampDb (sound.levelDb + sound.levelLane.front().db, laws.silenceDb);
+                    sound.levelLane.clear();
+                    flattened = true;
+                }
+
+                for (auto& send : sound.sends)
+                    if (! send.lane.empty())
+                    {
+                        send.levelDb = clampDb (send.lane.front().db, laws.silenceDb);
+                        send.lane.clear();
+                        flattened = true;
+                    }
+
+                if (flattened)
+                    out.notes.push_back ({ Note::Kind::approximated, sceneIndex, track.name, "the clip launched with the "
+                                           "live input draws a curve, which a mic cue has no file to follow: its first "
+                                           "value is used" });
+
+                out.notes.push_back ({ Note::Kind::info, sceneIndex, track.name, "a live input on the interface's "
+                                       + std::string (track.input.stereo ? "inputs " + std::to_string (2 * track.input.channel + 1)
+                                                                              + "/" + std::to_string (2 * track.input.channel + 2)
+                                                                          : "input " + std::to_string (track.input.channel + 1))
+                                       + ": a mic cue, fired here and kept running (namespace draft §121, BDU)" });
+                return sound;
+            }
+
             static bool deviceSwitchedOn (const Clip& clip,
                                           const std::map<std::string, std::pair<const Clip*, double>>& launchedHere,
                                           const Track& track, int device)
@@ -1372,14 +1440,14 @@ namespace wfg::import::als
 
                 const auto* fed = sourceFor (carrier);
 
+                //  A LIVE INPUT'S OWN CLIP shapes the mic cue it is (BDU).
+                if (fed == nullptr && isLive (carrier))
+                    fed = &carrier;
+
                 if (fed == nullptr)
                 {
-                    note (carrier.input.kind == Routing::Kind::external ? Note::Kind::dropped : Note::Kind::info,
-                          carrier.input.kind == Routing::Kind::external
-                            ? "the track listens to the interface's input: a live input is a mic cue in Go.dot, "
-                              "which this import does not make"
-                            : "the track listens with its monitoring In and nothing feeds it: its clip is silent in "
-                              "Live, and is not imported");
+                    note (Note::Kind::info, "the track listens with its monitoring In and nothing feeds it: its clip is "
+                                            "silent in Live, and is not imported");
                     return std::nullopt;
                 }
 
@@ -1622,6 +1690,22 @@ namespace wfg::import::als
                     //  --- Sounds first: they decide what the carriers fold into ----
                     std::set<std::string> carriersFolded;
 
+                    /*  A LIVE INPUT NOT YET RUNNING, its track on, is fired here
+                        (BDU) - with the clip launched on it, when there is one. */
+                    for (const auto& track : set.tracks)
+                    {
+                        if (! isLive (track) || state.playing.count (track.id) != 0 || ! state.held.at (track.id).active)
+                            continue;
+
+                        const auto launched = launchedHere.find (track.id);
+                        step.sounds.push_back (liveFor (index, scene, track,
+                                                        launched != launchedHere.end() ? launched->second.first : nullptr,
+                                                        launchedHere));
+
+                        if (launched != launchedHere.end())
+                            carriersFolded.insert (track.id);
+                    }
+
                     for (const auto& track : set.tracks)
                     {
                         if (track.kind != Track::Kind::audio || isCarrier (track))
@@ -1651,7 +1735,7 @@ namespace wfg::import::als
                         if (launched == launchedHere.end())
                             continue;
 
-                        if (! track.active)
+                        if (! state.held.at (track.id).active)
                         {
                             out.notes.push_back ({ Note::Kind::dropped, index, track.name, "the track is switched off "
                                                    "in Live; its clip is not imported" });
@@ -1736,8 +1820,9 @@ namespace wfg::import::als
                         state.sounds[sound.key] = &sound;
                         state.rate[sound.key] = sound.rate;
 
-                        const auto& launched = launchedHere.at (sound.trackId);
-                        hold (sound.trackId, *launched.first);
+                        //  A live input fired with no clip leaves its mixer where it stood.
+                        if (const auto launched = launchedHere.find (sound.trackId); launched != launchedHere.end())
+                            hold (sound.trackId, *launched->second.first);
                     }
                 }
             }
@@ -1790,6 +1875,12 @@ namespace wfg::import::als
                             hand.goDot = "the D700's Pan page on the aimed cue (namespace draft 113)";
                             break;
 
+                        case Parameter::active:
+                            hand.moved = "the track activator of \"" + trackName + "\" - its sounds on and off";
+                            hand.goDot = "nothing of its own: a cue's GO and its stop, or Esc, are where Go.dot "
+                                         "switches a sound (namespace draft 121, BEA)";
+                            break;
+
                         case Parameter::modulation:
                         case Parameter::otherModulation:
                         case Parameter::unknown:
@@ -1807,6 +1898,30 @@ namespace wfg::import::als
                     out.hands.push_back ({ control (*set.sceneUp), "select the scene above", "the standby arrow up" });
                 if (set.sceneDown.has_value())
                     out.hands.push_back ({ control (*set.sceneDown), "select the scene below", "the standby arrow down" });
+
+                /*  A KEY ON A SCENE ITSELF (§121, BEA): the GO it would fire. A
+                    MIDI trigger on that cue does the same, and is not written -
+                    the controller arrives knowing nothing (QO, PRD §4.9). */
+                for (std::size_t at = 0; at < set.scenes.size(); ++at)
+                {
+                    const auto& scene = set.scenes[at];
+
+                    if (! scene.key.has_value())
+                        continue;
+
+                    const auto step = std::find_if (out.steps.begin(), out.steps.end(), [at] (const Step& one)
+                    {
+                        return one.scene == static_cast<int> (at);
+                    });
+
+                    out.hands.push_back ({ control (*scene.key),
+                                           "launches scene " + std::to_string (at + 1)
+                                             + (scene.name.empty() ? std::string() : " \"" + scene.name + "\""),
+                                           step != out.steps.end()
+                                             ? "a GO from cue " + std::to_string (step->number) + " - a MIDI trigger on it "
+                                               "would do the same, and is not written (QO)"
+                                             : "nothing: the scene is not imported" });
+                }
 
                 for (const auto& hand : out.hands)
                     out.notes.push_back ({ Note::Kind::info, -1, {}, hand.control + ": " + hand.moved + " - in Go.dot, "
@@ -1885,6 +2000,16 @@ namespace wfg::import::als
                 for (const auto& track : set.tracks)
                     if (track.kind == Track::Kind::midi)
                         out.notes.push_back ({ Note::Kind::dropped, -1, track.name, "a MIDI track is not imported" });
+
+                /*  A MAX FOR LIVE DEVICE, wherever it sits (§121, BEA): said once
+                    for the set, since the group it is on may be on no path a
+                    sound takes - Sturbzep's sits on a group whose output is None. */
+                for (const auto& track : set.tracks)
+                    for (const auto& device : track.devices)
+                        if (device.kind.rfind ("MxDevice", 0) == 0)
+                            out.notes.push_back ({ Note::Kind::dropped, -1, track.name, "a Max for Live device, "
+                                                   + (device.name.empty() ? device.kind : device.name)
+                                                   + ", is not imported: Go.dot has no Max" });
 
                 for (const auto& problem : set.problems)
                     out.notes.push_back ({ Note::Kind::dropped, -1, {}, problem });

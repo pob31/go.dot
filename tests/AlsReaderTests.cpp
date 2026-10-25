@@ -304,6 +304,58 @@ TEST_CASE ("als: the hands - which control moved what, on which channel")
     CHECK_FALSE (set.sceneDown.has_value());   // a key mapped to nothing is no mapping
 }
 
+TEST_CASE ("als: a track activator's hand, a scene's own key, and a Max for Live device by its patch (namespace draft §121, BEA)")
+{
+    /*  The fixture with a controller on track 1's activator, a note on the
+        first scene, and a Max for Live device before its Reverb - each in the
+        shape Live writes it. */
+    auto xml = fixture ("session.als.xml").loadFileAsString().toStdString();
+
+    const auto insert = [&xml] (const std::string& before, const std::string& text)
+    {
+        const auto at = xml.find (before);
+        REQUIRE (at != std::string::npos);
+        xml.insert (at + before.size(), text);
+    };
+
+    insert ("<Speaker>", R"(<KeyMidi><IsNote Value="false" /><Channel Value="6" /><NoteOrController Value="20" /></KeyMidi>)");
+    insert ("<Scene Id=\"37\">", R"(<KeyMidi><IsNote Value="true" /><Channel Value="8" /><NoteOrController Value="4" /></KeyMidi>)");
+
+    const auto reverb = xml.find ("<Reverb Id=\"1\">");
+    REQUIRE (reverb != std::string::npos);
+    xml.insert (reverb, R"(<MxDeviceAudioEffect Id="5">
+        <On><Manual Value="true" /></On>
+        <UserName Value="" />
+        <PatchSlot><Value><MxDPatchRef><FileRef>
+            <RelativePath Value="Presets/Audio Effects/Max Audio Effect/Pause.amxd" />
+        </FileRef></MxDPatchRef></Value></PatchSlot>
+    </MxDeviceAudioEffect>
+    )");
+
+    const auto read = readSetXml (xml);
+    REQUIRE (read.set.has_value());
+    const auto& set = *read.set;
+
+    const auto activator = std::find_if (set.mappings.begin(), set.mappings.end(),
+                                         [] (const Mapping& one) { return one.target.what == Parameter::active; });
+    REQUIRE (activator != set.mappings.end());
+    CHECK (activator->channel == 7);
+    CHECK (activator->number == 20);
+    CHECK (activator->target.trackId == "14");
+
+    REQUIRE (set.scenes.size() == 3u);
+    REQUIRE (set.scenes[0].key.has_value());
+    CHECK (set.scenes[0].key->note);
+    CHECK (set.scenes[0].key->channel == 9);
+    CHECK (set.scenes[0].key->number == 4);
+    CHECK_FALSE (set.scenes[1].key.has_value());
+
+    const auto& one = trackNamed (set, "1");
+    REQUIRE (one.devices.size() == 3u);
+    CHECK (one.devices[1].kind == "MxDeviceAudioEffect");
+    CHECK (one.devices[1].name == "Pause.amxd");
+}
+
 TEST_CASE ("als: a Live 10 set - its scene names, its folder list and its group")
 {
     const auto set = readFixture ("live10.als.xml");

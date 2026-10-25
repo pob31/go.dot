@@ -339,6 +339,123 @@ TEST_CASE ("walk: a scene's tempo holds from there on, and re-stretches a warped
     }));
 }
 
+TEST_CASE ("walk: a live input is a mic cue fired in the first GO, and a clip launched on it later is a fade on it (namespace draft §121, BDU)")
+{
+    auto set = setOf (3);
+
+    /*  "VOIX": monitoring In on the interface's fourth input, -6 dB, sent to
+        Face at 0 dB; no clip in the first scene, a carrier clip in the second
+        that brings its fader to the bottom over ten beats. */
+    auto voice = trackOf ("7", "Voix", 3, 2);
+    voice.monitoring = Track::Monitoring::in;
+    voice.input.kind = Routing::Kind::external;
+    voice.input.stereo = false;
+    voice.input.channel = 3;
+    voice.volume = 0.5011872336;
+    voice.sends[0] = 1.0;
+
+    auto down = clipOf ("down", 0.0, 10.0);
+    down.envelopes.push_back (envelope ("7", Parameter::volume, { { 0.0, 0.5011872336 }, { 10.0, floorGain } }));
+    voice.slots[1].clip = down;
+
+    auto source = trackOf ("1", "1", 3, 2);
+    source.sends[0] = 1.0;
+    source.slots[0].clip = clipOf ("rain", 0.0, 16.0);
+    source.slots[2].clip = clipOf ("wind", 0.0, 16.0);
+    set.tracks = { voice, source };
+
+    const auto walked = walk (set);
+    REQUIRE (walked.steps.size() == 3u);
+
+    /*  THE FIRST GO: the rain, and the voice fired beside it. */
+    const auto& first = walked.steps[0];
+    REQUIRE (first.sounds.size() == 2u);
+    const auto live = std::find_if (first.sounds.begin(), first.sounds.end(), [] (const Sound& one) { return one.live; });
+    REQUIRE (live != first.sounds.end());
+    CHECK (live->key == "live:7");
+    CHECK (live->name == "Voix");
+    CHECK (live->inputChannel == 3);
+    CHECK_FALSE (live->inputStereo);
+    CHECK (live->levelDb == doctest::Approx (-6.0).epsilon (0.001));
+    REQUIRE (sendTo (*live, "return:0") != nullptr);
+    CHECK (sendTo (*live, "return:0")->levelDb == doctest::Approx (0.0));
+    CHECK (live->file.name.empty());
+
+    /*  THE SECOND: its carrier clip a fade on the mic cue, to silence. */
+    const auto& second = walked.steps[1];
+    CHECK (second.sounds.empty());
+    REQUIRE (second.fades.size() == 1u);
+    CHECK (second.fades[0].target == "live:7");
+    CHECK (second.fades[0].stopWhenDone);
+    CHECK (second.fades[0].duration == doctest::Approx (5.0));
+
+    /*  THE THIRD: the wind alone - the voice is running already. */
+    const auto& third = walked.steps[2];
+    REQUIRE (third.sounds.size() == 1u);
+    CHECK_FALSE (third.sounds[0].live);
+
+    CHECK (std::any_of (walked.notes.begin(), walked.notes.end(), [] (const Note& note)
+    {
+        return note.text.find ("a mic cue, fired here") != std::string::npos;
+    }));
+}
+
+TEST_CASE ("walk: the hands table says what fires a scene and what switches a track, and a Max for Live device is said by name (namespace draft §121, BEA)")
+{
+    auto xml = juce::File { juce::String (std::string (WFG_TEST_FIXTURES_DIR)) }
+                   .getChildFile ("als").getChildFile ("session.als.xml").loadFileAsString().toStdString();
+
+    const auto insert = [&xml] (const std::string& before, const std::string& text)
+    {
+        const auto at = xml.find (before);
+        REQUIRE (at != std::string::npos);
+        xml.insert (at + before.size(), text);
+    };
+
+    insert ("<Speaker>", R"(<KeyMidi><IsNote Value="false" /><Channel Value="6" /><NoteOrController Value="20" /></KeyMidi>)");
+    insert ("<Scene Id=\"37\">", R"(<KeyMidi><IsNote Value="true" /><Channel Value="8" /><NoteOrController Value="4" /></KeyMidi>)");
+    insert ("<Scene Id=\"44\">", R"(<KeyMidi><IsNote Value="true" /><Channel Value="8" /><NoteOrController Value="5" /></KeyMidi>)");
+
+    const auto reverb = xml.find ("<Reverb Id=\"1\">");
+    REQUIRE (reverb != std::string::npos);
+    xml.insert (reverb, R"(<MxDeviceAudioEffect Id="5"><On><Manual Value="true" /></On><PatchSlot><Value><MxDPatchRef><FileRef>
+        <RelativePath Value="Presets/Audio Effects/Max Audio Effect/Pause.amxd" /></FileRef></MxDPatchRef></Value></PatchSlot></MxDeviceAudioEffect>)");
+
+    const auto read = readSetXml (xml);
+    REQUIRE (read.set.has_value());
+
+    WalkOptions options;
+    options.scenes = { 0, 1 };      // the third scene left out
+    const auto walked = walk (*read.set, options);
+
+    const auto row = [&walked] (const std::string& moved) -> const Hand*
+    {
+        for (const auto& hand : walked.hands)
+            if (hand.moved.find (moved) != std::string::npos)
+                return &hand;
+
+        return nullptr;
+    };
+
+    const auto* activator = row ("track activator of \"1\"");
+    REQUIRE (activator != nullptr);
+    CHECK (activator->control == "CC 20, channel 7");
+
+    const auto* first = row ("launches scene 1 \"top start\"");
+    REQUIRE (first != nullptr);
+    CHECK (first->control == "note 4, channel 9");
+    CHECK (first->goDot.find ("a GO from cue 1") != std::string::npos);
+
+    const auto* third = row ("launches scene 3");
+    REQUIRE (third != nullptr);
+    CHECK (third->goDot.find ("not imported") != std::string::npos);
+
+    CHECK (std::any_of (walked.notes.begin(), walked.notes.end(), [] (const Note& note)
+    {
+        return note.kind == Note::Kind::dropped && note.text.find ("Pause.amxd") != std::string::npos;
+    }));
+}
+
 TEST_CASE ("walk: a track wired straight to the interface is a direct out, and a return on channels another holds is an aux into it (namespace draft §121, BDS, BDT)")
 {
     auto set = setOf (1);   // Face on pair 0 (channels 0/1), Loin on pair 1 (2/3)
