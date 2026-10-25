@@ -146,6 +146,15 @@
       "VALUE": [""],
       "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
     },
+    "quantise": {
+      "FULL_PATH": "/godot/cue/F7HR8TVD/quantise",
+      "DESCRIPTION": "Whether this cue waits for the beat grid before it starts (namespace draft 122, BEB): none, the default, starts as every cue always has; beat, bar, 2bars, 4bars or 8bars start it on the grid-s next such boundary. The grid is anchored by the first quantised GO while no run launched on it still sounds - that one starts at once and the bars count from it (BEC) - at the show-s sync/bpm and sync/beatsPerBar until a transport cue-s tempo verb moves them. A group-s applies to its entry, as its preWait does; a member the group starts is started on the group-s own time and its quantise is read only when it is fired on its own - by name, a start cue, a key or a trigger. The wait is a pre-wait the engine lengthens, so a replay waits the same ticks, and a sound is then placed on the grid-s own sample.",
+      "TYPE": "s",
+      "ACCESS": 3,
+      "VALUE": ["none"],
+      "RANGE": [{"VALS": ["none", "beat", "bar", "2bars", "4bars", "8bars"]}],
+      "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
+    },
     "role": {
       "FULL_PATH": "/godot/cue/F7HR8TVD/role",
       "DESCRIPTION": "Where this cue sits in the thing that contains it: an ordinary member, one of the cues in its group's header or footer, or one of the list's persistent cues. Derived from the element that contains it rather than stored, like `kind` and for the same reason - a client that could write it could move a cue between a group's preparation and its members without the group knowing. A cue at the top level of a list is a member. The whole vocabulary is declared here although `persistent` cannot occur until the section exists, because an enum that grows later grows under a client that has already read it.",
