@@ -456,6 +456,83 @@ TEST_CASE ("als import: a return carrying devices is an aux - its own output, le
                         { return note.text.find ("Live's own") != std::string::npos; }));
 }
 
+TEST_CASE ("als import: a direct out is a direct bus on the cue, and a return on a held pair an aux panned into the mix (namespace draft §121, BDS, BDT)")
+{
+    /*  The fixture, its track 14 wired straight to the interface's sixth
+        channel, and a mono return "C-Side" on channel 1 - the right of Face's
+        pair - beside the two it has. */
+    auto set = sessionFixture();
+    REQUIRE (set.returns.size() == 2u);
+    REQUIRE (! set.tracks.empty());
+
+    Track side;
+    side.id = "92";
+    side.name = "C-Side";
+    side.kind = Track::Kind::returnTrack;
+    side.output.kind = Routing::Kind::external;
+    side.output.stereo = false;
+    side.output.channel = 1;
+    side.sends.assign (3, 0.0003162277571);
+    set.returns.push_back (side);
+    set.sendsPre.push_back (false);
+
+    for (auto& ret : set.returns)
+        ret.sends.resize (3, 0.0003162277571);
+
+    for (auto& track : set.tracks)
+    {
+        track.sends.resize (3, 0.0003162277571);
+
+        if (track.id == "14")
+        {
+            track.output.kind = Routing::Kind::external;
+            track.output.stereo = false;
+            track.output.channel = 5;
+            track.sends[2] = 1.0;
+        }
+    }
+
+    WalkOptions options;
+    options.scenes = { 0, 1, 2 };
+    const auto walked = walk (set, options);
+
+    std::map<std::string, std::pair<std::string, int>> media;
+
+    for (const auto& step : walked.steps)
+        for (const auto& sound : step.sounds)
+            media[sound.key] = { sound.file.name, 2 };
+
+    doc::ShowDocument document;
+    build (set, walked, "Session", media, document);
+
+    INFO ("problems: " << (document.validate().empty() ? std::string ("none") : document.validate().front()));
+    CHECK (document.validate().empty());
+
+    /*  THE DIRECT OUT: a bus of that kind, one channel wide, on channel 5 of the
+        patch, named on the rain's directOut. */
+    const auto direct = idFor ("direct:direct:14");
+    const auto rain = idFor ("sound:37:14");
+    CHECK (at (document, "/godot/bus/" + direct + "/kind") == "direct");
+    CHECK (at (document, "/godot/bus/" + direct + "/width") == "1");
+    CHECK (at (document, "/godot/bus/" + direct + "/name") == "1");
+    CHECK (at (document, "/godot/cue/" + rain + "/directOut") == direct);
+    CHECK (at (document, "/godot/audio/outputPatch") == "0 1 2 3 5");
+
+    /*  THE SIDE: a mono aux with no output of its own, its one send into Face
+        panned hard right; the rain's send to it heard. */
+    const auto aux = idFor ("aux:return:2");
+    const auto face = idFor ("mix:return:0");
+    REQUIRE (elementOf (document, aux) == "Channel");
+    CHECK (at (document, "/godot/slot/" + aux + "/class") == "mono");
+    CHECK_FALSE (document.findById (idFor ("out:return:2")).isValid());
+
+    const auto intoFace = idFor ("auxsend:return:2:return:0");
+    CHECK (at (document, "/godot/send/" + intoFace + "/bus") == face);
+    CHECK (at (document, "/godot/send/" + intoFace + "/level") == "0");
+    CHECK (at (document, "/godot/send/" + intoFace + "/pan") == "1");
+    CHECK (at (document, "/godot/send/" + idFor ("sound:37:14:send:return:2") + "/bus") == aux);
+}
+
 TEST_CASE ("als import: a VST3's state is written as JUCE keeps one, an AU's as it is, a VST2's not at all")
 {
     PluginInfo vst3 { "VST3", "Verb", {}, "0123456789ABCDEF0123456789ABCDEF", { 1, 2, 3 }, { 4, 5 } };

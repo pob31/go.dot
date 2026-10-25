@@ -103,6 +103,11 @@ namespace wfg::import::als
         double levelDb = 0.0;
         std::vector<CurvePoint> lane;   ///< over the FILE, an offset on `levelDb`; empty for none
         bool on = true;
+
+        /*  A PLACE OF ITS OWN (namespace draft §121, BDT): a mono output that
+            lands on one side of a stereo owner's pair is panned there, -1 the
+            left and 1 the right. Empty, the sound's own pan rides it. */
+        std::optional<double> pan;
     };
 
     /*  A MIX: a return, or the master, that reaches the interface - what a send
@@ -115,13 +120,27 @@ namespace wfg::import::als
         one fits, a third-party plugin carried onto its chain, Live's own
         devices noted, and its sends into the other returns its own sends. Its
         sends come over switched on. A return with none of that stays a mix, its
-        fader folded into every send to it. */
+        fader folded into every send to it.
+
+        A DIRECT OUT (namespace draft §121, BDS): a track wired straight to the
+        interface has an output of its own, `direct:<track id>`, which the
+        sound plays on beside its sends - a bus of kind direct in Go.dot, named
+        on the cue rather than sent to.
+
+        TWO ON ONE PAIR (BDT): the owner of a set of channels is the widest on
+        them, then the first in Live's order; another whose channels all lie
+        inside an owner's gives up its output - a return becomes an aux sending
+        into the owner at 0 dB, a direct out sends its track `into` the owner
+        instead - a mono one panned to its side. */
     struct Mix
     {
-        std::string key;            ///< "return:<index>" or "master"
-        std::string name;           ///< the return's name, Live's letter taken off
+        std::string key;            ///< "return:<index>", "master" or "direct:<track id>"
+        std::string name;           ///< the return's name, Live's letter taken off; a direct out's track's
         int pair = -1;
         bool mono = false;
+        bool direct = false;        ///< a track's own output to the interface (BDS)
+        std::string into;           ///< a direct out on channels an owner holds: that owner's key (BDT)
+        std::optional<double> pan;  ///< with `into`: the side a mono one lands on
         std::vector<std::string> effects;
         bool aux = false;
         std::vector<const Device*> eqs;          ///< an aux's EQ Eights
@@ -152,6 +171,7 @@ namespace wfg::import::als
         double levelDb = 0.0;
         std::vector<CurvePoint> levelLane;
         std::vector<SendOut> sends;
+        std::string directOut;      ///< the direct `Mix::key` it plays on as well (BDS); empty for none
 
         /*  THE TRACK'S OWN PAN, -1..1 (namespace draft §113): on every send of
             the cue as a pan when the file is mono and a balance when it is

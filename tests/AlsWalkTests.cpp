@@ -339,6 +339,100 @@ TEST_CASE ("walk: a scene's tempo holds from there on, and re-stretches a warped
     }));
 }
 
+TEST_CASE ("walk: a track wired straight to the interface is a direct out, and a return on channels another holds is an aux into it (namespace draft §121, BDS, BDT)")
+{
+    auto set = setOf (1);   // Face on pair 0 (channels 0/1), Loin on pair 1 (2/3)
+
+    /*  TWO MORE RETURNS ON CHANNELS FACE HOLDS: "Side", mono on channel 1 - the
+        right of Face's pair - and "Twin", a second stereo on pair 0. The owner
+        is the widest, then the first in Live's order: Face. */
+    Track side;
+    side.id = "92";
+    side.name = "C-Side";
+    side.kind = Track::Kind::returnTrack;
+    side.output.kind = Routing::Kind::external;
+    side.output.stereo = false;
+    side.output.channel = 1;
+    set.returns.push_back (side);
+
+    Track twin;
+    twin.id = "93";
+    twin.name = "D-Twin";
+    twin.kind = Track::Kind::returnTrack;
+    twin.output.kind = Routing::Kind::external;
+    twin.output.stereo = true;
+    twin.output.channel = 0;
+    set.returns.push_back (twin);
+    set.sendsPre = { false, false, false, false };
+
+    for (auto& ret : set.returns)
+        ret.sends.assign (4, floorGain);
+
+    /*  THE SOURCE: sent to Face, and wired straight to the interface's sixth
+        channel as well. */
+    auto source = trackOf ("1", "1", 1, 4);
+    source.sends[0] = 1.0;
+    source.output.kind = Routing::Kind::external;
+    source.output.stereo = false;
+    source.output.channel = 5;
+    source.slots[0].clip = clipOf ("one", 0.0, 16.0);
+    set.tracks.push_back (source);
+
+    const auto walked = walk (set);
+
+    const auto mixNamed = [&walked] (const std::string& key) -> const Mix*
+    {
+        for (const auto& mix : walked.mixes)
+            if (mix.key == key)
+                return &mix;
+
+        return nullptr;
+    };
+
+    const auto* direct = mixNamed ("direct:1");
+    REQUIRE (direct != nullptr);
+    CHECK (direct->direct);
+    CHECK (direct->pair == 5);
+    CHECK (direct->mono);
+    CHECK (direct->name == "1");
+
+    const auto* face = mixNamed ("return:0");
+    REQUIRE (face != nullptr);
+    CHECK_FALSE (face->aux);
+    CHECK (face->pair == 0);
+
+    const auto* sideMix = mixNamed ("return:2");
+    REQUIRE (sideMix != nullptr);
+    CHECK (sideMix->aux);
+    CHECK (sideMix->pair < 0);
+    CHECK (sideMix->mono);
+    REQUIRE (sideMix->sends.size() == 1u);
+    CHECK (sideMix->sends[0].mix == "return:0");
+    CHECK (sideMix->sends[0].levelDb == doctest::Approx (0.0));
+    REQUIRE (sideMix->sends[0].pan.has_value());
+    CHECK (*sideMix->sends[0].pan == doctest::Approx (1.0));
+
+    const auto* twinMix = mixNamed ("return:3");
+    REQUIRE (twinMix != nullptr);
+    CHECK (twinMix->aux);
+    CHECK (twinMix->pair < 0);
+    REQUIRE (twinMix->sends.size() == 1u);
+    CHECK (twinMix->sends[0].mix == "return:0");
+    CHECK_FALSE (twinMix->sends[0].pan.has_value());
+
+    /*  THE SOUND: its send to Face, and its direct out - not a send. */
+    REQUIRE (walked.steps.size() == 1u);
+    const auto& sound = walked.steps[0].sounds.at (0);
+    CHECK (sound.directOut == "direct:1");
+    CHECK (sendTo (sound, "return:0") != nullptr);
+    CHECK (sendTo (sound, "direct:1") == nullptr);
+
+    CHECK (std::none_of (walked.notes.begin(), walked.notes.end(), [] (const Note& note)
+    {
+        return note.text.find ("straight to the interface") != std::string::npos;
+    }));
+}
+
 TEST_CASE ("walk: a fader's envelope is the level lane over the file, and a send's a send lane")
 {
     auto set = setOf (1);

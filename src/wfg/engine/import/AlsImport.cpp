@@ -251,19 +251,35 @@ namespace wfg::import::als
 
             for (const auto& step : walked.steps)
                 for (const auto& sound : step.sounds)
+                {
                     for (const auto& send : sound.sends)
                         sentTo.insert (send.mix);
+
+                    if (! sound.directOut.empty())
+                        sentTo.insert (sound.directOut);
+                }
 
             for (const auto& mix : walked.mixes)
             {
                 if ((mix.pair < 0 && ! mix.aux) || sentTo.count (mix.key) == 0)
                     continue;
 
+                std::string into;
+
+                for (const auto& send : mix.sends)
+                    if (const auto owner = std::find_if (walked.mixes.begin(), walked.mixes.end(),
+                                                         [&send] (const Mix& one) { return one.key == send.mix; });
+                          owner != walked.mixes.end())
+                        into += (into.empty() ? ", sent into \"" : "\", \"") + owner->name;
+
                 out << "- **" << mix.name << "**: " << (mix.pair < 0 ? std::string ("no output of its own")
                                                      : mix.mono ? "output " + std::to_string (mix.pair + 1)
                                                                  : "outputs " + std::to_string (2 * mix.pair + 1) + "/"
                                                                      + std::to_string (2 * mix.pair + 2))
-                    << (mix.aux ? " - **an aux**: a rack channel of its own, its sends heard (namespace draft §93)" : "")
+                    << (mix.direct ? " - **a direct out**: a track's own output, named on its cues (namespace draft §121)"
+                        : mix.aux ? " - **an aux**: a rack channel of its own, its sends heard (namespace draft §93)" + into
+                                      + (into.empty() ? "" : "\"")
+                                  : "")
                     << "\n";
             }
 
@@ -470,8 +486,13 @@ namespace wfg::import::als
 
         for (const auto& step : walked.steps)
             for (const auto& sound : step.sounds)
+            {
                 for (const auto& send : sound.sends)
                     sentTo.insert (send.mix);
+
+                if (! sound.directOut.empty())
+                    sentTo.insert (sound.directOut);
+            }
 
         /*  AND WHAT AN AUX SENDS INTO, for every aux something reaches - round
             again until nothing new is reached (§93). */
@@ -498,11 +519,9 @@ namespace wfg::import::als
 
         std::map<std::string, std::string> busOf;
         std::vector<std::string> patch;
-        std::set<int> patchedPairs;
 
         /*  WHERE A MIX OR AN AUX'S OUTPUT LANDS: the channels Live patched it
-            to. Two Live put on one pair sum there, which Go.dot allows and says
-            so. */
+            to - one bus a channel, the walk having shared them out (§121, BDT). */
         const auto patchPair = [&] (const Mix& mix)
         {
             if (mix.mono)
@@ -510,9 +529,6 @@ namespace wfg::import::als
                 patch.push_back (std::to_string (mix.pair));
                 return;
             }
-
-            if (! patchedPairs.insert (mix.pair).second)
-                said (Note::Kind::info, -1, mix.name, "shares its outputs with another mix, as in Live: the two sum");
 
             patch.push_back (std::to_string (2 * mix.pair));
             patch.push_back (std::to_string (2 * mix.pair + 1));
@@ -522,6 +538,25 @@ namespace wfg::import::als
 
         for (const auto* mix : mixes)
         {
+            /*  A DIRECT OUT (namespace draft §121, BDS): a bus of that kind on
+                the track's channels, named after the track, which its cues name. */
+            if (mix->direct)
+            {
+                const auto busId = ids.of ("direct:" + mix->key);
+                const auto made = document.createBus ("direct", mix->mono ? 1 : 2, -1, busId);
+
+                if (! made.ok)
+                {
+                    said (Note::Kind::dropped, -1, mix->name, "its direct out could not be made (" + made.reason + ")");
+                    continue;
+                }
+
+                write ("/godot/bus/" + busId + "/name", mix->name, -1);
+                busOf[mix->key] = busId;
+                patchPair (*mix);
+                continue;
+            }
+
             /*  AN AUX (namespace draft §93): its output a direct out of its own
                 on its pair, and the channel the sends reach. */
             if (mix->aux)
@@ -543,8 +578,10 @@ namespace wfg::import::als
                     }
                 }
 
+                /*  AS WIDE AS ITS OUTPUT: a mono return a mono aux, so that
+                    sent into a stereo mix it can be panned (BDT). */
                 const auto auxId = ids.of ("aux:" + mix->key);
-                const auto made = document.createRackChannel ("stereo", auxId, "shared");
+                const auto made = document.createRackChannel (mix->mono ? "mono" : "stereo", auxId, "shared");
 
                 if (! made.ok)
                 {
@@ -644,8 +681,12 @@ namespace wfg::import::als
                 if (target == busOf.end())
                     continue;
 
-                document.createSend (auxId, target->second, ids.of ("auxsend:" + mix->key + ":" + send.mix),
-                                     number (std::clamp (send.levelDb, -120.0, 12.0), 2));
+                const auto sendId = ids.of ("auxsend:" + mix->key + ":" + send.mix);
+                const auto made = document.createSend (auxId, target->second, sendId,
+                                                       number (std::clamp (send.levelDb, -120.0, 12.0), 2));
+
+                if (made.ok && send.pan.has_value())
+                    write ("/godot/send/" + sendId + "/pan", number (*send.pan, 2), -1);
             }
         }
 
@@ -740,6 +781,10 @@ namespace wfg::import::als
 
                 if (const auto dca = dcaOf.find (sound.dcaTrack); ! sound.dcaTrack.empty() && dca != dcaOf.end())
                     attributes.push_back ({ "dca", dca->second });
+
+                //  ITS DIRECT OUT (§121, BDS).
+                if (const auto direct = busOf.find (sound.directOut); ! sound.directOut.empty() && direct != busOf.end())
+                    attributes.push_back ({ "directOut", direct->second });
 
                 if (alone)
                 {
@@ -857,7 +902,9 @@ namespace wfg::import::als
                         a mono mix the balance leans the fold. A file not found
                         has no channel count, and the pan waits for the day it
                         is; nothing is written at the centre. */
-                    if (std::abs (sound.pan) > 0.005 && (channels == 1 || channels == 2))
+                    if (send.pan.has_value())
+                        write ("/godot/send/" + sendId + "/pan", number (*send.pan, 2), step.scene);
+                    else if (std::abs (sound.pan) > 0.005 && (channels == 1 || channels == 2))
                         write ("/godot/send/" + sendId + "/" + (channels == 1 ? "pan" : "balance"),
                                number (std::round (sound.pan * 100.0) / 100.0, 2), step.scene);
                 }

@@ -144,6 +144,7 @@ namespace wfg::import::als
         {
             std::string mix;
             std::vector<Term> terms;
+            std::optional<double> pan;  ///< a direct out sent into an owner: its side (BDT)
         };
 
         /*  WHAT A PARAMETER STANDS AT, held between the clips that move it
@@ -184,10 +185,21 @@ namespace wfg::import::als
                 return found == byId.end() ? nullptr : found->second;
             }
 
+            const Mix* mixOf (const std::string& key) const
+            {
+                for (const auto& one : mixes)
+                    if (one.key == key)
+                        return &one;
+
+                return nullptr;
+            }
+
             /*  THE MIXES: each return that reaches the interface, and the master
                 when anything is sent to it, in the order of their pairs. A
                 return carrying devices or sending into another is an aux
-                (namespace draft §93, answering QE). */
+                (namespace draft §93, answering QE). Then every track wired
+                straight to the interface, a direct out (§121, BDS), and the
+                channels shared out among them (BDT). */
             void buildMixes()
             {
                 const auto pairOf = [this] (const Routing& output, bool& mono) -> int
@@ -253,6 +265,32 @@ namespace wfg::import::als
                     mixes.push_back (std::move (mix));
                 }
 
+                if (set.master.has_value())
+                {
+                    Mix master;
+                    master.key = "master";
+                    master.name = "Master";
+                    master.pair = pairOf (set.master->output, master.mono);
+                    master.levelDb = decibels (set.master->volume, laws);
+                    mixes.push_back (std::move (master));
+                }
+
+                /*  A TRACK WIRED STRAIGHT TO THE INTERFACE (namespace draft
+                    §121, BDS): an output of its own, named after it. */
+                for (const auto& track : set.tracks)
+                {
+                    if (track.output.kind != Routing::Kind::external || track.output.channel < 0)
+                        continue;
+
+                    Mix direct;
+                    direct.key = "direct:" + track.id;
+                    direct.name = track.name;
+                    direct.direct = true;
+                    direct.mono = ! track.output.stereo;
+                    direct.pair = track.output.channel;
+                    mixes.push_back (std::move (direct));
+                }
+
                 /*  A RETURN SENDING INTO ANOTHER (namespace draft §93, AVW): it
                     is an aux, and the send is its own - into an aux at the
                     send's level, into a mix with that mix's fader folded in, as
@@ -261,6 +299,8 @@ namespace wfg::import::als
                     for (std::size_t into = 0; into < set.returns[at].sends.size() && into < set.returns.size(); ++into)
                         if (into != at && decibels (set.returns[at].sends[into], laws) > laws.floorDb + 0.01)
                             mixes[at].aux = true;
+
+                shareChannels();
 
                 for (std::size_t at = 0; at < set.returns.size() && at < mixes.size(); ++at)
                 {
@@ -307,20 +347,116 @@ namespace wfg::import::als
                                            std::to_string (mix.eqs.size()) + " EQ Eights on the return; the aux's "
                                            "EQ takes the first" });
 
-                    if (mix.pair < 0)
+                    if (mix.pair < 0 && mix.into.empty() && mix.sends.empty())
                         notes.push_back ({ Note::Kind::info, -1, ret.name,
                                            "the aux reaches no output of the interface itself: only what it sends "
                                            "into another return is heard" });
                 }
+            }
 
-                if (set.master.has_value())
+            /*  TWO ON ONE PAIR (namespace draft §121, BDT). The owner of a set
+                of channels is the widest mix on them, then the first in Live's
+                order; another whose channels all lie inside one owner's gives
+                up its output and goes into the owner at 0 dB - a return as an
+                aux with a send, a direct out by its track's path - a mono one
+                panned to the side it landed on. One straddling two owners
+                keeps nothing: Go.dot's patch is one bus a channel. */
+            void shareChannels()
+            {
+                const auto channelsOf = [] (const Mix& one)
                 {
-                    Mix master;
-                    master.key = "master";
-                    master.name = "Master";
-                    master.pair = pairOf (set.master->output, master.mono);
-                    master.levelDb = decibels (set.master->volume, laws);
-                    mixes.push_back (std::move (master));
+                    std::vector<int> out;
+
+                    if (one.pair < 0)
+                        return out;
+
+                    if (one.mono)
+                        out.push_back (one.pair);
+                    else
+                        out.insert (out.end(), { 2 * one.pair, 2 * one.pair + 1 });
+
+                    return out;
+                };
+
+                std::vector<std::size_t> order;
+
+                for (std::size_t at = 0; at < mixes.size(); ++at)
+                    if (mixes[at].pair >= 0)
+                        order.push_back (at);
+
+                std::stable_sort (order.begin(), order.end(), [this] (std::size_t a, std::size_t b)
+                {
+                    return ! mixes[a].mono && mixes[b].mono;
+                });
+
+                std::map<int, std::size_t> ownerOf;
+
+                for (const auto at : order)
+                {
+                    auto& one = mixes[at];
+                    const auto channels = channelsOf (one);
+                    std::set<std::size_t> owners;
+
+                    for (const auto channel : channels)
+                        if (const auto found = ownerOf.find (channel); found != ownerOf.end())
+                            owners.insert (found->second);
+
+                    if (owners.empty())
+                    {
+                        for (const auto channel : channels)
+                            ownerOf[channel] = at;
+
+                        continue;
+                    }
+
+                    const auto whole = owners.size() == 1
+                                         && std::all_of (channels.begin(), channels.end(),
+                                                         [&ownerOf] (int channel) { return ownerOf.count (channel) != 0; });
+
+                    if (! whole)
+                    {
+                        std::string names;
+
+                        for (const auto owner : owners)
+                            names += (names.empty() ? "\"" : "\" and \"") + mixes[owner].name;
+
+                        notes.push_back ({ Note::Kind::dropped, -1, one.name, "its outputs lie across " + names
+                                           + "\"'s, which Go.dot's patch cannot share: it keeps no output of its own"
+                                             " (namespace draft §121, BDT)" });
+                        one.pair = -1;
+                        continue;
+                    }
+
+                    const auto& owner = mixes[*owners.begin()];
+                    std::optional<double> pan;
+
+                    if (one.mono && ! owner.mono)
+                        pan = channels.front() == 2 * owner.pair ? -1.0 : 1.0;
+
+                    const auto side = pan.has_value() ? std::string (", panned to the side it was on") : std::string();
+                    one.pair = -1;
+
+                    if (one.direct)
+                    {
+                        one.into = owner.key;
+                        one.pan = pan;
+                        notes.push_back ({ Note::Kind::approximated, -1, one.name, "goes straight to the interface on "
+                                           "channels \"" + owner.name + "\" holds: it is sent into that mix instead"
+                                           + side + " (BDT)" });
+                        continue;
+                    }
+
+                    one.aux = true;
+
+                    SendOut send;
+                    send.mix = owner.key;
+                    send.levelDb = std::clamp (owner.aux ? 0.0 : owner.levelDb, laws.silenceDb, 12.0);
+                    send.pan = pan;
+                    one.sends.push_back (std::move (send));
+
+                    notes.push_back ({ Note::Kind::approximated, -1, one.name, "shares its outputs with \"" + owner.name
+                                       + "\": it is an aux with no output of its own, sent into that mix at 0 dB"
+                                       + side + " (namespace draft §121, BDT)" });
                 }
             }
 
@@ -382,9 +518,15 @@ namespace wfg::import::als
                         break;
 
                     case Routing::Kind::external:
-                        notes.push_back ({ Note::Kind::dropped, -1, node->name,
-                                           "the track goes straight to the interface rather than through a "
-                                           "return or the master; that output is not imported" });
+                        /*  ITS OWN OUTPUT (BDS), or the mix that holds those
+                            channels (BDT). */
+                        if (const auto* direct = mixOf ("direct:" + trackId); direct != nullptr)
+                        {
+                            if (! direct->into.empty())
+                                out.push_back ({ direct->into, withVolume(), direct->pan });
+                            else if (direct->pair >= 0)
+                                out.push_back ({ direct->key, withVolume() });
+                        }
                         break;
 
                     case Routing::Kind::none:
@@ -1065,6 +1207,21 @@ namespace wfg::import::als
                     if (silentThroughout (lane, laws))
                         continue;
 
+                    /*  ITS DIRECT OUT (BDS): named on the cue, at the cue's
+                        level - a path's own terms beyond the shared faders have
+                        nowhere to go there. */
+                    if (mix->direct)
+                    {
+                        sound.directOut = mixKey;
+
+                        if (! flat (finished (lane)) || std::abs (lane.front().db) > 0.05)
+                            note (Note::Kind::approximated, "its own output to the interface carries "
+                                                            + osc::formatDouble (std::round (lane.front().db * 10.0) / 10.0)
+                                                            + " dB beside the cue's level, which a direct out cannot: "
+                                                              "it plays there at the cue's level");
+                        continue;
+                    }
+
                     if (summing)
                     {
                         int heard = 0;
@@ -1087,6 +1244,11 @@ namespace wfg::import::als
                     SendOut send;
                     send.mix = mixKey;
                     send.on = true;
+
+                    for (const auto* path : mixPaths)
+                        if (path->pan.has_value())
+                            send.pan = path->pan;
+
                     lane = finished (lane);
 
                     if (flat (lane))
@@ -1097,7 +1259,7 @@ namespace wfg::import::als
                     sound.sends.push_back (std::move (send));
                 }
 
-                if (sound.sends.empty())
+                if (sound.sends.empty() && sound.directOut.empty())
                     note (Note::Kind::dropped, "\"" + sound.name + "\" reaches no output of the interface: imported "
                                                "with no send, silent");
 
