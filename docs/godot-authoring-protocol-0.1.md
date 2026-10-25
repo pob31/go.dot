@@ -202,12 +202,15 @@ Any client may send these; S21_HiJack's triggers and macro steps do (§7.3).
 | `/godot/cmd/standby/setNumber` | `,s` cue number | Parks it on the cue with that number (new). |
 | `/godot/cmd/run/stopAll` | none | Esc: everything stops gracefully, footers run. |
 | `/godot/cmd/run/killAll` | none | Double Esc: everything is dropped, footers skipped. |
+| `/godot/cmd/run/pauseAll` | none | Pause: everything Go.dot runs holds where it is, silent, until Play (PRD §3.34). |
+| `/godot/cmd/run/playAll` | none | Play: a paused show goes on from where it stood. |
 
 - **"GO at cue 12"** is a bundle of `standby/setNumber "12"` then `go`, applied in that order in
   one tick. QLab's `/go "12"` does the same.
 - **A number names a cue by exact text.** `"12"` is not `"12.0"`. The focused list is searched
   first, then the other lists in order. No match is `unknown-id`.
-- Go.dot has no pause or resume of everything. A processor that offers one says it cannot.
+- **Pause and Play** hold everything Go.dot runs and let it go (PRD §3.34, since 2026-10-25). While
+  paused, every press that would start a cue is refused `paused`, never queued.
 
 ## 6. Describing yourself: what the menus show
 
@@ -329,7 +332,8 @@ Per-cue triggers, made from templates, as QLab's are (decision G):
 - "This snapshot's cue" is read when the trigger fires: a snapshot never captured to Go.dot sends
   nothing and the log says so.
 - Macro steps follow the cueing system: GO → `go`, GO cue N → the bundle above, Stop → `run.stopAll`,
-  Panic → `run.killAll`. Pause and Resume fail with a sentence.
+  Panic → `run.killAll`, Pause → `run.pauseAll`, Resume → `run.playAll` (PRD §3.34; until 2026-10-25
+  Go.dot had no pause, and a processor built before then still says it cannot).
 
 ## 8. Not in this draft
 

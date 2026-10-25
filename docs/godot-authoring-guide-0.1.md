@@ -407,13 +407,16 @@ Any client may send these; S21_HiJack's per-cue triggers do.
 | `/godot/cmd/standby/setNumber` | `s` cue number | Parks the standby on the cue with that number. |
 | `/godot/cmd/run/stopAll` | none | Esc: everything stops gracefully. |
 | `/godot/cmd/run/killAll` | none | Double Esc: everything stops at once. |
+| `/godot/cmd/run/pauseAll` | none | Pause: everything holds where it is, silent, until Play. |
+| `/godot/cmd/run/playAll` | none | Play: a paused show goes on from where it stood. |
 
 - **GO at cue 12** is a bundle of `/godot/cmd/standby/setNumber "12"` then `/godot/cmd/go`,
   applied in that order in one tick - QLab's `/go "12"`.
 - **A number names a cue by its exact text**: `"12"` is not `"12.0"`. The list the operator is in
   is searched first, then the others in order. No match is `unknown-id`.
 - These verbs do not answer. A refusal is in Go.dot's log and at `/godot/engine/lastError`.
-- Go.dot has no pause or resume of everything.
+- **While paused**, a GO, a fire and every other press that would start a cue is refused `paused`,
+  never queued: Play starts nothing. Esc and double Esc still stop, and end the pause (PRD §3.34).
 
 ## 9. When your application changes
 

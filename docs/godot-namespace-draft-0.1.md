@@ -34647,3 +34647,92 @@ loop's jump back to its in-point as a turn, and passed on a GO that launched no 
 guides say it under *In and out points, loops*.
 
 Owed: the author's try - ⇄ clicked under a sounding loop, both ways.
+
+## 120. Pause - the show held until Play
+
+**Asked 2026-10-25** by the author: *"Next to Doh, can we add a pause button to hold all actions until
+toggled back to play?"*, then *"Add it to the Android remote too."* PRD §3.34 is the requirement; this is
+how it is built. Until now the authoring guide said plainly that Go.dot had no pause of everything.
+
+The author's picks (offered as options; the words are mine unless quoted):
+
+- **BDB** **GO while paused is refused, said why** - nothing is queued, so Play starts nothing that was
+  pressed meanwhile. And with it **everything that starts a cue**: GO, a fire by name or number, a key,
+  MIDI, OSC or timecode trigger, a cart pad, a strip, a take, a load to time, a scrub, a run advanced or
+  fired by hand, a lane or curve pass, Doh! - one reason, `paused`. Edits, the standby, Play, Esc and double
+  Esc are let in. A time-of-day trigger inside the pause is dropped, as in an outage (DI).
+- **BDC** **A tenth of a second's de-click** out and back in - Doh!'s own.
+- **BDD** **Live inputs are held silent too** - a mic cue, its live effects, a camera: the scope of double
+  Esc, everything Go.dot originates.
+- **BDE** **Esc and double Esc work while paused, and end the pause** - no panic fade, since nothing is
+  heard, and not a sample of what was paused heard again.
+- **BDF** **Pause / Play** as the button's words (fr *Pause* / *Lecture*), **F8** its key, reserved as F9 is
+  so a key trigger cannot take it, **decks of fifteen keys or more** for a Stream Deck key, and **nothing
+  told to the devices**: a desk run by its operator is left to them, outgoing MTC and LTC simply stop.
+
+Mine *(proposed)*:
+
+- **BDG** **Two commands, not a toggle**: `run.pauseAll` and `run.playAll`, each applied and doing nothing
+  when the show already stands as it asks, so a button that sends what its word says cannot be undone by
+  a tablet a pass behind. Both let through the lock, as Doh! is, and through an outage. `audio.apply` and
+  `audio.setup` are refused while paused: they rebuild a graph standing still.
+- **BDH** **The flag is the runner's** (`ListState::paused`), published as `/godot/engine/paused`, never
+  saved: a show opened again is not paused. The hold is serve's (`ShowHold`), asked by the handlers
+  through `Runner::setHoldRequest` - a replay holds the same ticks by the flag alone.
+- **BDI** **Hold the graph, not each cue.** The block source ramps every output down and then runs no
+  block, as an outage's RecoveryGate does (§11.1): the sample count, the tick index and every voice, fade,
+  wait, curve and LTC stand together, and Play goes on from the next sample with nothing to shift - every
+  deadline is an absolute tick. Pausing each cue would have meant relaunching every voice at an offset and
+  moving every deadline.
+- **BDJ** **What hears keeps hearing.** The tick thread drains commands at the frozen tick while the count
+  is held (`SampleClock::isHeld`) and runs `whileHeld` - the half of serve's before-tick that hears the
+  pair, the surfaces, the decks, the bindings, the devices, MQTT and the autosave - so a Play from a Stream
+  Deck arrives. **The same during an outage**, which until now heard none of them: a deck's Esc in an
+  outage reaches the engine now, and the autosave goes on.
+- **BDK** **A pass count for what is not logged**: `TickThread::passCount` moves on every pass, frozen or
+  not. The surfaces' and decks' double Stop window, flashes and blinks, MQTT's keepalive, the cadence of
+  what is done every so many ticks, and the pair's liveness (pings and pongs say passes, beats still say
+  ticks) run on it - two Stops a minute apart while paused are two Esc, and two paused machines are still
+  two machines there.
+- **BDL** **The autosave keeps its quiet through a hold**, counted in passes since the hold began: an edit
+  made while paused is saved as one made while playing is, and a fader dragged is not a save a pass.
+- **BDM** **Esc while paused** lets go of every stop still to come (else a stop cue's job hands its target
+  its level back), empties every effect (else a reverb frozen mid-tail rings the paused sound out), kills
+  every voice that sounded, and runs the graph muted until they are quiet - a fifth of a second at least,
+  a second at most - then opens it. A Pause inside that mute stays muted and then holds; a Play there
+  opens nothing early.
+- **BDN** **The renderer and MTC stop where the count will stand**: the hold says the sample from the first
+  block of the way down (`ShowHold::closesAt`), the renderer draws no picture past it and MTC sends nothing
+  due at or after it; at Play both start a fresh line (`ClockEstimate::forget`), MTC with a full frame.
+  The codes coming in (LTC, MTC) are forgotten at Play, so a chasing time group seats again (§60).
+- **BDO** **A backup follows its main into a pause and out of it**: while held, every record that has
+  arrived goes in at once (its slot would never come), the position says `held` (format 4), and a backup
+  taking over applies a Pause its main never confirmed, as it applies a stop, and drops a Play.
+- **BDP** The button sits left of Doh!, its colour a still blue (`paused`, #5B9BD5) while held - the words
+  carry it: *Pause* / *Play*, and *Paused - press Play (F8) to go on* on the transport line.
+
+As built: `clock/ShowHold.h` (open, closing, held, muted, opening; `beginBlock` and `applyGain` on the audio
+thread, after each output's gain and before LTC), asked by `AudioHost::beginBlock` from the device callback
+and the hosted pump, and by `DummyAudioClock`; `Engine::setHoldCheck`, a second gate after the outage's,
+told the origin - the engine's own records and a main's are let in (`Runner::refusedWhilePaused`);
+`Runner::pauseShow` / `playShow` / `stopWhileHeld` / `openAfterHeldStop`. The video region is version 25
+(`Clock::heldAt`); `MtcLane::feedClock` takes the held sample; `Presence` keeps passes and ticks apart.
+Clients: `gesture::pause` / `play`, `TransportComponent::dressPause` and F8, Show > Pause; the console's
+`#pause`, `renderPause` and F8; `DeckRole::pause` and its picture; the remote's header (0.1.8).
+
+Tests: ClockTests "tick thread: a held count drains commands...", "show hold:", "dummy clock: held...";
+AudioTests "audio host: the show held ramps every output..." (the ramp to the sample on a steady tone, the
+count standing, LTC not ramped, muted) and "audio recovery: Pause and Play are let through an outage...";
+GoTests "pause:" (once each, refusals, edits and the lock, the engine's fire inside the ramp, Esc and double
+Esc while paused, a Pause and a Play inside the mute, a paused session replayed record for record);
+MidiTests "mtc lane: the show held..."; VideoHostTests "video region: ...held at nought", "video clock:
+forgotten after a hold..."; FollowTests "held (PRD §3.34)..."; LeadershipTests "pause:" (settle, presence);
+SeatTests (the `held` line); DeckBridgeTests (six show keys, the Pause key); RunPaneUiTests "transport:
+Pause / Play..." and "F8 held..."; TriggerTests and console chords (F8 kept); and blackbox.pause (C and
+fr_FR): a hosted session over OSC - the ramp read back where a show that never paused would read it, a wait
+counting show time, a GO refused paused, Esc while paused leaving nothing of the paused sound, the replay.
+
+Owed: the author's try; the bench - an interface with a reverb send (Esc while paused), a projector and a
+camera, MTC into a desk, a main and backup paused together, a DeckLink card's sound through a pause (it
+starves to silence as in an outage, untested on the card); the transport line's words, mine; a plugin
+editor or monitor window does not pass F8 on (they pass Esc and Space).

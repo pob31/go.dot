@@ -3871,6 +3871,35 @@ we can start cutting real release version"*.
   latest - ready to try, not yet for a show (the author: *"reliable enough for testing from day-1,
   but not show ready before we spend some time putting it through its paces"*).
 
+### 3.34 Pause - holding the show
+
+*Added in 0.8, at the author's direction (2026-10-25); the mechanics are the namespace draft's
+§120.* The author: *"Next to Doh, can we add a pause button to hold all actions until toggled back
+to play?"*, and *"Add it to the Android remote too."*
+
+- **Pause holds everything Go.dot originates where it stands, until Play.** Every sound and every
+  live input - a mic cue, its live effects, a camera - goes silent and still over a tenth of a
+  second (the author's de-click), and every fade, wait, curve, movie, script, patch and outgoing
+  timecode stands with it. Play goes on from the same sample, ramping back in over the same tenth.
+  A wait counts show time, never the pause. Nothing is sent to the devices: a desk run by its own
+  operator is left to them, as Doh!'s Meh leaves it.
+- **While paused, nothing starts.** A GO, a fire by name or number, a trigger of any kind, a pad,
+  a load to time and Doh! are each refused with a sentence that says the show is paused - never
+  queued, so Play starts nothing that was pressed meanwhile. Edits, the standby, Play, Esc and double
+  Esc are let in. A time-of-day trigger that falls inside the pause is dropped, as in an outage
+  (§6.2).
+- **Esc and double Esc still work, and end the pause.** Esc's footers run and double Esc drops
+  everything, as always (§4.4) - with no panic fade, since nothing is heard - and not a sample of
+  what was paused is heard again.
+- **Its own button, beside Doh!, and F8.** The button's word is the state's - *Pause* while the show
+  runs, *Play* while it is held - and the transport says *Paused* in words (§4.8). The same on the
+  web console, on a Stream Deck of fifteen keys or more, and on the Android remote. Two named
+  commands, `run.pauseAll` and `run.playAll` (§4.11), so a press made on a screen a moment behind
+  cannot undo itself.
+- **What the machine is doing, not what someone decided** (§4.10): never saved, so a show opened
+  again is not paused. A backup follows its main into a pause and out of it, and a backup taking
+  over keeps a pause its main may not have confirmed.
+
 ---
 
 ## 4. Constraints as law

@@ -194,7 +194,9 @@ has stood in front of the thing.
   footers skipped, and nothing it started writes again: every parameter rests
   where the press left it (namespace draft §73). **Doh!** takes back a GO
   pressed too early: it stops what that GO started, puts the standby back, and
-  can send each device the command that undoes what it was sent. F flags the
+  can send each device the command that undoes what it was sent. **Pause**
+  (F8, beside Doh!) holds everything Go.dot runs where it is, silent, until
+  **Play** - nothing starts meanwhile (PRD §3.34). F flags the
   picked cues to look at after the run, and Shift+F the cue the last GO fired,
   the show locked or not.
 - **What is missing, said where it is used** (namespace draft §64). A cue that
@@ -307,7 +309,7 @@ and says afterwards what was built against what was drawn.
 | Process cues | Pure Data inside a cue, serial ports; a patch's ways in and out, Pd as its editor | §51, §65 |
 | Script cues | JavaScript and Lua in a cue, on the process cues' host | §66 |
 | MQTT | A broker as a device, a client to any broker, Go.dot's own broker | §67 |
-| The remote | An Android app live in the background: GO, Doh! and PANIC, cues, running cues, a surface, the mapping and its grid, find-my-tablet; Choufleur's script page and its wrist buzzer | §68 |
+| The remote | An Android app live in the background: GO, Pause, Doh! and PANIC, cues, running cues, a surface, the mapping and its grid, find-my-tablet; Choufleur's script page and its wrist buzzer | §68 |
 | Timecode out | MTC and LTC cues, the Timecode tab | §59 |
 | Timecode in | Time groups on LTC, MTC and the wall clock; chase by jump, varispeed and timestretch | §60 |
 | Media edit | A sound and a movie cut into sections, crossfaded and frozen; handles on the waveform; right-click menus and markers on it | §54, §55, §81 |
@@ -321,6 +323,7 @@ and says afterwards what was built against what was drawn.
 | The operator's window | Show settings in sections; flags; what is missing, said where it is used | §39.14, §63, §64 |
 | Carts, keys and bindings | A list GO never meets, fired by triggers, keys and the remote's Cart tab; a MIDI control or an OSC address bound to any number, learned by moving it; the wheel over a number | §74 |
 | The web console by touch | The Android remote's gestures on the page: PANIC and Doh!, swipe to kill, a run's sheet, pills, the playhead, a cue's sheet, Pick several, numbers dragged and held | §75 |
+| Pause / Play | Everything Go.dot runs held where it stands and let go - the graph not run, the tick standing - on the desktop, the console, a Stream Deck and the remote; F8 | §120 |
 
 The documents, besides the PRD and the devplan:
 
