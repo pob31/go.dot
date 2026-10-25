@@ -525,6 +525,7 @@ namespace wfg::import::als
             std::map<std::string, Sound*> sounds;           ///< a sound's key to the sound itself
             std::map<std::string, const Clip*> soundClip;   ///< a sound's key to its clip
             std::map<std::string, Held> held;               ///< track Id to where its mixer stands
+            std::map<std::string, double> rate;             ///< a sound's key to the speed it plays at now (BDR)
         };
 
         struct Walker
@@ -535,6 +536,10 @@ namespace wfg::import::als
             Walk out;
             Graph graph;
             State state;
+
+            /*  THE TEMPO AS THE SCENES GO BY (namespace draft §121, BDR): the
+                set's, then each scene's that sets one, from that scene on - a
+                night runs them in order, and Live keeps the last it was given. */
             double beatsPerRealSecond;
 
             Walker (const LiveSet& setToUse, const WalkOptions& optionsToUse)
@@ -566,6 +571,28 @@ namespace wfg::import::als
             static bool isCarrier (const Track& track)
             {
                 return track.kind == Track::Kind::audio && track.monitoring == Track::Monitoring::in;
+            }
+
+            /*  A CLIP'S LOOP POINTS IN ITS BEATS (namespace draft §121, BDQ):
+                Live stores an unwarped clip's as SECONDS of the file - the
+                Sturbzep organ's end at 402.55 with its end marker at 912.46
+                beats of the markers' 136 BPM, both the file's 402.55 s - and
+                the markers' slope, the clip's own tempo, is what turns them
+                into the beats its envelopes are drawn in. A warped clip's are
+                beats already. */
+            static double clipBeats (const Clip& clip, double loopValue)
+            {
+                if (clip.warped)
+                    return loopValue;
+
+                const auto perFileSecond = beatsPerSecond (clip);
+                return perFileSecond > 0.0 ? loopValue * perFileSecond : loopValue;
+            }
+
+            /** The beat a clip starts playing from. */
+            static double startBeatOf (const Clip& clip)
+            {
+                return clipBeats (clip, clip.loopOn ? clip.loopStart + clip.startRelative : clip.loopStart);
             }
 
             /*  WHETHER ONE TRACK FEEDS ANOTHER: its output is that track, or that
@@ -813,8 +840,8 @@ namespace wfg::import::als
                 };
 
                 //  --- Where in the file, and how fast ------------------------------
-                const auto startBeat = clip.loopOn ? clip.loopStart + clip.startRelative : clip.loopStart;
-                const auto endBeat = clip.loopEnd;
+                const auto startBeat = startBeatOf (clip);
+                const auto endBeat = clipBeats (clip, clip.loopEnd);
                 const auto fileSeconds = clip.file.sampleRate > 0.0 && clip.file.frames > 0
                                            ? static_cast<double> (clip.file.frames) / clip.file.sampleRate : 0.0;
 
@@ -823,6 +850,7 @@ namespace wfg::import::als
                 if (clip.warped && perFileSecond > 0.0)
                 {
                     const auto rate = beatsPerRealSecond / perFileSecond;
+                    sound.beatsPerFileSecond = perFileSecond;
 
                     if (std::abs (rate - 1.0) > 0.001)
                     {
@@ -836,10 +864,11 @@ namespace wfg::import::als
                     if (! warpIsStraight (clip))
                         note (Note::Kind::approximated, "its warp map bends; one speed, the whole map's, is used");
                 }
-                else if (! clip.warped)
+                else if (! clip.warped && std::any_of (clip.envelopes.begin(), clip.envelopes.end(), moves))
                 {
-                    note (Note::Kind::approximated, "the clip is not warped: its markers are read as beats at the "
-                                                    "set's tempo, which the probe set is to confirm");
+                    note (Note::Kind::approximated, "the clip is not warped: its loop points are read as seconds of the "
+                                                    "file and its envelopes in its own beats, which the probe set is to "
+                                                    "confirm (BDQ)");
                 }
 
                 /*  WHAT THE CLIP MOVES THAT THE IMPORT DOES NOT READ, said once. */
@@ -873,7 +902,7 @@ namespace wfg::import::als
                 if (clip.loopOn)
                 {
                     sound.loops = true;
-                    sound.loopIn = std::max (0.0, sampleSecondsAt (clip, clip.loopStart, set.tempo));
+                    sound.loopIn = std::max (0.0, sampleSecondsAt (clip, clipBeats (clip, clip.loopStart), set.tempo));
                     sound.loopOut = sound.out;
                 }
 
@@ -885,7 +914,7 @@ namespace wfg::import::als
                 std::vector<Path> every;
                 graph.paths (track.id, {}, every, 0);
 
-                const auto from = std::min (startBeat, clip.loopOn ? clip.loopStart : startBeat);
+                const auto from = std::min (startBeat, clip.loopOn ? clipBeats (clip, clip.loopStart) : startBeat);
                 const auto to = std::max (endBeat, from + 1.0e-3);
 
                 /*  ONLY THE PATHS EVER HEARD COUNT. A send that stays at the bottom
@@ -1202,7 +1231,8 @@ namespace wfg::import::als
                 }
 
                 auto* sound = state.sounds.at (playing->second);
-                const auto startBeat = clip.loopOn ? clip.loopStart + clip.startRelative : clip.loopStart;
+                const auto startBeat = startBeatOf (clip);
+                const auto endBeat = clipBeats (clip, clip.loopEnd);
                 const auto& held = state.held.at (carrier.id);
 
                 FadeOut fade;
@@ -1218,7 +1248,7 @@ namespace wfg::import::als
                 for (const auto& envelope : clip.envelopes)
                     if (envelope.target.trackId == carrier.id && moves (envelope))
                         for (const auto& point : envelope.points)
-                            if (point.beats > lastMoving && point.beats <= clip.loopEnd)
+                            if (point.beats > lastMoving && point.beats <= endBeat)
                                 lastMoving = point.beats;
 
                 const auto spanBeats = std::max (lastMoving - startBeat, 0.0);
@@ -1375,10 +1405,24 @@ namespace wfg::import::als
                     if (! options.scenes.empty() && options.scenes.count (index) == 0)
                         continue;
 
-                    if (! sceneDoesSomething (set, index))
-                        continue;
-
                     const auto& scene = set.scenes[sceneIndex];
+
+                    /*  THE TEMPO FROM HERE ON (BDR), set even by a scene that
+                        launches nothing: a night fires it, and Live keeps it. */
+                    const auto tempoBefore = beatsPerRealSecond;
+
+                    if (scene.tempoEnabled && std::isfinite (scene.tempo) && scene.tempo > 0.0)
+                        beatsPerRealSecond = scene.tempo / 60.0;
+
+                    const auto tempoChanges = ! same (beatsPerRealSecond, tempoBefore, 1.0e-6);
+
+                    if (tempoChanges)
+                        out.notes.push_back ({ Note::Kind::info, index, {}, "the scene sets the tempo to "
+                                               + osc::formatDouble (scene.tempo) + ": what it launches is stretched "
+                                               "to it, and a warped sound still playing is re-stretched (BDR)" });
+
+                    if (! sceneDoesSomething (set, index) && ! (tempoChanges && ! state.playing.empty()))
+                        continue;
 
                     Step step;
                     step.scene = index;
@@ -1386,11 +1430,6 @@ namespace wfg::import::als
                     step.name = scene.name;
                     step.notes = scene.annotation;
                     step.colour = scene.colour;
-
-                    if (scene.tempoEnabled && ! same (scene.tempo, set.tempo, 0.01))
-                        out.notes.push_back ({ Note::Kind::dropped, index, {}, "the scene changes the tempo to "
-                                               + osc::formatDouble (scene.tempo) + "; Go.dot has no tempo, the set's "
-                                               "is kept" });
 
                     if (scene.followAction)
                         out.notes.push_back ({ Note::Kind::dropped, index, {}, "the scene has a follow action, which is "
@@ -1415,8 +1454,7 @@ namespace wfg::import::als
                             continue;
                         }
 
-                        launchedHere[track.id] = { &clip, clip.loopOn ? clip.loopStart + clip.startRelative
-                                                                      : clip.loopStart };
+                        launchedHere[track.id] = { &clip, startBeatOf (clip) };
                     }
 
                     //  --- Sounds first: they decide what the carriers fold into ----
@@ -1484,6 +1522,41 @@ namespace wfg::import::als
                             step.fades.push_back (std::move (*fade));
                     }
 
+                    //  --- A tempo change re-stretches what is still playing (BDR) --
+                    if (tempoChanges)
+                    {
+                        for (const auto& [trackId, key] : state.playing)
+                        {
+                            auto* sound = state.sounds.at (key);
+
+                            if (sound->beatsPerFileSecond <= 0.0)
+                                continue;
+
+                            const auto rate = beatsPerRealSecond / sound->beatsPerFileSecond;
+                            const auto was = state.rate.count (key) != 0 ? state.rate.at (key) : sound->rate;
+
+                            if (std::abs (rate - was) <= 0.001)
+                                continue;
+
+                            FadeOut fade;
+                            fade.key = "tempo:" + scene.id + ":" + trackId;
+                            fade.scene = index;
+                            fade.target = key;
+                            fade.name = "Tempo " + osc::formatDouble (scene.tempo) + " - " + sound->name;
+                            fade.duration = laws.sampleSeconds;
+                            fade.levelDb = sound->levelDb;
+                            fade.rate = rate;
+                            step.fades.push_back (std::move (fade));
+                            state.rate[key] = rate;
+
+                            out.notes.push_back ({ Note::Kind::info, index, sound->trackName, "\"" + sound->name
+                                                   + "\" is still playing when the tempo changes: Live re-stretches it, "
+                                                     "so a speed fade takes it to "
+                                                   + osc::formatDouble (std::round (rate * 1000.0) / 1000.0)
+                                                   + " of its speed (BDR)" });
+                        }
+                    }
+
                     if (step.empty())
                         continue;
 
@@ -1499,6 +1572,7 @@ namespace wfg::import::als
                     {
                         state.playing[sound.trackId] = sound.key;
                         state.sounds[sound.key] = &sound;
+                        state.rate[sound.key] = sound.rate;
 
                         const auto& launched = launchedHere.at (sound.trackId);
                         hold (sound.trackId, *launched.first);

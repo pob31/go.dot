@@ -147,6 +147,7 @@ namespace wfg::import::als
 
         double rate = 1.0;
         bool timestretch = false;
+        double beatsPerFileSecond = 0.0;    ///< the warp's beats per second of the file; nought unwarped (BDR)
 
         double levelDb = 0.0;
         std::vector<CurvePoint> levelLane;
@@ -192,6 +193,11 @@ namespace wfg::import::als
 
         std::vector<EqMove> eq;
         bool stopWhenDone = false;
+
+        /*  A SPEED FADE (namespace draft §121, BDR): a warped sound still playing
+            when a scene changes the tempo is re-stretched to its new rate, as
+            Live does; the level is left alone. */
+        std::optional<double> rate;
     };
 
     struct StopOut

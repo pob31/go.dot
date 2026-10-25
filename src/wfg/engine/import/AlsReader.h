@@ -121,10 +121,13 @@ namespace wfg::import::als
         int colour = -1;            ///< Live's palette index
         FileReference file;
 
-        /*  THE MARKERS, in beats, as Live keeps them: with the loop off, the
-            clip plays from `loopStart` to `loopEnd`; with it on, from
-            `loopStart + startRelative` to `loopEnd` and then round the loop.
-            `currentStart`/`currentEnd` are the clip's own extent. */
+        /*  THE MARKERS as Live keeps them: with the loop off, the clip plays
+            from `loopStart` to `loopEnd`; with it on, from `loopStart +
+            startRelative` to `loopEnd` and then round the loop. In BEATS for a
+            warped clip; for an unwarped one in SECONDS of the file (namespace
+            draft §121, BDQ), which the walk turns into the clip's own beats by
+            its markers' slope. `currentStart`/`currentEnd` are the clip's own
+            extent, in its beats either way. */
         double loopStart = 0.0;
         double loopEnd = 0.0;
         double startRelative = 0.0;

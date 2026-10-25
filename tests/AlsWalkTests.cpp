@@ -261,6 +261,84 @@ TEST_CASE ("walk: a start before the file is a pre-wait, a loop a second range, 
     CHECK (third.timestretch);
 }
 
+TEST_CASE ("walk: an unwarped clip's loop points are seconds of the file, and it plays at its own speed (namespace draft §121, BDQ)")
+{
+    auto set = setOf (2);
+    auto source = trackOf ("1", "1", 2, 2);
+    source.sends[0] = 1.0;
+
+    /*  SIX SECONDS OF THE FILE, Live spelling an unwarped clip's loop points as
+        seconds; the markers' slope - the clip's own 120 BPM - makes them the
+        twelve beats its envelopes would be drawn in. Read as beats they were
+        three seconds, which is how the Sturbzep organ was cut at 2:57 of 6:42. */
+    auto plain = clipOf ("plain", 0.0, 6.0);
+    plain.warped = false;
+    source.slots[0].clip = plain;
+
+    /*  LOOPED, THE SAME: from the top, then round seconds two to six. */
+    auto looped = clipOf ("looped", 2.0, 6.0);
+    looped.warped = false;
+    looped.loopOn = true;
+    looped.startRelative = -2.0;
+    source.slots[1].clip = looped;
+    set.tracks.push_back (source);
+
+    const auto walked = walk (set);
+    REQUIRE (walked.steps.size() == 2u);
+
+    const auto& first = walked.steps[0].sounds.at (0);
+    CHECK (first.in == doctest::Approx (0.0));
+    CHECK (first.out == doctest::Approx (6.0));
+    CHECK (first.rate == doctest::Approx (1.0));
+    CHECK (first.beatsPerFileSecond == doctest::Approx (0.0));
+
+    const auto& second = walked.steps[1].sounds.at (0);
+    CHECK (second.loops);
+    CHECK (second.in == doctest::Approx (0.0));
+    CHECK (second.loopIn == doctest::Approx (2.0));
+    CHECK (second.loopOut == doctest::Approx (6.0));
+}
+
+TEST_CASE ("walk: a scene's tempo holds from there on, and re-stretches a warped sound still playing (namespace draft §121, BDR)")
+{
+    auto set = setOf (3);
+    set.scenes[1].tempoEnabled = true;
+    set.scenes[1].tempo = 60.0;
+
+    auto one = trackOf ("1", "1", 3, 2);
+    one.sends[0] = 1.0;
+    one.slots[0].clip = clipOf ("held", 0.0, 16.0);      // launched at the set's 120: its own speed
+
+    auto two = trackOf ("2", "2", 3, 2);
+    two.sends[0] = 1.0;
+    two.slots[1].clip = clipOf ("later", 0.0, 16.0);     // launched at 60: half its speed
+    two.slots[2].clip = clipOf ("third", 0.0, 16.0);     // the third scene sets no tempo: still 60
+    set.tracks.push_back (one);
+    set.tracks.push_back (two);
+
+    const auto walked = walk (set);
+    REQUIRE (walked.steps.size() == 3u);
+    CHECK (walked.steps[0].sounds.at (0).rate == doctest::Approx (1.0));
+
+    /*  THE SECOND GO: its own sound at half speed, and "held", still playing,
+        re-stretched to half by a speed fade (BDR). */
+    const auto& second = walked.steps[1];
+    CHECK (second.sounds.at (0).rate == doctest::Approx (0.5));
+    REQUIRE (second.fades.size() == 1u);
+    CHECK (second.fades[0].target == walked.steps[0].sounds[0].key);
+    REQUIRE (second.fades[0].rate.has_value());
+    CHECK (*second.fades[0].rate == doctest::Approx (0.5));
+    CHECK (second.fades[0].duration > 0.0);
+
+    CHECK (walked.steps[2].sounds.at (0).rate == doctest::Approx (0.5));
+    CHECK (walked.steps[2].fades.empty());
+
+    CHECK (std::any_of (walked.notes.begin(), walked.notes.end(), [] (const Note& note)
+    {
+        return note.text.find ("re-stretches it") != std::string::npos;
+    }));
+}
+
 TEST_CASE ("walk: a fader's envelope is the level lane over the file, and a send's a send lane")
 {
     auto set = setOf (1);

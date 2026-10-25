@@ -210,11 +210,13 @@ namespace wfg::import::als
             out << "## What came over\n\n";
             out << "- " << outcome.gos << " GO(s), " << outcome.sounds << " sound(s).\n";
 
-            int fades = 0, stops = 0, lanes = 0, sendLanes = 0;
+            int fades = 0, speedFades = 0, stops = 0, lanes = 0, sendLanes = 0;
 
             for (const auto& step : walked.steps)
             {
-                fades += static_cast<int> (step.fades.size());
+                for (const auto& fade : step.fades)
+                    (fade.rate.has_value() ? speedFades : fades) += 1;
+
                 stops += static_cast<int> (step.stops.size());
 
                 for (const auto& sound : step.sounds)
@@ -226,7 +228,8 @@ namespace wfg::import::als
                 }
             }
 
-            out << "- " << fades << " fade(s) from carrier clips launched alone, " << stops << " stop(s).\n";
+            out << "- " << fades << " fade(s) from carrier clips launched alone, " << speedFades
+                << " speed fade(s) at tempo changes, " << stops << " stop(s).\n";
             out << "- " << lanes << " level lane(s), " << sendLanes << " send lane(s).\n\n";
 
             out << "| GO | Scene | Sounds | Fades | Stops |\n|---|---|---|---|---|\n";
@@ -902,6 +905,15 @@ namespace wfg::import::als
 
                 if (fade.stopWhenDone)
                     attributes.push_back ({ "stopWhenDone", "true" });
+
+                /*  A SPEED FADE AT A TEMPO CHANGE (§121, BDR): the rate moved,
+                    the level left where it is. */
+                if (fade.rate.has_value())
+                {
+                    attributes.push_back ({ "levelOn", "false" });
+                    attributes.push_back ({ "rateOn", "true" });
+                    attributes.push_back ({ "rate", number (std::clamp (*fade.rate, 0.0, 20.0), 4) });
+                }
 
                 {
                     std::string sends;
