@@ -311,10 +311,13 @@ namespace wfg::import::als
         }
 
         //======================================================================
-        //  Mappings: a `KeyMidi` beside a parameter's automation target.
+        //  Mappings: a `KeyMidi` beside a parameter's automation target, and
+        //  the `MidiControllerRange` beside it.
 
-        std::optional<Mapping> mappingIn (const juce::XmlElement* keyMidi)
+        std::optional<Mapping> mappingIn (const juce::XmlElement* parameter)
         {
+            const auto* keyMidi = parameter != nullptr ? parameter->getChildByName ("KeyMidi") : nullptr;
+
             if (keyMidi == nullptr)
                 return std::nullopt;
 
@@ -328,7 +331,50 @@ namespace wfg::import::als
             out.channel = channel + 1;
             out.number = controller;
             out.note = flag (keyMidi, "IsNote");
+
+            if (const auto* range = parameter->getChildByName ("MidiControllerRange"))
+            {
+                out.rangeMin = number (range, "Min", 0.0);
+                out.rangeMax = number (range, "Max", 1.0);
+            }
+
             return out;
+        }
+
+        /*  A MIDI TRACK'S OUTPUT, as Live spells it: "MidiOut/External.Dev:IAC
+            MIDI (Bus 1)/2" - the port's name, and the channel from nought. */
+        Track::MidiOut midiOutOf (const std::string& target)
+        {
+            Track::MidiOut out;
+            constexpr std::string_view prefix = "MidiOut/External.Dev:";
+
+            if (target.rfind (prefix, 0) != 0)
+                return out;
+
+            const auto rest = target.substr (prefix.size());
+            const auto slash = rest.find_last_of ('/');
+
+            if (slash == std::string::npos)
+                return out;
+
+            const auto channel = osc::parseDouble (rest.substr (slash + 1)).value_or (-1.0);
+
+            if (! std::isfinite (channel) || channel < 0.0 || channel > 15.0)
+                return out;
+
+            out.port = rest.substr (0, slash);
+            out.channel = static_cast<int> (channel) + 1;
+            return out;
+        }
+
+        int countNamed (const juce::XmlElement& node, const char* name)
+        {
+            int count = 0;
+
+            for (auto* child : node.getChildIterator())
+                count += (child->hasTagName (name) ? 1 : 0) + countNamed (*child, name);
+
+            return count;
         }
 
         //======================================================================
@@ -360,7 +406,7 @@ namespace wfg::import::als
                     target.trackId = track.id;
                     enter (targets, *parameter, target);
 
-                    if (auto mapping = mappingIn (parameter->getChildByName ("KeyMidi")))
+                    if (auto mapping = mappingIn (parameter))
                     {
                         mapping->target = target;
                         set.mappings.push_back (*mapping);
@@ -446,7 +492,7 @@ namespace wfg::import::als
                         target.path = path;
                         enter (targets, parameter, target);
 
-                        if (auto mapping = mappingIn (parameter.getChildByName ("KeyMidi")))
+                        if (auto mapping = mappingIn (&parameter))
                         {
                             mapping->target = target;
                             set.mappings.push_back (*mapping);
@@ -470,6 +516,38 @@ namespace wfg::import::als
                     }
 
                     track.devices.push_back (std::move (device));
+                }
+            }
+
+            /*  A MIDI TRACK'S CONTROLLERS (namespace draft §121, BDV): the
+                table its clips' envelopes name, `ControllerTargets.N` under
+                the sequencer - N-2 the controller, 0 and 1 the pitch bend and
+                the channel pressure, which no mapping of the set's receives. */
+            void readMidiControllers (const juce::XmlElement* controllers, const Track& track)
+            {
+                if (controllers == nullptr)
+                    return;
+
+                for (auto* child : controllers->getChildIterator())
+                {
+                    const auto name = child->getTagName().toStdString();
+                    constexpr std::string_view prefix = "ControllerTargets.";
+
+                    if (name.rfind (prefix, 0) != 0)
+                        continue;
+
+                    const auto index = osc::parseDouble (name.substr (prefix.size())).value_or (-1.0);
+                    const auto id = child->getStringAttribute ("Id").toStdString();
+
+                    if (id.empty() || ! std::isfinite (index) || index < 0.0 || index > 130.0)
+                        continue;
+
+                    Target target;
+                    target.trackId = track.id;
+                    target.what = index >= 2.0 ? Parameter::controller : Parameter::unknown;
+                    target.path = index >= 2.0 ? std::to_string (static_cast<int> (index) - 2)
+                                               : index < 1.0 ? "pitch bend" : "channel pressure";
+                    targets[id] = target;
                 }
             }
 
@@ -654,6 +732,12 @@ namespace wfg::import::als
                 readDevices (at (chain, "DeviceChain/Devices"), track);
                 readModulationTargets (at (chain, "MainSequencer"), track);
 
+                if (kind == Track::Kind::midi)
+                {
+                    track.midiOut = midiOutOf (text (chain, "MidiOutputRouting/Target"));
+                    readMidiControllers (at (chain, "MainSequencer/MidiControllers"), track);
+                }
+
                 return track;
             }
 
@@ -670,9 +754,16 @@ namespace wfg::import::als
                     out.hasStop = flag (slot, "HasStop", true);
 
                     if (const auto* audio = at (slot, "ClipSlot/Value/AudioClip"))
+                    {
                         out.clip = readClip (*audio);
-                    else if (at (slot, "ClipSlot/Value/MidiClip") != nullptr)
-                        set.problems.push_back ("track \"" + track.name + "\" holds a MIDI clip, which is not read");
+                    }
+                    else if (const auto* midi = at (slot, "ClipSlot/Value/MidiClip"))
+                    {
+                        //  A MIDI CLIP (§121, BDV): its envelopes, and its notes counted.
+                        out.clip = readClip (*midi);
+                        out.clip->midi = true;
+                        out.clip->notes = countNamed (*midi, "MidiNoteEvent");
+                    }
 
                     track.slots.push_back (std::move (out));
                 }
@@ -696,7 +787,7 @@ namespace wfg::import::als
                         scene.tempoEnabled = flag (element, "IsTempoEnabled");
                         scene.tempo = number (element, "Tempo", 0.0);
                         scene.followAction = flag (element, "FollowAction/FollowActionEnabled");
-                        scene.key = mappingIn (element->getChildByName ("KeyMidi"));
+                        scene.key = mappingIn (element);
                         set.scenes.push_back (std::move (scene));
                     }
 

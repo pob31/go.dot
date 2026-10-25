@@ -400,6 +400,240 @@ TEST_CASE ("walk: a live input is a mic cue fired in the first GO, and a clip la
     }));
 }
 
+namespace
+{
+    /*  A MIDI TRACK on the IAC bus, channel 7, `scenes` empty slots. */
+    Track midiTrackOf (const std::string& id, std::size_t scenes)
+    {
+        Track track;
+        track.id = id;
+        track.name = "IAC";
+        track.kind = Track::Kind::midi;
+        track.midiOut = { "IAC MIDI (Bus 1)", 7 };
+        track.slots.resize (scenes);
+
+        for (auto& slot : track.slots)
+            slot.hasStop = false;
+
+        return track;
+    }
+
+    /*  A MIDI CLIP of `beats`, one controller curve on it. */
+    Clip midiClipOf (const std::string& name, const std::string& trackId, int controller, std::vector<EnvelopePoint> points,
+                     double beats = 8.0)
+    {
+        Clip clip;
+        clip.name = name;
+        clip.midi = true;
+        clip.loopStart = 0.0;
+        clip.loopEnd = beats;
+
+        Envelope curve;
+        curve.target.trackId = trackId;
+        curve.target.what = Parameter::controller;
+        curve.target.path = std::to_string (controller);
+        curve.points.push_back ({ -63072000.0, points.front().value });
+        curve.points.insert (curve.points.end(), points.begin(), points.end());
+        clip.envelopes.push_back (curve);
+        return clip;
+    }
+
+    Mapping mappingOf (int controller, const std::string& trackId, Parameter what)
+    {
+        Mapping mapping;
+        mapping.channel = 7;
+        mapping.number = controller;
+        mapping.target.trackId = trackId;
+        mapping.target.what = what;
+        mapping.rangeMin = what == Parameter::active ? 0.0 : floorGain;
+        mapping.rangeMax = what == Parameter::volume ? 1.99526238 : 1.0;
+        return mapping;
+    }
+}
+
+TEST_CASE ("walk: a MIDI clip's controller curve on a mapped fader is a fade on the sound, its value held, and the mapping no hand (namespace draft §121, BDV, BDW, BDY)")
+{
+    auto set = setOf (3);
+    auto source = trackOf ("1", "1", 3, 2);
+    source.sends[0] = 1.0;
+    source.volume = 0.5011872336;       // saved at -6 dB
+    source.slots[0].clip = clipOf ("rain", 0.0, 16.0);
+    source.slots[2].clip = clipOf ("wind", 0.0, 16.0);
+
+    /*  THE SECOND SCENE: controller 11 from nought to 109 over eight beats -
+        the fader of track 1 from the bottom to 0 dB along the provisional law. */
+    auto iac = midiTrackOf ("50", 3);
+    iac.slots[1].clip = midiClipOf ("Fade", "50", 11, { { 0.0, 0.0 }, { 8.0, 109.0 } });
+
+    set.tracks = { source, iac };
+    set.mappings = { mappingOf (11, "1", Parameter::volume) };
+
+    const auto walked = walk (set);
+    REQUIRE (walked.steps.size() == 3u);
+
+    const auto& rain = walked.steps[0].sounds.at (0);
+    CHECK (rain.levelDb == doctest::Approx (-6.0).epsilon (0.001));
+
+    REQUIRE (walked.steps[1].fades.size() == 1u);
+    const auto& fade = walked.steps[1].fades[0];
+    CHECK (fade.target == rain.key);
+    CHECK (fade.duration == doctest::Approx (4.0));
+    REQUIRE (fade.points.size() >= 2u);
+    CHECK (fade.points.front().db <= -70.0);
+    CHECK (fade.points.back().db == doctest::Approx (0.0).epsilon (0.01));
+    CHECK (fade.levelDb == doctest::Approx (0.0).epsilon (0.01));
+    CHECK_FALSE (fade.stopWhenDone);
+
+    /*  HELD: the wind, launched in the third scene, plays at where the clip
+        left the fader - 0 dB - and not at the set's saved value. */
+    CHECK (walked.steps[2].sounds.at (0).levelDb == doctest::Approx (0.0).epsilon (0.01));
+
+    /*  NO HAND, NO DCA: a row of its own instead. */
+    CHECK (walked.dcas.empty());
+    CHECK (walked.hands.empty());
+    REQUIRE (walked.clipFed.size() == 1u);
+    CHECK (walked.clipFed[0].control == "CC 11, channel 7");
+    CHECK (walked.clipFed[0].goDot.find ("fade") != std::string::npos);
+
+    CHECK (std::any_of (walked.notes.begin(), walked.notes.end(), [] (const Note& note)
+    {
+        return note.kind == Note::Kind::approximated && note.text.find ("controller law") != std::string::npos;
+    }));
+    CHECK (std::any_of (walked.notes.begin(), walked.notes.end(), [] (const Note& note)
+    {
+        return note.text.find ("loopback") != std::string::npos;
+    }));
+}
+
+TEST_CASE ("walk: a MIDI clip on a group's fader reaches every sound under it, a switch mutes and unmutes, and a controller mapped nowhere is a MIDI cue (namespace draft §121, BDV)")
+{
+    auto set = setOf (4);
+
+    Track master;
+    master.id = "99";
+    master.name = "Master";
+    master.kind = Track::Kind::master;
+    master.output.kind = Routing::Kind::external;
+    master.output.stereo = true;
+    master.output.channel = 2;
+    set.master = master;
+
+    /*  TWO TRACKS IN A GROUP that goes to the master. */
+    auto band = trackOf ("G", "Band", 4, 2);
+    band.kind = Track::Kind::group;
+    band.output.kind = Routing::Kind::master;
+
+    auto brass = trackOf ("1", "Brass", 4, 2);
+    brass.groupId = "G";
+    brass.output.kind = Routing::Kind::group;
+    brass.slots[0].clip = clipOf ("brass", 0.0, 32.0);
+
+    auto drums = trackOf ("2", "Drums", 4, 2);
+    drums.groupId = "G";
+    drums.output.kind = Routing::Kind::group;
+    drums.slots[0].clip = clipOf ("drums", 0.0, 32.0);
+
+    auto iac = midiTrackOf ("50", 4);
+    iac.slots[1].clip = midiClipOf ("Band down", "50", 2, { { 0.0, 109.0 }, { 4.0, 0.0 } }, 4.0);
+    iac.slots[2].clip = midiClipOf ("Brass off", "50", 16, { { 0.0, 0.0 } }, 1.0);
+    auto last = midiClipOf ("Brass on", "50", 16, { { 0.0, 127.0 } }, 1.0);
+    last.envelopes.push_back (midiClipOf ("x", "50", 99, { { 0.0, 64.0 } }, 1.0).envelopes.front());
+    iac.slots[3].clip = last;
+
+    set.tracks = { band, brass, drums, iac };
+    set.mappings = { mappingOf (2, "G", Parameter::volume), mappingOf (16, "1", Parameter::active) };
+
+    const auto walked = walk (set);
+    REQUIRE (walked.steps.size() == 4u);
+    REQUIRE (walked.steps[0].sounds.size() == 2u);
+    const auto brassKey = walked.steps[0].sounds[0].key;
+    const auto brassLevel = walked.steps[0].sounds[0].levelDb;
+
+    /*  THE GROUP'S FADER TO THE BOTTOM: a fade on each, to silence and stopped. */
+    const auto& down = walked.steps[1].fades;
+    REQUIRE (down.size() == 2u);
+    CHECK (down[0].key != down[1].key);
+    CHECK (down[0].stopWhenDone);
+    CHECK (down[1].stopWhenDone);
+    CHECK (down[0].duration == doctest::Approx (2.0));
+
+    /*  THE BRASS SWITCHED OFF: faded to silence and kept running; on again:
+        faded back to its level. */
+    REQUIRE (walked.steps[2].fades.size() == 1u);
+    const auto& mute = walked.steps[2].fades[0];
+    CHECK (mute.target == brassKey);
+    CHECK (mute.levelDb == doctest::Approx (-120.0));
+    CHECK (mute.points.empty());
+    CHECK_FALSE (mute.stopWhenDone);
+    CHECK (mute.name.rfind ("Mute", 0) == 0u);
+
+    REQUIRE (walked.steps[3].fades.size() == 1u);
+    const auto& unmute = walked.steps[3].fades[0];
+    CHECK (unmute.target == brassKey);
+    CHECK (unmute.levelDb == doctest::Approx (brassLevel));
+    CHECK (unmute.name.rfind ("Unmute", 0) == 0u);
+
+    /*  CONTROLLER 99 LANDS ON NOTHING: sent out as a MIDI cue, once, at 64. */
+    REQUIRE (walked.steps[3].midi.size() == 1u);
+    const auto& sent = walked.steps[3].midi[0];
+    CHECK (sent.port == "IAC MIDI (Bus 1)");
+    CHECK (sent.channel == 7);
+    CHECK (sent.controller == 99);
+    CHECK (sent.from == 64);
+    CHECK (sent.to == 64);
+    CHECK (sent.seconds == doctest::Approx (0.0));
+
+    CHECK (walked.dcas.empty());
+    CHECK (walked.clipFed.size() == 2u);
+}
+
+TEST_CASE ("walk: a live input saved switched off is fired by the MIDI clip that switches it on, and muted by the one that switches it off (namespace draft §121, BDU, BDV)")
+{
+    auto set = setOf (3);
+
+    auto voice = trackOf ("7", "Voix", 3, 2);
+    voice.monitoring = Track::Monitoring::in;
+    voice.input.kind = Routing::Kind::external;
+    voice.input.channel = 3;
+    voice.sends[0] = 1.0;
+    voice.active = false;
+
+    auto source = trackOf ("1", "1", 3, 2);
+    source.sends[0] = 1.0;
+    source.slots[0].clip = clipOf ("rain", 0.0, 16.0);
+
+    auto iac = midiTrackOf ("50", 3);
+    iac.slots[1].clip = midiClipOf ("Voice on", "50", 16, { { 0.0, 127.0 } }, 1.0);
+    iac.slots[2].clip = midiClipOf ("Voice off", "50", 16, { { 0.0, 0.0 } }, 1.0);
+
+    set.tracks = { voice, source, iac };
+    set.mappings = { mappingOf (16, "7", Parameter::active) };
+
+    const auto walked = walk (set);
+    REQUIRE (walked.steps.size() == 3u);
+
+    //  Off at the first GO: not fired.
+    CHECK (walked.steps[0].sounds.size() == 1u);
+    CHECK_FALSE (walked.steps[0].sounds[0].live);
+
+    //  Switched on: fired here, nothing to fade yet.
+    REQUIRE (walked.steps[1].sounds.size() == 1u);
+    CHECK (walked.steps[1].sounds[0].live);
+    CHECK (walked.steps[1].sounds[0].key == "live:7");
+    CHECK (walked.steps[1].fades.empty());
+
+    //  Switched off: muted, kept running.
+    REQUIRE (walked.steps[2].fades.size() == 1u);
+    CHECK (walked.steps[2].fades[0].target == "live:7");
+    CHECK (walked.steps[2].fades[0].levelDb == doctest::Approx (-120.0));
+    CHECK_FALSE (walked.steps[2].fades[0].stopWhenDone);
+
+    CHECK (std::none_of (walked.notes.begin(), walked.notes.end(), [] (const Note& note)
+    {
+        return note.text.find ("no mic cue is made") != std::string::npos;
+    }));
+}
+
 TEST_CASE ("walk: the hands table says what fires a scene and what switches a track, and a Max for Live device is said by name (namespace draft §121, BEA)")
 {
     auto xml = juce::File { juce::String (std::string (WFG_TEST_FIXTURES_DIR)) }

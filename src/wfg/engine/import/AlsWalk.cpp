@@ -685,6 +685,13 @@ namespace wfg::import::als
                 night runs them in order, and Live keeps the last it was given. */
             double beatsPerRealSecond;
 
+            /*  THE CONTROLS THE SET'S OWN MIDI CLIPS SEND (namespace draft
+                §121, BDX, BDY): channel and controller, from every MIDI clip on
+                a track with an output port. A mapping on one of these is driven
+                by the set, not by a hand. */
+            std::set<std::pair<int, int>> midiFed;
+            std::set<std::string> loopbackSaid;
+
             Walker (const LiveSet& setToUse, const WalkOptions& optionsToUse)
                 : set (setToUse), options (optionsToUse), laws (optionsToUse.laws),
                   graph (setToUse, optionsToUse.laws, out.notes),
@@ -696,7 +703,79 @@ namespace wfg::import::als
                 for (const auto& ret : set.returns)
                     state.held[ret.id] = { ret.volume, ret.sends, ret.active };
 
+                for (const auto& track : set.tracks)
+                {
+                    if (track.kind != Track::Kind::midi || track.midiOut.channel <= 0)
+                        continue;
+
+                    for (const auto& slot : track.slots)
+                        if (slot.clip.has_value())
+                            for (const auto& envelope : slot.clip->envelopes)
+                                if (const auto cc = controllerOf (envelope); cc >= 0)
+                                    midiFed.insert ({ track.midiOut.channel, cc });
+                }
+
                 out.mixes = graph.mixes;
+            }
+
+            /** The controller an envelope of a MIDI clip sends, or -1. */
+            static int controllerOf (const Envelope& envelope)
+            {
+                if (envelope.target.what != Parameter::controller)
+                    return -1;
+
+                const auto number = osc::parseDouble (envelope.target.path).value_or (-1.0);
+                return std::isfinite (number) && number >= 0.0 && number <= 127.0 ? static_cast<int> (number) : -1;
+            }
+
+            bool fedByClip (const Mapping& mapping) const
+            {
+                return ! mapping.note && midiFed.count ({ mapping.channel, mapping.number }) != 0;
+            }
+
+            /*  A CONTROLLER'S VALUE ON WHAT IT MOVES (namespace draft §121, BDW),
+                provisional until the probe set measures it: a fader straight in
+                decibels from the mapping's floor to 0 dB at 109 of 127 and on
+                to its top at 127 - a control whose top is 0 dB, a send, straight
+                from its floor to the top; a switch on at 64; anything else
+                straight between the mapping's ends. In the parameter's own
+                units: a gain for a fader or a send. */
+            double controllerValue (double value, const Mapping& mapping) const
+            {
+                const auto x = std::clamp (value, 0.0, 127.0);
+
+                switch (mapping.target.what)
+                {
+                    case Parameter::volume:
+                    case Parameter::send:
+                    {
+                        const auto floorDb = decibels (mapping.rangeMin, laws);
+                        const auto topDb = decibels (mapping.rangeMax, laws);
+                        double db;
+
+                        if (topDb <= 0.01)
+                            db = floorDb + (topDb - floorDb) * x / 127.0;
+                        else if (x <= 109.0)
+                            db = floorDb + (0.0 - floorDb) * x / 109.0;
+                        else
+                            db = topDb * (x - 109.0) / 18.0;
+
+                        return db <= laws.floorDb + 0.01 ? gainOfDb (laws.floorDb) : gainOfDb (db);
+                    }
+
+                    case Parameter::active:
+                        return x >= 64.0 ? 1.0 : 0.0;
+
+                    case Parameter::pan:
+                    case Parameter::device:
+                    case Parameter::modulation:
+                    case Parameter::otherModulation:
+                    case Parameter::controller:
+                    case Parameter::unknown:
+                        return mapping.rangeMin + (mapping.rangeMax - mapping.rangeMin) * x / 127.0;
+                }
+
+                return 0.0;
             }
 
             /*  A LIVE INPUT (namespace draft §121, BDU): a track listening with
@@ -1429,44 +1508,86 @@ namespace wfg::import::als
             }
 
             //==================================================================
-            /*  A CARRIER LAUNCHED WITHOUT ITS SOUND (QI): a fade on the sound
-                its track is hearing. */
-            std::optional<FadeOut> fadeFor (int sceneIndex, const Scene& scene, const Track& carrier, const Clip& clip)
+            /*  A CLIP THAT MOVES A TRACK'S MIXER WITHOUT LAUNCHING A SOUND: a
+                carrier launched alone (QI), or a MIDI clip's curve landed on a
+                mapping (§121, BDV). A fade on each sound the mover reaches - the
+                sound its track is hearing for a carrier, its own for a live
+                input or a plain track, every sound whose path crosses its
+                fader for a group - and the mixer held where the clip leaves it. */
+            std::vector<FadeOut> fadesFor (int sceneIndex, const Scene& scene, const Track& mover, const Clip& clip)
+            {
+                const auto note = [&] (Note::Kind kind, const std::string& text)
+                {
+                    out.notes.push_back ({ kind, sceneIndex, mover.name, text });
+                };
+
+                std::vector<Sound*> targets;
+
+                if (mover.kind == Track::Kind::group)
+                {
+                    for (const auto& [trackId, key] : state.playing)
+                    {
+                        std::vector<Path> every;
+                        graph.paths (trackId, {}, every, 0);
+
+                        const auto crosses = std::any_of (every.begin(), every.end(), [&mover] (const Path& path)
+                        {
+                            return std::any_of (path.terms.begin(), path.terms.end(),
+                                                [&mover] (const Term& term) { return term.trackId == mover.id; });
+                        });
+
+                        if (crosses)
+                            targets.push_back (state.sounds.at (key));
+                    }
+                }
+                else
+                {
+                    const auto* fed = isCarrier (mover) ? sourceFor (mover) : &mover;
+
+                    //  A LIVE INPUT'S OWN CLIP shapes the mic cue it is (BDU).
+                    if (fed == nullptr && isLive (mover))
+                        fed = &mover;
+
+                    if (fed == nullptr)
+                    {
+                        note (Note::Kind::info, "the track listens with its monitoring In and nothing feeds it: its clip is "
+                                                "silent in Live, and is not imported");
+                        hold (mover.id, clip);
+                        return {};
+                    }
+
+                    if (const auto playing = state.playing.find (fed->id); playing != state.playing.end())
+                        targets.push_back (state.sounds.at (playing->second));
+                    else
+                        note (Note::Kind::info, "nothing is playing on \"" + fed->name + "\" for the clip to shape: "
+                                                "where it leaves the mixer is kept for what comes after");
+                }
+
+                std::vector<FadeOut> fades;
+
+                for (auto* sound : targets)
+                    fades.push_back (fadeOnto (sceneIndex, scene, mover, clip, *sound, mover.kind == Track::Kind::group));
+
+                //  --- And where the clip leaves the mover's mixer ----------------
+                hold (mover.id, clip);
+                return fades;
+            }
+
+            FadeOut fadeOnto (int sceneIndex, const Scene& scene, const Track& carrier, const Clip& clip, Sound& soundMoved,
+                              bool keyedBySound)
             {
                 const auto note = [&] (Note::Kind kind, const std::string& text)
                 {
                     out.notes.push_back ({ kind, sceneIndex, carrier.name, text });
                 };
 
-                const auto* fed = sourceFor (carrier);
-
-                //  A LIVE INPUT'S OWN CLIP shapes the mic cue it is (BDU).
-                if (fed == nullptr && isLive (carrier))
-                    fed = &carrier;
-
-                if (fed == nullptr)
-                {
-                    note (Note::Kind::info, "the track listens with its monitoring In and nothing feeds it: its clip is "
-                                            "silent in Live, and is not imported");
-                    return std::nullopt;
-                }
-
-                const auto playing = state.playing.find (fed->id);
-
-                if (playing == state.playing.end())
-                {
-                    note (Note::Kind::info, "a carrier with no sound on \"" + fed->name + "\" to shape: nothing to "
-                                            "fade");
-                    return std::nullopt;
-                }
-
-                auto* sound = state.sounds.at (playing->second);
+                auto* sound = &soundMoved;
                 const auto startBeat = startBeatOf (clip);
                 const auto endBeat = clipBeats (clip, clip.loopEnd);
                 const auto& held = state.held.at (carrier.id);
 
                 FadeOut fade;
-                fade.key = "fade:" + scene.id + ":" + carrier.id;
+                fade.key = "fade:" + scene.id + ":" + carrier.id + (keyedBySound ? ":" + sound->key : std::string());
                 fade.scene = sceneIndex;
                 fade.target = sound->key;
                 fade.name = (clip.name.empty() ? std::string ("Fade") : clip.name) + " - " + carrier.name;
@@ -1534,6 +1655,36 @@ namespace wfg::import::als
                         fade.points.back().db = laws.silenceDb;
                 }
 
+                /*  THE TRACK ACTIVATOR MOVED (§121, BDV): off is a fade to
+                    silence that keeps the sound running, as Live's mute keeps
+                    the track live; on again, after an off, a fade back to the
+                    sound's level. */
+                if (const auto* active = envelopeOn (clip, carrier.id, Parameter::active);
+                      active != nullptr && ! active->points.empty())
+                {
+                    const auto on = lastValue (*active) >= 0.5;
+
+                    if (! on)
+                    {
+                        fade.name = "Mute - " + sound->name;
+                        fade.points.clear();
+                        fade.levelDb = laws.silenceDb;
+                        fade.stopWhenDone = false;
+                        note (Note::Kind::info, "switched off by the clip: \"" + sound->name + "\" is faded to silence and "
+                                                "kept running, as Live's mute keeps the track live (BDV)");
+                    }
+                    else if (! held.active)
+                    {
+                        fade.name = "Unmute - " + sound->name;
+
+                        if (fade.points.empty())
+                            fade.levelDb = sound->levelDb;
+
+                        fade.stopWhenDone = false;
+                        note (Note::Kind::info, "switched on by the clip: \"" + sound->name + "\" is faded back to its level (BDV)");
+                    }
+                }
+
                 //  --- The sends the carrier moves --------------------------------
                 for (std::size_t send = 0; send < carrier.sends.size(); ++send)
                 {
@@ -1593,8 +1744,10 @@ namespace wfg::import::als
                                                "equivalent for the device");
                 }
 
-                //  --- And where the carrier leaves its track ---------------------
-                hold (carrier.id, clip);
+                if (const auto* pan = envelopeOn (clip, carrier.id, Parameter::pan); pan != nullptr && moves (*pan))
+                    note (Note::Kind::dropped, "the pan of \"" + carrier.name + "\" moves in this fade; Go.dot has no "
+                                               "pan lane, and the fade leaves it");
+
                 return fade;
             }
 
@@ -1620,6 +1773,131 @@ namespace wfg::import::als
                     else if (envelope.target.what == Parameter::send && envelope.target.sendIndex >= 0
                                && static_cast<std::size_t> (envelope.target.sendIndex) < held.sends.size())
                         held.sends[static_cast<std::size_t> (envelope.target.sendIndex)] = lastValue (envelope);
+                    else if (envelope.target.what == Parameter::active)
+                        held.active = lastValue (envelope) >= 0.5;
+                }
+            }
+
+            //==================================================================
+            /*  A MIDI CLIP LAUNCHED (namespace draft §121, BDV): each of its
+                controller curves landed on the mappings it feeds, as a move on
+                what they move - the same move a carrier clip makes - and sent
+                out as a MIDI cue where the set maps it nowhere. */
+            void midiClipFor (int sceneIndex, const Scene& scene, const Track& track, const Clip& clip, Step& step)
+            {
+                const auto note = [&] (Note::Kind kind, const std::string& text)
+                {
+                    out.notes.push_back ({ kind, sceneIndex, track.name, text });
+                };
+
+                if (clip.notes > 0)
+                    note (Note::Kind::dropped, "\"" + clip.name + "\" holds " + std::to_string (clip.notes)
+                                               + " note(s), which are not imported: a MIDI note cue is a later thing");
+
+                if (track.midiOut.channel <= 0)
+                {
+                    if (std::any_of (clip.envelopes.begin(), clip.envelopes.end(), moves))
+                        note (Note::Kind::dropped, "\"" + clip.name + "\" moves controllers, and the track sends to no "
+                                                   "MIDI port: they go nowhere");
+                    return;
+                }
+
+                std::map<std::string, Clip> movesByTrack;   // the target track's Id to the clip of moves on it
+                const auto startBeat = startBeatOf (clip);
+
+                for (const auto& envelope : clip.envelopes)
+                {
+                    const auto cc = controllerOf (envelope);
+
+                    if (cc < 0)
+                    {
+                        if (moves (envelope))
+                            note (Note::Kind::dropped, "\"" + clip.name + "\" moves " + (envelope.target.path.empty()
+                                                         ? std::string ("a controller the set does not name") : envelope.target.path)
+                                                       + ", which the import does not send");
+                        continue;
+                    }
+
+                    bool landed = false;
+
+                    for (const auto& mapping : set.mappings)
+                    {
+                        if (mapping.note || mapping.channel != track.midiOut.channel || mapping.number != cc)
+                            continue;
+
+                        landed = true;
+                        auto& synthetic = movesByTrack[mapping.target.trackId];
+
+                        if (synthetic.envelopes.empty())
+                        {
+                            synthetic.name = clip.name;
+                            synthetic.loopStart = clip.loopStart;
+                            synthetic.loopEnd = clip.loopEnd;
+                            synthetic.startRelative = clip.startRelative;
+                            synthetic.loopOn = clip.loopOn;
+                            synthetic.currentStart = clip.currentStart;
+                            synthetic.currentEnd = clip.currentEnd;
+                            synthetic.warped = true;
+                        }
+
+                        Envelope moved;
+                        moved.target = mapping.target;
+                        moved.switches = mapping.target.what == Parameter::active;
+
+                        for (const auto& point : envelope.points)
+                            moved.points.push_back ({ point.beats, controllerValue (point.value, mapping) });
+
+                        synthetic.envelopes.push_back (std::move (moved));
+
+                        if (mapping.target.what == Parameter::volume || mapping.target.what == Parameter::send
+                              || mapping.target.what == Parameter::device)
+                            note (Note::Kind::approximated, "\"" + clip.name + "\" sends controller " + std::to_string (cc)
+                                                            + " to \"" + nameOf (mapping.target.trackId) + "\": its values "
+                                                              "are taken along the provisional controller law, 0 dB at 109 "
+                                                              "(BDW)");
+                    }
+
+                    if (landed)
+                        continue;
+
+                    /*  SENT OUT, in case something outside listens (BDV). */
+                    MidiOut sent;
+                    sent.key = "midi:" + scene.id + ":" + track.id + ":" + std::to_string (cc);
+                    sent.scene = sceneIndex;
+                    sent.name = (clip.name.empty() ? std::string ("MIDI") : clip.name) + " CC " + std::to_string (cc);
+                    sent.port = track.midiOut.port;
+                    sent.channel = track.midiOut.channel;
+                    sent.controller = cc;
+
+                    const auto& points = envelope.points;
+                    const auto first = points.size() > 1 ? points[1] : points.empty() ? EnvelopePoint {} : points[0];
+                    const auto last = points.empty() ? EnvelopePoint {} : points.back();
+                    sent.from = static_cast<int> (std::clamp (std::round (first.value), 0.0, 127.0));
+                    sent.to = static_cast<int> (std::clamp (std::round (last.value), 0.0, 127.0));
+                    sent.seconds = std::max (0.0, (last.beats - startBeat) / beatsPerRealSecond);
+
+                    if (! std::isfinite (sent.seconds))
+                        sent.seconds = 0.0;
+
+                    note (Note::Kind::info, "\"" + clip.name + "\" sends controller " + std::to_string (cc) + " on channel "
+                                            + std::to_string (sent.channel) + " to nothing the set maps: sent out as a "
+                                              "MIDI cue on \"" + sent.port + "\", in case something outside listens (BDV)");
+                    step.midi.push_back (std::move (sent));
+                }
+
+                if (! movesByTrack.empty() && loopbackSaid.insert (track.id).second)
+                    note (Note::Kind::info, "its controllers land on the set's own mappings over \"" + track.midiOut.port
+                                            + "\": taken for a loopback Live reads back, which the set does not say (BDX)");
+
+                for (auto& [targetId, synthetic] : movesByTrack)
+                {
+                    const auto* target = graph.track (targetId);
+
+                    if (target == nullptr)
+                        continue;
+
+                    for (auto& fade : fadesFor (sceneIndex, scene, *target, synthetic))
+                        step.fades.push_back (std::move (fade));
                 }
             }
 
@@ -1686,6 +1964,14 @@ namespace wfg::import::als
 
                         launchedHere[track.id] = { &clip, startBeatOf (clip) };
                     }
+
+                    /*  THE MIDI CLIPS FIRST (BDV): what they move - a fader, an
+                        activator - is where the sounds launched here and the
+                        live inputs fired here read the mixer from. */
+                    for (const auto& track : set.tracks)
+                        if (track.kind == Track::Kind::midi)
+                            if (const auto launched = launchedHere.find (track.id); launched != launchedHere.end())
+                                midiClipFor (index, scene, track, *launched->second.first, step);
 
                     //  --- Sounds first: they decide what the carriers fold into ----
                     std::set<std::string> carriersFolded;
@@ -1764,8 +2050,8 @@ namespace wfg::import::als
                             continue;
                         }
 
-                        if (auto fade = fadeFor (index, scene, track, clip))
-                            step.fades.push_back (std::move (*fade));
+                        for (auto& fade : fadesFor (index, scene, track, clip))
+                            step.fades.push_back (std::move (fade));
                     }
 
                     //  --- A tempo change re-stretches what is still playing (BDR) --
@@ -1843,6 +2129,29 @@ namespace wfg::import::als
                     Hand hand;
                     hand.control = control (mapping);
 
+                    /*  DRIVEN BY THE SET'S OWN MIDI CLIPS (§121, BDY): no hand,
+                        no DCA - a row of its own, saying what the clips do. */
+                    if (fedByClip (mapping))
+                    {
+                        hand.moved = target.what == Parameter::volume ? "the volume of \"" + trackName + "\""
+                                   : target.what == Parameter::send   ? "a send from \"" + trackName + "\""
+                                   : target.what == Parameter::active ? "the track activator of \"" + trackName + "\""
+                                   : target.what == Parameter::device ? target.deviceKind + " " + target.path + " on \"" + trackName + "\""
+                                   : target.what == Parameter::pan    ? "the pan of \"" + trackName + "\""
+                                                                      : "a parameter of \"" + trackName + "\"";
+                        hand.goDot = target.what == Parameter::volume ? "a fade on each sound it reaches, and the value held for "
+                                                                        "the GOs after (BDV)"
+                                   : target.what == Parameter::send   ? "a move of that send on each sound it reaches (BDV)"
+                                   : target.what == Parameter::active ? "its sounds muted and unmuted - a mic cue fired "
+                                                                        "when first switched on (BDV)"
+                                   : target.what == Parameter::device ? (target.deviceKind == "Eq8" ? "an EQ move (BDV)"
+                                                                                                    : "nothing: Go.dot has no "
+                                                                                                      "equivalent for the device")
+                                                                      : "nothing";
+                        out.clipFed.push_back (std::move (hand));
+                        continue;
+                    }
+
                     switch (target.what)
                     {
                         case Parameter::volume:
@@ -1883,6 +2192,7 @@ namespace wfg::import::als
 
                         case Parameter::modulation:
                         case Parameter::otherModulation:
+                        case Parameter::controller:
                         case Parameter::unknown:
                             hand.moved = "a parameter of \"" + trackName + "\" the import does not read";
                             hand.goDot = "nothing";
@@ -1957,7 +2267,7 @@ namespace wfg::import::als
                 {
                     const auto& target = mapping.target;
 
-                    if (target.what != Parameter::volume && target.what != Parameter::send)
+                    if ((target.what != Parameter::volume && target.what != Parameter::send) || fedByClip (mapping))
                         continue;
 
                     const auto* mapped = graph.track (target.trackId);
@@ -1991,15 +2301,32 @@ namespace wfg::import::als
                 }
             }
 
+            /*  A LIVE INPUT NO SCENE SWITCHED ON (BDU): saved off, and no clip
+                of the set turns it on - a hand does, on the night, or nobody.
+                No mic cue is made, and the report says so. */
+            void noteLivesNeverFired()
+            {
+                for (const auto& track : set.tracks)
+                {
+                    if (! isLive (track) || state.playing.count (track.id) != 0)
+                        continue;
+
+                    const auto hand = std::any_of (set.mappings.begin(), set.mappings.end(), [&track] (const Mapping& mapping)
+                    {
+                        return mapping.target.trackId == track.id && mapping.target.what == Parameter::active;
+                    });
+
+                    out.notes.push_back ({ Note::Kind::dropped, -1, track.name, "a live input saved switched off, which no "
+                                           "scene switches on" + std::string (hand ? " - a hand does, on the night" : "")
+                                           + ": no mic cue is made for it; add one if the night needs it (BDU)" });
+                }
+            }
+
             void noteTheSet()
             {
                 if (set.arrangementClips > 0)
                     out.notes.push_back ({ Note::Kind::dropped, -1, {}, std::to_string (set.arrangementClips)
                                            + " clip(s) in Arrangement view are not imported: Session view only" });
-
-                for (const auto& track : set.tracks)
-                    if (track.kind == Track::Kind::midi)
-                        out.notes.push_back ({ Note::Kind::dropped, -1, track.name, "a MIDI track is not imported" });
 
                 /*  A MAX FOR LIVE DEVICE, wherever it sits (§121, BEA): said once
                     for the set, since the group it is on may be on no path a
@@ -2025,6 +2352,7 @@ namespace wfg::import::als
         walker.walkScenes();
         walker.readHands();
         walker.flagResting();
+        walker.noteLivesNeverFired();
         return std::move (walker.out);
     }
 }

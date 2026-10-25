@@ -61,8 +61,10 @@ namespace wfg::import::als
         (`DryWet`, `Bands.3/ParameterA/Freq`); `modulation` is a clip's own
         relative envelope on the track's volume (`VolumeModulationTarget`),
         and `otherModulation` one on anything else a clip may modulate;
-        `active` is the track activator (`Speaker`), a switch (§121, BEA). */
-    enum class Parameter { volume, pan, send, device, modulation, otherModulation, active, unknown };
+        `active` is the track activator (`Speaker`), a switch (§121, BEA);
+        `controller` is a MIDI track's controller, `path` its number - what a
+        MIDI clip's envelope sends out (§121, BDV). */
+    enum class Parameter { volume, pan, send, device, modulation, otherModulation, active, controller, unknown };
 
     struct Target
     {
@@ -120,7 +122,12 @@ namespace wfg::import::als
     {
         std::string name;
         int colour = -1;            ///< Live's palette index
-        FileReference file;
+        FileReference file;         ///< empty for a MIDI clip
+
+        /*  A MIDI CLIP (namespace draft §121, BDV): no file, its envelopes on
+            the track's controllers, and `notes` of its own counted. */
+        bool midi = false;
+        int notes = 0;
 
         /*  THE MARKERS as Live keeps them: with the loop off, the clip plays
             from `loopStart` to `loopEnd`; with it on, from `loopStart +
@@ -225,6 +232,16 @@ namespace wfg::import::als
         Routing input;
         Routing output;
 
+        /*  WHERE A MIDI TRACK SENDS: Live's port by name and the channel,
+            one-based as a desk says it; nought for none (§121, BDV). */
+        struct MidiOut
+        {
+            std::string port;
+            int channel = 0;
+        };
+
+        MidiOut midiOut;
+
         double volume = 1.0;        ///< linear, 1 is 0 dB
         double pan = 0.0;           ///< -1 to 1
         std::vector<double> sends;  ///< linear, one per return in the set's order
@@ -242,6 +259,13 @@ namespace wfg::import::als
         int number = 0;
         bool note = false;
         Target target;
+
+        /*  THE ENDS OF THE CONTROL (`MidiControllerRange`): what the
+            parameter is at the controller's nought and at its 127, in the
+            parameter's own units - a fader's -70 dB and +6 dB as gains. One
+            for a parameter with no range written, which a switch has not. */
+        double rangeMin = 0.0;
+        double rangeMax = 1.0;
     };
 
     struct Scene

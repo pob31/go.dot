@@ -356,6 +356,112 @@ TEST_CASE ("als: a track activator's hand, a scene's own key, and a Max for Live
     CHECK (one.devices[1].name == "Pause.amxd");
 }
 
+TEST_CASE ("als: a MIDI track's clip is read - its controllers by the track's table, its port and channel, its notes counted (namespace draft §121, BDV)")
+{
+    /*  A MIDI track before the fixture's returns, in the shape Live writes it:
+        out to the IAC bus on channel 7 (Live's 6), a clip ramping controller
+        120 - the fader of track 1 - with one note in it, and the controller
+        table a clip's envelope names. */
+    auto xml = fixture ("session.als.xml").loadFileAsString().toStdString();
+    const auto at = xml.find ("<ReturnTrack Id=\"15\">");
+    REQUIRE (at != std::string::npos);
+
+    xml.insert (at, R"(<MidiTrack Id="50">
+        <Name><EffectiveName Value="IAC" /></Name>
+        <TrackGroupId Value="-1" />
+        <DeviceChain>
+            <AudioInputRouting><Target Value="AudioIn/External/S0" /></AudioInputRouting>
+            <AudioOutputRouting><Target Value="AudioOut/Master" /></AudioOutputRouting>
+            <MidiInputRouting><Target Value="MidiIn/None" /></MidiInputRouting>
+            <MidiOutputRouting><Target Value="MidiOut/External.Dev:IAC MIDI (Bus 1)/6" /></MidiOutputRouting>
+            <Mixer>
+                <Volume><Manual Value="1" /></Volume>
+                <Pan><Manual Value="0" /></Pan>
+                <Speaker><Manual Value="true" /></Speaker>
+            </Mixer>
+            <MainSequencer>
+                <ClipSlotList>
+                    <ClipSlot Id="0"><ClipSlot><Value /></ClipSlot><HasStop Value="true" /></ClipSlot>
+                    <ClipSlot Id="1">
+                        <ClipSlot><Value>
+                            <MidiClip Id="0" Time="0">
+                                <CurrentStart Value="0" /><CurrentEnd Value="8" />
+                                <Loop><LoopStart Value="0" /><LoopEnd Value="8" /><StartRelative Value="0" /><LoopOn Value="false" /></Loop>
+                                <Name Value="Fade voice" />
+                                <LaunchMode Value="0" /><LaunchQuantisation Value="1" />
+                                <Envelopes><Envelopes>
+                                    <ClipEnvelope Id="0">
+                                        <EnvelopeTarget><PointeeId Value="80173" /></EnvelopeTarget>
+                                        <Automation><Events>
+                                            <FloatEvent Id="1" Time="-63072000" Value="0" />
+                                            <FloatEvent Id="2" Time="0" Value="0" />
+                                            <FloatEvent Id="3" Time="8" Value="109" />
+                                        </Events></Automation>
+                                    </ClipEnvelope>
+                                    <ClipEnvelope Id="1">
+                                        <EnvelopeTarget><PointeeId Value="80170" /></EnvelopeTarget>
+                                        <Automation><Events>
+                                            <FloatEvent Id="4" Time="-63072000" Value="20" />
+                                            <FloatEvent Id="5" Time="0" Value="20" />
+                                        </Events></Automation>
+                                    </ClipEnvelope>
+                                </Envelopes></Envelopes>
+                                <Notes><KeyTracks><KeyTrack Id="0">
+                                    <Notes><MidiNoteEvent Time="0" Duration="1" Velocity="100" IsEnabled="true" /></Notes>
+                                    <MidiKey Value="60" />
+                                </KeyTrack></KeyTracks></Notes>
+                                <Disabled Value="false" />
+                            </MidiClip>
+                        </Value></ClipSlot>
+                        <HasStop Value="true" />
+                    </ClipSlot>
+                    <ClipSlot Id="2"><ClipSlot><Value /></ClipSlot><HasStop Value="false" /></ClipSlot>
+                </ClipSlotList>
+                <MonitoringEnum Value="1" />
+                <MidiControllers>
+                    <ControllerTargets.0 Id="80051"><LockEnvelope Value="0" /></ControllerTargets.0>
+                    <ControllerTargets.1 Id="80052"><LockEnvelope Value="0" /></ControllerTargets.1>
+                    <ControllerTargets.119 Id="80170"><LockEnvelope Value="0" /></ControllerTargets.119>
+                    <ControllerTargets.122 Id="80173"><LockEnvelope Value="0" /></ControllerTargets.122>
+                </MidiControllers>
+            </MainSequencer>
+            <DeviceChain><Devices /></DeviceChain>
+        </DeviceChain>
+    </MidiTrack>
+    )");
+
+    const auto read = readSetXml (xml);
+    REQUIRE (read.set.has_value());
+    const auto& set = *read.set;
+    CHECK (set.problems.empty());
+
+    const auto& iac = trackNamed (set, "IAC");
+    CHECK (iac.kind == Track::Kind::midi);
+    CHECK (iac.midiOut.port == "IAC MIDI (Bus 1)");
+    CHECK (iac.midiOut.channel == 7);
+
+    REQUIRE (iac.slots.size() == 3u);
+    REQUIRE (iac.slots[1].clip.has_value());
+    const auto& clip = *iac.slots[1].clip;
+    CHECK (clip.midi);
+    CHECK (clip.notes == 1);
+    CHECK (clip.name == "Fade voice");
+    CHECK (clip.loopEnd == doctest::Approx (8.0));
+    REQUIRE (clip.envelopes.size() == 2u);
+    CHECK (clip.envelopes[0].target.what == Parameter::controller);
+    CHECK (clip.envelopes[0].target.trackId == "50");
+    CHECK (clip.envelopes[0].target.path == "120");
+    CHECK (clip.envelopes[0].points.back().value == doctest::Approx (109.0));
+    CHECK (clip.envelopes[1].target.path == "117");
+
+    /*  THE ENDS OF A CONTROL: track 1's fader runs from -70 dB to +6. */
+    const auto fader = std::find_if (set.mappings.begin(), set.mappings.end(),
+                                     [] (const Mapping& one) { return one.number == 120; });
+    REQUIRE (fader != set.mappings.end());
+    CHECK (fader->rangeMin == doctest::Approx (0.0003162277571));
+    CHECK (fader->rangeMax == doctest::Approx (1.99526238));
+}
+
 TEST_CASE ("als: a Live 10 set - its scene names, its folder list and its group")
 {
     const auto set = readFixture ("live10.als.xml");

@@ -238,6 +238,22 @@ namespace wfg::import::als
         std::string name;
     };
 
+    /*  A CONTROLLER SENT OUT (namespace draft §121, BDV): a MIDI clip's curve on
+        a controller the set maps nowhere, which something outside may listen
+        to - a MIDI cue on a Port named after Live's, from one value to another
+        over its seconds. */
+    struct MidiOut
+    {
+        std::string key;            ///< "midi:<scene id>:<track id>:<controller>"
+        int scene = -1;
+        std::string name;
+        std::string port;           ///< Live's port, by name
+        int channel = 1;            ///< one-based
+        int controller = 0;
+        int from = 0, to = 0;       ///< 0..127
+        double seconds = 0.0;       ///< nought sends `to` at once
+    };
+
     /*  ONE GO: a scene that does something, numbered in the order it is
         played, and what it does. */
     struct Step
@@ -249,8 +265,9 @@ namespace wfg::import::als
         std::vector<Sound> sounds;
         std::vector<FadeOut> fades;
         std::vector<StopOut> stops;
+        std::vector<MidiOut> midi;
 
-        bool empty() const noexcept { return sounds.empty() && fades.empty() && stops.empty(); }
+        bool empty() const noexcept { return sounds.empty() && fades.empty() && stops.empty() && midi.empty(); }
     };
 
     /*  A HAND: a control, what it moved in Live, and what in Go.dot does the
@@ -276,6 +293,12 @@ namespace wfg::import::als
         std::vector<Mix> mixes;
         std::vector<Step> steps;
         std::vector<Hand> hands;
+
+        /*  THE CONTROLS THE SET'S OWN MIDI CLIPS DRIVE (namespace draft §121,
+            BDY): a mapping fed by a clip on the bus Live reads back is no hand
+            - no DCA, no row in the hands table - but a row here, saying what
+            the clips move and what Go.dot does for it. */
+        std::vector<Hand> clipFed;
 
         /*  The tracks a hand rode the fader of, by Live Id to name: one DCA
             each (QN). */

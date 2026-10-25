@@ -213,7 +213,7 @@ namespace wfg::import::als
                                       : std::string())
                 << ".\n";
 
-            int fades = 0, speedFades = 0, stops = 0, lanes = 0, sendLanes = 0;
+            int fades = 0, speedFades = 0, stops = 0, lanes = 0, sendLanes = 0, midi = 0;
 
             for (const auto& step : walked.steps)
             {
@@ -221,6 +221,7 @@ namespace wfg::import::als
                     (fade.rate.has_value() ? speedFades : fades) += 1;
 
                 stops += static_cast<int> (step.stops.size());
+                midi += static_cast<int> (step.midi.size());
 
                 for (const auto& sound : step.sounds)
                 {
@@ -231,8 +232,9 @@ namespace wfg::import::als
                 }
             }
 
-            out << "- " << fades << " fade(s) from carrier clips launched alone, " << speedFades
-                << " speed fade(s) at tempo changes, " << stops << " stop(s).\n";
+            out << "- " << fades << " fade(s) from carrier and MIDI clips, " << speedFades
+                << " speed fade(s) at tempo changes, " << stops << " stop(s), " << midi
+                << " MIDI cue(s) for controllers the set maps nowhere.\n";
             out << "- " << lanes << " level lane(s), " << sendLanes << " send lane(s).\n\n";
 
             out << "| GO | Scene | Sounds | Fades | Stops |\n|---|---|---|---|---|\n";
@@ -292,6 +294,17 @@ namespace wfg::import::als
 
             for (const auto& hand : walked.hands)
                 out << "| " << hand.control << " | " << hand.moved << " | " << hand.goDot << " |\n";
+
+            if (! walked.clipFed.empty())
+            {
+                out << "\n## Moved by the set's own MIDI clips\n\nControls the set's MIDI clips send over a port Live reads "
+                       "back, mapped to its own faders and switches: driven by the set, not by a hand, so no DCA is made for "
+                       "them (namespace draft §121, BDX, BDY).\n\n";
+                out << "| Control | In Live | In Go.dot |\n|---|---|---|\n";
+
+                for (const auto& hand : walked.clipFed)
+                    out << "| " << hand.control << " | " << hand.moved << " | " << hand.goDot << " |\n";
+            }
 
             for (const auto kind : { Note::Kind::approximated, Note::Kind::dropped, Note::Kind::info })
             {
@@ -721,10 +734,11 @@ namespace wfg::import::als
         std::map<std::string, std::string> cueOf;       // walk key to cue id
         std::map<std::string, EqFit> eqOf;              // sound key to its EQ's fit
         std::vector<std::string> inputPatch;            // the live inputs' channels of the interface, in their order (BDU)
+        std::map<std::string, std::string> portOf;      // Live's MIDI port by name to the Port declared for it (BDV)
 
         for (const auto& step : walked.steps)
         {
-            const auto items = step.sounds.size() + step.fades.size() + step.stops.size();
+            const auto items = step.sounds.size() + step.fades.size() + step.stops.size() + step.midi.size();
             const auto alone = items == 1 && step.sounds.size() == 1;
             const auto numberText = std::to_string (step.number);
 
@@ -826,9 +840,13 @@ namespace wfg::import::als
                 if (const auto dca = dcaOf.find (sound.dcaTrack); ! sound.dcaTrack.empty() && dca != dcaOf.end())
                     attributes.push_back ({ "dca", dca->second });
 
-                //  ITS DIRECT OUT (§121, BDS).
+                /*  ITS DIRECT OUT (§121, BDS) - shared on purpose: in Live every
+                    clip of the track, and every track on the pair, sums there. */
                 if (const auto direct = busOf.find (sound.directOut); ! sound.directOut.empty() && direct != busOf.end())
+                {
                     attributes.push_back ({ "directOut", direct->second });
+                    attributes.push_back ({ "sharedOut", "true" });
+                }
 
                 if (alone)
                 {
@@ -858,7 +876,8 @@ namespace wfg::import::als
                         row->second += "\n\n" + line;
                 }
 
-                const auto cueName = alone && ! step.name.empty() ? step.name : sound.name;
+                //  A mic cue keeps its track's name: the scene is not what it is.
+                const auto cueName = alone && ! step.name.empty() && ! sound.live ? step.name : sound.name;
                 const auto made = document.createCue (parent, doc::endOfSequence, sound.live ? "mic" : "media", cueName,
                                                       cueId, attributes);
 
@@ -1059,6 +1078,44 @@ namespace wfg::import::als
 
                 if (! made.ok)
                     said (Note::Kind::dropped, step.scene, {}, "the fade \"" + fade.name + "\" could not be made ("
+                                                               + made.reason + ")");
+            }
+
+            //  --- Its controllers sent out (§121, BDV) ---------------------------
+            for (const auto& sent : step.midi)
+            {
+                auto port = portOf.find (sent.port);
+
+                if (port == portOf.end())
+                {
+                    const auto made = document.createPort (sent.port, ids.of ("port:" + sent.port));
+
+                    if (! made.ok)
+                    {
+                        said (Note::Kind::dropped, step.scene, {}, "the MIDI port \"" + sent.port + "\" could not be declared ("
+                                                                   + made.reason + ")");
+                        continue;
+                    }
+
+                    port = portOf.emplace (sent.port, made.id).first;
+                }
+
+                doc::ShowDocument::Attributes attributes { { "port", port->second },
+                                                           { "type", "controlChange" },
+                                                           { "channel", std::to_string (sent.channel) },
+                                                           { "data1", std::to_string (sent.controller) },
+                                                           { "data2", std::to_string (sent.from) } };
+
+                if (sent.to != sent.from)
+                {
+                    attributes.push_back ({ "fadeTo", std::to_string (sent.to) });
+                    attributes.push_back ({ "fadeTime", number (std::clamp (sent.seconds, 0.0, 3600.0), 3) });
+                }
+
+                const auto made = document.createCue (parent, doc::endOfSequence, "midi", sent.name, ids.of (sent.key), attributes);
+
+                if (! made.ok)
+                    said (Note::Kind::dropped, step.scene, {}, "the MIDI cue \"" + sent.name + "\" could not be made ("
                                                                + made.reason + ")");
             }
 

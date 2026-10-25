@@ -594,6 +594,49 @@ TEST_CASE ("als import: a live input is a mic cue on a named input and a rack ch
     CHECK (at (document, "/godot/cue/" + fade + "/target") == mic);
 }
 
+TEST_CASE ("als import: a controller the set maps nowhere is a MIDI cue on a Port named after Live's, a ramp its fade (namespace draft §121, BDV)")
+{
+    Walk walked;
+    Step step;
+    step.scene = 0;
+    step.number = 1;
+    step.sceneId = "37";
+    step.name = "top start";
+
+    MidiOut sent;
+    sent.key = "midi:37:50:99";
+    sent.scene = 0;
+    sent.name = "Fade CC 99";
+    sent.port = "IAC MIDI (Bus 1)";
+    sent.channel = 7;
+    sent.controller = 99;
+    sent.from = 10;
+    sent.to = 100;
+    sent.seconds = 2.0;
+    step.midi.push_back (sent);
+    walked.steps.push_back (step);
+
+    doc::ShowDocument document;
+    const auto shown = build (sessionFixture(), walked, "Session", {}, document);
+
+    INFO ("problems: " << (document.validate().empty() ? std::string ("none") : document.validate().front()));
+    CHECK (document.validate().empty());
+    CHECK (shown.gos == 1);
+
+    const auto cue = idFor ("midi:37:50:99");
+    const auto port = idFor ("port:IAC MIDI (Bus 1)");
+    REQUIRE (elementOf (document, cue) == "Midi");
+    CHECK (parentOf (document, cue) == idFor ("go:37"));
+    CHECK (at (document, "/godot/cue/" + cue + "/port") == port);
+    CHECK (at (document, "/godot/port/" + port + "/name") == "IAC MIDI (Bus 1)");
+    CHECK (at (document, "/godot/cue/" + cue + "/type") == "controlChange");
+    CHECK (at (document, "/godot/cue/" + cue + "/channel") == "7");
+    CHECK (at (document, "/godot/cue/" + cue + "/data1") == "99");
+    CHECK (at (document, "/godot/cue/" + cue + "/data2") == "10");
+    CHECK (at (document, "/godot/cue/" + cue + "/fadeTo") == "100");
+    CHECK (at (document, "/godot/cue/" + cue + "/fadeTime") == "2");
+}
+
 TEST_CASE ("als import: a VST3's state is written as JUCE keeps one, an AU's as it is, a VST2's not at all")
 {
     PluginInfo vst3 { "VST3", "Verb", {}, "0123456789ABCDEF0123456789ABCDEF", { 1, 2, 3 }, { 4, 5 } };
