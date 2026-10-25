@@ -2624,7 +2624,7 @@ namespace wfg::tree
                             half emits them, against the roster this walk leaves
                             behind. Same rule as a cue's `prepare` and a slot's
                             `holder`. */
-                        if (name == "aim" || name == "solve" || name == "statePosition"
+                        if (name == "aim" || name == "solve" || name == "statePosition" || name == "loaded"
                              || name == "history" || name == "resume")
                             continue;
 
@@ -4776,6 +4776,14 @@ namespace wfg::tree
                 runtime.push_back (makeLeaf (base + "/statePosition", *row,
                                              cue::spellAim (lists != nullptr
                                                               ? lists->positionOf (listId)
+                                                              : cue::ListAim {})));
+
+            /*  WHAT A LOAD TO TIME HOLDS (namespace draft §117): the standby
+                cue and the second it is made ready at, or nothing. */
+            if (const auto* row = rowNamed ("list", "loaded"))
+                runtime.push_back (makeLeaf (base + "/loaded", *row,
+                                             cue::spellAim (lists != nullptr
+                                                              ? lists->loadedOf (listId)
                                                               : cue::ListAim {})));
 
             /*  THE STEPS, NEWEST FIRST, because the use is going back a little

@@ -514,7 +514,7 @@ namespace wfg::client::ui
         alone. */
     bool RunPaneComponent::headFor (const model::RunRow& entry) const
     {
-        return entry.launched() && spanOf (entry).known();
+        return (entry.launched() || entry.held()) && spanOf (entry).known();
     }
 
     juce::String RunPaneComponent::clockFor (const model::RunRow& entry)
@@ -790,7 +790,7 @@ namespace wfg::client::ui
             }
         }
 
-        if (entry.launched() && known)
+        if ((entry.launched() || entry.held()) && known)
         {
             /*  A HEAD THAT READS ON ANY COLOUR: two pixels of ink between one
                 of black each side, since one pixel of ink over a yellow or a
@@ -1118,11 +1118,14 @@ namespace wfg::client::ui
             the engine says, run by run (`run/seekable`, K9): a scene that
             loops is sought within its round, one with a header once the
             header is over, and the pane offers neither before then. */
-        if (entry.state != "playing" || ! entry.seekable)
+        /*  AND A RUN A LOAD TO TIME HOLDS (namespace draft §117): armed or
+            being got ready, with its head where the load put it; its scrub
+            is the loaded second's cursor. */
+        if (! entry.seekable || (entry.state != "playing" && ! entry.held()))
             return false;
 
         if (entry.kind == "media")
-            return entry.launched() && spanOf (entry).known();
+            return (entry.launched() || entry.held()) && spanOf (entry).known();
 
         /*  A TIMECODE RUN (namespace draft §59, TC.8): `run.seek` moves its
             code since TC.7, and the engine's `seekable` says when. One with a
@@ -1130,7 +1133,7 @@ namespace wfg::client::ui
             it is stopped has nothing to hold it to but its start, and is
             geared as a scene with no known length is. */
         if (entry.kind == "timecode")
-            return entry.launched();
+            return entry.launched() || entry.held();
 
         return entry.kind == "group";
     }

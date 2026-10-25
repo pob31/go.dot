@@ -1208,6 +1208,11 @@ state kinds are values and a note is an event; a curve or a fade the instant lan
 goes on from there; a fade's trim is applied to the cue the jump seats (namespace draft §115, at the
 author's direction, 2026-10-25).*
 
+*And the jump is two gestures, as in QLab (namespace draft §117, at the author's direction, 2026-10-25):
+Load to time makes the STANDBY cue ready at the second - the sounds armed where they would be, the scene
+held, the values every cue before the second had set sent - and holds it, silent, scrubbable; GO plays
+it from there and moves the pointer on. The solver is unchanged; the state position is where the hold is.*
+
 ### 3.14 Timecode
 
 **Chase and generate**, both required. LTC and MTC.

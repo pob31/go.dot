@@ -331,6 +331,11 @@ namespace wfg::client::model
         return changed;
     }
 
+    bool RunRow::held() const noexcept
+    {
+        return seekable && ! launched() && state != "failed";
+    }
+
     bool RunRow::launched() const noexcept
     {
         /*  The four states before a launch, named rather than inferred: a run

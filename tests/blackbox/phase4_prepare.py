@@ -622,6 +622,10 @@ def run(locale: "str | None") -> int:
 
                 command(server, "list.loadToTime", [LIST])
 
+                #  The load holds the ramp at its second (namespace draft 117):
+                #  GO is what plays it from there.
+                command(server, "go")
+
                 jumped = fresh_run_for_cue(server, RAMP, known_runs)
 
                 if report.check(bool(jumped), "the jump created a run for the ramp"):
@@ -634,7 +638,9 @@ def run(locale: "str | None") -> int:
                                  f"statePosition reads "
                                  f"{value_of(server, f'/godot/list/{LIST}/statePosition')!r}")
 
-                report.check(desk_received(target) - before_jump <= 1,
+                #  The hold sends the ramp's value at the second, and the release
+                #  fires the ramp there, which writes it once more.
+                report.check(desk_received(target) - before_jump <= 2,
                              "the jump sent the desk only what differed",
                              f"{desk_received(target) - before_jump} datagrams")
 

@@ -2420,6 +2420,7 @@ TEST_CASE ("timecode jump: a load to time starts a scene's code at its start plu
     //  Twelve seconds into the scene.
     rig.submit ("list.aim", { osc::Value::string (rig.listId), osc::Value::string (scene), osc::Value::float64 (12.0) });
     rig.submit ("list.loadToTime", { osc::Value::string (rig.listId) });
+    rig.submit ("go", {});       // the load holds the scene (namespace draft §117); GO plays it from there
 
     REQUIRE (rig.runOf (code) != nullptr);
     REQUIRE (rig.runOf (brief) != nullptr);

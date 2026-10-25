@@ -118,8 +118,14 @@ namespace wfg::cue
         void aimAt (const std::string& list, const ListAim& aim) { aims[list] = aim; }
         void landedAt (const std::string& list, const ListAim& aim) { positions[list] = aim; }
 
+        /*  WHAT A LOAD TO TIME HOLDS (namespace draft §117): the standby cue
+            and the second it is made ready at, published as `list/loaded`;
+            unset once GO has released it or the pointer has walked away. */
+        void loadedAt (const std::string& list, const ListAim& aim) { loads[list] = aim; }
+
         ListAim aimOf (const std::string& list) const { return lookUp (aims, list); }
         ListAim positionOf (const std::string& list) const { return lookUp (positions, list); }
+        ListAim loadedOf (const std::string& list) const { return lookUp (loads, list); }
 
         /*  A step taken, newest kept last. Bounded at sixty-four because the
             node that publishes it is one string, and because the use is going
@@ -387,7 +393,7 @@ namespace wfg::cue
             return found == from.end() ? ListAim {} : found->second;
         }
 
-        std::map<std::string, ListAim> aims, positions;
+        std::map<std::string, ListAim> aims, positions, loads;
         std::map<std::string, std::vector<Step>> histories;
         std::uint64_t taken = 0;
         std::int64_t recordingSince = -1;

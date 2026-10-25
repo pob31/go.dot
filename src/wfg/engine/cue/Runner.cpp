@@ -2663,6 +2663,22 @@ namespace wfg::cue
         if (! aim.isSet())
             return used;
 
+        /*  THE STANDBY IS WHAT IS LOADED (namespace draft §117; the author:
+            "fast forward from the cue where the standby pointer is"). An aim
+            at another cue - a step of the history clicked, "take it back to
+            cue 12" - moves the pointer there first, as `standby.set` would,
+            and that cue is then the one made ready. Refused where the
+            document refuses the pointer, and then nothing is done. */
+        const auto standbyBefore = list[juce::Identifier ("standby")].toString().toStdString();
+
+        if (aim.cue != standbyBefore)
+        {
+            if (! editable.setAttribute (standbyAddressOf (listId), aim.cue).ok)
+                return used;
+
+            editable.setAttribute (finishedAddressOf (listId), "false");
+        }
+
         /*  READ FROM THE HISTORY WHEN THERE IS ONE (2026-09-19): a cue the
             list has fired is placed, with everything fired before it, by the
             clock the steps kept; a cue never fired is read from the order. */
@@ -2811,53 +2827,71 @@ namespace wfg::cue
                     job.retired = true;
         }
 
-        //----------------------------------------------------------------------
-        /*  THE POINTER, positionally after the target (§3.5).
-
-            Through a WRITABLE document handed in by the command, because the
-            Runner reads the show and does not edit it - the same reference the
-            `go` handler uses to move standby, for the same reason: the pointer
-            is a decision somebody made and lives in the file, while everything
-            else this function touches is engine state. */
-        editable.setAttribute (standbyAddressOf (listId), plan.standby);
+        /*  AND THE HOLD BEFORE THIS ONE, whose runs the sweep has just ended. */
+        holdings.erase (listId);
 
         //----------------------------------------------------------------------
-        /*  AND THE TREE, OUTERMOST FIRST - shared with a group re-seated at a
-            second of its own timeline, which is the same building with the
-            scene's run already standing. With the trims the fades before the
-            place left (namespace draft §115): a cue a fade had brought down
-            comes back down, as §3.13 says it should. */
-        seatPlan (engine, tick, plan.runs, runFor, nextId, nullptr, &plan.trims);
+        /*  THE POINTER STAYS (namespace draft §117). A load is not the jump any
+            more: it makes the standby ready at the second, silent, and GO is
+            what plays it and moves the pointer on - "press load to time and
+            move the time cursor to the time of the second chorus then press
+            play" (the author, 2026-10-25). Until 2026-10-25 the pointer landed
+            after the target here and the sound started at once.
 
-        //----------------------------------------------------------------------
-        /*  AND THE VALUES: A MINIMAL CORRECTION, NOT A SHOTGUN BLAST (§3.13).
+            THE VALUES GO OUT NOW, every one - a curve's or a fade's value at
+            the second among them, since no run writes it while the hold
+            stands; the release fires that run at the same second, which
+            writes it again and goes on. "Reset the data of the runs before
+            it": what every cue before the loaded second had set, last writer
+            winning, sent where the desk does not already hold it. */
+        stashPlanned (tick, plan.values, plan.midi, true);
 
-            WHAT IS COMPARED IS THE FRESHEST THING KNOWN ABOUT THE TARGET:
-            what it was last OBSERVED to hold, and what Go.dot last WROTE where
-            there is no observation. The order matters and is the whole of what
-            §13.10 added here. A fader somebody moved by hand on the desk is in
-            the observation and not in the write, so before this the jump agreed
-            with a tree that disagreed with the room and sent nothing; now it
-            sends. And an observation is dropped the moment Go.dot writes that
-            address, so "no observation" means "nothing has been seen since we
-            last wrote", where the written value is the best account there is.
-
-            Sent through the ordinary write, so a replay reproduces it exactly
-            and, having no sender, does not move the rig. */
-        /*  STASHED, AND SENT BY THE HOOK (2026-10-03, Doh! D3, namespace draft
-            §24.13): a handler never submits, and this one did - so a replay,
-            which re-runs the handler AND re-injects the logged record, wrote
-            every jump value twice. The flush on the next tick compares and
-            sends, after that tick's give-backs - the old horizon's restores
-            could otherwise land over a value the jump had just sent. */
-        /*  AND THE MIDI STATE WITH THEM (namespace draft §115), and neither for
-            a value a run the seat has just fired writes itself. */
-        stashPlanned (tick, plan.values, plan.midi);
-
-        /*  WHERE IT LANDED, which is §3.13's second pointer. After a jump this
+        /*  WHERE IT LANDED, which is §3.13's second pointer. After a load this
             agrees with the aim; after the next GO it does not, and that
             divergence is what a running view shows. */
         lists.landedAt (listId, { aim.cue, aim.offset });
+        lists.loadedAt (listId, { aim.cue, aim.offset });
+
+        /*  BEFORE THE CUE, NOTHING IS HELD: the list is silent and reset, and
+            the standby is made ready from its top as it always is, by the next
+            tick's `armStandby` - whose memory of having done so the sweep has
+            just made stale. GO is then an ordinary GO. */
+        if (aim.offset < 0.0)
+        {
+            armedStandby.clear();
+        }
+        else
+        {
+            /*  THE BLOCK, OUTERMOST FIRST, HELD - the same building a jump did,
+                in its hold mode: sounds armed where they would be and not
+                launched, scenes made and held in their `prepared` phase, the
+                members still to come not made at all, a curve or a fade part
+                way not fired. With the trims the fades before the place left
+                (namespace draft §115), on the sounds as they are armed.
+
+                NOBODY'S GO, as the horizon's work is (§24, GY): the GO that
+                releases it stamps it then. */
+            struct Horizon
+            {
+                explicit Horizon (bool& flagToSet) : flag (flagToSet) { flag = true; }
+                ~Horizon() { flag = false; }
+                bool& flag;
+            } horizon { makingForHorizon };
+
+            seatPlan (engine, tick, plan.runs, runFor, nextId, nullptr, &plan.trims, true);
+
+            Held holding;
+            holding.cue = aim.cue;
+            holding.offset = aim.offset;
+            holding.plan = plan;
+            holding.runs = used;
+            holding.at = tick;
+            holdings[listId] = std::move (holding);
+
+            /*  AND THE STANDBY IS THIS BLOCK: `armStandby` would otherwise
+                make the cue ready again from its top, beside the hold. */
+            armedStandby = aim.cue;
+        }
 
         /*  AND THE HISTORY FOLLOWS THE JUMP: the steps the plan was read from
             move to the clock the rebuilt runs are on, and the steps after the
@@ -2886,8 +2920,20 @@ namespace wfg::cue
                            std::map<std::string, std::string>& runFor,
                            const NameDraw& nextId,
                            const SeatResume* resume,
-                           const std::vector<PlannedTrim>* trims)
+                           const std::vector<PlannedTrim>* trims,
+                           bool hold)
     {
+        /*  HELD RATHER THAN SET GOING (namespace draft §117): a load to time
+            builds the standby's block at a second and leaves it waiting for
+            GO. What the hold makes is what the release can adopt - the scenes
+            and the sounds, each `prepare`d `loaded` - and nothing that would
+            act on its own: no member still to come with a due tick, no code,
+            no curve or fade fired, no job but the `prepared` phase's hold. */
+        const auto heldBack = [hold] (const PlannedRun& wants)
+        {
+            return hold && (wants.when == planned::due || wants.when == planned::postWait);
+        };
+
         /*  WHAT A FADE BEFORE THE PLACE HAD DONE TO A CUE (namespace draft
             §115): the plan's trim for it, when the caller handed the trims in. */
         const auto trimFor = [trims] (const std::string& cueId) -> std::optional<double>
@@ -2918,7 +2964,7 @@ namespace wfg::cue
         {
             const auto cue = document.findById (wants.cue);
 
-            if (! cue.isValid() || cue.getType().toString() != "Group")
+            if (! cue.isValid() || cue.getType().toString() != "Group" || heldBack (wants))
                 continue;
 
             const auto standing = runFor.find (wants.cue);
@@ -3083,6 +3129,16 @@ namespace wfg::cue
             if (madeHere)
                 if (const auto trim = trimFor (wants.cue); trim.has_value())
                     run->ownLevel = *trim;
+
+            /*  HELD (§117): a block being got ready, as the horizon's is, with
+                its second on it for the pane to draw; the release writes
+                `playing` over it and dates it back by its offset then. */
+            if (hold)
+            {
+                run->state = runState::preparing;
+                run->prepare = preparedness::loaded;
+                run->position = wants.offset;
+            }
         }
 
         //----------------------------------------------------------------------
@@ -3095,8 +3151,19 @@ namespace wfg::cue
                 continue;
 
             /*  A RUN ALREADY STANDING FOR IT - a mic cue kept sounding through
-                a jump - is adopted as it is. */
+                a jump, a sound a hold armed - is adopted as it is. */
             if (runFor.count (wants.cue) > 0)
+                continue;
+
+            /*  HELD BACK (§117): a member still to come is made by the release,
+                with its wait counted from then; a code, a curve or a fade part
+                way is fired by the release at its second. What is over is made
+                over now, so the scene knows. */
+            if (heldBack (wants))
+                continue;
+
+            if (hold && wants.when == planned::sounding
+                  && (cue.hasType ("Timecode") || cue.hasType ("Osc") || cue.hasType ("Midi")))
                 continue;
 
             const auto parent = wants.ancestors.empty()
@@ -3278,8 +3345,22 @@ namespace wfg::cue
             }
 
             run->armedOrigin = run->startOffset > 0.0 ? run->startOffset : numberOf (cue, "startOffset");
-            run->launchRequested = true;
-            run->launchRequestedAtTick = tick;
+
+            /*  HELD (§117): armed where it would be and not launched - the
+                standby's arm, at a second - its playhead drawn there until GO
+                asks for it; `launchRequestedAtTick` nought is "nobody asked". */
+            if (hold)
+            {
+                run->launchRequested = false;
+                run->launchRequestedAtTick = 0;
+                run->prepare = preparedness::loaded;
+                run->position = run->armedOrigin;
+            }
+            else
+            {
+                run->launchRequested = true;
+                run->launchRequestedAtTick = tick;
+            }
 
             if (cue.hasType ("Mic"))
                 armMic (engine, cue, id);
@@ -3308,7 +3389,11 @@ namespace wfg::cue
 
             ONLY FOR A GROUP THAT IS PLAYING: a scene found over has nothing to
             carry on, and one still to come is fired by its due tick, which
-            makes its job then. */
+            makes its job then.
+
+            HELD (§117): the job is the hold itself - the `prepared` phase,
+            which does nothing at all - for every scene the hold made; the
+            release retires it and makes the scene's real job here. */
         for (const auto& wants : wanted)
         {
             if (wants.when != planned::sounding)
@@ -3323,6 +3408,20 @@ namespace wfg::cue
 
             if (! cue.isValid() || cue.getType().toString() != "Group")
                 continue;
+
+            if (hold)
+            {
+                if (const auto* seated = runs.find (found->second);
+                    seated != nullptr && seated->prepare == preparedness::loaded)
+                {
+                    GroupJob holding;
+                    holding.run = found->second;
+                    holding.phase = groupPhase::prepared;
+                    scheduled.push_back (holding);
+                }
+
+                continue;
+            }
 
             GroupJob job;
             job.run = found->second;
@@ -3467,6 +3566,172 @@ namespace wfg::cue
     }
 
     //==============================================================================
+    /*  THE HOLD (namespace draft §117). */
+    const Runner::Held* Runner::heldFor (const std::string& listId, const std::string& standby) const
+    {
+        const auto found = holdings.find (listId);
+
+        if (found == holdings.end() || found->second.cue != standby || found->second.runs.empty())
+            return nullptr;
+
+        return &found->second;
+    }
+
+    bool Runner::isHeldAt (const std::string& listId, const std::string& cueId) const
+    {
+        const auto found = holdings.find (listId);
+        return found != holdings.end() && found->second.cue == cueId;
+    }
+
+    bool Runner::isHeld (const std::string& runId) const
+    {
+        for (const auto& [listId, holding] : holdings)
+            if (std::find (holding.runs.begin(), holding.runs.end(), runId) != holding.runs.end())
+                return true;
+
+        return false;
+    }
+
+    std::vector<std::string> Runner::releaseHeld (Engine& engine, doc::ShowDocument& editable, std::int64_t tick,
+                                                  const std::string& listId, const std::vector<std::string>& supplied,
+                                                  std::uint64_t serial)
+    {
+        std::vector<std::string> used;
+        const auto found = holdings.find (listId);
+
+        if (found == holdings.end())
+            return used;
+
+        /*  Copied out and forgotten first: the seat below makes runs, and
+            nothing of the hold is wanted once GO has it. */
+        const auto holding = found->second;
+        holdings.erase (found);
+        lists.loadedAt (listId, {});
+
+        std::size_t taken = 0;
+
+        const NameDraw nextId = [&] (const std::string& under, const std::string& ofCue)
+        {
+            auto id = taken < supplied.size() ? supplied[taken] : std::string {};
+            ++taken;
+
+            if (id.empty())
+                id = namer.next (RunNames::causeOf (under, ofCue), ofCue);
+
+            used.push_back (id);
+            return id;
+        };
+
+        /*  ASKED FOR, EVERY ONE: the GO's own now (`goSerial`, as a fired cue
+            adopting its arm is stamped), their marks off, a sound's launch
+            asked for where it was armed - `launchIfDue` places it a horizon
+            ahead, as a GO on an armed standby is placed. The holds' jobs are
+            retired; the seat makes the scenes' real jobs. */
+        std::map<std::string, std::string> runFor;
+
+        for (const auto& id : holding.runs)
+        {
+            auto* run = runs.find (id);
+
+            if (run == nullptr)
+                continue;
+
+            runFor[run->cue] = id;
+
+            if (run->isFinished())
+                continue;
+
+            run->prepare.clear();
+            run->goSerial = currentGo;
+
+            /*  Every leaf the hold made, as the jump's seat asked for each:
+                a sound's launch placed where it was armed, a memo's end. */
+            if (! run->isGroup())
+            {
+                run->launchRequested = true;
+                run->launchRequestedAtTick = tick;
+            }
+        }
+
+        for (auto& job : scheduled)
+            if (! job.retired && std::find (holding.runs.begin(), holding.runs.end(), job.run) != holding.runs.end())
+                job.retired = true;
+
+        /*  THE SCENES CARRIED ON FROM THEIR SECOND, THE REST MADE: a kept
+            scene goes `playing`, dated back by its offset, its rounds with it;
+            a kept sound is adopted as it is; the members still to come are
+            made due from now; a curve or a fade the second lands inside is
+            fired there; the jobs count the kept members as the round's. */
+        seatPlan (engine, tick, holding.plan.runs, runFor, nextId, nullptr, &holding.plan.trims);
+
+        /*  AND THE POINTER LANDS AFTER THE TARGET, positionally (§3.5), as the
+            jump's did: after the whole scene when the target is in one, since
+            the scene is about to fire its next member itself. */
+        editable.setAttribute (standbyAddressOf (listId), holding.plan.standby);
+        editable.setAttribute (finishedAddressOf (listId), holding.plan.standby.empty() ? "true" : "false");
+
+        /*  THE STEP, DATED BACK BY THE SECOND: the cue reads as fired that
+            long ago, which is where a later load will place it. A hold read
+            from the history retimed the steps when it was made, to the tick
+            it was made on; the show then stood still for as long as the hold
+            did, so every kept step moves forward by that much (§13.10, the
+            history is the clock) - the loaded cue's among them, which lands
+            at `offset` before now. A cue never fired gets its GO's step. */
+        if (holding.plan.how == "history")
+            lists.retimed (listId, holding.at, tick);
+        else
+            lists.steppedAt (listId, { tick - ticksFor (holding.offset), holding.cue, 'g', serial });
+
+        return used;
+    }
+
+    std::vector<std::string> Runner::seekHeld (Engine& engine, doc::ShowDocument& editable, std::int64_t tick,
+                                               const std::string& runId, double seconds,
+                                               const std::vector<std::string>& supplied)
+    {
+        /*  Which list holds it, and where the hold is - read before anything
+            is rebuilt, since the load below replaces the hold. */
+        std::string listId;
+        ListAim aim;
+
+        for (const auto& [candidate, holding] : holdings)
+        {
+            if (std::find (holding.runs.begin(), holding.runs.end(), runId) == holding.runs.end())
+                continue;
+
+            const auto* run = runs.find (runId);
+
+            if (run == nullptr)
+                return {};
+
+            /*  THE SECOND OF THE LOADED CUE this is: its own, for the loaded
+                cue's run; for a member, the loaded second moved by as far as
+                the hand moved the member from where the hold put it - a
+                sound's second being a second of its file, which inside a
+                scene the walk times runs with the scene's clock. */
+            auto second = seconds;
+
+            if (run->cue != holding.cue)
+                for (const auto& wants : holding.plan.runs)
+                    if (wants.cue == run->cue)
+                    {
+                        second = holding.offset + (seconds - wants.offset);
+                        break;
+                    }
+
+            listId = candidate;
+            aim = { holding.cue, std::max (second, 0.0) };
+            break;
+        }
+
+        if (listId.empty())
+            return {};
+
+        lists.aimAt (listId, aim);
+        return loadToTime (engine, editable, tick, listId, supplied);
+    }
+
+    //==============================================================================
     bool Runner::seekableNow (const Run& run) const
     {
         if (run.isFinished())
@@ -3553,9 +3818,12 @@ namespace wfg::cue
             playing - the only state a client offers the scrub in (K9's
             review, MW): a finished run, or one waiting or armed, reads false
             without a walk of the show, every tick. */
+        /*  AND A RUN A LOAD TO TIME HOLDS (namespace draft §117), armed or
+            being got ready: the scrub on it is the loaded second's cursor. */
         for (const auto& snapshot : runs.current())
         {
-            const auto now = snapshot.state == runState::playing && seekableNow (snapshot);
+            const auto now = (snapshot.state == runState::playing || snapshot.prepare == preparedness::loaded)
+                               && seekableNow (snapshot);
 
             if (now != snapshot.seekable)
                 if (auto* run = runs.find (snapshot.id))
@@ -14073,20 +14341,22 @@ namespace wfg::cue
     }
 
     void Runner::stashPlanned (std::int64_t tick, const std::vector<PlannedValue>& values,
-                               const std::vector<PlannedMidi>& midi)
+                               const std::vector<PlannedMidi>& midi, bool everything)
     {
         /*  STASHED, AND SENT BY THE HOOK (2026-10-03, Doh! D3, namespace draft
             §24.13): a handler never submits. The flush on the next tick compares
             and sends, after that tick's give-backs. A value marked live is a
-            seated run's to write (namespace draft §115) and is left out. */
+            seated run's to write (namespace draft §115) and is left out -
+            unless `everything`: a hold fires no run (§117), so the value at
+            the second is the hold's to send. */
         auto& out = stashFor (tick);
 
         for (const auto& value : values)
-            if (! value.live)
+            if (everything || ! value.live)
                 out.values.emplace_back (value.address, value.value);
 
         for (const auto& message : midi)
-            if (! message.live)
+            if (everything || ! message.live)
                 out.midi.push_back (message);
     }
 
@@ -19741,6 +20011,15 @@ namespace wfg::cue
             return;
 
         armedStandby = standby;
+
+        /*  A LOAD THE POINTER WALKED AWAY FROM IS FORGOTTEN (namespace draft
+            §117): its block is given back below as any block left behind is. */
+        if (! listId.empty())
+            if (const auto found = holdings.find (listId); found != holdings.end() && found->second.cue != standby)
+            {
+                holdings.erase (found);
+                lists.loadedAt (listId, {});
+            }
 
         /*  WHAT THE POINTER LEFT BEHIND.
 
@@ -25730,12 +26009,14 @@ namespace wfg::cue
             that disagreed with the log about a show nobody had touched. */
         registry.add ({ "list.aim",
                         "Points at a position in a list - a cue and how far into it - and asks"
-                        " what the show would be there. Changes nothing.",
+                        " what the show would be there. Changes nothing - unless the list is"
+                        " loaded at that cue, when the aim is the cursor and the hold is built"
+                        " again at the new second (namespace draft 117).",
                         { { "list", 's', false }, { "cue", 's', false },
-                          { "offset", 'd', false } },
+                          { "offset", 'd', false }, { "run", 's', true, true } },
                         true,
-                        [&runner, &document] (CommandContext&,
-                                              const std::vector<osc::Value>& args)
+                        [&engine, &runner, &document] (CommandContext& context,
+                                                       const std::vector<osc::Value>& args)
                         {
                             const auto listId = args[0].getString();
                             const auto cueId = args[1].getString();
@@ -25760,7 +26041,28 @@ namespace wfg::cue
 
                             runner.listState().aimAt (listId,
                                                       { cueId, args[2].asDouble() });
-                            return Outcome::ok (args);
+
+                            /*  WHILE THE LIST IS LOADED AT THIS CUE, THE AIM IS
+                                THE CURSOR (namespace draft §117): the hold is
+                                made again at the second, its values sent, as
+                                the jump's would be - on a settled move, which
+                                is when a client sends this. The identifiers
+                                the hold draws ride on the record, as the
+                                jump's do. */
+                            std::vector<osc::Value> applied (args.begin(), args.begin() + 3);
+
+                            if (runner.isHeldAt (listId, cueId))
+                            {
+                                std::vector<std::string> supplied;
+
+                                for (std::size_t n = 3; n < args.size(); ++n)
+                                    supplied.push_back (args[n].getString());
+
+                                for (const auto& id : runner.loadToTime (engine, document, context.tick, listId, supplied))
+                                    applied.push_back (osc::Value::string (id));
+                            }
+
+                            return Outcome::ok (applied);
                         } });
 
         //----------------------------------------------------------------------
@@ -25777,8 +26079,10 @@ namespace wfg::cue
             what a client has been dragging. Two commands and one coordinate:
             §3.13's two pointers are the question and the answer. */
         registry.add ({ "list.loadToTime",
-                        "Makes the list's aim true: ends what the jump abandons, moves the"
-                        " pointer, rebuilds the runs mid-way and sends what differs.",
+                        "Loads the standby cue at the list's aim (namespace draft 117): ends what"
+                        " the list was playing, sends what every cue before the second had set,"
+                        " and makes the cue ready at that second, silent, for the GO that plays"
+                        " it. An aim at another cue moves the pointer there first.",
                         { { "list", 's', false }, { "run", 's', true, true } },
                         true,
                         [&engine, &runner, &document]
@@ -25871,8 +26175,8 @@ namespace wfg::cue
                         { { "run", 's', false }, { "seconds", 'd', false },
                           { "made", 's', true, true } },
                         true,
-                        [&engine, &runner] (CommandContext& context,
-                                            const std::vector<osc::Value>& args)
+                        [&engine, &runner, &document] (CommandContext& context,
+                                                       const std::vector<osc::Value>& args)
                         {
                             const auto runId = args[0].getString();
                             const auto seconds = args[1].asDouble();
@@ -25896,6 +26200,25 @@ namespace wfg::cue
                                 mistake worth a rejection. */
                             if (run->isFinished())
                                 return Outcome::ok (applied);
+
+                            /*  A RUN A LOAD TO TIME HOLDS (namespace draft
+                                §117): the scrub is the loaded second's cursor.
+                                The second becomes the list's aim, read as a
+                                second of the loaded cue, and the hold is built
+                                again there - never a seek of the armed voice,
+                                which would launch it. */
+                            if (runner.isHeld (runId))
+                            {
+                                std::vector<std::string> supplied;
+
+                                for (std::size_t n = 2; n < args.size(); ++n)
+                                    supplied.push_back (args[n].getString());
+
+                                for (const auto& id : runner.seekHeld (engine, document, context.tick, runId, seconds, supplied))
+                                    applied.push_back (osc::Value::string (id));
+
+                                return Outcome::ok (applied);
+                            }
 
                             if (run->kind == "media")
                             {
@@ -26301,6 +26624,19 @@ namespace wfg::cue
                                 backTo = paused.stepTick + (context.tick - paused.dohTick);
                                 outcome = runner.resumeStandby (engine, context.tick, list, paused, supplied);
                             }
+                            else if (runner.heldFor (listId, standby) != nullptr)
+                            {
+                                /*  A CUE LOADED AT A SECOND IS RELEASED (namespace
+                                    draft §117): what the load made ready plays
+                                    from there, and the step is dated back by the
+                                    second - the cue reads as fired that long
+                                    ago, which is where the history will place
+                                    it. The pointer the release sets lands after
+                                    the target, as a jump's did. */
+                                outcome.made = runner.releaseHeld (engine, document, context.tick, listId, supplied,
+                                                                   runner.goInHand());
+                                outcome.stepped = true;
+                            }
                             else
                             {
                                 outcome.made = runner.fireStandby (engine, context.tick, list, standby, supplied);
@@ -26328,7 +26664,9 @@ namespace wfg::cue
                                 the time the cue spent paused - so a later jump
                                 places the cue where it plays. Only when it really
                                 was carried on: a fall-back to the top starts now. */
-                            if (outcome.resumed)
+                            if (outcome.stepped)
+                                juce::ignoreUnused (backTo);
+                            else if (outcome.resumed)
                                 runner.listState().steppedAt (listId, { backTo, standby, 'g', serial });
                             else
                                 runner.listState().stepped (listId, { context.tick, standby, 'g', serial });

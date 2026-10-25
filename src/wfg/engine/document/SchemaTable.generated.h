@@ -45,7 +45,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_cue_kind[] = { "memo", "group", "media", "fade", "transport", "osc", "midi", "start", "mic", "video", "process", "timecode", "script" };
     inline constexpr std::string_view enum_cue_role[] = { "member", "header", "footer", "persistent" };
     inline constexpr std::string_view enum_cue_override[] = { "file", "on", "off" };
-    inline constexpr std::string_view enum_cue_prepare[] = { "idle", "preparing", "pending", "partial", "armed", "verified" };
+    inline constexpr std::string_view enum_cue_prepare[] = { "idle", "preparing", "pending", "partial", "armed", "verified", "loaded" };
     inline constexpr std::string_view enum_media_rateMode[] = { "varispeed", "timestretch" };
     inline constexpr std::string_view enum_media_delay[] = { "none", "sound" };
     inline constexpr std::string_view enum_media_rangeJoin[] = { "gapless", "crossfade" };
@@ -1003,6 +1003,14 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "",
           "Where the last load-to-time actually landed, in the same spelling as aim - PRD 3.13-s second pointer. After a jump the two agree; after a manual tweak they do not, and that divergence is exactly what a running view has to show, because it is the difference between where the operator asked to be and where the show has got to since." },
+        { "list", "loaded",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "",
+          "What a load to time holds (namespace draft 117): the standby cue and the second it is made ready at, in the same spelling as aim - or empty when nothing is held. A load makes the standby cue ready at the aim's second, silent: its sounds armed part way in, its scene held, the values every cue before the second had set sent to the desk and the MIDI ports. GO releases it from there and the pointer moves on; a new aim at the loaded cue builds the hold again at the new second; the pointer walking away gives it back. Before the cue (-1) nothing is held and GO is an ordinary GO." },
         { "list", "history",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           false, "",
@@ -1143,10 +1151,10 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "idle",
           false, 0.0, false, 0.0,
-          enum_cue_prepare, 6,
+          enum_cue_prepare, 7,
           "", 50.0, false, "park",
           "",
-          "How far ahead this cue has been got ready, derived from its prepared run. PRD 3.12: preparation is per PARAMETER rather than per cue, so a block that is partly anticipatable says so rather than pretending. Idle is the resting state and means nothing has been prepared, which is not a failure - a MIDI cue can never be prepared and reads idle for ever. Preparing is in progress; pending is waiting for a slot somebody else holds (3.9e, in words rather than colour); partial means something in the block could not be anticipated and will happen at entry; armed means everything that could be prepared was, with nothing to verify; verified means every pre-sent value was read back equal, which is the only one of the six that says the desk agrees. A sound reads preparing until the audio side has confirmed its voice. A still or a movie, which is read ahead without a run (namespace draft 48), reads preparing while the renderer reads it, armed once it holds it ready to show, and partial when its file is missing or will not read; idle while no renderer runs." },
+          "How far ahead this cue has been got ready, derived from its prepared run. PRD 3.12: preparation is per PARAMETER rather than per cue, so a block that is partly anticipatable says so rather than pretending. Idle is the resting state and means nothing has been prepared, which is not a failure - a MIDI cue can never be prepared and reads idle for ever. Preparing is in progress; pending is waiting for a slot somebody else holds (3.9e, in words rather than colour); partial means something in the block could not be anticipated and will happen at entry; armed means everything that could be prepared was, with nothing to verify; verified means every pre-sent value was read back equal, which is the only one of these that says the desk agrees; loaded (namespace draft 117) means a load to time has made the cue ready at a second, silent, for the GO that plays it from there. A sound reads preparing until the audio side has confirmed its voice. A still or a movie, which is read ahead without a run (namespace draft 48), reads preparing while the renderer reads it, armed once it holds it ready to show, and partial when its file is missing or will not read; idle while no renderer runs." },
         { "cue", "prepareError",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           false, "",

@@ -54,6 +54,9 @@ namespace wfg::client::ui
 
             /** Make the aim true. */
             std::function<void()> load;
+
+            /** Put the panel away (the author, 2026-10-25: a close was missing). */
+            std::function<void()> close;
         };
 
         HistoryPanelComponent (const model::Theme& theme, Actions actions);
@@ -100,6 +103,7 @@ namespace wfg::client::ui
         juce::TextEditor offsetBox;
         juce::TextButton beforeButton { "before" };
         juce::TextButton loadButton { "Load" };
+        juce::TextButton closeButton { "x" };
         juce::Viewport viewport;
         Stack stack { *this };
 

@@ -1213,12 +1213,16 @@ namespace wfg::cue
                                                  const std::string& cueId,
                                                  const std::vector<std::string>& supplied);
 
-        /*  THE JUMP: what `list.loadToTime` calls.
+        /*  THE LOAD: what `list.loadToTime` calls, and what `list.aim` and
+            `run.seek` call again while the list is loaded (namespace draft
+            §117, 2026-10-25). Until then it was the jump itself.
 
             PRD §3.13. An operator asks for the show as it was, and this makes
-            it so - one record whose applied arguments carry every run
-            identifier it drew, in the order it drew them, because a replay
-            never draws one of its own.
+            it ready - the standby cue held at the second, silent, the values
+            every cue before it had set sent - for the GO that plays it from
+            there (`releaseHeld`). One record whose applied arguments carry
+            every run identifier it drew, in the order it drew them, because a
+            replay never draws one of its own.
 
             IT ENDS WHAT THE JUMP ABANDONS BEFORE IT BUILDS ANYTHING, the way
             `run.kill` ends a run: every descendant, AND NO FOOTER. A footer is
@@ -1239,6 +1243,52 @@ namespace wfg::cue
         std::vector<std::string> loadToTime (Engine& engine, doc::ShowDocument& editable,
                                              std::int64_t tick, const std::string& listId,
                                              const std::vector<std::string>& supplied);
+
+        /*  WHAT A LOAD TO TIME HOLDS, PER LIST (namespace draft §117; the
+            author, 2026-10-25: "something like in QLab ... scrub upcoming
+            cues to skip running a section and at the same time reset the data
+            of the runs before it"). The standby cue made ready at a second:
+            the plan it was built from, and the runs the hold made - sounds
+            armed part way in and not launched, scenes held in the `prepared`
+            phase. GO releases it (`releaseHeld`); a new aim at the loaded cue
+            builds it again at the new second; the pointer walking away gives
+            it back as any block left behind. Handler state: a replay holds and
+            releases the same runs. */
+        struct Held
+        {
+            std::string cue;
+            double offset = -1.0;
+            Plan plan;
+            std::vector<std::string> runs;
+
+            /** The tick the hold was made on: the history stood still from then. */
+            std::int64_t at = 0;
+        };
+
+        /** The hold a GO on `standby` would release, or null. */
+        const Held* heldFor (const std::string& listId, const std::string& standby) const;
+
+        /** Whether the list's hold is on this cue: a new aim there is a scrub. */
+        bool isHeldAt (const std::string& listId, const std::string& cueId) const;
+
+        /** Whether this run is one a hold made. */
+        bool isHeld (const std::string& runId) const;
+
+        /*  THE RELEASE, what `go` does on a loaded standby: the held runs are
+            asked for - launched where they were armed, the scenes carried on
+            from their second, the members still to come made due - and the
+            pointer lands after the target as a jump's did. Returns the
+            identifiers it drew. */
+        std::vector<std::string> releaseHeld (Engine& engine, doc::ShowDocument& editable, std::int64_t tick,
+                                              const std::string& listId, const std::vector<std::string>& supplied,
+                                              std::uint64_t serial);
+
+        /*  A SCRUB OF A HELD RUN (`run.seek`): the second asked for, read as a
+            second of the loaded cue, becomes the list's aim and the hold is
+            built again there. Returns the identifiers it drew. */
+        std::vector<std::string> seekHeld (Engine& engine, doc::ShowDocument& editable, std::int64_t tick,
+                                           const std::string& runId, double seconds,
+                                           const std::vector<std::string>& supplied);
 
         /*  A SEEK: what `run.seek` calls (author, 2026-09-18: "I'd like to be
             able to scrub active cues and groups").
@@ -1856,6 +1906,11 @@ namespace wfg::cue
             std::vector<std::string> made;
             bool resumed = false;
             std::string carriedOn;
+
+            /*  THE STEP IS WRITTEN ALREADY (namespace draft §117): a release
+                dates the loaded cue's step itself - the cue's own step moved
+                when the hold was read from the history, a new one otherwise. */
+            bool stepped = false;
         };
 
         Resumed resumeStandby (Engine& engine, std::int64_t tick, const juce::ValueTree& list,
@@ -2565,7 +2620,11 @@ namespace wfg::cue
                        std::map<std::string, std::string>& runFor,
                        const NameDraw& nextId,
                        const SeatResume* resume = nullptr,
-                       const std::vector<PlannedTrim>* trims = nullptr);
+                       const std::vector<PlannedTrim>* trims = nullptr,
+                       bool hold = false);
+
+        /** The holds, by list (namespace draft §117). */
+        std::map<std::string, Held> holdings;
 
         /*  THE SECOND A SEAT FIRES A MESSAGE CUE AT (namespace draft §115),
             while `seatPlan` fires one the instant landed inside: an OSC cue's
@@ -4755,7 +4814,7 @@ namespace wfg::cue
         /*  What a plan's values and MIDI messages leave for the flush: the ones
             a seated run is not about to write itself (`live`). */
         void stashPlanned (std::int64_t tick, const std::vector<PlannedValue>& values,
-                           const std::vector<PlannedMidi>& midi);
+                           const std::vector<PlannedMidi>& midi, bool everything = false);
 
         /*  WHAT ONE PUT-BACK HAS IN HAND: the press's tick, the GO's serial and
             list, the panic fade it fades over, the identifiers it may draw, the

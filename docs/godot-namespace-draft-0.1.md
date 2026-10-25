@@ -3291,6 +3291,10 @@ to measure rather than a loop.
 
 ### 13.9 `list.loadToTime` — one record, and a run tree adopted mid-way
 
+*Since 2026-10-25 (§117) the record is a HOLD, not a jump: the standby cue made ready at the second,
+silent, and `go` is what plays it from there and moves the pointer. What follows describes the seat
+both halves share.*
+
 The handler applies the current plan as a single logged command whose applied arguments carry every
 run identifier it drew, in the order it drew them — the `go` pattern (§12.6), because a replay never
 draws one of its own. It:
@@ -3464,6 +3468,9 @@ step inside the cap is not queued for later — the next step gets a fresh sweep
 observation of a moment that has passed is worth less than the cost of asking for it.
 
 #### What the desktop's load to time changed (2026-09-19): the history is the clock
+
+*(2026-10-25, §117: the load retimes the steps as below when it is made, and the release moves every
+kept step forward by the time the show stood held.)*
 
 The author, on seeing scrubbing (§14.16) beside the load to time he was about to ask for: *"1 is like
 scrubbing through the load to time history. 4 [a live recorder] is like dumping the load to time
@@ -34338,7 +34345,8 @@ The author's (2026-10-25), from three questions put to him:
   a note still held at the instant. Not taken.)
 - **Load plays at once.** The jump is the jump: the sound and the scene start from the aimed second when
   Load is pressed, and the next GO fires the cue after the target - as built since Phase 4. No paused
-  landing.
+  landing. *Superseded the same day by §117: Load holds the standby cue at the second, silent, and GO
+  plays it from there.*
 - **The trims are applied in this round too.**
 
 Mine *(proposed)*:
@@ -34438,3 +34446,95 @@ after a double Esc, and blackbox.phase6-surfaces, green with it. Both tester gui
 
 Owed: the author's try on the D700 - a DCA ridden during a scene, the scene ending with and without a finger
 on the fader.
+
+## 117. Load to time is the standby made ready at a second
+
+**Asked 2026-10-25** by the author, after §115 landed: *"I really don't understand the load to time
+mechanics. We're making something like in QLab. This is something that can scrub upcoming cues to skip
+running a section and at the same time that should be able to reset the data of the runs before it."*
+And: *"How do you scrub to the time position within the cue?"* - the desktop panel had a text box where
+QLab has a scrub bar. And a close was missing on the panel.
+
+Until this round Load was the whole jump at once (§13.9): the list's runs ended, what should be sounding
+at the second started there, the values sent, the pointer landed after the aimed cue. Nothing was held;
+there was no scrubbable position before GO.
+
+### 117.1 Decisions
+
+The author's (2026-10-25, four questions put to him):
+
+- **Land loaded and silent.** Load seats the standby cue and what would be running at that second,
+  held; the desk and MIDI values up to that second are sent; a time cursor on the loaded cue can be
+  scrubbed; **GO releases it** from there and the pointer moves on. (Offered: play at once, as before.
+  Not taken - §115.1's "Load plays at once" is superseded.)
+- **Values on each settled move** of the cursor - not live while dragging, not only at GO.
+- **The standby cue is what is loaded**: *"from the cue where the standby pointer is"*.
+- **The reset before it is what the jump already did**: values from the top of the list to the loaded
+  second, the list's sounds ended and re-seated where they should be.
+
+Mine *(proposed)*:
+
+- **BCL** **A load is the standby's prepared block, built at a second.** The engine already had the
+  state this needs: a cue at standby is *made ready and not asked for* (`Run::onlyPrepared`) - its
+  sounds armed with no launch asked, a scene's chain in `preparing` with a job in the `prepared` phase,
+  which does nothing. `armStandby` builds that block at the cue's top; a load builds it from the solver's
+  plan at the aim's second (`seatPlan`'s hold mode): sounds armed part way into their files and not
+  launched, scenes made and held, each `prepare`d `loaded`; what is over made over, so a scene knows;
+  the members still to come not made at all; a code, a curve or a fade part way not fired. Esc and a
+  double Esc spare it as they spare any prepared block; the pointer walking away gives it back as a
+  block left behind; `armStandby` leaves it alone since the standby is what it holds.
+- **BCM** **GO releases it.** `go`'s own fork - beside the Doh resume - when the standby is held:
+  every held run asked for (the GO's own, `goSerial`; a sound's launch placed where it was armed, a
+  horizon ahead, as a GO on an armed standby is placed), the holds' jobs retired, and the plan seated
+  again in its ordinary mode over the held runs: the scenes go `playing` dated back by their second,
+  the members still to come are made due from now, a curve or a fade the second lands inside is fired
+  there (`seatingAt`), the jobs count the held members as the round's. The pointer lands after the
+  target as a jump's did - after the whole scene, since the scene is about to fire its next member
+  itself. The step is the GO's, dated back by the second; a hold read from the history retimed the
+  steps when it was made and the show stood still for as long as it was held, so every kept step moves
+  forward by that much at the release (`ListState::retimed`, the history is the clock).
+- **BCN** **The aim is the cursor while the list is loaded there.** `list.aim` at the loaded cue builds
+  the hold again at the new second and sends the values, as the load did; its record carries the run
+  identifiers it draws, as the jump's does. A client sends it on a settled move: Enter in the panel's
+  box, a step clicked, the `before` button, the web slider let go (`change`, not `input`, while loaded).
+- **BCO** **The run pane's cursor is the same cursor.** A held run says `seekable` and has its head
+  where the hold put it (its `position`); `run.seek` on one is never a seek of the armed voice, which
+  would launch it: the second becomes the list's aim, read as a second of the loaded cue - a member's
+  file second moved by as far as the hand moved it from where the hold put it - and the hold is built
+  again. The pane offers the scrub on a run that is `seekable` without being `playing`, which the engine
+  says of no other run.
+- **BCP** **A step clicked loads that cue.** The pointer may stand on any cue (decision X); a load whose
+  aim names a cue other than the standby moves the pointer there first, as `standby.set` would, and that
+  cue is the one made ready. "Take it back to cue 12" is still one click and Load.
+- **BCQ** **Before the cue (-1) nothing is held**: the list is ended and reset, the values sent, the
+  standby made ready again from its top by the next tick, and GO is an ordinary GO. `list/loaded` says
+  the cue at -1 all the same, so a panel can say *loaded before it*.
+- **BCR** **Published**: `/godot/list/<id>/loaded`, `"<cue> <offset>"` or empty, beside `statePosition`;
+  the cue's `prepare` word `loaded` on a held run. Not carried to a follower (`pair.seat` carries no
+  prepared run, §58); a Doh after the release takes the GO back as any GO, and the hold is not rebuilt.
+
+### 117.2 What changed for the clients
+
+The desktop opens Load to time aimed at the standby, no longer at the pick; a pick edits and does not
+re-aim (a step clicked still does). The panel says *loaded: <cue> at +m:ss - GO plays from here*, its
+button reads *Reload* while the aim is on the loaded cue, and it has a close (the author's ask). The
+running pane draws a held run with its head at the loaded second and offers its scrub. The web console's
+aim bar says what is loaded, its button reads *reload*, and its slider aims when let go while loaded.
+
+### 117.3 As built (2026-10-25)
+
+`Runner::Held` (cue, offset, plan, runs, tick) by list; `loadToTime` is the hold (the standby moved to
+the aim's cue first; the sweep; `seatPlan (…, hold)`; `stashPlanned (…, everything)`; `armedStandby`
+set to the loaded cue); `releaseHeld` from `goOn` (`Resumed::stepped`); `seekHeld`; `isHeldAt`,
+`isHeld`, `heldFor`; `mirrorSeekable` says `seekable` of a held run; `armStandby` forgets a hold the
+pointer walked away from; `ListState::loadedAt/loadedOf`; `preparedness::loaded`; `list.aim` with a
+variadic `run`; `run.seek` on a held run. Rows: `list,loaded`; `cue,prepare`'s words gain `loaded`.
+Client: `LoadToTimeReading::loaded*`, the panel's words, button and close, `RunRow::held`,
+`RunPaneComponent::scrubbable/headFor`; console `views/aim.js` (`aimIsLoaded`), `gestures/fields.js`.
+
+Tests: GoTests "load:" (held and silent, GO plays from there and the step is dated back; a new aim is
+the cursor; a scrub of a held run; Esc leaves it and the pointer walking away gives it back; -1 holds
+nothing; a step aimed at loads that cue), and every jump case made load + GO (`JumpRig::jumpTo`);
+NetworkCueTests' §115 cases hold (the values go out at the load) and the scrub re-holds; the timecode,
+history and blackbox jumps press GO. Not in this round: a fade the second lands inside is seated over,
+not resumed (§115); the chase's `code.seat` sends no values.

@@ -3077,6 +3077,8 @@ TEST_CASE ("jump: a value the jump puts on the desk lands before a member its se
     rig.tickOnce();
     REQUIRE (rig.engine.submit ("cli", "list.loadToTime", { osc::Value::string (rig.listId) }));
     rig.tickOnce();
+    REQUIRE (rig.engine.submit ("cli", "go", {}));       // the load holds (§117); GO releases the scene
+    rig.tickOnce();
 
     for (int n = 0; n < 5; ++n)
         rig.tickOnce();
@@ -5197,14 +5199,24 @@ namespace
             return id;
         }
 
+        /*  A LOAD (namespace draft §117): the scene made ready at the second,
+            silent, its values sent by the flush on the next tick. */
         void jumpTo (double offset)
         {
             REQUIRE (engine.submit ("cli", "list.aim", { osc::Value::string (listId), osc::Value::string (scene),
                                                          osc::Value::float64 (offset) }));
             tickOnce();
             REQUIRE (engine.submit ("cli", "list.loadToTime", { osc::Value::string (listId) }));
-            tickOnce();     // the handler seats
+            tickOnce();     // the handler holds
             tickOnce();     // the flush sends
+        }
+
+        /** The GO that releases what is loaded. */
+        void play()
+        {
+            REQUIRE (engine.submit ("cli", "go", {}));
+            tickOnce();
+            tickOnce();
         }
 
         std::size_t sent (std::uint8_t status, std::uint8_t data1) const

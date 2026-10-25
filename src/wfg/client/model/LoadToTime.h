@@ -86,6 +86,12 @@ namespace wfg::client::model
         std::string aimCue;
         double aimOffset = -1.0;
 
+        /*  WHAT THE LIST HOLDS (namespace draft §117): the standby cue made
+            ready at a second, silent, waiting for GO - or nothing. */
+        bool loaded = false;
+        std::string loadedCue;
+        double loadedOffset = -1.0;
+
         /*  The engine's answer, when there is one: how it was read, the wall
             tick it describes, what would be sounding and where the pointer
             would land. `ok` is the answer's own word for "the aim named

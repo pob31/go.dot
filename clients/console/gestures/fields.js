@@ -23,12 +23,14 @@ import { setNode } from "../plumbing/link.js";
 import { dbl, str } from "../plumbing/osc.js";
 import { gesture } from "./table.js";
 import { commitText } from "../views/values.js";
-import { aimHere } from "../views/aim.js";
+import { aimHere, aimIsLoaded } from "../views/aim.js";
 
 document.addEventListener("input", (event) => {
   /*  The slider re-aims as it moves - asking is free and the answer is what it
       is for. */
-  if (event.target && event.target.id === "aim-offset") { aimHere(); return; }
+  /*  Not while the list is loaded there (namespace draft 117): each aim then
+      builds the hold again, so the slider aims when it is let go. */
+  if (event.target && event.target.id === "aim-offset") { if (!aimIsLoaded()) aimHere(); return; }
 
   const target = event.target;
 
@@ -127,6 +129,9 @@ document.addEventListener("change", (event) => {
       that key makes leaves the focus where it was. Up and Down are not among
       those keys: they stay the standby's, as §14.3 asks. */
   if (target && target.id === "aim-offset") {
+    //  A settled move of a loaded list's cursor (namespace draft 117).
+    if (aimIsLoaded()) aimHere();
+
     if (pointer.aimKeyStep) { pointer.aimKeyStep = false; return; }
 
     target.blur();

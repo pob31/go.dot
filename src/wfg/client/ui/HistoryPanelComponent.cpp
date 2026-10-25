@@ -57,6 +57,16 @@ namespace wfg::client::ui
         };
         addAndMakeVisible (loadButton);
 
+        /*  A CLOSE, as the inspector has one (the author, 2026-10-25): the
+            panel used to go only on a GO or from the Show menu. */
+        closeButton.setWantsKeyboardFocus (false);
+        closeButton.onClick = [this]
+        {
+            if (actions.close)
+                actions.close();
+        };
+        addAndMakeVisible (closeButton);
+
         viewport.setViewedComponent (&stack, false);
         viewport.setScrollBarsShown (true, false);
         addAndMakeVisible (viewport);
@@ -97,10 +107,22 @@ namespace wfg::client::ui
     {
         reading = readingToShow;
 
-        aimLabel.setText (reading.aimed
-                            ? "aim: " + juce::String (reading.nameOf (reading.aimCue))
-                            : juce::String ("pick a cue to aim at"),
-                          juce::dontSendNotification);
+        /*  THE AIM, AND WHAT IS LOADED (namespace draft §117): the standby
+            cue made ready at the second, silent, until GO plays it from
+            there. The aim is where the hand is; the two agree after a load. */
+        juce::String aimWords = reading.aimed
+                                  ? "aim: " + juce::String (reading.nameOf (reading.aimCue))
+                                  : juce::String ("the standby cue is what is loaded");
+
+        if (reading.loaded)
+            aimWords += "\nloaded: " + juce::String (reading.nameOf (reading.loadedCue))
+                          + (reading.loadedOffset >= 0.0
+                               ? " at +" + juce::String (model::clockText (reading.loadedOffset))
+                               : juce::String (" before it"))
+                          + " - GO plays from here";
+
+        aimLabel.setText (aimWords, juce::dontSendNotification);
+        loadButton.setButtonText (reading.loaded && reading.loadedCue == reading.aimCue ? "Reload" : "Load");
 
         if (! offsetBox.hasKeyboardFocus (true))
             offsetBox.setText (reading.aimed && reading.aimOffset >= 0.0
@@ -140,7 +162,7 @@ namespace wfg::client::ui
                 words += "\nnothing would be sounding";
 
             if (! reading.standby.empty())
-                words += "\npointer lands on " + juce::String (reading.nameOf (reading.standby));
+                words += "\nafter GO the pointer lands on " + juce::String (reading.nameOf (reading.standby));
 
             for (const auto& why : reading.confused)
                 words += "\ncould not know: " + juce::String (why);
@@ -184,8 +206,12 @@ namespace wfg::client::ui
         const auto row = rowHeight();
         auto area = getLocalBounds().reduced (row / 3, 0);
 
-        heading.setBounds (area.removeFromTop (row + row / 3).withTrimmedTop (row / 3));
-        aimLabel.setBounds (area.removeFromTop (row));
+        auto headingRow = area.removeFromTop (row + row / 3).withTrimmedTop (row / 3);
+        closeButton.setBounds (headingRow.removeFromRight (row).reduced (2));
+        heading.setBounds (headingRow);
+
+        //  Two lines once something is loaded: the aim, and what is held.
+        aimLabel.setBounds (area.removeFromTop (reading.loaded ? row * 2 : row));
 
         auto controls = area.removeFromTop (row);
         loadButton.setBounds (controls.removeFromRight (row * 2).reduced (2));

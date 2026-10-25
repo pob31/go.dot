@@ -128,7 +128,16 @@ function renderAim() {
   const atOffset = space > 0 ? Number(aim.slice(space + 1)) : -1;
 
   el("aim-at").textContent = atCue ? cueName(atCue) : "— pick a row —";
+
+  /*  WHAT IS LOADED (namespace draft 117): the standby cue made ready at a
+      second, silent, until GO plays it from there. The button reloads while
+      the aim is on the loaded cue. */
+  const loaded = String(tree.get("/godot/list/" + focus + "/loaded", ""));
+  const loadedSpace = loaded.lastIndexOf(" ");
+  const loadedCue = loadedSpace > 0 ? loaded.slice(0, loadedSpace) : "";
+
   el("aim-load").disabled = !atCue;
+  el("aim-load").textContent = loadedCue && loadedCue === atCue ? "reload" : "load to time";
 
   /*  Not while somebody is dragging it: writing the slider's own value back
       under a finger is how a control fights the person using it - and so is
@@ -152,9 +161,12 @@ function renderAim() {
   el("aim-offset-text").textContent = offsetText(Number(slider.value));
 
   const landed = String(tree.get("/godot/list/" + focus + "/statePosition", ""));
-  el("aim-landed").textContent = landed && landed !== aim
-    ? "landed at " + landed.replace(/ /, " + ") + " s"
-    : "";
+  el("aim-landed").textContent = loadedCue
+    ? "loaded: " + cueName(loadedCue) + " at " + offsetText(Number(loaded.slice(loadedSpace + 1))) +
+      " — GO plays from here"
+    : landed && landed !== aim
+      ? "landed at " + landed.replace(/ /, " + ") + " s"
+      : "";
 
   renderSteps(focus, atCue);
 
@@ -231,4 +243,18 @@ function aimHere() {
   gesture("aim", [str(list), str(selection.picked), dbl(Number(el("aim-offset").value))]);
 }
 
-export { renderAim, aimedList, aimHere };
+/*  Whether the focused list is loaded at the picked row (namespace draft
+    116): then the slider aims on release, not as it moves, since each aim
+    builds the hold again. */
+function aimIsLoaded() {
+  const list = aimedList();
+
+  if (!list || !selection.picked) return false;
+
+  const loaded = String(tree.get("/godot/list/" + list + "/loaded", ""));
+  const space = loaded.lastIndexOf(" ");
+
+  return space > 0 && loaded.slice(0, space) === selection.picked;
+}
+
+export { renderAim, aimedList, aimHere, aimIsLoaded };

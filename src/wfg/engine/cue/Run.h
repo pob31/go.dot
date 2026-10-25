@@ -236,6 +236,14 @@ namespace wfg::cue
         /** Everything that could be prepared was, with nothing to verify. */
         inline constexpr const char* armed = "armed";
 
+        /*  MADE READY AT A SECOND BY A LOAD TO TIME (namespace draft §117): the
+            standby's block built from the solver's plan - a sound armed part
+            way into its file, a scene held with its members where they would
+            be - waiting, silent, for the GO that releases it. A prepared block
+            in every other respect: Esc spares it, the pointer moving away gives
+            it back, and a client reads it as a run it may scrub. */
+        inline constexpr const char* loaded = "loaded";
+
         /*  Every pre-sent value read back equal - the only one of these that
             says the desk AGREES. Nothing reaches it until a network cue can be
             read before it is written (§13.6). */

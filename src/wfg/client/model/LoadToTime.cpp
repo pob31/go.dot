@@ -115,6 +115,20 @@ namespace wfg::client::model
             }
         }
 
+        /*  AND WHAT IS LOADED, spelt the same way (§117). */
+        const auto loaded = text (snapshot, base + "loaded");
+        const auto loadedSpace = loaded.rfind (' ');
+
+        if (loadedSpace != std::string::npos && loadedSpace > 0)
+        {
+            if (const auto offset = osc::parseDouble (loaded.substr (loadedSpace + 1)); offset.has_value())
+            {
+                reading.loaded = true;
+                reading.loadedCue = loaded.substr (0, loadedSpace);
+                reading.loadedOffset = *offset;
+            }
+        }
+
         const auto nameFor = [&snapshot, &reading] (const std::string& cueId)
         {
             if (! cueId.empty() && reading.names.count (cueId) == 0)
@@ -125,6 +139,7 @@ namespace wfg::client::model
             nameFor (step.cue);
 
         nameFor (reading.aimCue);
+        nameFor (reading.loadedCue);
 
         /*  AND THE ANSWER, which is the one place in this window that parses
             JSON - for the reason the engine gives: a solve changes shape as

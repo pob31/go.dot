@@ -7915,7 +7915,10 @@ namespace
             return id;
         }
 
-        Engine::TickResult jumpTo (const std::string& cueId, double offset)
+        /*  LOAD, THEN GO (namespace draft §117): a load makes the cue ready
+            at the second and holds it; the GO is what plays it from there.
+            The hold alone is `loadAt`. */
+        Engine::TickResult loadAt (const std::string& cueId, double offset)
         {
             REQUIRE (engine.submit ("cli", "list.aim",
                                     { osc::Value::string (listId),
@@ -7924,6 +7927,12 @@ namespace
             tickOnce();
 
             return submitAndTick ("list.loadToTime", { osc::Value::string (listId) });
+        }
+
+        Engine::TickResult jumpTo (const std::string& cueId, double offset)
+        {
+            REQUIRE (loadAt (cueId, offset).rejected == 0);
+            return submitAndTick ("go");
         }
 
         const cue::Run* liveRunOf (const std::string& cueId) const
@@ -8376,8 +8385,10 @@ TEST_CASE ("jump: the record carries every run it drew, and the signature accept
 
     REQUIRE (jump != parsed.records.end());
 
-    /*  The list, then the group and its three members. */
-    REQUIRE (jump->args.size() == 5u);
+    /*  The list, then the group and the two members the hold makes - the one
+        over and the one sounding; the member still to come is the release's
+        (namespace draft §117), on the GO's own record. */
+    REQUIRE (jump->args.size() == 4u);
     CHECK (jump->args[0].getString() == rig.listId);
 
     for (std::size_t n = 1; n < jump->args.size(); ++n)
@@ -8444,6 +8455,200 @@ TEST_CASE ("jump: a fade before the place leaves its trim on the cue the jump se
 
     CHECK (rig.runs.find (first)->ownLevel == doctest::Approx (-12.0));
     CHECK (rig.runs.find (second)->ownLevel == doctest::Approx (-2.0));
+}
+
+//==============================================================================
+/*  NAMESPACE DRAFT §117 (the author, 2026-10-25): "something like in QLab".
+    A load to time makes the STANDBY cue ready at a second and holds it,
+    silent - the sounds armed where they would be, the scene held, the desk
+    and the MIDI ports put where every cue before the second had them - and
+    GO is what plays it from there. The aim is the cursor while it is held.
+    Each case was written first and failed on d2a17da8, where Load was the
+    jump itself. */
+TEST_CASE ("load: a load to time holds the standby cue at the second, silent, and GO plays it from there (namespace draft 117)")
+{
+    JumpRig rig;
+    rig.setStandby (rig.scene);
+
+    //  Three seconds into the scene: the first member three seconds in, the second one, the third due in seven.
+    REQUIRE (rig.loadAt (rig.scene, 3.0).rejected == 0);
+
+    const auto* group = rig.liveRunOf (rig.scene);
+    REQUIRE (group != nullptr);
+    CHECK (group->state == cue::runState::preparing);
+    CHECK (group->prepare == cue::preparedness::loaded);
+
+    const auto* first = rig.liveRunOf (rig.early);
+    REQUIRE (first != nullptr);
+    CHECK (first->state == cue::runState::armed);
+    CHECK_FALSE (first->launchRequested);
+    CHECK (first->launchRequestedAtTick == 0);
+    CHECK (first->startOffset == doctest::Approx (3.0));
+    CHECK (first->prepare == cue::preparedness::loaded);
+    CHECK (first->position == doctest::Approx (3.0));
+
+    const auto* second = rig.liveRunOf (rig.middle);
+    REQUIRE (second != nullptr);
+    CHECK_FALSE (second->launchRequested);
+    CHECK (second->startOffset == doctest::Approx (1.0));
+
+    //  The member still to come is the release's; the pointer has not moved; the hold is published.
+    CHECK (rig.runOf (rig.late).empty());
+    CHECK (rig.standby() == rig.scene);
+    CHECK (rig.runner.listState().loadedOf (rig.listId).cue == rig.scene);
+    CHECK (rig.runner.listState().loadedOf (rig.listId).offset == doctest::Approx (3.0));
+
+    //  Two seconds of ticks: nothing launches, nothing fires, the scene stays held.
+    for (int n = 0; n < 100; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.liveRunOf (rig.early) != nullptr);
+    CHECK (rig.liveRunOf (rig.early)->launchedAtSample == 0);
+    CHECK (rig.liveRunOf (rig.scene)->state == cue::runState::preparing);
+    CHECK (rig.runOf (rig.late).empty());
+
+    //  GO: the scene plays from there, the third member is due, the pointer lands after the scene.
+    const auto goAt = rig.tick;
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    CHECK (rig.liveRunOf (rig.scene)->state == cue::runState::playing);
+    const auto askedFor = rig.liveRunOf (rig.early)->launchRequested
+                            || rig.liveRunOf (rig.early)->launchedAtSample > 0;
+    CHECK (askedFor);
+    CHECK (rig.liveRunOf (rig.early)->prepare.empty());
+
+    const auto third = rig.runOf (rig.late);
+    REQUIRE_FALSE (third.empty());
+    CHECK (rig.runs.find (third)->state == cue::runState::waiting);
+
+    CHECK (rig.standby() == rig.after);
+    CHECK (rig.runner.listState().loadedOf (rig.listId).cue.empty());
+
+    //  The step says the scene was fired three seconds before the GO.
+    const auto& steps = rig.runner.listState().historyOf (rig.listId);
+    REQUIRE_FALSE (steps.empty());
+    CHECK (steps.back().cue == rig.scene);
+    CHECK (steps.back().tick == goAt - 150);
+
+    //  And the scheduler carries it on: the third member fires seven seconds after the GO.
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (third)->state != cue::runState::waiting; }, 500));
+}
+
+TEST_CASE ("load: a new aim at the loaded cue is the cursor - the hold is built again at the second (namespace draft 117)")
+{
+    JumpRig rig;
+    rig.setStandby (rig.scene);
+    REQUIRE (rig.loadAt (rig.scene, 3.0).rejected == 0);
+
+    const auto firstHold = rig.runOf (rig.early);
+    REQUIRE_FALSE (firstHold.empty());
+
+    //  Eleven seconds in: the first two members over, the third a second in.
+    REQUIRE (rig.engine.submit ("cli", "list.aim", { osc::Value::string (rig.listId), osc::Value::string (rig.scene),
+                                                     osc::Value::float64 (11.0) }));
+    rig.tickOnce();
+
+    CHECK (rig.runs.find (firstHold)->isFinished());
+    CHECK (rig.liveRunOf (rig.early) == nullptr);
+
+    const auto* third = rig.liveRunOf (rig.late);
+    REQUIRE (third != nullptr);
+    CHECK (third->state == cue::runState::armed);
+    CHECK_FALSE (third->launchRequested);
+    CHECK (third->startOffset == doctest::Approx (1.0));
+    CHECK (rig.runner.listState().loadedOf (rig.listId).offset == doctest::Approx (11.0));
+    CHECK (rig.standby() == rig.scene);
+}
+
+TEST_CASE ("load: a scrub of a held run is the same cursor, read as a second of the loaded cue (namespace draft 117)")
+{
+    JumpRig rig;
+    rig.setStandby (rig.scene);
+    REQUIRE (rig.loadAt (rig.scene, 3.0).rejected == 0);
+
+    //  The HELD run of the first member - the standby's own arm of it, which the load ended, is a run of it too.
+    REQUIRE (rig.liveRunOf (rig.early) != nullptr);
+    const auto heldFirst = rig.liveRunOf (rig.early)->id;
+    rig.tickOnce();      // the hook mirrors `seekable` on the tick after the hold
+    CHECK (rig.runs.find (heldFirst)->seekable);
+
+    //  The first member dragged back to one second of its file: the scene is at one.
+    REQUIRE (rig.submitAndTick ("run.seek", { osc::Value::string (heldFirst), osc::Value::float64 (1.0) }).rejected == 0);
+
+    INFO (rig.engine.log().contents());
+    CHECK (rig.runner.listState().loadedOf (rig.listId).offset == doctest::Approx (1.0));
+    const auto* first = rig.liveRunOf (rig.early);
+    REQUIRE (first != nullptr);
+    CHECK (first->id != heldFirst);
+    CHECK_FALSE (first->launchRequested);
+    CHECK (first->startOffset == doctest::Approx (1.0));
+    CHECK (rig.liveRunOf (rig.middle) == nullptr);     // due at two: the release's
+}
+
+TEST_CASE ("load: the pointer walking away gives the hold back; Esc leaves it (namespace draft 117)")
+{
+    JumpRig rig;
+    rig.setStandby (rig.scene);
+    REQUIRE (rig.loadAt (rig.scene, 3.0).rejected == 0);
+    const auto heldFirst = rig.runOf (rig.early);
+    REQUIRE_FALSE (heldFirst.empty());
+
+    SUBCASE ("Esc: a loaded cue stays loaded, as a prepared block does")
+    {
+        REQUIRE (rig.submitAndTick ("run.stopAll").applied == 1);
+        for (int n = 0; n < 5; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.liveRunOf (rig.early) != nullptr);
+        CHECK (rig.liveRunOf (rig.early)->state == cue::runState::armed);
+        CHECK (rig.runner.listState().loadedOf (rig.listId).cue == rig.scene);
+    }
+
+    SUBCASE ("the pointer parked elsewhere: the hold goes, as a block left behind does")
+    {
+        rig.setStandby (rig.after);
+        for (int n = 0; n < 3; ++n)
+            rig.tickOnce();
+
+        CHECK (rig.runner.listState().loadedOf (rig.listId).cue.empty());
+        CHECK (rig.liveRunOf (rig.early) == nullptr);
+        CHECK (rig.liveRunOf (rig.scene) == nullptr);
+    }
+}
+
+TEST_CASE ("load: before the cue nothing is held, and GO is an ordinary GO; a step aimed at loads that cue (namespace draft 117)")
+{
+    JumpRig rig;
+
+    SUBCASE ("before")
+    {
+        rig.setStandby (rig.scene);
+        REQUIRE (rig.loadAt (rig.scene, -1.0).rejected == 0);
+
+        CHECK (rig.runner.listState().loadedOf (rig.listId).cue == rig.scene);
+        CHECK (rig.runner.listState().loadedOf (rig.listId).offset == doctest::Approx (-1.0));
+        CHECK (rig.liveRunOf (rig.scene) == nullptr);
+        for (int n = 0; n < 2; ++n)
+            rig.tickOnce();
+
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+        //  The scene's job launches its first member a tick on, from its top.
+        REQUIRE (rig.tickUntil ([&] { const auto* run = rig.liveRunOf (rig.early);
+                                      return run != nullptr && (run->launchRequested || run->launchedAtSample > 0); }, 20));
+        CHECK (rig.liveRunOf (rig.early)->startOffset == doctest::Approx (0.0));
+    }
+
+    SUBCASE ("aimed at another cue: the pointer moves there and that cue is loaded")
+    {
+        rig.setStandby (rig.after);
+        REQUIRE (rig.loadAt (rig.scene, 2.0).rejected == 0);
+
+        CHECK (rig.standby() == rig.scene);
+        CHECK (rig.runner.listState().loadedOf (rig.listId).cue == rig.scene);
+        REQUIRE (rig.liveRunOf (rig.early) != nullptr);
+        CHECK (rig.liveRunOf (rig.early)->startOffset == doctest::Approx (2.0));
+    }
 }
 
 TEST_CASE ("jump: with no aim there is nothing to make true")
@@ -10561,6 +10766,10 @@ TEST_CASE ("history: the jump retimes the steps, and drops the ones it undid")
     const auto jumpAt = rig.tick;
     CHECK (rig.submitAndTick ("list.loadToTime", { osc::Value::string (rig.listId) }).applied == 1);
 
+    //  The load holds the rain at its second (namespace draft §117); GO plays it from there.
+    const auto goAt = rig.tick;
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
     //  Both sounds are rebuilt where the clock put them.
     const auto* thunder = rig.runs.liveRunOf (rig.mediaId);
     REQUIRE (thunder != nullptr);
@@ -10572,13 +10781,15 @@ TEST_CASE ("history: the jump retimes the steps, and drops the ones it undid")
     /*  The history is on the new clock: the thunder reads as fired 150 ticks
         before the jump, the rain 50 - and the memo, fired after the instant,
         is gone. */
+    /*  The rain's own step is moved again by the release: fired a second
+        before the GO that played it from there (§117). */
     const auto& steps = rig.runner.listState().historyOf (rig.listId);
     REQUIRE (steps.size() == 2u);
     CHECK (steps[0].cue == rig.mediaId);
-    CHECK (steps[0].tick == jumpAt - 150);
+    CHECK (steps[0].tick == goAt - 150);
     CHECK (steps[1].cue == rig.rain);
-    CHECK (steps[1].tick == jumpAt - 50);
-    juce::ignoreUnused (afterAt);
+    CHECK (steps[1].tick == goAt - 50);
+    juce::ignoreUnused (afterAt, jumpAt);
 
     //  So a later aim reads right: three seconds into the rain, thunder at five.
     const auto replan = rig.planFor (rig.rain, 3.0);
@@ -18865,6 +19076,10 @@ TEST_CASE ("jump: an automatic sequence jumped into during a member's pre-wait p
     const auto groupRun = rig.runOf (rig.groupId);
     REQUIRE_FALSE (groupRun.empty());
 
+    //  The load holds the sequence (namespace draft §117); GO plays it on.
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    INFO (rig.engine.log().contents());
     CHECK (rig.runToCompletion (groupRun) < 400);
     CHECK (runsFor (rig, rig.third) == 1u);
     CHECK (runsFor (rig, closing) == 1u);

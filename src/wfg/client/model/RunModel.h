@@ -248,6 +248,11 @@ namespace wfg::client::model
         /** True once a launch has happened, which is when `position` means anything. */
         bool launched() const noexcept;
 
+        /*  A RUN A LOAD TO TIME HOLDS (namespace draft §117): not launched,
+            and yet with a head to draw and a scrub to offer - the engine says
+            `seekable` of a run that is not playing for no other reason. */
+        bool held() const noexcept;
+
         /*  WHAT THE ROW'S CLOCK SAYS: a timecode run's label once it has been
             let go, else `position` - the seconds - as for every other run. */
         std::string clockWords() const;

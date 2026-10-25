@@ -7984,6 +7984,14 @@ TEST_CASE ("client: the load-to-time reading is the engine's answer, names and a
         }
 
     CHECK (sawThunder);
+    CHECK_FALSE (reading.loaded);
+
+    //  Loaded there (namespace draft §117): the rain made ready a second in, said by `list/loaded`.
+    rig.apply (132, "window", "list.loadToTime", { osc::Value::string (listId) });
+    const auto held = model::readLoadToTime (*rig.publish (134), listId);
+    CHECK (held.loaded);
+    CHECK (held.loadedCue == rain);
+    CHECK (held.loadedOffset == doctest::Approx (1.0));
 
     //  Nothing aimed: nothing answered, and the steps still read.
     rig.apply (140, "window", "list.aim", { osc::Value::string (listId), osc::Value::string (""),

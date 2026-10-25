@@ -290,10 +290,11 @@ namespace wfg::client
                                                   else
                                                       selection.click (id, extend, toggle, show.rows());
 
-                                                  /*  LOADING TO TIME, THE PICK IS THE AIM (author,
-                                                      2026-09-18: "cue or group can be changed and
-                                                      the load to time readjusts to it"). */
-                                                  aimAtPick();
+                                                  /*  LOADING TO TIME, THE PICK IS NOT THE AIM any
+                                                      more (namespace draft §117, the author,
+                                                      2026-10-25): the standby cue is what is
+                                                      loaded, and the pick only edits. A step
+                                                      clicked in the panel still re-aims. */
 
                                                   /*  THE INSPECTOR WAITS OUT THE DOUBLE-CLICK on a plain
                                                       click (author, 2026-09-18: "don't open the inspector
@@ -325,7 +326,6 @@ namespace wfg::client
                 listActions.pickStep        = [this] (int direction)
                                               {
                                                   const auto stepped = selection.step (direction, show.rows());
-                                                  aimAtPick();
                                                   inspectNow();
 
                                                   if (! stepped.empty())
@@ -603,6 +603,7 @@ namespace wfg::client
                 historyActions.aim  = [this] (const std::string& cueId, double offset)
                                       { send (gesture::aim (last.listId, cueId, offset)); };
                 historyActions.load = [this] { send (gesture::loadToTime (last.listId)); };
+                historyActions.close = [this] { leaveLoadToTime(); };
 
                 /*  THE UNDO HISTORY'S THREE GESTURES: stand after that many
                     transactions - which is that many `undo` or `redo`
@@ -6740,12 +6741,12 @@ namespace wfg::client
                 loadingToTime = true;
                 menuItemsChanged();
 
-                /*  Opened on the picked cue, else the standby: the aim has to
-                    name something for the panel to have anything to say. */
-                const auto cue = ! selection.empty() ? selection.anchor() : last.standbyId;
-
-                if (! cue.empty())
-                    send (gesture::aim (last.listId, cue, -1.0));
+                /*  OPENED ON THE STANDBY (namespace draft §117): the standby
+                    cue is what a load makes ready, so that is where the aim
+                    starts. A step clicked in the panel aims elsewhere, and a
+                    load then moves the pointer there first. */
+                if (! last.standbyId.empty())
+                    send (gesture::aim (last.listId, last.standbyId, -1.0));
             }
 
             void leaveLoadToTime()
@@ -6836,17 +6837,6 @@ namespace wfg::client
 
                 for (auto n = at; n < index; ++n)
                     send (gesture::redo());
-            }
-
-            void aimAtPick()
-            {
-                if (! loadingToTime || selection.empty())
-                    return;
-
-                const auto cue = selection.anchor();
-
-                if (! cue.empty() && cue != aimCue)
-                    send (gesture::aim (last.listId, cue, aimOffset));
             }
 
             /** Moves into a footer that did not exist yet, waiting for the tree to name it. */
