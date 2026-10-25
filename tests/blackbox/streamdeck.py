@@ -122,7 +122,8 @@ def run(locale: "str | None") -> int:
             keys = keys_until(server, lambda k: len(k) == 15 and k[14][0] == "go")
             report.equal(keys[14][0] if len(keys) == 15 else None, "go", "GO is the last key once the show's keys are on")
             report.equal(keys[13][0] if len(keys) == 15 else None, "esc", "Esc beside it")
-            report.equal(keys[10][0] if len(keys) == 15 else None, "standbyUp", "the standby's arrows first")
+            report.equal(keys[11][0] if len(keys) == 15 else None, "pause", "Pause / Play before Doh! (PRD 3.34)")
+            report.equal(keys[9][0] if len(keys) == 15 else None, "standbyUp", "the standby's arrows first")
 
             #  A deck has no strips: a strip is refused on it.
             send(server, "strip.create", [DECK])

@@ -948,9 +948,12 @@ TEST_CASE ("peer link: a ping is answered at once; what is not the link's gramma
     pair::Stream stream { "S1" };
     stream.setSend (wire.send());
     stream.setLeading (true);
-    stream.afterTick (77, 1.0);
+    stream.afterTick (12, 1.0);
+    stream.setPass (77);
 
-    //  At once, on the server's thread, with this machine's tick: no tick in between.
+    /*  At once, on the server's thread, with this machine's pass count - its
+        tick until PRD §3.34, which stands while the show is held: no tick in
+        between. */
     stream.received (followerA, ping (t0, 0.0f), t0);
     auto got = wire.take (followerA);
     REQUIRE (got.size() == 1);

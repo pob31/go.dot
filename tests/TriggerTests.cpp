@@ -984,9 +984,9 @@ TEST_CASE ("key trigger: its key is spelled once, is never one the show keeps, a
     CHECK (rig.document.getAttribute (key) == std::optional<std::string> ("F7"));
 
     //  Born with its key, in one step; and born with a key the show keeps, not at all.
-    const auto born = rig.document.createTrigger (rig.cueId, triggerKind::key, {}, { { "key", "F8" } });
+    const auto born = rig.document.createTrigger (rig.cueId, triggerKind::key, {}, { { "key", "F6" } });
     REQUIRE (born.ok);
-    CHECK (rig.document.getAttribute ("/godot/trigger/" + born.id + "/key") == std::optional<std::string> ("F8"));
+    CHECK (rig.document.getAttribute ("/godot/trigger/" + born.id + "/key") == std::optional<std::string> ("F6"));
 
     CHECK_FALSE (rig.document.createTrigger (rig.cueId, triggerKind::key, {}, { { "key", "Escape" } }).ok);
     CHECK_FALSE (rig.document.createTrigger (rig.cueId, triggerKind::key, {}, { { "kind", "osc" } }).ok);
@@ -1080,7 +1080,7 @@ TEST_CASE ("key trigger: its own list moves and GO stays where it was; a cart's 
     const auto cart = rig.document.createList ("Pads", {}, { { "kind", "cart" } }).id;
     const auto pad = rig.document.createCue (cart, 0, "memo", "Thunder").id;
     const auto padKey = rig.add (triggerKind::key, pad);
-    rig.set (padKey, "key", "F8");
+    rig.set (padKey, "key", "F6");
 
     CHECK (rig.tick ("trigger.fire", { osc::Value::string (padKey) }).rejected == 0);
     CHECK (! rig.runOf (pad).empty());
