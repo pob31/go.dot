@@ -494,8 +494,8 @@ jobs:
         # (`releases/latest`). Ready to test, not yet for a show - the author,
         # 2026-10-17: "reliable enough for testing from day-1, but not show ready
         # before we spend some time putting it through its paces". The words are
-        # mine. --generate-notes lists the commits since the previous tag under the
-        # paragraph written here.
+        # mine. GitHub's generated notes list the commits since the previous tag
+        # under the paragraph written here, and the remote's link closes them.
         run: |
           set -euo pipefail
           cat > notes.md <<'EOF'
@@ -519,6 +519,20 @@ jobs:
           | Linux x86_64, no install (glibc of Ubuntu 24.04 or newer) | `*-linux-x86_64.tar.gz` — run `./go.dot.sh` |
           EOF
 
+          # THE REMOTE'S LINK closes the notes, after the commits - where the
+          # author put it by hand on v0.1.18 (2026-10-26: "otherwise I have to
+          # add it manually each time"). `releases/latest` of the remote's repo,
+          # so it never names a version that goes stale.
+          cat > remote.md <<'EOF'
+          **Android Remote Control for Go.dot**: https://github.com/pob31/go.dot-remote/releases/latest
+          EOF
+
+          # The commits since the previous release, asked of the API rather than
+          # left to --generate-notes, which would put them after everything.
+          gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$GITHUB_REF_NAME" \
+            --jq .body > generated.md
+          { cat notes.md; echo; cat generated.md; echo; echo; cat remote.md; } > body.md
+
           # A RELEASE ALREADY MADE BY HAND for this tag - GitHub's "Draft a new
           # release" page makes the tag, which is what started this run - is
           # given the downloads rather than refused (2026-10-17: the first
@@ -528,9 +542,6 @@ jobs:
             gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --clobber \
               dist/go.dot-* dist/SHA256SUMS.txt
             if [ -z "$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json body --jq .body)" ]; then
-              gh api "repos/$GITHUB_REPOSITORY/releases/generate-notes" -f tag_name="$GITHUB_REF_NAME" \
-                --jq .body > generated.md
-              { cat notes.md; echo; cat generated.md; } > body.md
               gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --notes-file body.md
             fi
             gh release edit "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --latest --prerelease=false --draft=false
@@ -542,6 +553,5 @@ jobs:
             --verify-tag \
             --latest \
             --title "Go.dot $VERSION" \
-            --notes-file notes.md \
-            --generate-notes \
+            --notes-file body.md \
             dist/go.dot-* dist/SHA256SUMS.txt
