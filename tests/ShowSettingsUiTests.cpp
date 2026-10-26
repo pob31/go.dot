@@ -2481,9 +2481,10 @@ TEST_CASE ("show settings UI: the Timecode tab sits before Playback, and each of
 
     /*  Three menus and a number, in the order the rows stand - then, since
         TG.10, the Coming in part's two menus and four numbers after them
-        (namespace draft §60; their own case below). */
+        (namespace draft §60; their own case below), and since §122 the beat
+        grid's two numbers after those. */
     REQUIRE (menus.size() == 5u);
-    REQUIRE (boxes.size() == 5u);
+    REQUIRE (boxes.size() == 7u);
     auto* rate = menus[0];
     auto* mtc = menus[1];
     auto* ltc = menus[2];
@@ -2665,15 +2666,18 @@ TEST_CASE ("show settings UI: the Timecode tab's Coming in part sends a node.set
     };
     collect (*page);
 
-    //  After the outgoing rows: two menus and four numbers, in the order the rows stand.
+    /*  After the outgoing rows: two menus and four numbers, in the order the
+        rows stand - and the beat grid's two numbers last (namespace draft §122). */
     REQUIRE (menus.size() == 5u);
-    REQUIRE (boxes.size() == 5u);
+    REQUIRE (boxes.size() == 7u);
     auto* ltcIn = menus[3];
     auto* mtcIn = menus[4];
     auto* tolerance = boxes[1];
     auto* jumpPast = boxes[2];
     auto* catchUp = boxes[3];
     auto* crossfade = boxes[4];
+    auto* tempo = boxes[5];
+    auto* beatsPerBar = boxes[6];
 
     const auto shownLabel = [&labels] (const juce::String& text) -> juce::Label*
     {
@@ -2698,6 +2702,8 @@ TEST_CASE ("show settings UI: the Timecode tab's Coming in part sends a node.set
     CHECK (jumpPast->getText().getDoubleValue() == doctest::Approx (0.25));
     CHECK (catchUp->getText().getDoubleValue() == doctest::Approx (1.0));
     CHECK (crossfade->getText().getDoubleValue() == doctest::Approx (10.0));
+    CHECK (tempo->getText().getDoubleValue() == doctest::Approx (120.0));
+    CHECK (beatsPerBar->getText().getDoubleValue() == doctest::Approx (4.0));
 
     //  The inputs: one channel enabled, wider listed and disabled, saying why - as the LTC output menu does.
     auto codeItem = 0;
@@ -2748,11 +2754,13 @@ TEST_CASE ("show settings UI: the Timecode tab's Coming in part sends a node.set
     CHECK (rig.sent.back().args[0].getString() == "/godot/sync/mtcIn");
     CHECK (rig.sent.back().args[1].getString() == port.id);
 
-    //  The four numbers, a comma read as a point, each to its row.
+    //  The six numbers, a comma read as a point, each to its row.
     for (auto [box, typed, address, sent] : { std::tuple { tolerance, "12,5", "/godot/sync/chaseTolerance", "12.5" },
                                               std::tuple { jumpPast, "0,5", "/godot/sync/chaseJump", "0.5" },
                                               std::tuple { catchUp, "2", "/godot/sync/chaseRate", "2" },
-                                              std::tuple { crossfade, "20", "/godot/sync/chaseCrossfade", "20" } })
+                                              std::tuple { crossfade, "20", "/godot/sync/chaseCrossfade", "20" },
+                                              std::tuple { tempo, "92,5", "/godot/sync/bpm", "92.5" },
+                                              std::tuple { beatsPerBar, "3", "/godot/sync/beatsPerBar", "3" } })
     {
         INFO (address);
         const auto before = rig.sent.size();
