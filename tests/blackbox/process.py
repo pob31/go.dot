@@ -100,11 +100,18 @@ def run_of(server: Server, cue: str) -> "str | None":
     return None
 
 
-def doubled(device: Device, value: float) -> bool:
+def doubled(device: Device, value: float) -> "float | None":
+    """When the doubled value arrived, in seconds from the device's start - None before it has."""
     for message in device.timed():
         if message[2] == "/dev/out" and message[3] and abs(message[3][0] - 2 * value) < 1e-4:
-            return True
-    return False
+            return message[0]
+    return None
+
+
+def started(device: Device) -> float:
+    """When the device's arrivals count from, on this machine's monotonic clock - the driver's own."""
+    _, answer = common.http_get(device.query_port, "/_mock/started")
+    return json.loads(answer)["VALUE"][0]
 
 
 def session(report: Report, server: Server, device: Device, facts: dict) -> None:
@@ -118,13 +125,16 @@ def session(report: Report, server: Server, device: Device, facts: dict) -> None
     report.equal(state, "running", "its patch opens in Pure Data and runs")
 
     #  2. M57: a report doubled and back at the device.
+    #  The answer's time is the device's stamp when it came, not when the poll noticed it (as M72's, 2a570eb0).
+    origin = started(device)
     latencies = []
     for step in range(10):
         value = 0.01 * (step + 1)          # all under the edge's half
         sent_at = time.monotonic()
         report_at(server, value)
-        arrived = common.wait_until(lambda v=value: doubled(device, v), timeout=5.0)
-        latencies.append(time.monotonic() - sent_at)
+        arrived = common.wait_until(lambda v=value: doubled(device, v) is not None, timeout=5.0)
+        came = doubled(device, value) if arrived else None
+        latencies.append((origin + came if came is not None else time.monotonic()) - sent_at)
         report.check(bool(arrived), f"the device's {value:.2f} comes back doubled at /dev/out")
         time.sleep(0.05)
 

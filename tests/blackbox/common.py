@@ -904,7 +904,9 @@ class Report:
         self.checks += 1
 
         if condition:
-            print(f"  ok   {description}")
+            #  The farm's Release timing lane sets WFG_REPORT_DETAIL: a pass's reading is what the bounds are set from.
+            shown = f"\n         {detail}" if detail and os.environ.get("WFG_REPORT_DETAIL") == "1" else ""
+            print(f"  ok   {description}{shown}")
             return True
 
         line = f"{description}" + (f"\n         {detail}" if detail else "")

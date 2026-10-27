@@ -2320,6 +2320,21 @@ foreach(driver IN LISTS WFG_REALTIME_DRIVERS)
     endforeach()
 endforeach()
 
+# THE RELEASE TIMING LANE (2026-10-27): the drivers whose checks judge how
+# closely the engine keeps time - the realtime lock's, and the four that judge
+# a round trip or a takeover without holding it - labelled `timed`, in C only
+# (a locale moves no clock). The farm's test presets farm-linux-timed and
+# farm-macos-timed run them against a Release build, one at a time.
+set(WFG_TIMED_DRIVERS ${WFG_REALTIME_DRIVERS} mqtt script pair-show pair-sample)
+
+foreach(driver IN LISTS WFG_TIMED_DRIVERS)
+    if(NOT TEST blackbox.${driver}.C)
+        message(FATAL_ERROR "tests/CMakeLists.txt: the timed label names blackbox.${driver}.C, which is no test")
+    endif()
+
+    set_property(TEST blackbox.${driver}.C APPEND PROPERTY LABELS timed)
+endforeach()
+
 # THE TIME GROUP'S DRIVER HOLDS EVERY LANE (2026-10-14, namespace draft §60.7,
 # TG.12). It plays the MTC it judges from inside the engine it judges
 # (`--midi-play-loop`), so a starved machine makes its own sender late and the
