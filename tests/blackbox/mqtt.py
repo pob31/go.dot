@@ -266,8 +266,10 @@ def session(report: Report, server: Server, port: int, facts: dict) -> None:
         value = float(step + 1)             # all under the line at 25
         sent_at = time.monotonic()
         sensor.publish("room1/temp", f"{value}")
-        arrived = common.wait_until(lambda v=value: echoed(watcher, v) is not None, timeout=5.0)
-        latencies.append(time.monotonic() - sent_at)
+        #  The echo's time is the reader's stamp when it came, not when the poll noticed it: the poll's
+        #  sleep added 10-26 ms on the Mac and put M72 past 100 ms with the echo back in 81 (2026-10-27).
+        arrived = common.wait_until(lambda v=value: echoed(watcher, v), timeout=5.0)
+        latencies.append((arrived if arrived else time.monotonic()) - sent_at)
         report.check(bool(arrived), f"the sensor's {value:.0f} comes back doubled on room1/echo")
         time.sleep(0.05)
 
