@@ -705,6 +705,7 @@ namespace wfg::audio
                         return false;
                     }
 
+                    proxy->bindClock (&blockClock);
                     trackLanes.back().push_back (&proxy->lane());
                 }
 
@@ -1143,6 +1144,7 @@ namespace wfg::audio
                     if (proxy == nullptr)
                         return false;
 
+                    proxy->bindClock (&blockClock);
                     trackLanes.back()[slot] = &proxy->lane();
                 }
 
@@ -1645,6 +1647,10 @@ namespace wfg::audio
             tapView.buffer = &tap;
             tapView.channels = tapChannels;
             tapView.blockStart = samples.samplesElapsed();
+
+            //  AND THE BLOCK CLOCK for the plugins' playheads (§123, BEI).
+            blockClock.blockStart = tapView.blockStart;
+            takeClock();
 
             /*  THE TAP, filled before Tracktion runs (namespace draft §18.4):
                 the rack's input stage reads it during the call below, in this
@@ -2811,6 +2817,45 @@ namespace wfg::audio
         std::map<std::string, int> rackTracks;
         LiveInputTap tapView;
 
+        /*  THE BLOCK CLOCK every proxy reads (namespace draft §123, BEI): the
+            block's first sample and the beat clock, copied here at the block's
+            start from what the tick thread last gave under `clockSeq` - odd
+            while it writes, so the copy is never half of two. */
+        plugin::BlockClock blockClock;
+        std::atomic<std::uint64_t> clockSeq { 0 };
+        cue::BeatClockState clockGiven;
+        std::uint64_t clockTaken = 0;
+
+        void setBeatClock (const cue::BeatClockState& state) noexcept
+        {
+            const auto odd = clockSeq.load (std::memory_order_relaxed) + 1u;
+            clockSeq.store (odd, std::memory_order_release);
+            clockGiven = state;
+            clockSeq.store (odd + 1u, std::memory_order_release);
+        }
+
+        void takeClock() noexcept
+        {
+            for (int attempt = 0; attempt < 4; ++attempt)
+            {
+                const auto before = clockSeq.load (std::memory_order_acquire);
+
+                if ((before & 1u) != 0 || before == clockTaken)
+                    return;
+
+                const auto copy = clockGiven;
+                std::atomic_thread_fence (std::memory_order_acquire);
+
+                if (clockSeq.load (std::memory_order_relaxed) == before)
+                {
+                    blockClock.state = copy;
+                    ++blockClock.seq;
+                    clockTaken = before;
+                    return;
+                }
+            }
+        }
+
         /*  THE AUXES (namespace draft §93): the bus every track's tap writes
             into, every track's tap (by its index, null on a graph with no
             aux), every aux's input stage (index - voices, null on a rack
@@ -3470,6 +3515,11 @@ namespace wfg::audio
     {
         if (auto* lane = proxyLane (trackIndex, slot))
             lane->setEnabled (enabled);
+    }
+
+    void AudioHost::setBeatClock (const cue::BeatClockState& state) noexcept
+    {
+        impl->setBeatClock (state);
     }
 
     void AudioHost::setTrackFxParameter (int trackIndex, int slot, int parameter, float normalised) noexcept

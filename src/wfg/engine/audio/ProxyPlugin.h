@@ -68,6 +68,11 @@ namespace wfg::audio
         static juce::ValueTree create (int numChannels, int slot);
 
         /** The lane and its atomics. Any thread; see ProxyLane. */
+        /*  The block clock this proxy reads during the block (namespace draft
+            §123, BEI), bound once after insertion as a live input's tap is.
+            Null places nothing. */
+        void bindClock (const plugin::BlockClock* clock) noexcept    { boundClock = clock; }
+
         plugin::ProxyLane& lane() noexcept              { return proxyLane; }
         const plugin::ProxyLane& lane() const noexcept  { return proxyLane; }
 
@@ -100,6 +105,7 @@ namespace wfg::audio
         int channels = 2;
         int setSlot = 0;
         plugin::ProxyLane proxyLane;
+        const plugin::BlockClock* boundClock = nullptr;
 
         /*  The channel pointers for one call, sized in initialise() and never
             after. A vector of pointers, not of samples: the buffer is the

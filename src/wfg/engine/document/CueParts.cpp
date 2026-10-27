@@ -62,7 +62,7 @@ namespace wfg::doc::parts
                   { "startOffset", "rate", "rateMode", "delay", "delayBy" },
                   "Range", { "name", "in", "out", "loops", "toEnd" } },
 
-                { Part::speed, "speed", { "Media", "Video" }, { "rate", "rateMode" }, {}, {} },
+                { Part::speed, "speed", { "Media", "Video" }, { "rate", "rateMode", "followTempo" }, {}, {} },
 
                 //  The DCA's mapping goes where its mark goes (namespace draft §50, ACB).
                 { Part::mix, "mix", { "Media", "Mic", "Video" },

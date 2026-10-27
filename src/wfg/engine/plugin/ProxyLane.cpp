@@ -329,6 +329,35 @@ namespace wfg::plugin
 
     void ProxyLane::process (float* const* channelData, int numChannels, int numSamples) noexcept
     {
+        process (channelData, numChannels, numSamples, nullptr, 0);
+    }
+
+    void ProxyLane::publishClock (const cue::BeatClockState& state) noexcept
+    {
+        if (header == nullptr)
+            return;
+
+        /*  A SEQLOCK IN THE HEADER (BEI): odd while these are written, even once
+            they hold; the child reads again on an odd count or one that moved. */
+        const auto odd = header->gridSeq.load (std::memory_order_relaxed) + 1u;
+        header->gridSeq.store (odd, std::memory_order_release);
+        header->gridAnchorSample.store (static_cast<std::uint64_t> (std::max<std::int64_t> (0, state.anchorSample)),
+                                        std::memory_order_relaxed);
+        header->gridAnchorBeat.store (state.clock.anchorBeat, std::memory_order_relaxed);
+        header->gridBpmFrom.store (state.clock.bpmFrom, std::memory_order_relaxed);
+        header->gridBpmTo.store (state.clock.bpmTo, std::memory_order_relaxed);
+        header->gridRampStart.store (state.clock.rampStart, std::memory_order_relaxed);
+        header->gridRampLength.store (state.clock.rampLength, std::memory_order_relaxed);
+        header->gridShape.store (state.clock.shape, std::memory_order_relaxed);
+        header->gridBeatsPerBar.store (static_cast<std::uint32_t> (std::max (1, state.clock.beatsPerBar)),
+                                       std::memory_order_relaxed);
+        header->gridPlaying.store (state.playing ? 1u : 0u, std::memory_order_relaxed);
+        header->gridSeq.store (odd + 1u, std::memory_order_release);
+    }
+
+    void ProxyLane::process (float* const* channelData, int numChannels, int numSamples,
+                             const BlockClock* clock, std::int64_t blockStart) noexcept
+    {
         if (enabled.load (std::memory_order_relaxed) == 0 || channelData == nullptr || numSamples <= 0)
             return;
 
@@ -387,6 +416,13 @@ namespace wfg::plugin
             one deadline (2026-09-26), where it used to be cut short with its
             tail left dry. The pieces follow one another, so the plugin hears
             the block in order. */
+        //  THE CLOCK, when it moved since the header last had it (BEI).
+        if (clock != nullptr && clock->seq != clockSeqSent)
+        {
+            publishClock (clock->state);
+            clockSeqSent = clock->seq;
+        }
+
         for (int offset = 0; offset < numSamples;)
         {
             const auto samples = std::min (numSamples - offset, regionMaxSamples);
@@ -396,6 +432,8 @@ namespace wfg::plugin
 
             bound->numChannels.store (static_cast<std::uint32_t> (channels), std::memory_order_relaxed);
             bound->numSamples.store (static_cast<std::uint32_t> (samples), std::memory_order_relaxed);
+            bound->blockStartSample.store (static_cast<std::uint64_t> (std::max<std::int64_t> (0, blockStart + offset)),
+                                           std::memory_order_relaxed);
 
             const auto seq = bound->requestSeq.load (std::memory_order_relaxed) + 1;
             bound->requestSeq.store (seq, std::memory_order_release);

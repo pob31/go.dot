@@ -569,6 +569,11 @@ namespace wfg::audio
         audioHost.setTrackFxParameter (track, slot, parameter, normalised);
     }
 
+    void HostPlayer::setBeatClock (const cue::BeatClockState& state)
+    {
+        audioHost.setBeatClock (state);
+    }
+
     void HostPlayer::setFxShape (int track, int slot, int feed, int back)
     {
         audioHost.setTrackFxShape (track, slot, feed, back);

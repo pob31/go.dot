@@ -886,6 +886,15 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="followTempo">
+          <a:documentation>Whether this sound-s speed follows the beat grid-s tempo (namespace draft 123, BEK; the author-s: opt-in, off by default): on, its speed is its rate times the tempo now over the show-s sync/bpm - so a rate of one plays as written at the show-s tempo and climbs with a ramp, by its rateMode - and a tempo cue is heard on it as a speed fade would be; off, the grid never touches it. A sound an Ableton Live set brought over is stretched to its scene-s tempo already and comes with this off.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="fxHideUnused">
           <a:documentation>Whether the cue-s FX panel leaves out every plugin the cue has not switched in (namespace draft 105; the author-s words, Hide unused plugins). A matter of what the panel shows, never of the sound: a plugin switched out on the cue stays shown, since the cue keeps what was set on it, and the panel says how many it left out.</a:documentation>
           <choice>
@@ -2747,7 +2756,7 @@
       </optional>
       <optional>
         <attribute name="curve">
-          <a:documentation>The shape of that fade. Ignored by a hard stop.</a:documentation>
+          <a:documentation>The shape of that fade. Ignored by a hard stop; a tempo ramp has shape, a number, instead.</a:documentation>
           <choice>
             <value>linear</value>
             <value>sCurve</value>
@@ -2756,7 +2765,7 @@
       </optional>
       <optional>
         <attribute name="duration">
-          <a:documentation>How long the fade half takes, when the verb is fade. Ignored by a hard stop.</a:documentation>
+          <a:documentation>How long the fade half takes, when the verb is fade; with the tempo verb, how long the beat grid takes to reach the new tempo from the one it is at (namespace draft 123, BEL) - nought a step, as a tempo cue always was. Ignored by a hard stop.</a:documentation>
           <data type="double">
             <param name="minInclusive">0</param>
           </data>
@@ -2828,6 +2837,15 @@
         <attribute name="range">
           <a:documentation>Which slice of the target to go to, by identifier, when the verb is advance - and empty, which is what advance has always meant, is the NEXT one. Naming a slice is how a bed is sent to its outro from wherever it has got to rather than stepped through everything in between, which on a loop that never ends is the difference between a gesture and a wait. The slice still finishes the pass it is on before the jump, because that is what makes an advance graceful; a slice of some other cue is a warning and the run goes to the next one instead.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="shape">
+          <a:documentation>With the tempo verb (namespace draft 123, BEL): the shape of the ramp from the tempo the grid is at to this cue-s - nought a straight line in beats a minute, as Live draws its tempo automation, one the full S that eases out of the old tempo and into the new, and between the two the blend. The beats the ramp covers are the same whatever the shape.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">1</param>
+          </data>
         </attribute>
       </optional>
       <optional>

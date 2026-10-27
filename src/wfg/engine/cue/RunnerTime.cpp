@@ -1449,7 +1449,7 @@ namespace wfg::cue
 
             const auto ranges = rangesOf (targetCue);
             const auto actual = job->moviePosition
-                                  + job->rate * run.chaseFactor * static_cast<double> (at - job->movieAt)
+                                  + job->rate * run.chaseFactor * run.tempoFactor * static_cast<double> (at - job->movieAt)
                                       / static_cast<double> (sampleRate);
             auto error = actual - target->file;
 

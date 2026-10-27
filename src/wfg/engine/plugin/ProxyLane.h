@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <wfg/engine/cue/BeatClock.h>
 #include <wfg/engine/plugin/SharedRegion.h>
 #include <wfg/engine/rt/RtCheck.h>
 
@@ -65,6 +66,18 @@
 */
 namespace wfg::plugin
 {
+    /*  WHERE A BLOCK IS ON THE CLOCK (namespace draft §123, BEI): the first
+        sample of the block in Go.dot's count, and the beat clock as the tick
+        thread last gave it with a count that moves when the clock does.
+        Written by the host's audio thread before Tracktion's block and read by
+        every proxy during it, as a live input's tap is (LiveInputTap). */
+    struct BlockClock
+    {
+        std::int64_t blockStart = 0;
+        cue::BeatClockState state;
+        std::uint64_t seq = 0;
+    };
+
     class ProxyLane
     {
     public:
@@ -196,6 +209,13 @@ namespace wfg::plugin
             channel, and the first block it answers again fades back in. */
         void process (float* const* channelData, int numChannels, int numSamples) noexcept WFG_AUDIO_THREAD;
 
+        /*  THE SAME, PLACED ON THE CLOCK (namespace draft §123, BEI): the beat
+            clock put in the region's header when its count moved, and each
+            piece's first sample - `blockStart` on - on the lane before the
+            request, for the child's playhead. */
+        void process (float* const* channelData, int numChannels, int numSamples,
+                      const BlockClock* clock, std::int64_t blockStart) noexcept WFG_AUDIO_THREAD;
+
         //======================================================================
         /** Blocks sent to the child. */
         std::uint64_t blocks() const noexcept;
@@ -213,7 +233,10 @@ namespace wfg::plugin
         void clearMisses() noexcept;
 
     private:
+        void publishClock (const cue::BeatClockState& state) noexcept WFG_AUDIO_THREAD;
+
         std::atomic<region::Lane*> lane { nullptr };
+        std::uint64_t clockSeqSent = 0;     ///< the audio thread's: the count of the clock in the header
         std::atomic<int> shapeFeed { -1 };
         std::atomic<int> shapeBack { -1 };
         region::Header* header = nullptr;

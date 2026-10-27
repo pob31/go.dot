@@ -8992,15 +8992,17 @@ TEST_CASE ("client: a cue's DCA is a menu of the show's DCAs, and the sampler ro
     REQUIRE (doesAt + 1 < headings.size());
     CHECK (headings[doesAt + 1] == "sampler");
 
-    /*  The speed and its mode straight after where the file starts, then its
-        delay (namespace draft §70), then the sampler's rows (§22.7). */
+    /*  The speed and its mode straight after where the file starts, whether
+        it follows the tempo (namespace draft §123), then its delay (§70), then
+        the sampler's rows (§22.7). */
     const auto startOffsetAt = positionOf (does, "startOffset");
-    REQUIRE (startOffsetAt + 5 < does.size());
+    REQUIRE (startOffsetAt + 6 < does.size());
     CHECK (does[startOffsetAt + 1] == "rate");
     CHECK (does[startOffsetAt + 2] == "rateMode");
-    CHECK (does[startOffsetAt + 3] == "delay");
-    CHECK (does[startOffsetAt + 4] == "delayBy");
-    CHECK (does[startOffsetAt + 5] == "dca");
+    CHECK (does[startOffsetAt + 3] == "followTempo");
+    CHECK (does[startOffsetAt + 4] == "delay");
+    CHECK (does[startOffsetAt + 5] == "delayBy");
+    CHECK (does[startOffsetAt + 6] == "dca");
 
     //  Two words the tree runs together, said as two words.
     const std::vector<std::pair<std::string, std::string>> spoken {
@@ -9468,11 +9470,12 @@ TEST_CASE ("client: a cue's delay - after its speed, None, Sound or Picture, the
         return names;
     };
 
-    //  After its speed: a sound's after its speed mode, a movie's after its speed.
+    //  After its speed: a sound's after its speed mode and its tempo switch (§123), a movie's after its speed.
     const auto soundRows = allNames (model::inspect (*snapshot, sound.id));
-    REQUIRE (positionOf (soundRows, "rateMode") + 2 < soundRows.size());
-    CHECK (soundRows[positionOf (soundRows, "rateMode") + 1] == "delay");
-    CHECK (soundRows[positionOf (soundRows, "rateMode") + 2] == "delayBy");
+    REQUIRE (positionOf (soundRows, "followTempo") + 2 < soundRows.size());
+    CHECK (soundRows[positionOf (soundRows, "rateMode") + 1] == "followTempo");
+    CHECK (soundRows[positionOf (soundRows, "followTempo") + 1] == "delay");
+    CHECK (soundRows[positionOf (soundRows, "followTempo") + 2] == "delayBy");
 
     const auto movieRows = allNames (model::inspect (*snapshot, movie.id));
     REQUIRE (positionOf (movieRows, "rate") + 2 < movieRows.size());

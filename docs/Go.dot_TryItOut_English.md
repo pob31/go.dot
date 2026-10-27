@@ -233,7 +233,7 @@ Right-click a cue in the list, or a port in the Serial tab, and choose *Copy for
 
 ### Starting on the beat (new)
 
-- A cue or a group can start on the beat grid: the inspector's **starts on** row - at once, the next beat, the next bar, 2, 4 or 8 bars. The first such GO while nothing is on the grid starts at once and the bars count from it; the next ones wait for their boundary and land on it to the sample. Cues that do not ask never wait. The tempo and the beats per bar are on Show settings > Timecode, and a **Tempo** cue from the Add menu's transport list changes them from that point in the show on, keeping the beat. An imported Live set brings its scenes' tempos and its clips' launch quantisation over.
+- A cue or a group can start on the beat grid: the inspector's **starts on** row - at once, the next beat, the next bar, 2, 4 or 8 bars. The first such GO while nothing is on the grid starts at once and the bars count from it; the next ones wait for their boundary and land on it to the sample. Cues that do not ask never wait. The tempo and the beats per bar are on Show settings > Timecode, and a **Tempo** cue from the Add menu's transport list changes them from that point in the show on, keeping the beat - at once, or over a length with a shape from straight to S-shaped. Every hosted plugin reads the tempo and the beat from its host, so a delay or an LFO set in note lengths follows the show and its ramps; a sound follows too when its **follows the tempo** switch is on, off by default. An imported Live set brings its scenes' tempos and its clips' launch quantisation over.
 
 ### Keeping the show safe
 

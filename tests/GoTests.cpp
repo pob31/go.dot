@@ -51,6 +51,7 @@
 #include <wfg/engine/audio/CueMatrix.h>
 #include <wfg/engine/cue/FadeJob.h>
 #include <wfg/engine/cue/FadeMoveRows.h>
+#include <wfg/engine/cue/BeatClock.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
@@ -700,8 +701,11 @@ TEST_CASE ("beat grid: a cue that does not ask never waits, and the grid is not 
     //  Everything stopped: the grid is not live, and the next quantised GO anchors afresh.
     rig.submitAndTick ("run.stopAll");
     REQUIRE (rig.tickUntil ([&rig] { return ! rig.runner.gridLive(); }, 200));
-    rig.tickOnce();     // the readout is the next hook's
-    CHECK (rig.runner.listState().tempo() == doctest::Approx (0.0));
+    rig.tickOnce();     // the readouts are the next hook's
+
+    //  The tempo stands where it was (§123, BEM); the grid is not live.
+    CHECK (rig.runner.listState().tempo() == doctest::Approx (120.0));
+    CHECK_FALSE (rig.runner.listState().gridLive());
 
     REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.secondId + "/quantise", "bar").ok);
     const auto again = rig.fire (rig.secondId);
@@ -749,9 +753,111 @@ TEST_CASE ("beat grid: a tempo verb moves the grid from its moment on, the beat 
         nearest = std::min (nearest, std::abs (beats - std::round (beats)));
     }
 
-    CHECK (rig.runner.beatGrid().bpm == doctest::Approx (60.0));
+    CHECK (rig.runner.beatGrid().clock.bpmTo == doctest::Approx (60.0));
     CHECK (nearest < 1.0e-6);
     CHECK (second > anchor);
+}
+
+TEST_CASE ("beat grid: a tempo cue with a length ramps the grid - the readout follows it, and a bar fired inside lands on the integral's sample (namespace draft §123, BEL)")
+{
+    GridRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/quantise", "bar").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.secondId + "/quantise", "bar").ok);
+
+    //  Half the tempo over two seconds, straight.
+    const auto tempoId = rig.document.createCue (rig.listId, 3, "transport", "Rit.").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + tempoId + "/verb", "tempo").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + tempoId + "/bpm", "60").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + tempoId + "/duration", "2").ok);
+
+    const auto anchor = rig.fire (rig.mediaId);
+    const auto anchorGo = rig.goTick;
+
+    for (int n = 0; n < 7; ++n)
+        rig.tickOnce();
+
+    rig.setStandby (tempoId);
+    const auto tempoGo = rig.tick;
+    rig.submitAndTick ("go");
+    rig.tickOnce();
+    rig.tickOnce();
+
+    //  THE READOUT RIDES THE RAMP: a second in, ninety; after it, sixty.
+    for (int n = 0; n < 48; ++n)
+        rig.tickOnce();
+
+    const auto midway = rig.runner.listState().tempo();
+    CHECK (midway > 84.0);
+    CHECK (midway < 96.0);
+
+    //  A BAR FIRED INSIDE THE RAMP lands on a bar of the ramped clock, to the sample.
+    const auto second = rig.fire (rig.secondId);
+
+    auto nearest = 1.0;
+
+    for (const auto tempoTick : { tempoGo, tempoGo + 1, tempoGo + 2 })
+    {
+        cue::BeatClock clock;
+        clock.anchorBeat = static_cast<double> (tempoTick - anchorGo) / 50.0 * 2.0;
+        clock.bpmFrom = 120.0;
+        clock.bpmTo = 60.0;
+        clock.rampLength = 2.0;
+
+        const auto anchorThen = anchor + (tempoTick - anchorGo) * 960;
+        const auto beat = clock.beatAt (static_cast<double> (second - anchorThen) / 48000.0);
+        nearest = std::min (nearest, std::abs (beat / 4.0 - std::round (beat / 4.0)));
+    }
+
+    CHECK (nearest < 1.0e-6);
+
+    for (int n = 0; n < 120; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runner.listState().tempo() == doctest::Approx (60.0));
+}
+
+TEST_CASE ("beat grid: a sound that follows the tempo plays at the grid's tempo over the show's; one that does not is left alone (namespace draft §123, BEK)")
+{
+    GridRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/quantise", "bar").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.secondId + "/followTempo", "true").ok);
+
+    const auto tempoId = rig.document.createCue (rig.listId, 3, "transport", "Slower").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + tempoId + "/verb", "tempo").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + tempoId + "/bpm", "90").ok);
+
+    rig.fire (rig.mediaId);
+    const auto plainTrack = rig.audio.launches.back().first;
+
+    rig.setStandby (tempoId);
+    rig.submitAndTick ("go");
+
+    for (int n = 0; n < 4; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runner.listState().tempo() == doctest::Approx (90.0));
+
+    //  The second, fired at once: its voice placed at three quarters, the show's 120 to the grid's 90.
+    rig.fire (rig.secondId);
+    const auto followingTrack = rig.audio.launches.back().first;
+
+    for (int n = 0; n < 4; ++n)
+        rig.tickOnce();
+
+    auto followingSpeed = 1.0;
+
+    for (const auto& point : rig.audio.ratePoints)
+        if (point.track == followingTrack)
+            followingSpeed = point.speed;
+
+    CHECK (followingSpeed == doctest::Approx (0.75));
+
+    //  The first never asked: no speed but one was ever placed on it.
+    for (const auto& point : rig.audio.ratePoints)
+        if (point.track == plainTrack)
+            CHECK (point.speed == doctest::Approx (1.0));
+
+    CHECK (rig.runner.listState().gridLive());
 }
 
 TEST_CASE ("go: a sound held back is placed its delay later, on the sample, after its pre-wait")

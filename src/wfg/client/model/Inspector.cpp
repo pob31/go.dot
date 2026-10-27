@@ -89,7 +89,7 @@ namespace wfg::client::model
                     starts: two more things said about how the file is played
                     (namespace draft §22.7). */
                 { "media",   { "file", "take", "lockedTo", "channels", "directOut",
-                               "level", "startOffset", "rate", "rateMode", "delay", "delayBy",
+                               "level", "startOffset", "rate", "rateMode", "followTempo", "delay", "delayBy",
                                "dca", "dcaCurve", "dcaOffset", "strip",
                                "initialLevel", "release",
                                "secondPress", "velocity", "velocityFloor", "pressure",
@@ -125,7 +125,7 @@ namespace wfg::client::model
                     both's shape, so it comes after both. */
                 { "fade",    { "target", "dca", "aux", "levelOn", "level", "rateOn", "rate", "curve", "points", "video",
                                "stopWhenDone" } },
-                { "transport", { "target", "verb", "andGo", "range", "thenNext", "curve", "bpm", "beatsPerBar" } },
+                { "transport", { "target", "verb", "andGo", "range", "thenNext", "duration", "curve", "bpm", "beatsPerBar", "shape" } },
                 { "start",   { "target" } },
                 //  A process cue (namespace draft §51): its MIDI; its patch is the canvas's (§65, AMY).
                 { "process", { "midiIn", "midiOut" } },
@@ -191,6 +191,7 @@ namespace wfg::client::model
                 //  The beat grid (namespace draft §122). Words mine, owed.
                 { "quantise", "starts on" },
                 { "bpm", "tempo" },
+                { "followTempo", "follows the tempo" },
                 { "beatsPerBar", "beats per bar" },
                 { "shortName", "short name" },
                 { "secondPress", "second press" },
@@ -573,8 +574,13 @@ namespace wfg::client::model
             {
                 if (field.name == "range")
                     field.applies = verb == "advance";
-                else if (field.name == "curve" || field.name == "duration")
+                else if (field.name == "curve")
                     field.applies = verb == "fade";
+                //  A length is a fading stop's or a tempo ramp's; a shape the ramp's alone (namespace draft §123, BEL).
+                else if (field.name == "duration")
+                    field.applies = verb == "fade" || verb == "tempo";
+                else if (field.name == "shape")
+                    field.applies = verb == "tempo";
                 else if (field.name == "andGo")
                     field.applies = verb == "jump";
                 else if (field.name == "thenNext")

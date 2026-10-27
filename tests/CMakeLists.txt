@@ -128,6 +128,7 @@ add_executable(wfg_tests
     EditPlaybackTests.cpp
     MediaEditRenderTests.cpp
     CuePartTests.cpp
+    BeatClockTests.cpp
     AlsReaderTests.cpp
     AlsWalkTests.cpp
     AlsImportTests.cpp

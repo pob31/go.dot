@@ -296,11 +296,15 @@ namespace wfg::cue
         void setPaused (bool value) noexcept { pausedNow = value; }
         bool paused() const noexcept { return pausedNow; }
 
-        /*  THE BEAT GRID'S TEMPO NOW (namespace draft §122): what the grid runs
-            at while a run launched on it sounds, nought otherwise. Published as
-            `/godot/engine/tempo`, a readout; never saved. */
+        /*  THE TEMPO NOW (namespace draft §122; §123, BEM): what the plugins
+            hear - the show's until a tempo cue moves it, a ramp followed tick
+            by tick, never nought - and whether a run launched on the grid still
+            sounds. Published as `/godot/engine/tempo` and `/godot/engine/
+            gridLive`, readouts; never saved. */
         void setTempo (double bpm) noexcept { tempoNow = bpm; }
         double tempo() const noexcept { return tempoNow; }
+        void setGridLive (bool live) noexcept { gridLiveNow = live; }
+        bool gridLive() const noexcept { return gridLiveNow; }
 
         /*  WHAT IS GOT READY AHEAD OF GO (namespace draft §48): one entry per
             cue the next GO starts that has a file - the focused list's
@@ -418,7 +422,8 @@ namespace wfg::cue
         DohForget dohForgetNow;
         DohReport dohReportNow;
         bool pausedNow = false;
-        double tempoNow = 0.0;
+        double tempoNow = 120.0;
+        bool gridLiveNow = false;
         std::vector<Ahead> aheadNow;
     };
 }

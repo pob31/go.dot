@@ -210,7 +210,10 @@ has stood in front of the thing.
   next beat or bar (`quantise`, off by default); the first such GO while
   nothing is on the grid anchors it, the rest land on their boundary to the
   sample; a transport cue's `tempo` verb moves the tempo and the bar from its
-  moment on, keeping the beat; Show settings > Timecode holds the show's.
+  moment on, keeping the beat, stepped or ramped with a shape; Show settings >
+  Timecode holds the show's. Every hosted plugin reads the tempo and the beat
+  from its playhead (namespace draft §123), and a sound with `followTempo` on
+  plays at the grid's tempo over the show's.
 - **Importing.** Ableton Live sets (`wfg import-als`, several sets making a tour
   with a performance for each venue; scene tempos, direct outs, live inputs as
   mic cues and MIDI clips' controller curves since §121) and QLab 4 and 5 workspaces

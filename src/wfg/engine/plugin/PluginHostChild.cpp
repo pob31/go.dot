@@ -16,6 +16,7 @@
 
 #include <wfg/engine/plugin/PluginHostChild.h>
 #include <wfg/engine/plugin/Catalogue.h>
+#include <wfg/engine/plugin/GridPlayHead.h>
 #include <wfg/engine/plugin/LaneMapping.h>
 #include <wfg/engine/plugin/PluginLoad.h>
 #include <wfg/engine/plugin/ProcessUtil.h>
@@ -573,6 +574,18 @@ namespace wfg::plugin
             {
                 lanes.takePriority();
 
+                /*  THE PLAYHEAD EACH INSTANCE READS (namespace draft §123, BEJ):
+                    the region's clock and its lane's block start, set before
+                    the first block and taken off before the instances go. */
+                playheads.clear();
+
+                for (int i = 0; i < lanes.count && i < static_cast<int> (instances.size()); ++i)
+                {
+                    playheads.push_back (std::make_unique<GridPlayHead> (&lanes.header, lanes.laneOf[static_cast<std::size_t> (i)],
+                                                                         static_cast<double> (lanes.header.sampleRate.load (std::memory_order_relaxed))));
+                    instances[static_cast<std::size_t> (i)]->setPlayHead (playheads.back().get());
+                }
+
                 std::vector<LaneState> state (static_cast<std::size_t> (lanes.count));
 
                 for (auto& s : state)
@@ -678,11 +691,15 @@ namespace wfg::plugin
                     lanes.restAfterIdlePass (any);
                 }
 
+                for (auto& instance : instances)
+                    instance->setPlayHead (nullptr);
+
                 lanes.workgroup.leave();
             }
 
             juce::AudioPluginFormatManager manager;
             std::vector<std::unique_ptr<juce::AudioPluginInstance>> instances;
+            std::vector<std::unique_ptr<GridPlayHead>> playheads;    ///< one an instance (§123, BEJ)
             InsertLayout layout;
             std::array<float*, maxLaneChannels> lanePointers {};
             std::vector<float> baseline;

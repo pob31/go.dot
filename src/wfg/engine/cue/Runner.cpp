@@ -416,7 +416,7 @@ namespace wfg::cue
             before it, so the run's clock and the voice's never disagree. */
         double voiceRateOf (const Run& run, double stretchLimit) noexcept
         {
-            const auto wanted = run.ownRate * run.chaseFactor;
+            const auto wanted = run.ownRate * run.chaseFactor * run.tempoFactor;
 
             if (! run.stretch || ! (stretchLimit > 0.0))
                 return wanted;
@@ -6237,6 +6237,10 @@ namespace wfg::cue
             cue's own mode. */
         run->stretch = textOf (cue, "rateMode") == "timestretch";
 
+        //  WHETHER IT FOLLOWS THE TEMPO (namespace draft §123, BEK), read with its rate.
+        run->followTempo = textOf (cue, "followTempo") == "true";
+        run->tempoFactor = 1.0;
+
         if (const auto method = chaseMethodOf (*run); method == "varispeed")
             run->stretch = false;
         else if (method == "timestretch")
@@ -7314,23 +7318,47 @@ namespace wfg::cue
         {
             const auto bpm = numberOf (cue, "bpm");
             const auto beats = static_cast<int> (numberOf (cue, "beatsPerBar"));
+            const auto length = numberOf (cue, "duration");
+            const auto shape = numberOf (cue, "shape");
+            const auto bpmGiven = std::isfinite (bpm) && bpm > 0.0;
+            const auto barGiven = beats >= 1 && beats <= 32;
 
+            /*  ANCHORED: the grid goes on from the beat and the tempo it is at
+                this tick - mid-ramp, the tempo of that moment - and ramps to
+                the cue's over its length along its shape (BEL); a length of
+                nought is the step it always was. */
             if (grid.anchored)
             {
-                const auto beatNow = gridBeatAt (tick);
+                const auto seconds = gridSeconds (tick);
+                const auto beatNow = grid.clock.beatAt (seconds);
+                const auto bpmNow = grid.clock.bpmAt (seconds);
 
                 if (grid.anchorSample > 0)
                     grid.anchorSample += (tick - grid.anchorTick) * samplesPerTick;
 
                 grid.anchorTick = tick;
-                grid.anchorBeat = beatNow;
+                grid.clock.anchorBeat = beatNow;
+                grid.clock.bpmFrom = bpmNow;
+                grid.clock.bpmTo = bpmGiven ? bpm : bpmNow;
+                grid.clock.rampStart = 0.0;
+                grid.clock.rampLength = std::isfinite (length) && length > 0.0 ? length : 0.0;
+                grid.clock.shape = std::isfinite (shape) ? std::clamp (shape, 0.0, 1.0) : 0.0;
+
+                if (barGiven)
+                    grid.clock.beatsPerBar = beats;
             }
+            else
+            {
+                //  Before any anchor: what the next anchor runs at, and what the plugins hear meanwhile.
+                if (bpmGiven)
+                    grid.clock.bpmFrom = grid.clock.bpmTo = bpm;
 
-            if (std::isfinite (bpm) && bpm > 0.0)
-                grid.bpm = bpm;
+                if (barGiven)
+                    grid.clock.beatsPerBar = beats;
 
-            if (beats >= 1 && beats <= 32)
-                grid.beatsPerBar = beats;
+                grid.clock.rampLength = 0.0;
+                grid.tempoSet = grid.tempoSet || bpmGiven || barGiven;
+            }
 
             finishing.push_back (runId);
             return;
@@ -9503,22 +9531,64 @@ namespace wfg::cue
         return grid;
     }
 
-    double Runner::gridBpm() const
+    double Runner::showBpm() const
     {
-        if (grid.bpm > 0.0)
-            return grid.bpm;
-
         const auto bpm = osc::parseDouble (document.getAttribute ("/godot/sync/bpm").value_or ("120")).value_or (120.0);
         return std::isfinite (bpm) && bpm > 0.0 ? bpm : 120.0;
     }
 
-    int Runner::gridBeatsPerBar() const
+    int Runner::showBeatsPerBar() const
     {
-        if (grid.beatsPerBar > 0)
-            return grid.beatsPerBar;
-
         const auto beats = osc::parseDouble (document.getAttribute ("/godot/sync/beatsPerBar").value_or ("4")).value_or (4.0);
         return std::isfinite (beats) && beats >= 1.0 && beats <= 32.0 ? static_cast<int> (beats) : 4;
+    }
+
+    double Runner::gridSeconds (std::int64_t tick) const noexcept
+    {
+        return static_cast<double> (tick - grid.anchorTick) / TickClock::rateHz;
+    }
+
+    /*  THE TEMPO NOW (namespace draft §123, BEM): the clock's at this tick
+        once anchored, following a ramp; before any anchor, a tempo verb's if
+        one spoke, else the show's. Never nought: what the plugins hear. */
+    double Runner::tempoNow (std::int64_t tick) const
+    {
+        if (grid.anchored)
+            return grid.clock.bpmAt (gridSeconds (tick));
+
+        if (grid.tempoSet && grid.clock.bpmTo > 0.0)
+            return grid.clock.bpmTo;
+
+        return showBpm();
+    }
+
+    int Runner::barNow() const
+    {
+        if ((grid.anchored || grid.tempoSet) && grid.clock.beatsPerBar >= 1)
+            return grid.clock.beatsPerBar;
+
+        return showBeatsPerBar();
+    }
+
+    /*  WHAT THE AUDIO SIDE IS GIVEN (BEI): the clock as it stands once its
+        anchor's sample is known; before that, or before any anchor, a steady
+        clock at the tempo now whose beats count from the show's start. */
+    BeatClockState Runner::clockState (std::int64_t tick) const
+    {
+        BeatClockState state;
+        state.playing = true;
+
+        if (grid.anchored && grid.anchorSample > 0)
+        {
+            state.anchorSample = grid.anchorSample;
+            state.clock = grid.clock;
+            return state;
+        }
+
+        state.anchorSample = 0;
+        state.clock.bpmFrom = state.clock.bpmTo = tempoNow (tick);
+        state.clock.beatsPerBar = barNow();
+        return state;
     }
 
     int Runner::quantiseBeatsOf (const std::string& quantise, int beatsPerBar) noexcept
@@ -9533,37 +9603,36 @@ namespace wfg::cue
 
     double Runner::gridBeatAt (std::int64_t tick) const noexcept
     {
-        if (! grid.anchored || ! (grid.bpm > 0.0))
-            return 0.0;
-
-        return grid.anchorBeat + static_cast<double> (tick - grid.anchorTick) / TickClock::rateHz * grid.bpm / 60.0;
+        return grid.anchored ? grid.clock.beatAt (gridSeconds (tick)) : 0.0;
     }
 
     std::int64_t Runner::gridSampleOf (double beat) const noexcept
     {
-        if (grid.anchorSample <= 0 || audio == nullptr || audio->sampleRate() <= 0 || ! (grid.bpm > 0.0))
+        if (! grid.anchored || grid.anchorSample <= 0 || audio == nullptr || audio->sampleRate() <= 0)
             return 0;
 
-        return grid.anchorSample + std::llround ((beat - grid.anchorBeat) * 60.0 / grid.bpm
-                                                   * static_cast<double> (audio->sampleRate()));
+        return grid.anchorSample + std::llround (grid.clock.secondsOfBeat (beat) * static_cast<double> (audio->sampleRate()));
     }
 
     void Runner::quantiseLaunch (Run& run, std::int64_t tick)
     {
-        const auto step = quantiseBeatsOf (run.quantise, gridBeatsPerBar());
+        const auto step = quantiseBeatsOf (run.quantise, barNow());
 
         if (step <= 0)
             return;
 
         /*  NOT LIVE: this run starts as a plain one does, and the bars count
-            from it (BEC) - at the show's tempo, or where a tempo verb left it. */
+            from it (BEC) - at the tempo now: the show's, or where a tempo verb
+            left it, a ramp still running carried on from where it is. */
         if (! gridLive())
         {
+            const auto bpm = tempoNow (tick);
+            const auto bar = barNow();
             grid.anchored = true;
             grid.anchorTick = tick + run.preWaitTicks;
-            grid.anchorBeat = 0.0;
-            grid.bpm = gridBpm();
-            grid.beatsPerBar = gridBeatsPerBar();
+            grid.clock = {};
+            grid.clock.bpmFrom = grid.clock.bpmTo = bpm;
+            grid.clock.beatsPerBar = bar;
             grid.anchorRun = run.id;
             grid.anchorSample = 0;
             run.onGrid = true;
@@ -9581,8 +9650,7 @@ namespace wfg::cue
         const auto lead = onASample ? latencyTicks() + 1 : 0;
         const auto earliest = tick + run.preWaitTicks + lead;
         const auto boundary = std::ceil (gridBeatAt (earliest) / step - 1.0e-9) * step;
-        const auto ticksPerBeat = TickClock::rateHz * 60.0 / grid.bpm;
-        const auto boundaryTick = static_cast<double> (grid.anchorTick) + (boundary - grid.anchorBeat) * ticksPerBeat;
+        const auto boundaryTick = static_cast<double> (grid.anchorTick) + grid.clock.secondsOfBeat (boundary) * TickClock::rateHz;
         const auto fireTick = static_cast<std::int64_t> (std::floor (boundaryTick + 1.0e-9)) - lead;
 
         run.preWaitTicks = static_cast<int> (std::max<std::int64_t> (run.preWaitTicks, fireTick - tick));
@@ -9592,9 +9660,32 @@ namespace wfg::cue
 
     void Runner::gridTick (std::int64_t tick)
     {
-        lists.setTempo (gridLive() ? grid.bpm : 0.0);
+        /*  THE READOUTS (BEM), the tempo never nought; and the factor on every
+            sound that follows the tempo (BEK): the tempo now over the show's,
+            one on every other run - set here, before `applyRates` places the
+            speeds, so a ramp is heard on the tick it moves. */
+        const auto tempo = tempoNow (tick);
+        lists.setTempo (tempo);
+        lists.setGridLive (gridLive());
 
-        if (! grid.anchored || audio == nullptr || samplesPerTick <= 0)
+        const auto factor = showBpm() > 0.0 && std::isfinite (tempo / showBpm()) ? tempo / showBpm() : 1.0;
+
+        for (const auto& snapshot : runs.current())
+            if (snapshot.followTempo && ! snapshot.isFinished())
+                if (auto* following = runs.find (snapshot.id))
+                    following->tempoFactor = factor;
+
+        if (audio == nullptr)
+            return;
+
+        //  AND THE CLOCK TO THE AUDIO SIDE, when it moved (BEI).
+        if (const auto state = clockState (tick); ! state.sameAs (clockGiven))
+        {
+            clockGiven = state;
+            audio->setBeatClock (state);
+        }
+
+        if (! grid.anchored || samplesPerTick <= 0)
             return;
 
         /*  THE ANCHOR'S SAMPLE for an anchor that places no launch - a fade, a
@@ -22090,8 +22181,9 @@ namespace wfg::cue
             so a correction moves the picture as it moves a voice: from the last
             point on. */
         const auto* self = runs.find (job.self);
-        const auto factor = self != nullptr && std::isfinite (self->chaseFactor) && self->chaseFactor > 0.0
-                              ? self->chaseFactor : 1.0;
+        const auto factor = (self != nullptr && std::isfinite (self->chaseFactor) && self->chaseFactor > 0.0
+                               ? self->chaseFactor : 1.0)
+                            * (self != nullptr ? self->tempoFactor : 1.0);
         auto speed = job.rate * factor;
 
         /*  A PICTURE HELD BACK TAKES ITS SPEED A DELAY LATER (namespace draft
@@ -22354,7 +22446,7 @@ namespace wfg::cue
         const auto now = videoClockNow();
 
         run.position = now >= 0 ? videoValueOf (job, video::Property::time, now) : job.moviePosition;
-        run.rateNow = job.rate * run.chaseFactor * static_cast<double> (job.bounce);
+        run.rateNow = job.rate * run.chaseFactor * run.tempoFactor * static_cast<double> (job.bounce);
 
         auto index = -1;
 
@@ -23880,7 +23972,8 @@ namespace wfg::cue
             if (! (duration > 0.0))
                 duration = job->movieLength;
 
-            const auto factor = std::isfinite (run.chaseFactor) && run.chaseFactor > 0.0 ? run.chaseFactor : 1.0;
+            const auto factor = (std::isfinite (run.chaseFactor) && run.chaseFactor > 0.0 ? run.chaseFactor : 1.0)
+                                * run.tempoFactor;
             const auto speed = job->rate * factor;
             const auto rate = videoSampleRate();
 

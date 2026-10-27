@@ -34967,3 +34967,75 @@ set's bar the show's). Owed: the words, mine; the author's try on the D700 and a
 stems against Live; a group playing a member by the member's own quantise, if it is wanted; a hold and the
 anchor (the author's to decide: shift the grid by the held time, or let the bars count through it); the
 probe set's question 10.
+
+## 123. The tempo reaches the plugins, and ramps
+
+**Asked 2026-10-26/27** by the author, after a try of §122's step: *"What would be good is to have the tempo
+available to the plugins so that any time based on the note length can share this info and then the ramping
+of the tempo makes sense. Not sure the varispeed/time stretch of media is relevant or if it should be an opt
+in parameter."* Asked three things, the author chose: a sound that opts in follows the tempo **relative to
+the show's `sync/bpm`**, its written rate meaning "at the show's tempo"; while nothing is on the grid the
+plugins see **the tempo as set and a transport that is playing**, the readout never nought; and the ramp's
+shape **adjustable, "like the audio fades"** - a number from straight to S-shaped (a fade cue's `curve` is
+only linear or S; the continuous one is a section's `fadeInCurve`, so the ramp gets a row of its own).
+Straight in beats a minute underneath, as Live draws tempo automation, my recommendation taken unanswered.
+
+What was found: a hosted plugin had **no playhead at all** - every plugin runs in a child process over a
+memory-mapped region (§17.6, AF), nothing in Go.dot uses Tracktion's `ExternalPlugin`, and neither child
+ever called `setPlayHead`. A delay set in note lengths had nothing to go by, 60 BPM or otherwise. The Edit's
+60 BPM (PRD §3.25) is untouched by any of this.
+
+Mine *(proposed)*, the codes after §121's BEG:
+
+- **BEH** **One clock, shared.** `cue::BeatClock` - a pure struct, no JUCE: the anchor's beat, the tempo there
+  (`bpmFrom`), the tempo the ramp reaches (`bpmTo`), the ramp's start and length in seconds from the anchor,
+  its `shape` 0..1 and the bar. `bpmAt` blends the straight line and the smoothstep by the shape; `beatAt` is
+  the tempo's integral in closed form (the ramp's beats are `L·(bpmFrom·p + (bpmTo−bpmFrom)·((1−k)·p²/2 +
+  k·(p³ − p⁴/2)))/60`, either shape covering the same beats); `secondsOfBeat` inverts it, straight where
+  the tempo is steady and by bisection inside the ramp. The Runner counts it in ticks, the audio side and
+  the plugin's child in samples, all three from the one arithmetic.
+- **BEI** **The region carries the clock and the block's place.** The header gains the clock's numbers and
+  the anchor's sample under a seqlock count (`gridSeq`, odd while the parent writes) and whether the
+  transport plays; each lane gains `blockStartSample`, the piece's first sample in Go.dot's count, stored
+  before the request. The host's audio thread copies the clock the tick thread gave at each block's start
+  (`BlockClock`, bound to every proxy as a live input's tap is) and a proxy puts it in the header when its
+  count moved. Region `version` 5: an old child refuses it.
+- **BEJ** **The playhead.** `plugin::GridPlayHead`, one an instance, set on the worker before its first block:
+  `bpm` the tempo at the block, the time signature `beatsPerBar/4`, `ppqPosition` the beats since the first
+  anchor (a beat is a quarter note), the last bar's start and the bar count, the time in samples and seconds,
+  playing as the header says, never looping or recording. Before the parent wrote a clock, 120 in four from
+  the show's start. The editor helper (`PluginEditorChild`), which processes silence, keeps no playhead.
+- **BEK** **A sound that follows.** `media,followTempo` (T, off): a run with it carries `tempoFactor`, the
+  tempo now over the show's `sync/bpm`, set each tick by `gridTick` before the speeds are placed and
+  multiplied into the voice's speed beside the chase factor, on a movie too; off, the factor is one and the
+  voice is bit for bit what it was. The importer leaves it off (BDK's speed fades stand).
+- **BEL** **The ramp.** The Tempo cue reads its `duration` - the ramp's length, nought the step it was - and a
+  `shape` row of its own (0 straight, 1 the full S; `curve` stays the fading stop's). The verb re-anchors at
+  its tick with the beat and the tempo the grid is at that moment - mid-ramp, that moment's - and the ramp
+  runs from there. A quantised cue fired inside a ramp waits for a boundary the integral places, to the sample.
+- **BEM** **The readouts.** `engine/tempo` is the tempo the plugins hear - the show's until a tempo cue
+  moves it, a ramp followed tick by tick - and never nought (BEE amended: between songs the tempo stands where
+  it was left); `engine/gridLive` (T, r) says whether a run launched on the grid still sounds. A Pd patch
+  gets the tempo from `[r /godot/engine/tempo]`, as it gets any row.
+
+As built 2026-10-27: `src/wfg/engine/cue/BeatClock.h`; `Runner::BeatGrid` holding a `BeatClock` (`tempoNow`,
+`barNow`, `clockState`, `gridSeconds`), `quantiseLaunch` and `gridSampleOf` through `secondsOfBeat`,
+`gridTick` setting the readouts, every following run's factor and the audio side's clock; `fireStop`'s tempo
+verb re-anchoring and ramping; `Run::followTempo`/`tempoFactor` read at the arm; `cue::Player::setBeatClock`
+through `HostPlayer` to `AudioHost::Impl::setBeatClock`/`takeClock` and `blockClock`; `ProxyPlugin::bindClock`
+and `ProxyLane::process` with the clock and the piece's first sample, `publishClock`; `region::Header`/`Lane`
+fields, version 5; `plugin/GridPlayHead.h` set by `RealHost::run`; the inspector greying `duration` for fade
+and tempo, `shape` for tempo, `follows the tempo` in the speed part. Rows: `transport,shape`,
+`media,followTempo`, `engine,gridLive`, `engine,tempo` reworded, `transport,duration`/`curve` saying what
+they mean for tempo.
+
+Tests: `BeatClockTests` (straight, the ramp's integral against a sum for three shapes, the inverse to a
+nanosecond, a step, a re-anchor mid-ramp, `sameAs`); GoTests "beat grid:" (a ramp's readout midway and
+after, a bar fired inside a ramp landing on the ramped clock's bar, a following sound at three quarters under
+a tempo of 90 over a show of 120 while a plain one keeps its speed, the readouts after the grid dies);
+ProxyTests (a lane's block starts and the clock in the region once per change, the playhead's answers before
+and inside a ramp, an odd count keeping the last whole clock).
+
+Owed: the words, mine; the author's bench - a tempo-synced delay on a hosted voice under a ramping tempo cue;
+the importer turning `followTempo` on for a set (rate = set tempo over clip tempo, the scene tempo cues doing
+the rest) if the stems want it; a hold and the anchor (§122's open question).

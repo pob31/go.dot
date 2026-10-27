@@ -59,8 +59,10 @@ namespace wfg::plugin::region
     /** Bumped whenever a structure below changes shape. */
     /*  3 since 2026-09-26: the plugin's main widths and the layout in words in
         the header, the latency after a cue's state on each lane. 4 since
-        2026-10-22: whether the worker is in the interface's audio workgroup. */
-    constexpr std::uint32_t version = 4;
+        2026-10-22: whether the worker is in the interface's audio workgroup.
+        5 since 2026-10-27: the beat clock in the header and each block's first
+        sample on its lane, for the plugins' playhead (namespace draft §123). */
+    constexpr std::uint32_t version = 5;
 
     /** The most parameters a plugin may expose through the proxy; a plugin
         with more has the rest neither published nor written. */
@@ -126,6 +128,24 @@ namespace wfg::plugin::region
             nought otherwise - and always nought elsewhere. */
         std::atomic<std::uint32_t> inWorkgroup;
 
+        /*  THE BEAT CLOCK (namespace draft §123, BEI), parent to child: the
+            numbers of `cue::BeatClock` and the Go.dot sample its anchor falls
+            on, which the child's playhead reads a block's tempo and beat from.
+            Written under `gridSeq` as a seqlock: odd while the parent writes,
+            even once the numbers hold, so a child reading an odd count or one
+            that moved under it reads again. `gridPlaying` is the transport a
+            plugin sees. */
+        std::atomic<std::uint64_t> gridSeq;
+        std::atomic<std::uint64_t> gridAnchorSample;
+        std::atomic<double> gridAnchorBeat;
+        std::atomic<double> gridBpmFrom;
+        std::atomic<double> gridBpmTo;
+        std::atomic<double> gridRampStart;
+        std::atomic<double> gridRampLength;
+        std::atomic<double> gridShape;
+        std::atomic<std::uint32_t> gridBeatsPerBar;
+        std::atomic<std::uint32_t> gridPlaying;
+
         /** The child's sentence, NUL-terminated, written before `childFailed`. */
         char problem[problemChars];
 
@@ -155,6 +175,11 @@ namespace wfg::plugin::region
         /** Bumped by the parent at an arm; the child resets the instance
             before the next block so the previous cue's tail is not in it. */
         std::atomic<std::uint32_t> resetSeq;
+
+        /*  WHERE THIS PIECE STARTS in Go.dot's count of samples (namespace
+            draft §123, BEI), stored before the request: what the playhead
+            places the beat against. */
+        std::atomic<std::uint64_t> blockStartSample;
 
         /*  A CUE'S WHOLE STATE, loaded onto this lane's instance before the cue
             may launch (the author's decision of 2026-09-25). One in flight:
@@ -187,7 +212,8 @@ namespace wfg::plugin::region
 
     static_assert (std::atomic<std::uint64_t>::is_always_lock_free
                      && std::atomic<std::uint32_t>::is_always_lock_free
-                     && std::atomic<float>::is_always_lock_free,
+                     && std::atomic<float>::is_always_lock_free
+                     && std::atomic<double>::is_always_lock_free,
                    "the whole design depends on these being lock-free: a locking atomic"
                    " would put a kernel call on the audio thread and break PRD 4.2");
 

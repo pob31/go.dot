@@ -1338,6 +1338,14 @@ namespace wfg::cue
         bool onGrid = false;
         bool anchorsGrid = false;
 
+        /*  A SOUND THAT FOLLOWS THE TEMPO (namespace draft §123, BEK): the
+            cue's `followTempo`, copied at the arm beside its rate, and the
+            factor the grid's tempo over the show's puts on its speed, set each
+            tick by `gridTick` - one for a sound that does not follow, so its
+            voice is bit for bit what it always was. */
+        bool followTempo = false;
+        double tempoFactor = 1.0;
+
         /*  ITS `launchNotBefore` IS A SEAT'S, NOT YET MISSED (RD.8): a sound
             whose cold arm answers after that sample is moved into its file by
             the lateness, once (`launchIfDue`), rather than started late from

@@ -122,6 +122,8 @@ namespace wfg::audio
             pointers[static_cast<std::size_t> (channel)]
                 = destination.getWritePointer (channel, context.bufferStartSample);
 
-        proxyLane.process (pointers.data(), usable, context.bufferNumSamples);
+        //  ON THE CLOCK (§123, BEI): this block's first sample, the buffer's offset in.
+        proxyLane.process (pointers.data(), usable, context.bufferNumSamples, boundClock,
+                           boundClock != nullptr ? boundClock->blockStart + context.bufferStartSample : 0);
     }
 }

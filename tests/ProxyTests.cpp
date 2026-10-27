@@ -38,6 +38,7 @@
 #include <wfg/engine/audio/HostPlayer.h>
 #include <wfg/engine/audio/Looper.h>
 #include <wfg/engine/plugin/Catalogue.h>
+#include <wfg/engine/plugin/GridPlayHead.h>
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/plugin/PluginCommands.h>
 #include <wfg/engine/plugin/PluginTable.h>
@@ -382,6 +383,118 @@ TEST_CASE ("proxy: a late block fades to silence from where the last answer left
 
     if (rt::isCounting())
         CHECK (rt::violations() == 0);
+}
+
+TEST_CASE ("proxy: a lane puts each piece's first sample and the beat clock in the region, the clock once per change (namespace draft §123, BEI)")
+{
+    plugin::ProxyLane lane;
+    VectorRegion region (2, 64, 1);
+    region.bind (lane, 0);
+    lane.setEnabled (true);
+
+    plugin::BlockClock clock;
+    clock.blockStart = 1000;
+    clock.seq = 1;
+    clock.state.anchorSample = 500;
+    clock.state.clock.anchorBeat = 2.0;
+    clock.state.clock.bpmFrom = 100.0;
+    clock.state.clock.bpmTo = 80.0;
+    clock.state.clock.rampLength = 3.0;
+    clock.state.clock.shape = 0.5;
+    clock.state.clock.beatsPerBar = 3;
+
+    //  Nobody answers: the first piece misses, and was placed before it was asked.
+    Block block (2, 64, 0.25f);
+    lane.process (block.data(), 2, 64, &clock, clock.blockStart);
+    const auto* laid = region.lane (0);
+    CHECK (laid->blockStartSample.load() == 1000u);
+
+    const auto* header = region.header;
+    CHECK (header->gridSeq.load() == 2u);
+    CHECK (header->gridAnchorSample.load() == 500u);
+    CHECK (header->gridAnchorBeat.load() == doctest::Approx (2.0));
+    CHECK (header->gridBpmFrom.load() == doctest::Approx (100.0));
+    CHECK (header->gridBpmTo.load() == doctest::Approx (80.0));
+    CHECK (header->gridRampLength.load() == doctest::Approx (3.0));
+    CHECK (header->gridShape.load() == doctest::Approx (0.5));
+    CHECK (header->gridBeatsPerBar.load() == 3u);
+    CHECK (header->gridPlaying.load() == 1u);
+
+    //  The same clock again: not written again. A moved count: written, the count even once more.
+    lane.process (block.data(), 2, 64, &clock, 1064);
+    CHECK (header->gridSeq.load() == 2u);
+    CHECK (laid->blockStartSample.load() == 1064u);
+
+    clock.seq = 2;
+    clock.state.clock.bpmTo = 70.0;
+    lane.process (block.data(), 2, 64, &clock, 1128);
+    CHECK (header->gridSeq.load() == 4u);
+    CHECK (header->gridBpmTo.load() == doctest::Approx (70.0));
+
+    //  With no clock, the old call: nothing of the clock moves.
+    lane.process (block.data(), 2, 64);
+    CHECK (header->gridSeq.load() == 4u);
+}
+
+TEST_CASE ("proxy: a plugin's playhead reads the tempo, the beat and the bar at its block from the region (namespace draft §123, BEJ)")
+{
+    VectorRegion region (2, 64, 1);
+    region.header->sampleRate.store (48000);
+    auto* laid = region.lane (0);
+    const plugin::GridPlayHead head (region.header, laid, 48000.0);
+
+    /*  BEFORE THE PARENT WROTE A CLOCK: the clock as it starts, 120 in four,
+        playing, the beats counted from the show's start. */
+    laid->blockStartSample.store (96000);
+    {
+        const auto position = head.getPosition();
+        REQUIRE (position.hasValue());
+        CHECK (*position->getBpm() == doctest::Approx (120.0));
+        CHECK (position->getTimeSignature()->numerator == 4);
+        CHECK (position->getTimeSignature()->denominator == 4);
+        CHECK (*position->getPpqPosition() == doctest::Approx (4.0));
+        CHECK (*position->getPpqPositionOfLastBarStart() == doctest::Approx (4.0));
+        CHECK (*position->getBarCount() == 1);
+        CHECK (*position->getTimeInSamples() == 96000);
+        CHECK (*position->getTimeInSeconds() == doctest::Approx (2.0));
+        CHECK (position->getIsPlaying());
+        CHECK_FALSE (position->getIsLooping());
+    }
+
+    //  A CLOCK IN THE REGION, written as the lane writes it: a ramp from 120 to 60 over four seconds, in three.
+    plugin::ProxyLane lane;
+    region.bind (lane, 0);
+    lane.setEnabled (true);
+
+    plugin::BlockClock clock;
+    clock.seq = 1;
+    clock.state.anchorSample = 48000;
+    clock.state.clock.anchorBeat = 8.0;
+    clock.state.clock.bpmFrom = 120.0;
+    clock.state.clock.bpmTo = 60.0;
+    clock.state.clock.rampLength = 4.0;
+    clock.state.clock.beatsPerBar = 3;
+
+    Block block (2, 64, 0.0f);
+    lane.process (block.data(), 2, 64, &clock, 48000 + 72000);   // a second and a half into the ramp
+
+    const auto position = head.getPosition();
+    REQUIRE (position.hasValue());
+    const auto& expected = clock.state.clock;
+    CHECK (*position->getBpm() == doctest::Approx (expected.bpmAt (1.5)));
+    CHECK (*position->getPpqPosition() == doctest::Approx (expected.beatAt (1.5)));
+    CHECK (*position->getPpqPositionOfLastBarStart() == doctest::Approx (expected.lastBarStartBeat (expected.beatAt (1.5))));
+    CHECK (position->getTimeSignature()->numerator == 3);
+    CHECK (*position->getTimeInSamples() == 48000 + 72000);
+    CHECK (*position->getBpm() < 120.0);
+    CHECK (*position->getBpm() > 60.0);
+
+    //  A count left odd - the parent mid-write - keeps the last whole clock.
+    region.header->gridSeq.store (3);
+    region.header->gridBpmFrom.store (999.0);
+    const auto held = head.getPosition();
+    REQUIRE (held.hasValue());
+    CHECK (*held->getBpm() == doctest::Approx (expected.bpmAt (1.5)));
 }
 
 TEST_CASE ("proxy: a value written before the child is up is in the region once the lane is bound")

@@ -922,6 +922,11 @@ namespace wfg::audio
         void setTrackFxEnabled (int trackIndex, int slot, bool enabled) noexcept;
         void setTrackFxParameter (int trackIndex, int slot, int parameter, float normalised) noexcept;
 
+        /*  THE BEAT CLOCK (namespace draft §123, BEI), from the tick thread
+            when it moves: taken whole by the audio thread at each block's start
+            and put in every plugin's region for its playhead. */
+        void setBeatClock (const cue::BeatClockState& state) noexcept;
+
         /*  How wide the cue is at one insert (2026-09-26): the channels it
             sends and how many come back. Any thread; atomics on the lane. */
         void setTrackFxShape (int trackIndex, int slot, int feed, int back) noexcept;

@@ -52,6 +52,7 @@
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/clock/ShowHold.h>
 #include <wfg/engine/command/CommandRegistry.h>
+#include <wfg/engine/cue/BeatClock.h>
 #include <wfg/engine/cue/GroupJoin.h>
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/FadeJob.h>
@@ -545,6 +546,11 @@ namespace wfg::cue
             tick; atomics on the audio side. No-ops by default, as setEq. */
         virtual void setFxEnabled (int, int, bool) {}
         virtual void setFxParameter (int, int, int, float) {}
+
+        /*  THE BEAT CLOCK, when it moves (namespace draft §123, BEI): what every
+            hosted plugin's playhead reads. Nothing by default: a replay, and
+            every rig with no plugin. */
+        virtual void setBeatClock (const BeatClockState&) {}
 
         /*  How wide the cue is at one insert, changed under it (2026-09-26):
             the channels it sends and how many come back (FxSetting). Tick
@@ -1480,21 +1486,22 @@ namespace wfg::cue
         bool gridLive() const;
 
         //======================================================================
-        /*  THE BEAT GRID (namespace draft §122, BEC): a tempo and a bar, anchored
-            by a quantised GO while no run launched on the grid still sounds -
-            that GO starts at once and the bars count from it - and moved by a
-            transport cue's tempo verb, the beat it is on kept. Handler state,
-            so a replay waits the same ticks, but for the anchor's SAMPLE: the
-            hook's, set when the anchoring run launches, from which a quantised
-            sound's own sample is placed (`gridSampleOf`). A tempo or a bar of
-            nought reads the show's `sync/bpm` and `sync/beatsPerBar`. */
+        /*  THE BEAT GRID (namespace draft §122, BEC; §123, BEH): a clock -
+            tempo, ramp and bar, counted in seconds from the anchor - anchored
+            by a quantised GO while no run launched on the grid still sounds,
+            that GO starting at once and the bars counting from it, and moved
+            by a transport cue's tempo verb, the beat it is on kept, stepped or
+            ramped. Handler state, so a replay waits the same ticks, but for
+            the anchor's SAMPLE: the hook's, set when the anchoring run launches,
+            from which a quantised sound's own sample is placed
+            (`gridSampleOf`). `tempoSet` says a tempo verb spoke before any
+            anchor; until then the show's `sync/bpm` and `sync/beatsPerBar`. */
         struct BeatGrid
         {
             bool anchored = false;
+            bool tempoSet = false;
             std::int64_t anchorTick = 0;
-            double anchorBeat = 0.0;
-            double bpm = 0.0;
-            int beatsPerBar = 0;
+            BeatClock clock;
             std::string anchorRun;
             std::int64_t anchorSample = 0;
         };
@@ -4589,9 +4596,14 @@ namespace wfg::cue
         bool isPast (const std::string& listId, const std::string& fired, const std::string& marked) const;
 
         BeatGrid grid;
+        BeatClockState clockGiven;      ///< what the audio side last had (§123, BEI)
 
-        double gridBpm() const;
-        int gridBeatsPerBar() const;
+        double showBpm() const;
+        int showBeatsPerBar() const;
+        double gridSeconds (std::int64_t tick) const noexcept;
+        double tempoNow (std::int64_t tick) const;
+        int barNow() const;
+        BeatClockState clockState (std::int64_t tick) const;
         double gridBeatAt (std::int64_t tick) const noexcept;
         std::int64_t gridSampleOf (double beat) const noexcept;
         static int quantiseBeatsOf (const std::string& quantise, int beatsPerBar) noexcept;
