@@ -91,6 +91,7 @@ namespace wfg::cue { class CurveTable; class DcaTable; class LaneTable; class Li
 
 namespace wfg::video { class VideoHost; class Converter; }
 namespace wfg::video::ffmpeg { class Installer; }
+namespace wfg::net { class SscV2Table; }
 namespace wfg::serial { class SerialTable; class HeardLines; }
 
 namespace wfg::tree
@@ -633,6 +634,10 @@ namespace wfg::tree
             the table serve opens one on for each device on the ssc wire. */
         void setDatagramLinks (const serial::SerialTable* table) noexcept { datagramLinks = table; }
 
+        /*  AND THE BASE STATIONS OVER HTTPS (namespace draft §124, BET): the
+            link rows and the certificate each last presented. */
+        void setSscV2 (const net::SscV2Table* table) noexcept { sscV2 = table; }
+
         /*  THE DEVICE PRESETS installed beside the binary (namespace draft
             §57, AFN): what the Network tab's ADD menu offers, published
             under /godot/preset/<slug>. Absent in a replay and a tree dump,
@@ -795,6 +800,7 @@ namespace wfg::tree
         const serial::SerialTable* links = nullptr;
         const serial::SerialTable* mqttLinks = nullptr;
         const serial::SerialTable* datagramLinks = nullptr;
+        const net::SscV2Table* sscV2 = nullptr;
         const PresetTable* presets = nullptr;
 
         /*  THE PRESET ROWS, MADE ONCE PER TABLE (DP.11): two hundred and forty

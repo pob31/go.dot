@@ -47,6 +47,8 @@
 
 #include <cstdint>
 
+#include <map>
+
 #include <optional>
 #include <string>
 #include <vector>
@@ -234,7 +236,8 @@ namespace wfg::tree::wire
     std::vector<std::pair<std::string, json::Value>> sscLeavesOf (const json::Value& message);
 
     /*  A value as the node takes it: a number an int32 on a node typed `i`
-        and a float32 otherwise, a bool T or F, a string as it is, each
+        - or, with no node to say (`typeTags` empty), a whole number - and a
+        float32 otherwise, a bool T or F, a string as it is, each
         element of an array one atom - an array inside it flattened in order;
         null is nothing. */
     osc::Values sscValuesOf (const json::Value& value, const std::string& typeTags);
@@ -242,4 +245,23 @@ namespace wfg::tree::wire
     /*  The error a message carries, `osc.error`, as compact JSON - what the
         device's last reply keeps - or empty where there is none. */
     std::string sscErrorOf (const json::Value& message);
+
+    //==========================================================================
+    /*  THE SSCV2 WIRE (namespace draft §124, BET): Sennheiser's version 2 - a
+        Spectera, an EW-DX from firmware 4 - REST and JSON over HTTPS. The
+        address under the prefix is the resource's path and then the field:
+        `/api/mts/paired/all/1234/name` is the field `name` of the resource
+        `/api/mts/paired/all/1234`. A write is a PUT of that resource with the
+        field alone, `{"name":"Lead"}`; a question a GET of the resource, whose
+        answer is heard whole. Rendered as the request table takes it: the
+        method and the path, a new line, the body. */
+    std::string renderSscV2 (const std::string& relative, const osc::Values& values, bool asking);
+
+    /*  What a resource holds, as addresses under it and values: an object's
+        fields by name, nested; a collection - an array the file names an
+        identifier for (`ids`, the root's `GODOT.IDS`: `/api/mts/paired/all` is
+        `mtUid`) - each element under its identifier's value; anything else a
+        leaf. An event is an object of these keyed by path. */
+    std::vector<std::pair<std::string, json::Value>> sscV2LeavesOf (const std::string& path, const json::Value& value,
+                                                                    const std::map<std::string, std::string>& ids);
 }

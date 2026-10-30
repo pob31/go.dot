@@ -81,6 +81,7 @@ TE = "ThirdParty/tracktion_engine"
 SIMPLEWEB = "ThirdParty/juce_simpleweb"
 SPATCORE = "ThirdParty/spatcore"
 HIDAPI = "ThirdParty/hidapi"
+MBEDTLS = "ThirdParty/mbedtls"
 LIBPD = "ThirdParty/libpd"
 PUREDATA = "ThirdParty/pure-data"
 LIBAJANTV2 = "ThirdParty/libajantv2"
@@ -98,6 +99,8 @@ FIX_HINT = {
     TE: "git submodule update --init " + TE,
     SPATCORE: "git submodule update --init " + SPATCORE,
     HIDAPI: "git submodule update --init " + HIDAPI,
+    MBEDTLS: "git submodule update --init " + MBEDTLS
+             + "   (NOT --recursive: its test framework is never built here)",
     LIBPD: "git submodule update --init " + LIBPD,
     PUREDATA: "git submodule update --init " + PUREDATA,
     LIBAJANTV2: "git submodule update --init " + LIBAJANTV2,
@@ -152,7 +155,7 @@ def checked_out_head(path: str):
 
 def check_a(failures):
     """Every submodule is checked out at the SHA its gitlink names."""
-    for path in (JUCE, TE, SIMPLEWEB, SPATCORE, HIDAPI, LIBPD, PUREDATA, LIBAJANTV2):
+    for path in (JUCE, TE, SIMPLEWEB, SPATCORE, HIDAPI, MBEDTLS, LIBPD, PUREDATA, LIBAJANTV2):
         recorded, err = recorded_gitlink(path)
         if err:
             failures.append(err)

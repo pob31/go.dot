@@ -975,9 +975,10 @@ namespace wfg::tree::wire
     osc::Values sscValuesOf (const json::Value& value, const std::string& typeTags)
     {
         osc::Values out;
-        const auto whole = ! typeTags.empty() && typeTags[0] == 'i';
+        const auto typed = ! typeTags.empty();
+        const auto declaredWhole = typed && typeTags[0] == 'i';
 
-        std::function<void (const json::Value&)> one = [&out, whole, &one] (const json::Value& atom)
+        std::function<void (const json::Value&)> one = [&out, typed, declaredWhole, &one] (const json::Value& atom)
         {
             //  An array inside one - a Digital 6000's meters, two channels of nine - is its atoms in order.
             if (atom.isArray())
@@ -985,7 +986,10 @@ namespace wfg::tree::wire
                     one (inner);
             else if (atom.isBool())
                 out.push_back (osc::Value::boolean (atom.asBool()));
-            else if (atom.isNumber() && whole)
+            else if (atom.isNumber()
+                       && (declaredWhole
+                           || (! typed && std::abs (atom.asNumber() - std::round (atom.asNumber())) < 1e-9
+                               && std::abs (atom.asNumber()) < 2.0e9)))
                 out.push_back (osc::Value::int32 (static_cast<std::int32_t> (std::llround (atom.asNumber()))));
             else if (atom.isNumber())
                 out.push_back (osc::Value::float32 (static_cast<float> (atom.asNumber())));
@@ -1002,5 +1006,77 @@ namespace wfg::tree::wire
         const auto* protocol = message.find ("osc");
         const auto* error = protocol != nullptr ? protocol->find ("error") : nullptr;
         return error != nullptr ? json::write (*error) : std::string {};
+    }
+}
+
+namespace wfg::tree::wire
+{
+    std::string renderSscV2 (const std::string& relative, const osc::Values& values, bool asking)
+    {
+        const auto cut = relative.rfind ('/');
+
+        if (cut == std::string::npos || cut == 0 || cut + 1 >= relative.size())
+            return {};
+
+        const auto resource = relative.substr (0, cut);
+
+        if (asking)
+            return "GET " + resource + "\n";
+
+        const auto field = relative.substr (cut + 1);
+        std::string value = "null";
+
+        if (values.size() == 1)
+        {
+            value = sscAtom (values.front());
+        }
+        else if (values.size() > 1)
+        {
+            value = "[";
+            for (std::size_t at = 0; at < values.size(); ++at)
+                value += (at > 0 ? "," : "") + sscAtom (values[at]);
+            value += "]";
+        }
+
+        return "PUT " + resource + "\n{" + json::quote (field) + ":" + value + "}";
+    }
+
+    namespace
+    {
+        void collectV2 (const std::string& path, const json::Value& value, const std::map<std::string, std::string>& ids,
+                        std::vector<std::pair<std::string, json::Value>>& out)
+        {
+            if (value.isObject())
+            {
+                for (const auto& [key, child] : value.asObject())
+                    collectV2 (path + "/" + key, child, ids, out);
+                return;
+            }
+
+            if (const auto named = ids.find (path); value.isArray() && named != ids.end())
+            {
+                for (const auto& element : value.asArray())
+                {
+                    const auto* id = element.find (named->second);
+
+                    if (id == nullptr)
+                        continue;
+
+                    const auto key = id->isString() ? id->asString() : std::to_string (std::llround (id->asNumber()));
+                    collectV2 (path + "/" + key, element, ids, out);
+                }
+                return;
+            }
+
+            out.emplace_back (path, value);
+        }
+    }
+
+    std::vector<std::pair<std::string, json::Value>> sscV2LeavesOf (const std::string& path, const json::Value& value,
+                                                                    const std::map<std::string, std::string>& ids)
+    {
+        std::vector<std::pair<std::string, json::Value>> out;
+        collectV2 (path, value, ids, out);
+        return out;
     }
 }

@@ -35121,10 +35121,10 @@ The codes after §123's BEM. The first three are the author's; the rest mine *(p
 
 | Stage | What | Commit |
 |---|---|---|
-| WR.0 | This section; PRD §3.35 | |
-| WR.1 | The shure wire, the `angles` framing, REP and SAMPLE heard; the Shure presets | |
-| WR.2 | A mock Shure receiver; `blackbox.radios` | |
-| WR.3 | The ssc wire, a datagram link; the Sennheiser presets | |
+| WR.0 | This section; PRD §3.35 | 6540cc63 |
+| WR.1 | The shure wire, the `angles` framing, REP and SAMPLE heard; the Shure presets | 6540cc63 |
+| WR.2 | A mock Shure receiver; `blackbox.radios` | 6540cc63 |
+| WR.3 | The ssc wire, a datagram link; the Sennheiser presets | 3aa834fc |
 | WR.4 | Mbed TLS, a TLS link, the pin | |
 | WR.5 | The sscv2 wire, Server-Sent Events; the Spectera preset | |
 | WR.6 | The radio panel, problem marks | |
@@ -35186,3 +35186,40 @@ alone, subscribing, reached by its link; JSON a datagram a message, null when as
 against `mock_ssc.py`, an EW-DX from its guide: the subscription first and renewed, what it covers heard, a
 mute and a gain as JSON, the gain the receiver adapted to its step heard back, a pack's battery dropping
 heard, a 404 kept - 47 checks with the Shure half, both locales.
+
+As built 2026-10-30, WR.4 and WR.5. **Mbed TLS 3.6.7** (the LTS line) at `ThirdParty/mbedtls`, its `library/*.c`
+compiled as `wfg_mbedtls` in `cmake/WfgThirdParty.cmake` and nothing of its own CMake, whose top level will not
+configure without the `framework` submodule this project never fetches (CI's checkouts stay non-recursive);
+`scripts/check-pins.py` knows it; `deps.no-openssl` still passes. `net::TlsStream`: Mbed TLS over a JUCE socket -
+the connect keeps its bounded wait - PSA crypto started once, the handshake completed whatever is presented, and
+the certificate's SHA-256 handed back as hex pairs. `net::Http`: a request's text with Basic authentication, a
+response's head, a chunked body however it is cut, and an EventSource parser. `net::SscV2Table`: a worker per
+device, one TLS connection for the event stream and one kept alive for requests, the links' backoff; the
+fingerprint compared with `mount/pin` before a byte is written, so **no request and no password leaves before
+the device is trusted** - with no pin, `linkProblem` says "not trusted yet" and `mount/certificate` shows what to
+trust; a different one is refused as "not the one trusted". Read from Sennheiser's SSCv2 Specification 2.3 while
+building: the `open` event names the session; `PUT .../{sessionUUID}/add` takes the paths, and the base station
+answers each with its current values, so nothing is fetched besides; a `close` event ends the session, which is
+opened again; a `PUT` of a resource may carry one field and is transactional (400 for a field it lacks).
+
+The sscv2 wire: `renderSscV2` (a PUT of the resource with the field, a GET of it when asked) and `sscV2LeavesOf`
+(an event's resources, or a reply, field by field; a collection's array by the root's `GODOT.IDS` - the packs
+by `mtUid`); a value with no node to type it - a pack's, under an identifier the base station gave it - typed by
+its JSON, a whole number an int32. `https` is a transport (the sscv2 wire only, a host required), `mount/pin`
+stored and `mount/certificate` published, the login `user password`. In the Network tab a base station waiting to
+be trusted says so in its problem cell, and a click offers *Trust this certificate* - the fingerprint written as
+the pin, an undoable edit - or *Forget the trusted certificate*; its host is typed in place, no menu offering a way
+its wire cannot take. `sennheiser-spectera` from `scripts/presets/sennheiser_sscv2.py`: the site, the state and
+the two RF channels described, the packs, inputs, outputs, antennas and health OPEN. Spectera's OpenAPI file was
+not read (the documentation portal's links answered 404): its field names come from Sennheiser's Companion module,
+to be checked at JTSE. An EW-DX from firmware 4 is the same wire with a preset still to write.
+
+Tests: WireTests (Basic authentication and a request bytes-exact; a head arriving in pieces, a chunked body cut
+anywhere, a size that is not one; events named or not, data lines joined, a comment, CR alone; a PUT of one field,
+a GET; an event's fields nested, a collection under its identifiers, an array left whole), ClientTests (when a
+device waits to be trusted, whatever the case and colons), and `blackbox.radios` against `mock_spectera.py`, a
+base station from SSCv2 2.3 over real TLS with a test certificate (`tests/fixtures/certs`): reached and its
+certificate shown with NOTHING sent; a wrong pin refused, still nothing sent; trusted, the session opened and the
+resources added; a pack heard under its mtUid, a rename as a PUT of that pack with the one field, heard back; a
+battery dropping heard; a 400 kept; the stream closed by the base station and opened again; a wrong password said
+- 69 checks with the Shure and SSC halves, both locales.

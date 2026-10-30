@@ -16,6 +16,8 @@
 
 #include <wfg/engine/tree/ParameterTree.h>
 
+#include <wfg/engine/net/SscV2.h>
+
 #include <wfg/engine/cue/TextFields.h>
 #include <wfg/engine/video/Blanks.h>
 
@@ -2692,7 +2694,7 @@ namespace wfg::tree
 
                         /*  LISTEN moves with no command: the runtime half's.
                             So does the link (DP.6), on its own thread. */
-                        if (name == "listen" || name == "link" || name == "linkProblem")
+                        if (name == "listen" || name == "link" || name == "linkProblem" || name == "certificate")
                             continue;
 
                         /*  `loaded` and `nodeCount` describe what the engine did
@@ -5115,9 +5117,23 @@ namespace wfg::tree
                     const auto linkState = overLink ? table->stateOf (mountId) : serial::PortState {};
                     const auto base = std::string (godot) + "/mount/" + mountId + "/";
 
+                    /*  A BASE STATION OVER HTTPS (§124, BET): its worker's own
+                        words, and the certificate it last presented. */
+                    if (transport == "https")
+                    {
+                        const auto station = sscV2 != nullptr ? sscV2->stateOf (mountId) : net::SscV2State {};
+                        runtime.push_back (makeLeaf (base + "link", *linkRow, station.state));
+                        runtime.push_back (makeLeaf (base + "linkProblem", *linkProblemRow, station.problem));
+                        if (const auto* certificateRow = rowNamed ("mount", "certificate"))
+                            runtime.push_back (makeLeaf (base + "certificate", *certificateRow, station.certificate));
+                        continue;
+                    }
+
                     runtime.push_back (makeLeaf (base + "link", *linkRow, overLink ? linkState.state : std::string ("off")));
                     runtime.push_back (makeLeaf (base + "linkProblem", *linkProblemRow,
                                                  overLink ? linkState.problem : std::string {}));
+                    if (const auto* certificateRow = rowNamed ("mount", "certificate"))
+                        runtime.push_back (makeLeaf (base + "certificate", *certificateRow, std::string {}));
                 }
 
         /*  WHAT EACH SURFACE'S ROTARIES ARE SHOWING (author, 2026-09-25): its

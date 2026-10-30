@@ -148,6 +148,12 @@ namespace wfg::client::model
         std::string link = "off";
         std::string linkProblem;
 
+        /*  A BASE STATION OVER HTTPS (namespace draft §124, BET): the
+            certificate it last presented and the one the show trusts, each
+            its SHA-256 as hex pairs. */
+        std::string certificate;
+        std::string pin;
+
         /*  AND ON A MIDI PORT (namespace draft §57, DP.9): the declared port a
             `midi` transport sends on, by identifier, and the channel its
             nodes count from. */
@@ -184,6 +190,11 @@ namespace wfg::client::model
         already has; the framing stays what the row says - length for a device
         typed by hand, what the preset said for one made from a preset. */
     std::vector<std::pair<std::string, std::string>> deviceOnTcp (const std::string& deviceId);
+
+    /*  WHETHER A DEVICE OVER HTTPS WAITS TO BE TRUSTED (§124, BET): it has
+        presented a certificate the show's pin is not - none yet, or another.
+        Compared as hex digits alone, whatever the case and the colons. */
+    bool waitsForTrust (const DeviceRow& row);
 
     /*  AND ON A MIDI PORT (DP.9): its transport, the port, and the midi wire,
         the only one a port carries. */

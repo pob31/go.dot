@@ -226,8 +226,9 @@ namespace wfg::tree
             line; a word the schema lacks never reaches here. */
         if (declaration->wire != "osc" && declaration->wire != "rcp" && declaration->wire != "line"
               && declaration->wire != "midi" && declaration->wire != "mqtt" && declaration->wire != "shure"
-              && declaration->wire != "ssc")
-            return refuse ("wire \"" + declaration->wire + "\" is not one Go.dot renders - osc, rcp, line, midi, mqtt, shure or ssc");
+              && declaration->wire != "ssc" && declaration->wire != "sscv2")
+            return refuse ("wire \"" + declaration->wire + "\" is not one Go.dot renders - osc, rcp, line, midi, mqtt, shure, ssc"
+                           " or sscv2");
 
         /*  THE MQTT WIRE AND TRANSPORT ARE ONE THING SEEN TWICE (namespace
             draft §67, ANA): a publish on a topic is what a broker takes and
@@ -246,6 +247,13 @@ namespace wfg::tree
         if (declaration->wire == "ssc" && declaration->transport != "udp")
             return refuse ("the ssc wire is a Sennheiser receiver's JSON, a datagram each - set the transport to udp");
 
+        //  And version 2 over TLS, which carries nothing else (§124, BET).
+        if (declaration->wire == "sscv2" && declaration->transport != "https")
+            return refuse ("the sscv2 wire is a Sennheiser base station's REST over TLS - set the transport to https");
+
+        if (declaration->transport == "https" && declaration->wire != "sscv2")
+            return refuse ("an https device speaks Sennheiser's version 2 only - set the wire to sscv2");
+
         if (declaration->wire == "midi" && declaration->transport == "serial")
             return refuse ("the midi wire does not ride a serial port - a MIDI port, a connection or a datagram");
 
@@ -253,7 +261,8 @@ namespace wfg::tree
             belongs to a wire, and a word on the wrong one would wait for an
             answer that cannot come. */
         if ((declaration->readback == "get" || declaration->readback == "xremote" || declaration->readback == "subscribe")
-              && declaration->wire != "osc" && ! (declaration->readback == "subscribe" && declaration->wire == "ssc"))
+              && declaration->wire != "osc"
+              && ! (declaration->readback == "subscribe" && (declaration->wire == "ssc" || declaration->wire == "sscv2")))
             return refuse ("readback " + declaration->readback + " is an OSC device's way - set the wire to osc");
 
         if (declaration->readback == "notify" && declaration->wire != "rcp" && declaration->wire != "shure")
@@ -341,12 +350,20 @@ namespace wfg::tree
             if (declaration->port < 0 || declaration->port > 65535)
                 return refuse ("no usable port. A broker listens on 1883 unless it says otherwise");
         }
+        /*  A BASE STATION OVER TLS (namespace draft §124, BET): a host to reach
+            and a port, 443 unless it says another; whether its certificate is
+            trusted is the link's to say, tonight, not the declaration's. */
+        else if (declaration->transport == "https")
+        {
+            if (declaration->host.empty())
+                return refuse ("it is reached over HTTPS and names no host");
+        }
         else if (declaration->transport != "udp" && declaration->transport != "midi")
             return refuse ("transport \"" + declaration->transport
                            + "\" is declared but not implemented -"
-                             " Go.dot speaks udp, tcp, serial, midi and mqtt to a mount today");
+                             " Go.dot speaks udp, tcp, serial, midi, mqtt and https to a mount today");
 
-        if ((declaration->transport == "udp" || declaration->transport == "tcp")
+        if ((declaration->transport == "udp" || declaration->transport == "tcp" || declaration->transport == "https")
               && (declaration->port <= 0 || declaration->port > 65535))
             return refuse ("no usable port. A device has to say which port it listens"
                            " on; nothing can be inferred and UDP will never tell you it"

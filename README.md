@@ -703,6 +703,7 @@ test step runs, four, three and four entries at once — each runner's cores.
 | `wfg_pd` | STATIC | Pure Data and libpd, one Pd instance per patch on a thread of its own |
 | `wfg_lua` | STATIC | Lua 5.4 for a script cue: its core and six libraries, never io, os, package or debug |
 | `wfg_hidapi` | STATIC | hidapi's one platform file, for the SpaceMouse and the Stream Decks |
+| `wfg_mbedtls` | STATIC | Mbed TLS's library sources, its client half used: HTTPS to a Sennheiser Spectera |
 | `wfg_syphon` | STATIC | macOS only: Syphon's Metal half and Go.dot's own server on it |
 | `wfg` | executable | The product binary (PRD §7's binary name) |
 | `wfg_tests` | executable | doctest runner, registered with CTest under both locales |
@@ -768,6 +769,7 @@ live in `packaging/`.
 | juce_simpleweb (the OSCQuery server's HTTP and WebSocket; the author's fork) | `pob31/juce_simpleweb` | `b72ec947548654cdd0a7e72b71ab5826fe574847` |
 | spatcore (the author's shared control-plane code, headers only) | main, after PR #18 | `5803830150e408ad76c296cd9edbd5d9eba35dc3` |
 | hidapi (the SpaceMouse, the Stream Decks) | 0.15.0 | `d6b2a974608dec3b76fb1e36c189f22b9cf3650c` |
+| Mbed TLS (HTTPS to a radio-mic base station; Apache-2.0; its `framework` submodule is not fetched) | 3.6.7 LTS | `068ff080b369adfac81509f9b57b2afabaf82dc5` |
 | sokol (the video renderer's graphics) | master, 2026-10-06 | `401f21f8b7039258c35fef75c11d9a8a0e616771` |
 | Spout's SpoutDX (vendored in `ThirdParty/spout`, Windows) | master | `c2bcc12147711d12ace7d5f08e869d774d840f8a` |
 | Syphon (`ThirdParty/Syphon`, macOS) | main, 2026-09-21 | `f4761677a45b8034a3c2069ec0f3d2553da81fba` |

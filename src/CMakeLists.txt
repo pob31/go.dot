@@ -273,6 +273,9 @@ add_library(wfg_engine STATIC
     wfg/engine/mqtt/Session.cpp
     wfg/engine/mqtt/Broker.cpp
     wfg/engine/mqtt/Words.cpp
+    wfg/engine/net/Http.cpp
+    wfg/engine/net/SscV2.cpp
+    wfg/engine/net/TlsStream.cpp
     wfg/engine/serial/TcpLink.cpp
     wfg/engine/serial/UdpLink.cpp
     wfg/engine/surface/SurfaceProfile.cpp

@@ -353,6 +353,15 @@ namespace wfg::tree
             return covered == 0 ? std::string {} : wire::renderSsc (address.substr (covered), values, asking);
         }
 
+        //  And a base station's request (§124, BET), the prefix off.
+        std::string sscV2RequestOf (const MountTable* mounts, const std::string& mountId, const std::string& address,
+                                    const osc::Values& values, bool asking)
+        {
+            const auto* declaration = mounts != nullptr ? mounts->declarationOf (mountId) : nullptr;
+            const auto covered = declaration != nullptr ? prefixMatchLength (address, declaration->prefix) : 0;
+            return covered == 0 ? std::string {} : wire::renderSscV2 (address.substr (covered), values, asking);
+        }
+
         std::vector<std::string> wordsOf (const std::string& text)
         {
             std::vector<std::string> out;
@@ -407,6 +416,12 @@ namespace wfg::tree
                 const auto frame = shureFrameOf (mounts, message.mountId, message.address, {}, true);
                 ok = ! frame.empty() && deliver (message.destination, std::vector<std::uint8_t> (frame.begin(), frame.end()));
             }
+            else if (message.destination.wire == "sscv2")
+            {
+                //  A base station is asked with a GET of the resource (§124, BET).
+                const auto text = sscV2RequestOf (mounts, message.mountId, message.address, {}, true);
+                ok = ! text.empty() && deliver (message.destination, std::vector<std::uint8_t> (text.begin(), text.end()));
+            }
             else if (message.destination.wire == "ssc")
             {
                 //  A Sennheiser receiver is asked with null (§124, BES).
@@ -458,6 +473,14 @@ namespace wfg::tree
                 whose framing adds nothing after it. */
             const auto frame = shureFrameOf (mounts, message.mountId, message.address, message.values, false);
             ok = ! frame.empty() && deliver (message.destination, std::vector<std::uint8_t> (frame.begin(), frame.end()));
+        }
+        else if (message.destination.wire == "sscv2")
+        {
+            /*  THE SSCV2 WIRE (namespace draft §124, BET): a PUT of the
+                resource with the one field, handed to the base station's
+                worker as its request. */
+            const auto text = sscV2RequestOf (mounts, message.mountId, message.address, message.values, false);
+            ok = ! text.empty() && deliver (message.destination, std::vector<std::uint8_t> (text.begin(), text.end()));
         }
         else if (message.destination.wire == "ssc")
         {
@@ -761,6 +784,7 @@ namespace wfg::tree
         /*  A device on the ssc wire has a socket of its own (§124, BES), so
             it is reached as a link is, by its identifier. */
         destination.link = declaration.transport == "tcp" || declaration.transport == "mqtt" || declaration.wire == "ssc"
+                                || declaration.wire == "sscv2"
                                ? declaration.id : std::string {};
         destination.wire = declaration.wire.empty() ? std::string ("osc") : declaration.wire;
         destination.midiPort = declaration.transport == "midi" ? declaration.midiPort : std::string {};

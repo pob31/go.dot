@@ -3214,12 +3214,24 @@ namespace wfg::client::ui
                     AFJ; DP.6), what the link is doing, in the engine's word:
                     open is quiet and dim; anything else is the failure it is,
                     with its sentence - the word carries it, not the colour. */
-                else if (entry.transport == "tcp" || entry.transport == "mqtt")
+                else if (entry.transport == "tcp" || entry.transport == "mqtt" || entry.transport == "https"
+                           || entry.wire == "ssc")
                 {
-                    g.setColour (Look::colour (theme, entry.link == "open" && entry.linkProblem.empty() ? "ink-dim" : "failed"));
-                    g.drawText ("link " + juce::String (entry.link)
-                                  + (entry.linkProblem.empty() ? juce::String() : ": " + juce::String (entry.linkProblem)),
-                                cells[11], juce::Justification::centredLeft, true);
+                    /*  A base station waiting to be trusted says so first, and
+                        a click on the cell offers it (§124, BET). */
+                    if (model::waitsForTrust (entry))
+                    {
+                        g.setColour (Look::colour (theme, "failed"));
+                        g.drawText ("not trusted - click to trust its certificate " + juce::String (entry.certificate),
+                                    cells[11], juce::Justification::centredLeft, true);
+                    }
+                    else
+                    {
+                        g.setColour (Look::colour (theme, entry.link == "open" && entry.linkProblem.empty() ? "ink-dim" : "failed"));
+                        g.drawText ("link " + juce::String (entry.link)
+                                      + (entry.linkProblem.empty() ? juce::String() : ": " + juce::String (entry.linkProblem)),
+                                    cells[11], juce::Justification::centredLeft, true);
+                    }
                 }
 
                 /*  THE KIND, and the newer preset when one is installed: the
@@ -3277,9 +3289,39 @@ namespace wfg::client::ui
                     case Cell::rollback: editAt (row, cellAt (event.x, width), width); return;
 
                     case Cell::problem:
+                        trustMenu (entry);
+                        return;
+
                     case Cell::topics:
                     case Cell::none:   return;
                 }
+            }
+
+            /*  TRUSTING A BASE STATION (namespace draft §124, BET): its
+                certificate's fingerprint written as the device's pin - a
+                decision, kept in the show and undone as any edit is - or, for
+                one already trusted, forgotten. Nothing for any other device. */
+            void trustMenu (const model::DeviceRow& entry)
+            {
+                if (entry.transport != "https" || (entry.certificate.empty() && entry.pin.empty()))
+                    return;
+
+                juce::PopupMenu menu;
+                menu.addItem (1, "Trust this certificate: " + juce::String (entry.certificate),
+                              model::waitsForTrust (entry), false);
+                menu.addItem (2, "Forget the trusted certificate", ! entry.pin.empty(), false);
+
+                const auto pinRow = "/godot/mount/" + entry.id + "/pin";
+                const auto certificate = entry.certificate;
+                menu.showMenuAsync (juce::PopupMenu::Options(), [this, pinRow, certificate] (int chosen)
+                                    {
+                                        if (! send)
+                                            return;
+                                        if (chosen == 1)
+                                            send (gesture::setNode (pinRow, certificate));
+                                        else if (chosen == 2)
+                                            send (gesture::setNode (pinRow, ""));
+                                    });
             }
 
             void listBoxItemDoubleClicked (int, const juce::MouseEvent&) override {}
@@ -3320,6 +3362,15 @@ namespace wfg::client::ui
             void chooseWay (int row, int width)
             {
                 const auto& entry = rows[static_cast<std::size_t> (row)];
+
+                /*  A BASE STATION OVER HTTPS (§124, BET) is reached one way
+                    only: its host is typed in place, and no menu offers a way
+                    its wire cannot take. */
+                if (entry.transport == "https")
+                {
+                    editAt (row, Cell::host, width);
+                    return;
+                }
 
                 juce::PopupMenu menu;
                 menu.addItem (1, "On the network, by datagram (UDP), at an address...", true, entry.transport == "udp");

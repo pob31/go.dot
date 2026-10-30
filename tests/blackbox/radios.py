@@ -38,6 +38,16 @@ the adapted value heard; a pack's battery dropping heard through the
 subscription; an address the receiver lacks kept as the last reply; and the
 subscription renewed before its lifetime runs out.
 
+THEN SPECTERA (BET), against mock_spectera.py, a base station from SSCv2 2.3
+over real TLS with a self-signed certificate: a device from the Spectera preset
+reached, its certificate shown and NOTHING sent - no request, no password -
+until it is trusted; a pin that is not its fingerprint refused and said; the
+right pin, then the subscription opened and the resources added, their values
+heard, a pack under the identifier the base station gave it; a cue renaming a
+pack as a PUT of that pack with the one field, heard back; a battery dropping
+heard; a field the base station refuses kept as the last reply; the base
+station closing the subscription, opened again; and a wrong password said.
+
 WHAT WAS HEARD IS READ FROM THE SESSION'S LOG, where every report is a
 `mount.heard` record with its address and typed values: a mounted node's HTTP
 answer is what Go.dot wrote, and what the device said reaches no client yet
@@ -59,10 +69,12 @@ from common import HarnessError, Report, Server
 
 MOCK = Path(__file__).resolve().parent / "mock_shure.py"
 MOCK_SSC = Path(__file__).resolve().parent / "mock_ssc.py"
+MOCK_SPECTERA = Path(__file__).resolve().parent / "mock_spectera.py"
 FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "bundles" / "devices"
 
 RADIO = "AD4QRAD1"         # the device made from the Axient Digital preset
 EWDX = "EWDXRAD1"          # and the one from the EW-DX preset, on SSC
+SPECTERA = "SPECTRA1"      # and the one from the Spectera preset, over HTTPS
 CUE = "B3N8R5TW"           # the fixture's /light/go, re-aimed at the receiver
 
 locale = next((arg.split("=", 1)[1] for arg in sys.argv if arg.startswith("--wfg-locale=")), "C")
@@ -268,6 +280,74 @@ def run() -> int:
                              "the subscription asked again before its fifteen seconds run out",
                              f"{subscribed()} subscriptions")
                 report.equal(em.values("subscribers"), [1], "and the receiver still has it")
+
+            # --- a Sennheiser Spectera over HTTPS (BET) ---------------------------------
+            with MockReceiver(MOCK_SPECTERA) as bs:
+                spec = f"/godot/mount/{SPECTERA}/"
+                pack = "/spectera/api/mts/paired/all/7/"
+                send("mount.createFromPreset", ["sennheiser-spectera", SPECTERA])
+                report.check(settle(spec + "wire", "sscv2"),
+                             "a device made from the Spectera preset is on the sscv2 wire",
+                             f"wire {read(spec + 'wire')!r}, problem {read(spec + 'problem')!r}")
+                report.equal(read(spec + "transport"), "https", "over TLS")
+                report.equal(read(spec + "port"), "443", "at the base station's own port")
+
+                send("node.set", [spec + "host", "127.0.0.1"])
+                send("node.set", [spec + "port", str(bs.port)])
+                send("node.set", [spec + "login", "controlSennheiser mockpass"])
+                send("node.set", [spec + "rx", "true"])
+
+                fingerprint = bs.values("fingerprint")[0]
+                report.check(settle(spec + "certificate", fingerprint, seconds=8.0),
+                             "reached, the certificate it presented is shown", f"{read(spec + 'certificate')!r}")
+                report.check(wait_for(lambda: "not trusted yet" in read(spec + "linkProblem")),
+                             "and the link says it is not trusted yet", f"{read(spec + 'linkProblem')!r}")
+                report.equal(bs.values("requests"), [], "nothing was sent: no request, no password")
+
+                send("node.set", [spec + "pin", "00:11:22"])
+                report.check(wait_for(lambda: "not the one trusted" in read(spec + "linkProblem"), seconds=10.0),
+                             "a pin that is not its fingerprint is refused, and said", f"{read(spec + 'linkProblem')!r}")
+                report.equal(bs.values("requests"), [], "and still nothing was sent")
+
+                send("node.set", [spec + "pin", fingerprint])
+                report.check(settle(spec + "link", "open", seconds=12.0),
+                             "trusted, the link opens", f"link {read(spec + 'link')!r}, {read(spec + 'linkProblem')!r}")
+                report.check(wait_for(lambda: any(r.startswith("PUT /api/ssc/state/subscriptions/")
+                                                  and r.split(" ")[1].endswith("/add")
+                                                  for r in bs.values("requests"))),
+                             "the subscription opened and the preset's resources added", f"{bs.values('requests')}")
+                report.check(wait_for(lambda: heard(pack + "name", 's:"Lead"')),
+                             "a pack's name heard, under the identifier the base station gave it")
+                report.check(wait_for(lambda: heard(pack + "batteryFillLevel", "i:90")), "its battery")
+                report.check(wait_for(lambda: heard("/spectera/api/rf/channels/0/frequency", "i:602000")),
+                             "and an RF channel's frequency")
+
+                report.check(fire(pack + "name", 's:"Lead Vox"'), "the fixture's cue re-aimed at the pack's name")
+                report.check(wait_for(lambda: 'PUT /api/mts/paired/all/7 {"name":"Lead Vox"}' in bs.values("requests")),
+                             "fired, it is a PUT of that pack with the one field", f"{bs.values('requests')[-2:]}")
+                report.equal(bs.values("state", "/api/mts/paired/all/7")[0].get("name"), "Lead Vox",
+                             "and the base station holds it")
+                report.check(wait_for(lambda: heard(pack + "name", 's:"Lead Vox"')), "its change heard back")
+
+                bs.values("hand", "/api/mts/paired/all/9/batteryFillLevel=20")
+                report.check(wait_for(lambda: heard("/spectera/api/mts/paired/all/9/batteryFillLevel", "i:20")),
+                             "a pack's battery dropping, told as an event, is heard")
+
+                report.check(fire(pack + "bogus", "i:1"), "re-aimed at a field the base station does not have")
+                report.check(wait_for(lambda: "HTTP 400" in read(spec + "lastReply")),
+                             "its refusal is the device's last reply", f"{read(spec + 'lastReply')!r}")
+
+                bs.values("close")
+                report.check(wait_for(lambda: bs.values("subscribers") == [1]
+                                      and sum(1 for r in bs.values("requests")
+                                              if r == "GET /api/ssc/state/subscriptions") >= 2,
+                                      seconds=12.0),
+                             "the base station closing the subscription, it is opened again",
+                             f"{bs.values('subscribers')}")
+
+                send("node.set", [spec + "login", "controlSennheiser wrong"])
+                report.check(wait_for(lambda: "refused the login" in read(spec + "linkProblem"), seconds=12.0),
+                             "a wrong password is said", f"{read(spec + 'linkProblem')!r}")
 
         #  WFG_KEEP_RADIOS_LOG=<file> keeps the session's log for a look after a red run.
         if os.environ.get("WFG_KEEP_RADIOS_LOG") and log.is_file():

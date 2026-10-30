@@ -54,6 +54,7 @@ namespace wfg::tree
             if (transport == "udp")  return wire == "osc" || wire == "midi" || wire == "ssc";
             if (transport == "tcp")  return oneOf (wire, { "osc", "rcp", "line", "midi", "shure" });
             if (transport == "midi") return wire == "midi";
+            if (transport == "https") return wire == "sscv2";
             return false;
         }
 
@@ -105,11 +106,11 @@ namespace wfg::tree
 
         preset.readback = stringOf (godot, "READBACK");
 
-        if (! oneOf (preset.transport, { "udp", "tcp", "midi" }))
-            return (slug + ": TRANSPORT is udp, tcp or midi, not \"" + preset.transport + "\"");
+        if (! oneOf (preset.transport, { "udp", "tcp", "midi", "https" }))
+            return (slug + ": TRANSPORT is udp, tcp, midi or https, not \"" + preset.transport + "\"");
 
-        if (! oneOf (preset.wire, { "osc", "rcp", "line", "midi", "shure", "ssc" }))
-            return (slug + ": WIRE is osc, rcp, line, midi, shure or ssc, not \"" + preset.wire + "\"");
+        if (! oneOf (preset.wire, { "osc", "rcp", "line", "midi", "shure", "ssc", "sscv2" }))
+            return (slug + ": WIRE is osc, rcp, line, midi, shure, ssc or sscv2, not \"" + preset.wire + "\"");
 
         if (! oneOf (preset.framing, { "length", "slip" }))
             return (slug + ": FRAMING is length or slip, not \"" + preset.framing + "\"");

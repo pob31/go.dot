@@ -6587,6 +6587,26 @@ TEST_CASE ("client: the show's devices are read out of the tree")
     CHECK (model::readDevices (*rig.publish (2)).front().label() != "/wfs");
 }
 
+TEST_CASE ("client: a base station over HTTPS waits to be trusted until its pin is the certificate it presented")
+{
+    //  Namespace draft §124, BET: the Network tab's trust entry reads this.
+    model::DeviceRow row;
+    row.transport = "https";
+    CHECK_FALSE (model::waitsForTrust (row));            // nothing presented yet
+
+    row.certificate = "DE:9B:8D:71";
+    CHECK (model::waitsForTrust (row));                  // presented, not trusted
+
+    row.pin = "de9b8d71";
+    CHECK_FALSE (model::waitsForTrust (row));            // the same, whatever the case and the colons
+
+    row.pin = "00:11:22:33";
+    CHECK (model::waitsForTrust (row));                  // another box, or this one reset
+
+    row.transport = "tcp";
+    CHECK_FALSE (model::waitsForTrust (row));            // never for a device not over HTTPS
+}
+
 TEST_CASE ("client: which device an address is aimed at, and the rewrite that moves it")
 {
     std::vector<model::DeviceRow> devices;

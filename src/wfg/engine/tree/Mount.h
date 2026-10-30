@@ -365,6 +365,11 @@ namespace wfg::tree
             fields a SAMPLE line carries. Empty for every other device. */
         std::vector<std::vector<std::string>> sampleLayouts;
 
+        /*  A BASE STATION'S COLLECTIONS (§124, BET), from the root's
+            `GODOT.IDS`: a resource path and the field each element of its
+            array is known by - `/api/mts/paired/all` by `mtUid`. */
+        std::map<std::string, std::string> collectionIds;
+
         static MountResult failed (std::string problem);
     };
 
@@ -545,6 +550,9 @@ namespace wfg::tree
             file gave none. */
         std::vector<std::vector<std::string>> sampleLayoutsOf (const std::string& mountId) const;
 
+        /*  And a base station's collections (§124, BET). */
+        std::map<std::string, std::string> collectionIdsOf (const std::string& mountId) const;
+
         /*  Every node of one mount, for a reader that indexes them - the MIDI
             echoes' table (DP.10). Empty for a mount not loaded. */
         std::vector<const Node*> nodesOf (const std::string& mountId) const;
@@ -687,6 +695,7 @@ namespace wfg::tree
             std::string getTemplate;
             std::string subscribeTemplate;
             std::vector<std::vector<std::string>> sampleLayouts;
+            std::map<std::string, std::string> collectionIds;
         };
 
         Node* findNode (const std::string& address);

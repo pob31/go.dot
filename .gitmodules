@@ -31,3 +31,6 @@
 [submodule "ThirdParty/libajantv2"]
 	path = ThirdParty/libajantv2
 	url = https://github.com/aja-video/libajantv2.git
+[submodule "ThirdParty/mbedtls"]
+	path = ThirdParty/mbedtls
+	url = https://github.com/Mbed-TLS/mbedtls.git

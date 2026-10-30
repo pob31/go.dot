@@ -23,6 +23,7 @@
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
 #include <wfg/engine/json/JsonValue.h>
+#include <wfg/engine/net/Http.h>
 #include <wfg/engine/tree/Wires.h>
 #include <wfg/engine/tree/MountSender.h>
 
@@ -762,6 +763,137 @@ TEST_CASE ("wire: an SSC reply's properties at their paths, the osc part left ou
     CHECK (sscValuesOf (kept[0].second, "s").empty());
     CHECK (sscErrorOf (*mixed.value) == R"([{"rx1":{"bogus":[404]}}])");
     CHECK (sscErrorOf (*reply.value).empty());
+}
+
+//==============================================================================
+/*  HTTP FOR A BASE STATION AND THE SSCV2 WIRE (namespace draft §124, BET): a
+    request's text, a response's head, a chunked body however it is cut, the
+    Server-Sent Events of a subscription, and the wire's request and leaves
+    against the shapes Spectera's API answers in. */
+TEST_CASE ("net: a request whole - Basic authentication, the JSON body and its length")
+{
+    CHECK (net::base64 ("controlSennheiser:secret") == "Y29udHJvbFNlbm5oZWlzZXI6c2VjcmV0");
+    CHECK (net::base64 ("a") == "YQ==");
+    CHECK (net::base64 ("ab") == "YWI=");
+
+    const auto put = net::requestOf ("PUT", "10.0.0.5", "/api/mts/paired/all/12", "u", "p", {}, R"({"name":"Lead"})");
+    CHECK (put == "PUT /api/mts/paired/all/12 HTTP/1.1\r\nHost: 10.0.0.5\r\nAuthorization: Basic dTpw\r\n"
+                  "Accept: application/json\r\nConnection: keep-alive\r\nContent-Type: application/json\r\n"
+                  "Content-Length: 15\r\n\r\n{\"name\":\"Lead\"}");
+
+    const auto get = net::requestOf ("GET", "bs", "/api/ssc/state/subscriptions", {}, {}, "text/event-stream", {});
+    CHECK (get.find ("Accept: text/event-stream\r\n") != std::string::npos);
+    CHECK (get.find ("Authorization") == std::string::npos);
+    CHECK (get.find ("Content-Length") == std::string::npos);
+}
+
+TEST_CASE ("net: a response's head once it is all there, and a chunked body however the bytes come")
+{
+    std::string buffer = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nTransfer-Encoding: chunked\r\n";
+    std::string problem;
+    CHECK_FALSE (net::takeHead (buffer, problem).has_value());
+    CHECK (problem.empty());
+
+    buffer += "\r\n7\r\nevent: \r\n";
+    const auto head = net::takeHead (buffer, problem);
+    REQUIRE (head.has_value());
+    CHECK (head->status == 200);
+    CHECK (head->reason == "OK");
+    CHECK (head->chunked);
+    CHECK (head->headers.at ("content-type") == "text/event-stream");
+    CHECK (buffer == "7\r\nevent: \r\n");
+
+    net::ChunkDecoder chunks;
+    std::string out = chunks.feed (buffer.substr (0, 5));
+    out += chunks.feed (buffer.substr (5));
+    out += chunks.feed ("4\r\nopen\r\n0\r\n\r\n");
+    CHECK (out == "event: open");
+    CHECK (chunks.finished);
+
+    std::string length = "HTTP/1.1 404 Not Found\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}";
+    const auto missing = net::takeHead (length, problem);
+    REQUIRE (missing.has_value());
+    CHECK (missing->status == 404);
+    CHECK (missing->contentLength == 2);
+    CHECK (missing->closes);
+
+    std::string junk = "SSH-2.0-OpenSSH\r\n\r\n";
+    CHECK_FALSE (net::takeHead (junk, problem).has_value());
+    CHECK_FALSE (problem.empty());
+
+    net::ChunkDecoder bad;
+    bad.feed ("zz\r\n");
+    CHECK_FALSE (bad.problem.empty());
+}
+
+TEST_CASE ("net: Server-Sent Events - named or not, data lines joined, comments nothing, any line end")
+{
+    net::EventParser parser;
+    auto events = parser.feed ("event: open\r\ndata: {\"sessionUUID\":\"abc\"}\r\n\r\n: keep-alive\n\ndata: {\"a\":");
+    REQUIRE (events.size() == 1u);
+    CHECK (events[0].name == "open");
+    CHECK (events[0].data == R"({"sessionUUID":"abc"})");
+
+    events = parser.feed ("1}\ndata: more\n\n");
+    REQUIRE (events.size() == 1u);
+    CHECK (events[0].name == "message");
+    CHECK (events[0].data == "{\"a\":1}\nmore");
+
+    //  A carriage return alone ends a line too.
+    events = parser.feed ("data: x\r\r");
+    REQUIRE (events.size() == 1u);
+    CHECK (events[0].data == "x");
+}
+
+TEST_CASE ("wire: an SSCV2 request is a PUT of the resource with the one field, or a GET of it")
+{
+    CHECK (renderSscV2 ("/api/mts/paired/all/1234/name", { osc::Value::string ("Lead") }, false)
+             == "PUT /api/mts/paired/all/1234\n{\"name\":\"Lead\"}");
+    CHECK (renderSscV2 ("/api/rf/channels/0/frequency", { osc::Value::int32 (602000) }, false)
+             == "PUT /api/rf/channels/0\n{\"frequency\":602000}");
+    CHECK (renderSscV2 ("/api/mts/paired/all/1234/sleep", { osc::Value::boolean (true) }, false)
+             == "PUT /api/mts/paired/all/1234\n{\"sleep\":true}");
+    CHECK (renderSscV2 ("/api/mts/paired/all/1234/name", {}, true) == "GET /api/mts/paired/all/1234\n");
+    CHECK (renderSscV2 ("/name", { osc::Value::int32 (1) }, false).empty());
+}
+
+TEST_CASE ("wire: what an SSCV2 resource holds, field by field, a collection's elements under their identifiers")
+{
+    const std::map<std::string, std::string> ids { { "/api/mts/paired/all", "mtUid" } };
+
+    //  An event: resources by path, fields nested.
+    const auto event = json::parse (R"({"/api/mts/paired/all/1234":{"mtUid":1234,"name":"Lead","batteryFillLevel":80,"interference":{"severity":"None"}}})");
+    REQUIRE (event.ok());
+    std::vector<std::pair<std::string, json::Value>> leaves;
+    for (const auto& [path, value] : event.value->asObject())
+        for (auto& leaf : sscV2LeavesOf (path, value, ids))
+            leaves.push_back (std::move (leaf));
+    REQUIRE (leaves.size() == 4u);
+    CHECK (leaves[0].first == "/api/mts/paired/all/1234/batteryFillLevel");
+    CHECK (leaves[1].first == "/api/mts/paired/all/1234/interference/severity");
+    CHECK (leaves[3].first == "/api/mts/paired/all/1234/name");
+
+    //  With no node to say, a whole number is an int32 and a fraction a float32.
+    CHECK (sscValuesOf (leaves[0].second, {})[0].isInt32());
+    const auto fraction = json::parse ("12.5");
+    REQUIRE (fraction.ok());
+    CHECK (sscValuesOf (*fraction.value, {})[0].isFloat32());
+
+    //  A collection answered whole: each element under its identifier.
+    const auto all = json::parse (R"([{"mtUid":7,"name":"A"},{"mtUid":9,"name":"B"},{"name":"no id"}])");
+    REQUIRE (all.ok());
+    const auto packs = sscV2LeavesOf ("/api/mts/paired/all", *all.value, ids);
+    REQUIRE (packs.size() == 4u);
+    CHECK (packs[0].first == "/api/mts/paired/all/7/mtUid");
+    CHECK (packs[3].first == "/api/mts/paired/all/9/name");
+
+    //  An array the file names no identifier for is a leaf as it is.
+    const auto warnings = json::parse (R"({"state":"Ok","warnings":["Fan"]})");
+    REQUIRE (warnings.ok());
+    const auto state = sscV2LeavesOf ("/api/device/state", *warnings.value, ids);
+    REQUIRE (state.size() == 2u);
+    CHECK (state[1].first == "/api/device/state/warnings");
+    CHECK (sscValuesOf (state[1].second, "s")[0].getString() == "Fan");
 }
 
 //==============================================================================

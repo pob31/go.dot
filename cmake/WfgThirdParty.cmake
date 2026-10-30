@@ -650,6 +650,27 @@ else()
 endif()
 unset(_decklink)
 
+# Mbed TLS (Apache-2.0, Mbed-TLS/mbedtls at v3.6.7, the LTS line), for HTTPS to a
+# Sennheiser Spectera base station (namespace draft 124, BEO): its library's
+# sources compiled here and nothing of its own CMake, whose top level refuses to
+# configure without the test framework submodule this project never fetches. The
+# release tag carries every generated source, the stock mbedtls_config.h is used,
+# and only the client half is called. Windows links its sockets and BCrypt's
+# random numbers; Linux and macOS nothing. OpenSSL stays refused (deps.no-openssl).
+set(_mbedtls "${CMAKE_SOURCE_DIR}/ThirdParty/mbedtls")
+file(GLOB _mbedtls_sources CONFIGURE_DEPENDS "${_mbedtls}/library/*.c")
+add_library(wfg_mbedtls STATIC ${_mbedtls_sources})
+target_include_directories(wfg_mbedtls SYSTEM PUBLIC "${_mbedtls}/include")
+target_include_directories(wfg_mbedtls PRIVATE "${_mbedtls}/library")
+target_compile_options(wfg_mbedtls PRIVATE $<IF:$<C_COMPILER_ID:MSVC>,/w,-w>)
+set_target_properties(wfg_mbedtls PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(WIN32)
+    target_link_libraries(wfg_mbedtls PUBLIC ws2_32 bcrypt)
+endif()
+target_link_libraries(wfg_deps INTERFACE wfg_mbedtls)
+unset(_mbedtls_sources)
+unset(_mbedtls)
+
 # hidapi (BSD-3, libusb/hidapi at hidapi-0.15.0), for the SpaceMouse the engine
 # reads itself (namespace draft 45, O.11, ZE): the one platform file and nothing
 # of hidapi's own CMake - spatcore_add_hidapi's settings, transcribed (static, no

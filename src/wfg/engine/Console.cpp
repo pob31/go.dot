@@ -30,6 +30,7 @@
 #include <wfg/engine/import/AlsImport.h>
 #include <wfg/engine/import/QlabImport.h>
 #include <wfg/engine/json/JsonValue.h>
+#include <wfg/engine/net/SscV2.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/cue/AutoName.h>
 #include <wfg/engine/cue/DcaTable.h>
@@ -3170,6 +3171,50 @@ namespace
         return wanted;
     }
 
+    /*  THE BASE STATIONS OVER HTTPS AS THE SHOW DECLARES THEM (namespace draft
+        §124, BET): each device on the sscv2 wire, at its host and port - 443
+        when the port says nothing - its login the user and the password,
+        space-separated, its pin the certificate trusted, and what it watches
+        the file's SUBSCRIBE, a JSON array of resource paths. */
+    std::vector<wfg::net::SscV2Wanted> sscV2WantedOf (const wfg::doc::ShowDocument& document,
+                                                      const wfg::tree::MountTable& mounts)
+    {
+        std::vector<wfg::net::SscV2Wanted> wanted;
+
+        for (const auto& mountId : wfg::tree::declaredMountIds (document))
+        {
+            const auto base = "/godot/mount/" + mountId + "/";
+            const auto reads = [&document, &base] (const char* row, const char* otherwise)
+            { return document.getAttribute (base + row).value_or (std::string (otherwise)); };
+
+            if (reads ("transport", "udp") != "https" || reads ("wire", "osc") != "sscv2")
+                continue;
+
+            wfg::net::SscV2Wanted wish;
+            wish.id = mountId;
+            wish.host = reads ("host", "");
+            wish.port = static_cast<int> (wfg::osc::parseDouble (reads ("port", "443")).value_or (443.0));
+            wish.pin = reads ("pin", "");
+            wish.rx = reads ("rx", "false") == "true";
+            wish.tx = reads ("tx", "true") != "false";
+
+            const auto login = reads ("login", "");
+            const auto space = login.find (' ');
+            wish.user = login.substr (0, space);
+            wish.password = space == std::string::npos ? std::string {} : login.substr (space + 1);
+
+            if (reads ("readback", "none") == "subscribe")
+                if (const auto parsed = wfg::json::parse (mounts.subscribeTemplateOf (mountId)); parsed.ok() && parsed.value->isArray())
+                    for (const auto& path : parsed.value->asArray())
+                        if (path.isString())
+                            wish.subscribe.push_back (path.asString());
+
+            wanted.push_back (std::move (wish));
+        }
+
+        return wanted;
+    }
+
     /*  THE DEVICES ON MQTT BROKERS AS THE SHOW DECLARES THEM (namespace
         draft §67, ANE; MQ.3): one link per device whose transport is mqtt,
         at its broker's host and port - 1883 when the port says nothing -
@@ -4330,6 +4375,12 @@ namespace
         wfg::serial::SerialTable datagramLinks { wfg::serial::openUdpLink };
         datagramLinks.setHold (&machineHold);
 
+        /*  AND THE BASE STATIONS OVER HTTPS (namespace draft §124, BET): a
+            worker each, its TLS connections its own. Held as the connections
+            are: a held machine opens none, so asks nothing and sends no login. */
+        wfg::net::SscV2Table sscV2;
+        sscV2.setHold (&machineHold);
+
         /*  AND THE DEVICES ON MQTT BROKERS (namespace draft §67, ANE, ANH;
             MQ.3): a third table, its links cut by MQTT's own framing, and a
             session per device on the tick thread speaking the protocol over
@@ -4417,12 +4468,13 @@ namespace
             are this machine's own hardware and stay open; only what is written
             to them is held. */
         bool linksReconciledHeld = false;
-        const auto reconcileLinks = [&links, &datagramLinks, &document, &mounts, &machineHold, &linksReconciledHeld]
+        const auto reconcileLinks = [&links, &datagramLinks, &sscV2, &document, &mounts, &machineHold, &linksReconciledHeld]
         {
             linksReconciledHeld = machineHold.held();
             links.reconcile (linksReconciledHeld ? std::vector<wfg::serial::Wanted> {} : linkWantedOf (document));
             datagramLinks.reconcile (linksReconciledHeld ? std::vector<wfg::serial::Wanted> {}
                                                          : datagramWantedOf (document, mounts));
+            sscV2.reconcile (linksReconciledHeld ? std::vector<wfg::net::SscV2Wanted> {} : sscV2WantedOf (document, mounts));
         };
 
         /*  AND WHAT A MIDI CONSOLE SAYS BACK (namespace draft §57, AFL; DP.10):
@@ -4488,10 +4540,14 @@ namespace
                               {
                                   return serialPorts.sendPacket (port, packet);
                               });
-        sender.setLinkSink ([&links, &datagramLinks, &mqttLinks, &mqttSessions] (const std::string& mountId, const std::vector<std::uint8_t>& packet)
+        sender.setLinkSink ([&links, &datagramLinks, &sscV2, &mqttLinks, &mqttSessions] (const std::string& mountId, const std::vector<std::uint8_t>& packet)
                             {
                                 //  A datagram of its own, for a device on the ssc wire (§124, BES).
                                 if (datagramLinks.sendPacket (mountId, packet))
+                                    return true;
+
+                                //  A request to a base station's worker, on the sscv2 wire (§124, BET).
+                                if (sscV2.request (mountId, std::string (packet.begin(), packet.end())))
                                     return true;
 
                                 /*  A packet to a link cut by packets; a line to one
@@ -5782,6 +5838,7 @@ namespace
         parameters.setLinks (&links);
         parameters.setMqttLinks (&mqttLinks);
         parameters.setDatagramLinks (&datagramLinks);
+        parameters.setSscV2 (&sscV2);
         parameters.setPresets (&presets);
 
         /*  A PROCESS CUE'S PATCH OPENED IN PLUGDATA OR PD (namespace draft §51,
@@ -7609,6 +7666,59 @@ namespace
                                      }
                                  }
 
+                                 /*  AND WHAT A BASE STATION SAID (namespace draft §124,
+                                     BET): an event, an object keyed by resource path; a
+                                     reply, the resource a request asked for; each heard
+                                     field by field under the prefix - a pack under its
+                                     identifier, typed by its node where the file has
+                                     one and by its JSON where it cannot (a pack's id is
+                                     the base station's, not the file's). An error is the
+                                     device's last reply. */
+                                 for (const auto& said : sscV2.take (64))
+                                 {
+                                     const auto* declaration = mounts.declarationOf (said.id);
+                                     const auto roots = declaration != nullptr ? wfg::tree::prefixesOf (declaration->prefix)
+                                                                               : std::vector<std::string> {};
+                                     if (roots.empty())
+                                         continue;
+
+                                     if (said.kind == "error")
+                                     {
+                                         engine.submit ("link:" + said.id, "mount.replied",
+                                                        { wfg::osc::Value::string (said.id),
+                                                          wfg::osc::Value::string ("error"),
+                                                          wfg::osc::Value::string (said.path + ": " + said.text) });
+                                         continue;
+                                     }
+
+                                     const auto parsed = wfg::json::parse (said.text);
+                                     if (! parsed.ok())
+                                         continue;
+
+                                     const auto root = roots.front() == "/" ? std::string {} : roots.front();
+                                     const auto ids = mounts.collectionIdsOf (said.id);
+                                     std::vector<std::pair<std::string, wfg::json::Value>> leaves;
+
+                                     if (said.kind == "event" && parsed.value->isObject())
+                                     {
+                                         for (const auto& [resource, entities] : parsed.value->asObject())
+                                             for (auto& leaf : wfg::tree::wire::sscV2LeavesOf (resource, entities, ids))
+                                                 leaves.push_back (std::move (leaf));
+                                     }
+                                     else if (said.kind == "reply")
+                                     {
+                                         leaves = wfg::tree::wire::sscV2LeavesOf (said.path, *parsed.value, ids);
+                                     }
+
+                                     for (const auto& [where, entity] : leaves)
+                                     {
+                                         const auto* node = mounts.nodeAt (root + where);
+                                         auto values = wfg::tree::wire::sscValuesOf (entity, node != nullptr ? node->typeTags : std::string {});
+                                         if (! values.empty())
+                                             nameSpace.write ("link:" + said.id, wfg::osc::Packet::message (root + where, std::move (values)));
+                                     }
+                                 }
+
                                  /*  AND THE LINES A CONSOLE SAID DOWN ITS LINK (the
                                      rcp wire, namespace draft §57, DP.7): NOTIFY is
                                      the device reporting a parameter - heard, as its
@@ -8268,6 +8378,7 @@ namespace
                     Sennheiser receiver on the ssc wire, whose
                     socket is its own (§124, BES). */
                 if (document.getAttribute (base + "transport").value_or (std::string ("udp")) == "tcp"
+                      || document.getAttribute (base + "transport").value_or (std::string ("udp")) == "https"
                       || document.getAttribute (base + "wire").value_or (std::string ("osc")) == "ssc")
                 {
                     hearing->byHost["link:" + mountId].push_back (

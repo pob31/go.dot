@@ -89,16 +89,16 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_group_selection[] = { "sequential", "shuffle" };
     inline constexpr std::string_view enum_group_takeover[] = { "group", "strip" };
     inline constexpr std::string_view enum_group_timeSource[] = { "ltc", "mtc", "clock" };
-    inline constexpr std::string_view enum_mount_transport[] = { "udp", "tcp", "ws", "serial", "midi", "mqtt" };
+    inline constexpr std::string_view enum_mount_transport[] = { "udp", "tcp", "ws", "serial", "midi", "mqtt", "https" };
     inline constexpr std::string_view enum_mount_framing[] = { "length", "slip" };
-    inline constexpr std::string_view enum_mount_wire[] = { "osc", "rcp", "line", "midi", "mqtt", "shure", "ssc" };
+    inline constexpr std::string_view enum_mount_wire[] = { "osc", "rcp", "line", "midi", "mqtt", "shure", "ssc", "sscv2" };
     inline constexpr std::string_view enum_mount_panic[] = { "park", "snap" };
     inline constexpr std::string_view enum_mount_readback[] = { "none", "oscquery", "notify", "xremote", "subscribe", "get", "midi" };
     inline constexpr std::string_view enum_mount_listen[] = { "off", "connecting", "listening", "unsupported", "unreachable" };
     inline constexpr std::string_view enum_mount_doh[] = { "takeBack", "leave" };
     inline constexpr std::string_view enum_mount_link[] = { "off", "closed", "opening", "open", "retrying" };
-    inline constexpr std::string_view enum_preset_transport[] = { "udp", "tcp", "midi" };
-    inline constexpr std::string_view enum_preset_wire[] = { "osc", "rcp", "line", "midi", "shure", "ssc" };
+    inline constexpr std::string_view enum_preset_transport[] = { "udp", "tcp", "midi", "https" };
+    inline constexpr std::string_view enum_preset_wire[] = { "osc", "rcp", "line", "midi", "shure", "ssc", "sscv2" };
     inline constexpr std::string_view enum_preset_framing[] = { "length", "slip" };
     inline constexpr std::string_view enum_preset_origin[] = { "shipped", "yours" };
     inline constexpr std::string_view enum_network_brokerState[] = { "off", "listening", "problem" };
@@ -3680,10 +3680,10 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           true, "udp",
           false, 0.0, false, 0.0,
-          enum_mount_transport, 6,
+          enum_mount_transport, 7,
           "", 1.0, false, "park",
           "",
-          "How the device is reached. udp, the ordinary kind, at its host and port. tcp (namespace draft 57, AFJ, DP.6): a connection to its host and port kept open by Go.dot, the stream cut by its framing row. serial: OSC over SLIP on the serial port its serial row names, whose framing is slip - an Arduino running CNMAT-s OSC library on USB (namespace draft 51, ACR, PC.11) - heard, triggered, sent to and recorded from as any device; its host and port are then not read. midi (DP.9): the declared MIDI port its midiPort row names, the midi wire only, a console on a DIN or USB cable. mqtt (namespace draft 67, ANA): a broker at its host and port - or Go.dot-s own broker when the host is empty - its topics addresses under the prefix, heard by the filters its topics row names; the mqtt wire only. ws is declared because a document should be able to say what a device is before Go.dot can talk to it, and a mount declaring it is refused when the show loads rather than going quiet during it." },
+          "How the device is reached. udp, the ordinary kind, at its host and port. tcp (namespace draft 57, AFJ, DP.6): a connection to its host and port kept open by Go.dot, the stream cut by its framing row. serial: OSC over SLIP on the serial port its serial row names, whose framing is slip - an Arduino running CNMAT-s OSC library on USB (namespace draft 51, ACR, PC.11) - heard, triggered, sent to and recorded from as any device; its host and port are then not read. midi (DP.9): the declared MIDI port its midiPort row names, the midi wire only, a console on a DIN or USB cable. mqtt (namespace draft 67, ANA): a broker at its host and port - or Go.dot-s own broker when the host is empty - its topics addresses under the prefix, heard by the filters its topics row names; the mqtt wire only. ws is declared because a document should be able to say what a device is before Go.dot can talk to it, and a mount declaring it is refused when the show loads rather than going quiet during it. https (namespace draft 124, BET): a Sennheiser Spectera base station, or an EW-DX from firmware 4, over TLS at its host and port - 443 - on the sscv2 wire only, after its certificate is trusted (pin)." },
         { "mount", "serial",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           false, "",
@@ -3704,10 +3704,10 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           true, "osc",
           false, 0.0, false, 0.0,
-          enum_mount_wire, 7,
+          enum_mount_wire, 8,
           "", 1.0, false, "park",
           "",
-          "What the bytes to this device are (namespace draft 57, AFJ): osc, the codec of namespace draft 45; rcp, a Yamaha console-s lines of text; line, a command line and its CR LF, a grandMA2-s; midi, the messages a node-s MIDI shape renders to; mqtt, a publish on the topic the address spells under the prefix, its payload the values joined by spaces (namespace draft 67, ANA, ANC), the mqtt transport only; shure, a Shure receiver-s command strings, < SET 1 AUDIO_GAIN 30 > for the address /1/AUDIO_GAIN under the prefix, over tcp only (namespace draft 124, BER); ssc, a Sennheiser receiver-s JSON whose shape is the address under the prefix, {\"rx1\":{\"mute\":true}} for /rx1/mute, a datagram each on a socket of the device-s own, over udp only (namespace draft 124, BES). Only osc is rendered today: a device naming another is refused when the show loads, in words, until the wire of DP.7, DP.8 or DP.9 is built - declared now so that the word is in the schema a show is checked against, and a device made from a preset carries what its file says." },
+          "What the bytes to this device are (namespace draft 57, AFJ): osc, the codec of namespace draft 45; rcp, a Yamaha console-s lines of text; line, a command line and its CR LF, a grandMA2-s; midi, the messages a node-s MIDI shape renders to; mqtt, a publish on the topic the address spells under the prefix, its payload the values joined by spaces (namespace draft 67, ANA, ANC), the mqtt transport only; shure, a Shure receiver-s command strings, < SET 1 AUDIO_GAIN 30 > for the address /1/AUDIO_GAIN under the prefix, over tcp only (namespace draft 124, BER); ssc, a Sennheiser receiver-s JSON whose shape is the address under the prefix, {\"rx1\":{\"mute\":true}} for /rx1/mute, a datagram each on a socket of the device-s own, over udp only (namespace draft 124, BES); sscv2, Sennheiser-s version 2 over https - the address under the prefix the resource-s path and the field, /api/mts/paired/all/1234/name, a write a PUT of the resource with that field alone (namespace draft 124, BET). Only osc is rendered today: a device naming another is refused when the show loads, in words, until the wire of DP.7, DP.8 or DP.9 is built - declared now so that the word is in the schema a show is checked against, and a device made from a preset carries what its file says." },
         { "mount", "login",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           false, "",
@@ -3715,7 +3715,7 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 1.0, false, "park",
           "",
-          "The line sent as soon as the connection opens, and again after every reopening, for a device on the line wire (namespace draft 57, AFJ, DP.8): a grandMA2-s login <user> <password>, which its telnet remote wants before it takes a command; and for a device on an MQTT broker (namespace draft 67, ANE), the user name and password the broker asks, space-separated. Empty sends nothing. A decision about the rig, so it is stored; a password in a show file is the operator-s to weigh, and a user made for the show with the rights it needs is the usual answer." },
+          "The line sent as soon as the connection opens, and again after every reopening, for a device on the line wire (namespace draft 57, AFJ, DP.8): a grandMA2-s login <user> <password>, which its telnet remote wants before it takes a command; and for a device on an MQTT broker (namespace draft 67, ANE), the user name and password the broker asks, space-separated. Empty sends nothing. A decision about the rig, so it is stored; a password in a show file is the operator-s to weigh, and a user made for the show with the rights it needs is the usual answer. And for a device on the sscv2 wire (namespace draft 124, BET), the user name and password, space-separated, its Basic authentication - a Spectera-s user is controlSennheiser, its password the one set in Control Cockpit when third-party access was turned on." },
         { "mount", "topics",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           true, "#",
@@ -3843,7 +3843,7 @@ namespace wfg::doc::generated
           enum_mount_readback, 7,
           "", 1.0, false, "park",
           "",
-          "Whether this target can be ASKED what a value is, and how, or TELLS without being asked (namespace draft 57, AFL, DP.10). Transport says how to send and says nothing about the other direction, so without this a cue whose wait is verified against a write-only device is a cue that can never succeed and nothing notices until the show. oscquery: asked over HTTP at its query port. get: asked on the wire, the bare address with no atoms or the file-s GET line, answered at the same address - Holophonix, a DS100. notify: a Yamaha console-s get line answered with OK, and its NOTIFY lines heard on their own. xremote: an X32-s or M32-s /xremote sent every nine seconds while rx is on, after which it tells every change. subscribe: the file-s SUBSCRIBE line sent the same way - an Eos. midi: a console-s echoes on the midi wire, read by its nodes- shapes. The last three tell and are never asked; a verified cue aimed at one is refused as at a none. notify is also a Shure receiver-s REP lines, told on every change and asked with GET (namespace draft 124, BER). subscribe is also a Sennheiser receiver-s: the file-s SUBSCRIBE, a JSON message whole, sent as its socket opens and renewed every nine seconds, after which it tells every change (namespace draft 124, BES). None is the default because it is true of most devices: a mounted namespace is usually hand-written for a box that will never answer." },
+          "Whether this target can be ASKED what a value is, and how, or TELLS without being asked (namespace draft 57, AFL, DP.10). Transport says how to send and says nothing about the other direction, so without this a cue whose wait is verified against a write-only device is a cue that can never succeed and nothing notices until the show. oscquery: asked over HTTP at its query port. get: asked on the wire, the bare address with no atoms or the file-s GET line, answered at the same address - Holophonix, a DS100. notify: a Yamaha console-s get line answered with OK, and its NOTIFY lines heard on their own. xremote: an X32-s or M32-s /xremote sent every nine seconds while rx is on, after which it tells every change. subscribe: the file-s SUBSCRIBE line sent the same way - an Eos. midi: a console-s echoes on the midi wire, read by its nodes- shapes. The last three tell and are never asked; a verified cue aimed at one is refused as at a none. notify is also a Shure receiver-s REP lines, told on every change and asked with GET (namespace draft 124, BER). subscribe is also a Sennheiser receiver-s: the file-s SUBSCRIBE, a JSON message whole, sent as its socket opens and renewed every nine seconds, after which it tells every change (namespace draft 124, BES); and on the sscv2 wire the Server-Sent Events of /api/ssc/state/subscriptions, the file-s SUBSCRIBE a JSON array of the resources to watch, each asked for whole as the session opens (namespace draft 124, BET). None is the default because it is true of most devices: a mounted namespace is usually hand-written for a box that will never answer." },
         { "mount", "sent",
           ValueType::integer, 'i', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "0",
@@ -3956,6 +3956,22 @@ namespace wfg::doc::generated
           "", 1.0, false, "park",
           "",
           "Why the connection is not open, in a sentence - nothing answered at the host and port, the device closed it - and empty while it is open, or there is none. Beside mount/problem rather than in it, because the load writes that one and a connection that drops during the show must not read as a mistyped declaration." },
+        { "mount", "pin",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 1.0, false, "park",
+          "",
+          "The certificate this device is trusted by, its SHA-256 as hex pairs joined by colons, for a device over https (namespace draft 124, BET): a base station signs its own, which no authority vouches for, so its fingerprint is checked against this before the login or anything else is sent. Empty, the device is reached, its certificate shown on the certificate row and nothing sent: trusting it is a decision, so it is stored. A different certificate - another box, or this one reset - is refused and said." },
+        { "mount", "certificate",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 1.0, false, "park",
+          "",
+          "The certificate a device over https last presented, its SHA-256 as hex pairs joined by colons (namespace draft 124, BET): what the pin row is set to, to trust it. Empty until one was presented." },
         { "mount", "lastReply",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           false, "",
@@ -3992,7 +4008,7 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "udp",
           false, 0.0, false, 0.0,
-          enum_preset_transport, 3,
+          enum_preset_transport, 4,
           "", 1.0, false, "park",
           "",
           "How a device made from it is reached: a datagram, a TCP link, or a MIDI port." },
@@ -4000,7 +4016,7 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "osc",
           false, 0.0, false, 0.0,
-          enum_preset_wire, 6,
+          enum_preset_wire, 7,
           "", 1.0, false, "park",
           "",
           "What its messages are rendered to on the way out: OSC, Yamaha's RCP text, a telnet line, MIDI bytes, a Shure receiver's command strings, a Sennheiser receiver's JSON." },

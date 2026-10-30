@@ -869,6 +869,12 @@ namespace wfg::tree
                             names.push_back (name.asString());
                     result.sampleLayouts.push_back (std::move (names));
                 }
+
+            //  A base station's collections by their identifiers (§124, BET).
+            if (const auto* ids = property (*godot, "IDS"); ids != nullptr && ids->isObject())
+                for (const auto& [path, field] : ids->asObject())
+                    if (field.isString())
+                        result.collectionIds[path] = field.asString();
         }
 
         collect (*parsed.value, {}, rootPath, mountAt, mount, result.nodes, result.problems, result.warnings);
@@ -909,7 +915,7 @@ namespace wfg::tree
         }
 
         mounts[mount.id] = Entry { mount, result.nodes, result.warnings, result.getTemplate, result.subscribeTemplate,
-                                   result.sampleLayouts };
+                                   result.sampleLayouts, result.collectionIds };
         bumpShape();
         return result;
     }
@@ -931,7 +937,7 @@ namespace wfg::tree
         MountResult result;
         result.ok = true;
 
-        mounts[mount.id] = Entry { mount, {}, {}, {}, {}, {} };
+        mounts[mount.id] = Entry { mount, {}, {}, {}, {}, {}, {} };
         bumpShape();
 
         return result;
@@ -1051,6 +1057,12 @@ namespace wfg::tree
     {
         const auto found = mounts.find (mountId);
         return found == mounts.end() ? std::string {} : found->second.getTemplate;
+    }
+
+    std::map<std::string, std::string> MountTable::collectionIdsOf (const std::string& mountId) const
+    {
+        const auto found = mounts.find (mountId);
+        return found == mounts.end() ? std::map<std::string, std::string> {} : found->second.collectionIds;
     }
 
     std::vector<std::vector<std::string>> MountTable::sampleLayoutsOf (const std::string& mountId) const

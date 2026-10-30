@@ -21,6 +21,7 @@
 #include <wfg/engine/tree/PresetTable.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
+#include <cctype>
 #include <cstddef>
 #include <map>
 #include <string>
@@ -124,6 +125,8 @@ namespace wfg::client::model
             else if (name == "framing")    row.framing = text (node).empty() ? std::string ("length") : text (node);
             else if (name == "link")       row.link = text (node).empty() ? std::string ("off") : text (node);
             else if (name == "linkProblem") row.linkProblem = text (node);
+            else if (name == "certificate") row.certificate = text (node);
+            else if (name == "pin")        row.pin = text (node);
             else if (name == "midiPort")   row.midiPort = text (node);
             else if (name == "midiChannel") row.midiChannel = number (text (node), 1);
             else if (name == "wire")       row.wire = text (node).empty() ? std::string ("osc") : text (node);
@@ -454,6 +457,20 @@ namespace wfg::client::model
     std::vector<std::pair<std::string, std::string>> deviceOnNetwork (const std::string& deviceId)
     {
         return { { "/godot/mount/" + deviceId + "/transport", "udp" } };
+    }
+
+    bool waitsForTrust (const DeviceRow& row)
+    {
+        const auto digits = [] (const std::string& text)
+        {
+            std::string out;
+            for (const char c : text)
+                if (std::isxdigit (static_cast<unsigned char> (c)) != 0)
+                    out.push_back (static_cast<char> (std::toupper (static_cast<unsigned char> (c))));
+            return out;
+        };
+
+        return row.transport == "https" && ! row.certificate.empty() && digits (row.certificate) != digits (row.pin);
     }
 
     std::vector<std::pair<std::string, std::string>> deviceOnTcp (const std::string& deviceId)
