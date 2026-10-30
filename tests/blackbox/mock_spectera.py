@@ -17,15 +17,18 @@
 §124, BET; WR.5).
 
 Written from Sennheiser's "Sennheiser Sound Control (SSCv2) Specification"
-2.3 and nothing of Go.dot's: HTTPS only, with a self-signed certificate
-(tests/fixtures/certs), HTTP/1.1 kept alive, Basic authentication as
-`controlSennheiser` and 401 without it. `GET /api/ssc/state/subscriptions`
+2.3 and the Spectera OpenAPI 18.3, and nothing of Go.dot's: HTTPS only, with a
+self-signed certificate (tests/fixtures/certs), HTTP/1.1 kept alive, Basic
+authentication as `api` - the third-party user - and 401 without it. `GET /api/ssc/state/subscriptions`
 answers a Server-Sent Events stream, chunked, whose first event is `open`
 with the session's path and `sessionUUID`; `PUT .../{sessionUUID}/add` takes a
 JSON array of resource paths and reports each one's values at once; after
 that every change is an event keyed by the resource's path. `PUT` of a
 resource takes a partial object - transactional: one unknown field and nothing
-changes, 400 - and answers the resource as it now is. A path it lacks is 404.
+changes, 400 - and answers the resource as it now is; as the OpenAPI's
+PutSchemas require, it must carry the element's identifier, and a pack's
+its `type` (SEK or SKM, the schema's discriminator), or it is 400 too. The
+site has no PUT (405). A path it lacks is 404.
 
 A driver scripts it over plain HTTP on a second port, `{"VALUE": [...]}`:
 
@@ -51,7 +54,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 HOST = "127.0.0.1"
-USER = "controlSennheiser"
+USER = "api"
 PASSWORD = "mockpass"
 CERTS = Path(__file__).resolve().parent.parent / "fixtures" / "certs"
 
@@ -76,6 +79,7 @@ def initial():
 
 
 COLLECTIONS = ("/api/rf/channels", "/api/mts/paired/all")
+IDS = {"/api/rf/channels": "rfChannelId", "/api/mts/paired/all": "mtUid"}
 
 
 class Station:
@@ -204,6 +208,13 @@ def handler_for(station):
                     return self.answer(404, {"error": "not found"})
                 if not isinstance(payload, dict) or any(key not in resource for key in payload):
                     return self.answer(400, {"error": "unknown field"})
+                if self.path == "/api/device/site":
+                    return self.answer(405, {"error": "the site is read-only"})
+                for collection, field in IDS.items():
+                    if self.path.startswith(collection + "/") and payload.get(field) != resource.get(field):
+                        return self.answer(400, {"error": "missing or wrong " + field})
+                if self.path.startswith("/api/mts/paired/all/") and payload.get("type") != resource.get("type"):
+                    return self.answer(400, {"error": "type picks the schema: SEK or SKM"})
                 resource.update(payload)
                 station.tell(self.path)
                 return self.answer(200, resource)

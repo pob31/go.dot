@@ -772,7 +772,7 @@ TEST_CASE ("wire: an SSC reply's properties at their paths, the osc part left ou
     against the shapes Spectera's API answers in. */
 TEST_CASE ("net: a request whole - Basic authentication, the JSON body and its length")
 {
-    CHECK (net::base64 ("controlSennheiser:secret") == "Y29udHJvbFNlbm5oZWlzZXI6c2VjcmV0");
+    CHECK (net::base64 ("api:secret") == "YXBpOnNlY3JldA==");
     CHECK (net::base64 ("a") == "YQ==");
     CHECK (net::base64 ("ab") == "YWI=");
 
@@ -854,6 +854,12 @@ TEST_CASE ("wire: an SSCV2 request is a PUT of the resource with the one field, 
     CHECK (renderSscV2 ("/api/mts/paired/all/1234/sleep", { osc::Value::boolean (true) }, false)
              == "PUT /api/mts/paired/all/1234\n{\"sleep\":true}");
     CHECK (renderSscV2 ("/api/mts/paired/all/1234/name", {}, true) == "GET /api/mts/paired/all/1234\n");
+
+    //  What a PUT carries first - the identifier, a pack's type - and never the field twice.
+    CHECK (renderSscV2 ("/api/mts/paired/all/1234/name", { osc::Value::string ("Lead") }, false,
+                        { { "mtUid", osc::Value::int64 (1234) }, { "type", osc::Value::string ("SKM") },
+                          { "name", osc::Value::string ("old") } })
+             == "PUT /api/mts/paired/all/1234\n{\"mtUid\":1234,\"type\":\"SKM\",\"name\":\"Lead\"}");
     CHECK (renderSscV2 ("/name", { osc::Value::int32 (1) }, false).empty());
 }
 

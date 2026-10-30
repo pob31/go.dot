@@ -353,13 +353,62 @@ namespace wfg::tree
             return covered == 0 ? std::string {} : wire::renderSsc (address.substr (covered), values, asking);
         }
 
-        //  And a base station's request (§124, BET), the prefix off.
+        /*  And a base station's request (§124, BET), the prefix off. A PUT of
+            an element of a collection carries its identifier, read from the
+            address - a pack's `mtUid` is the segment after the collection -
+            and the file's CARRY fields as the device last said them: a pack's
+            `type`. One the device has not said yet is left out, and the base
+            station's refusal says why. */
         std::string sscV2RequestOf (const MountTable* mounts, const std::string& mountId, const std::string& address,
                                     const osc::Values& values, bool asking)
         {
             const auto* declaration = mounts != nullptr ? mounts->declarationOf (mountId) : nullptr;
             const auto covered = declaration != nullptr ? prefixMatchLength (address, declaration->prefix) : 0;
-            return covered == 0 ? std::string {} : wire::renderSscV2 (address.substr (covered), values, asking);
+
+            if (covered == 0)
+                return {};
+
+            auto relative = address.substr (covered);
+
+            /*  A FIELD PUT TO ANOTHER RESOURCE than the one it is read in - an
+                EW-DX channel's frequency - by the node's own word, before what
+                the PUT carries is worked out for it. A question still asks the
+                resource it is read in. */
+            if (const auto* node = mounts->nodeAt (address); ! asking && node != nullptr && ! node->sscResource().empty())
+                if (const auto field = relative.rfind ('/'); field != std::string::npos)
+                    relative = node->sscResource() + relative.substr (field);
+
+            const auto cut = relative.rfind ('/');
+            const auto resource = cut == std::string::npos ? std::string {} : relative.substr (0, cut);
+            std::vector<std::pair<std::string, osc::Value>> carry;
+
+            if (! asking && ! resource.empty())
+            {
+                const auto carried = mounts->carryFieldsOf (mountId);
+
+                for (const auto& [collection, idField] : mounts->collectionIdsOf (mountId))
+                {
+                    if (resource.rfind (collection + "/", 0) != 0)
+                        continue;
+
+                    const auto id = resource.substr (collection.size() + 1);
+
+                    if (id.empty() || id.find ('/') != std::string::npos)
+                        continue;
+
+                    const auto whole = std::all_of (id.begin(), id.end(), [] (unsigned char c) { return std::isdigit (c) != 0; });
+                    carry.emplace_back (idField, whole && id.size() < 19 ? osc::Value::int64 (std::stoll (id))
+                                                                        : osc::Value::string (id));
+
+                    if (const auto fields = carried.find (collection); fields != carried.end())
+                        for (const auto& field : fields->second)
+                            if (const auto* said = mounts->observedOf (address.substr (0, covered) + resource + "/" + field);
+                                said != nullptr && ! said->empty())
+                                carry.emplace_back (field, said->front());
+                }
+            }
+
+            return wire::renderSscV2 (relative, values, asking, carry);
         }
 
         std::vector<std::string> wordsOf (const std::string& text)

@@ -35223,3 +35223,34 @@ certificate shown with NOTHING sent; a wrong pin refused, still nothing sent; tr
 resources added; a pack heard under its mtUid, a rename as a PUT of that pack with the one field, heard back; a
 battery dropping heard; a 400 kept; the stream closed by the base station and opened again; a wrong password said
 - 69 checks with the Shure and SSC halves, both locales.
+
+**Corrected the same evening from Sennheiser's own specifications**, which the author found and linked: the
+Spectera release notes 18.3, the Spectera OpenAPI 18.3 (`Spectera-openapi-api-18.3.yaml`, the file the portal's
+Swagger page loads), the level-recording FlatBuffers schema 1.1, and the EW-DX 3rd-party API 1.7. What they changed:
+
+- **The third-party user is `api`**, "with no rights to reconfigure vital configurations"; `controlSennheiser` is the
+  user of Sennheiser's own software, which is why its Companion module logs in so. The login row reads `api
+  <password>` (the row's sentence, the preset and the driver).
+- **Spectera has no audio mute per pack or per input or output** (release notes 18.3, Known Issues): muting is the
+  console's. A pack can sleep (`sleep`, preliminary) and an RF channel be muted (`rfState`).
+- **Every PUT of an element must carry its identifier** - `inputId`, `rfChannelId`, `antennaPortId`, `mtUid` - and a
+  pack's body is one of two schemas, SEK or SKM, picked by `type`. A PUT of one field alone would have been refused.
+  The wire now carries the identifier, read from the address by the root's `IDS`, and the root's new `CARRY` fields
+  (a pack's `type`) as the device last said them - nothing when it has not said yet, the refusal then saying why -
+  then the field. `mock_spectera.py` refuses a PUT without them, as the schemas do.
+- **The site is read-only** (`/api/device/site` has no PUT): the preset's site rows are read-only.
+- **A node may name the resource it is put to** (`GODOT.SSCV2.RESOURCE`): an EW-DX channel's frequency is read in
+  `/api/rf/channels/<n>` and written by a PUT of `/api/rf/channels/<n>/frequency`. What the PUT carries is worked out
+  for the resource it goes to; a question still asks the one it is read in.
+- **`sennheiser-ewdx`**, an EW-DX from firmware 4 on the sscv2 wire, generated from API 1.7: four channels and four
+  transmitters, 0 to 3, described whole - name, mute, gain, output level, identify, frequency, the four meters, the
+  synced pack settings, the transmitters' battery and state - and subscribed to. `sennheiser-ewdx-ssc` stays for
+  firmware below 4 or legacy mode.
+- **Level recording** (`/api/levelrecording/live`, FlatBuffers schema 1.1) carries, per pack, 64 times a frame, the
+  RSSI at each of four antennas, the link quality and interference, and the battery and base station health: the
+  telemetry a radio panel wants. A FlatBuffers reader is WR.6's to weigh.
+
+Tests: MountTests (a PUT carrying the identifier, then the type once heard, an RF channel's identifier, a field put
+to a resource of its own with nothing carried that is not its, the question still asking the resource it is read
+in); WireTests (what is carried comes first and never twice); `blackbox.radios` (the pack's PUT carrying its mtUid and
+type, an RF channel muted with its identifier) - 71 checks, both locales.

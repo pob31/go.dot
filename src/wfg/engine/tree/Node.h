@@ -190,6 +190,13 @@ namespace wfg::tree
         bool shureBraces = false;
         int shurePad = 0;
 
+        /*  AND ON THE SSCV2 WIRE (§124, BET), from `GODOT.SSCV2.RESOURCE`: the
+            resource a write of this field is put to, where it is not the one
+            it is read in - an EW-DX channel's frequency, read in
+            `/api/rf/channels/0` and put to `/api/rf/channels/0/frequency`.
+            Empty, the address's own. */
+        std::string sscResource;
+
         //======================================================================
         // The declared range, when the table gives one.
         bool hasMinimum = false;
@@ -320,6 +327,7 @@ namespace wfg::tree
         int shureOffset() const noexcept                               { return about().shureOffset; }
         bool shureBraces() const noexcept                              { return about().shureBraces; }
         int shurePad() const noexcept                                  { return about().shurePad; }
+        const std::string& sscResource() const noexcept                { return about().sscResource; }
         bool hasMinimum() const noexcept                               { return about().hasMinimum; }
         double minimum() const noexcept                                { return about().minimum; }
         bool hasMaximum() const noexcept                               { return about().hasMaximum; }

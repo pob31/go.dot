@@ -26,7 +26,10 @@ protocol's own spelling, so the address in a cue is the address in the device's 
   layout, picked by how many fields came (§124, BER). At the root of a Sennheiser receiver's (`ssc`),
   `SUBSCRIBE` is the subscription message whole, JSON, sent as the device's socket opens and every nine
   seconds after (§124, BES). A base station's (`sscv2`) is a JSON array of the resources to watch, and `IDS`
-  names the field each collection's elements are known by - `{"/api/mts/paired/all": "mtUid"}` (§124, BET).
+  names the field each collection's elements are known by - `{"/api/mts/paired/all": "mtUid"}` - which every PUT of
+  an element carries, and `CARRY` any field it must carry besides, as the device last said it -
+  `{"/api/mts/paired/all": ["type"]}`. A node's `GODOT.SSCV2.RESOURCE` names the resource a write of it is put to
+  where that is not the one it is read in (§124, BET).
 - On a part of the tree, `OPEN` (`true`: an address under it that the file does not list is sent as
   typed - an Eos cue numbered 98.1) and `SKIP` (`true`, or the word the menus offer it by: the level under it
   may be left out, offered as *[skip]* or *[word]* - Eos's *[current]*, a cue in the console's current list);

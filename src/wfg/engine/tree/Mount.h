@@ -370,6 +370,12 @@ namespace wfg::tree
             array is known by - `/api/mts/paired/all` by `mtUid`. */
         std::map<std::string, std::string> collectionIds;
 
+        /*  AND WHAT EVERY PUT OF AN ELEMENT CARRIES BESIDE ITS IDENTIFIER, from
+            the root's `GODOT.CARRY`: a collection and the fields its schema is
+            told apart by - a Spectera pack's `type` - taken from what the
+            device last said of that element. */
+        std::map<std::string, std::vector<std::string>> carryFields;
+
         static MountResult failed (std::string problem);
     };
 
@@ -550,8 +556,10 @@ namespace wfg::tree
             file gave none. */
         std::vector<std::vector<std::string>> sampleLayoutsOf (const std::string& mountId) const;
 
-        /*  And a base station's collections (§124, BET). */
+        /*  And a base station's collections (§124, BET), and what a PUT of one
+            of their elements carries. */
         std::map<std::string, std::string> collectionIdsOf (const std::string& mountId) const;
+        std::map<std::string, std::vector<std::string>> carryFieldsOf (const std::string& mountId) const;
 
         /*  Every node of one mount, for a reader that indexes them - the MIDI
             echoes' table (DP.10). Empty for a mount not loaded. */
@@ -696,6 +704,7 @@ namespace wfg::tree
             std::string subscribeTemplate;
             std::vector<std::vector<std::string>> sampleLayouts;
             std::map<std::string, std::string> collectionIds;
+            std::map<std::string, std::vector<std::string>> carryFields;
         };
 
         Node* findNode (const std::string& address);

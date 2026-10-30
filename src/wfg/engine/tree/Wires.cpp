@@ -1011,7 +1011,8 @@ namespace wfg::tree::wire
 
 namespace wfg::tree::wire
 {
-    std::string renderSscV2 (const std::string& relative, const osc::Values& values, bool asking)
+    std::string renderSscV2 (const std::string& relative, const osc::Values& values, bool asking,
+                             const std::vector<std::pair<std::string, osc::Value>>& carry)
     {
         const auto cut = relative.rfind ('/');
 
@@ -1038,7 +1039,13 @@ namespace wfg::tree::wire
             value += "]";
         }
 
-        return "PUT " + resource + "\n{" + json::quote (field) + ":" + value + "}";
+        std::string body;
+
+        for (const auto& [name, carried] : carry)
+            if (name != field)
+                body += json::quote (name) + ":" + sscAtom (carried) + ",";
+
+        return "PUT " + resource + "\n{" + body + json::quote (field) + ":" + value + "}";
     }
 
     namespace

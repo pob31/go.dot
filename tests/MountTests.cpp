@@ -2407,6 +2407,62 @@ TEST_CASE ("mount sender: a Sennheiser receiver is sent JSON, the prefix off, a 
     CHECK (sent[0] == R"({"rx1":{"gain":null}})");
 }
 
+TEST_CASE ("mount sender: a base station's PUT carries the element's identifier, its type as last heard, and goes where the node says")
+{
+    //  §124, BET: the Spectera OpenAPI 18.3 requires the identifier in every PUT of an element, a pack's type too.
+    tree::MountTable mounts;
+    tree::MountDeclaration station;
+    station.id = "SPECTRA1";
+    station.prefix = "/spectera";
+    station.namespaceFile = "namespaces/spectera.json";
+    station.transport = "https";
+    station.wire = "sscv2";
+    station.readback = "subscribe";
+    station.host = "10.0.0.40";
+    station.port = 443;
+    REQUIRE (mounts.load (station, R"JSON({"FULL_PATH": "/spectera", "GODOT": {"IDS": {"/api/mts/paired/all": "mtUid", "/api/rf/channels": "rfChannelId"}, "CARRY": {"/api/mts/paired/all": ["type"]}}, "CONTENTS": {"api": {"FULL_PATH": "/spectera/api", "CONTENTS": {"mts": {"FULL_PATH": "/spectera/api/mts", "CONTENTS": {"paired": {"FULL_PATH": "/spectera/api/mts/paired", "CONTENTS": {"all": {"FULL_PATH": "/spectera/api/mts/paired/all", "GODOT": {"OPEN": true}, "CONTENTS": {}}}}}}, "rf": {"FULL_PATH": "/spectera/api/rf", "CONTENTS": {"channels": {"FULL_PATH": "/spectera/api/rf/channels", "CONTENTS": {"0": {"FULL_PATH": "/spectera/api/rf/channels/0", "CONTENTS": {"rfState": {"FULL_PATH": "/spectera/api/rf/channels/0/rfState", "TYPE": "s", "ACCESS": 3}, "frequency": {"FULL_PATH": "/spectera/api/rf/channels/0/frequency", "TYPE": "i", "ACCESS": 3, "GODOT": {"SSCV2": {"RESOURCE": "/api/rf/channels/0/frequency"}}}}}}}}}}}}})JSON").ok);
+
+    CHECK (mounts.collectionIdsOf ("SPECTRA1").at ("/api/mts/paired/all") == "mtUid");
+    CHECK (mounts.carryFieldsOf ("SPECTRA1").at ("/api/mts/paired/all") == std::vector<std::string> { "type" });
+
+    tree::MountSender sender;
+    sender.setMounts (&mounts);
+    std::vector<std::string> sent;
+    sender.setLinkSink ([&sent] (const std::string&, const std::vector<std::uint8_t>& bytes)
+    {
+        sent.emplace_back (bytes.begin(), bytes.end());
+        return true;
+    });
+
+    const auto to = tree::MountSender::destinationFor (station);
+    REQUIRE (to.link == "SPECTRA1");
+
+    //  The type not heard yet: the identifier alone, and the base station's refusal will say why.
+    sender.queue ("SPECTRA1", to, "/spectera/api/mts/paired/all/7/name", osc::Value::string ("Lead"));
+    sender.flush();
+    REQUIRE (sent.size() == 1u);
+    CHECK (sent[0] == "PUT /api/mts/paired/all/7\n{\"mtUid\":7,\"name\":\"Lead\"}");
+
+    //  Heard, it is carried.
+    sent.clear();
+    mounts.noteObservation ("/spectera/api/mts/paired/all/7/type", osc::Value::string ("SKM"));
+    sender.queue ("SPECTRA1", to, "/spectera/api/mts/paired/all/7/sleep", osc::Value::boolean (true));
+    sender.queue ("SPECTRA1", to, "/spectera/api/rf/channels/0/rfState", osc::Value::string ("RfMuted"));
+    sender.flush();
+    REQUIRE (sent.size() == 2u);
+    CHECK (sent[0] == "PUT /api/mts/paired/all/7\n{\"mtUid\":7,\"type\":\"SKM\",\"sleep\":true}");
+    CHECK (sent[1] == "PUT /api/rf/channels/0\n{\"rfChannelId\":0,\"rfState\":\"RfMuted\"}");
+
+    //  A field put to a resource of its own (an EW-DX's frequency); asked, the resource it is read in.
+    sent.clear();
+    sender.queue ("SPECTRA1", to, "/spectera/api/rf/channels/0/frequency", osc::Value::int32 (602000));
+    sender.queueQuery ("SPECTRA1", to, "/spectera/api/rf/channels/0/frequency");
+    sender.flush();
+    REQUIRE (sent.size() == 2u);
+    CHECK (sent[0] == "PUT /api/rf/channels/0/frequency\n{\"frequency\":602000}");
+    CHECK (sent[1] == "GET /api/rf/channels/0\n");
+}
+
 TEST_CASE ("mount sender: a device on the rcp wire is sent lines spelled as its nodes say, one each whatever the bundles row says")
 {
     tree::MountTable mounts;

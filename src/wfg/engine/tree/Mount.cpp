@@ -532,6 +532,10 @@ namespace wfg::tree
                     out.shurePad = static_cast<int> (pad->asNumber());
             }
 
+            //  And the resource it is put to on the sscv2 wire (§124, BET).
+            if (const auto* v2 = property (*godot, "SSCV2"); v2 != nullptr)
+                out.sscResource = stringProperty (*v2, "RESOURCE");
+
             //  And its shape on the MIDI wire (DP.9), fixed keys.
             if (const auto* shape = property (*godot, "MIDI"); shape != nullptr)
             {
@@ -875,6 +879,13 @@ namespace wfg::tree
                 for (const auto& [path, field] : ids->asObject())
                     if (field.isString())
                         result.collectionIds[path] = field.asString();
+
+            if (const auto* carry = property (*godot, "CARRY"); carry != nullptr && carry->isObject())
+                for (const auto& [path, fields] : carry->asObject())
+                    if (fields.isArray())
+                        for (const auto& field : fields.asArray())
+                            if (field.isString())
+                                result.carryFields[path].push_back (field.asString());
         }
 
         collect (*parsed.value, {}, rootPath, mountAt, mount, result.nodes, result.problems, result.warnings);
@@ -915,7 +926,7 @@ namespace wfg::tree
         }
 
         mounts[mount.id] = Entry { mount, result.nodes, result.warnings, result.getTemplate, result.subscribeTemplate,
-                                   result.sampleLayouts, result.collectionIds };
+                                   result.sampleLayouts, result.collectionIds, result.carryFields };
         bumpShape();
         return result;
     }
@@ -937,7 +948,7 @@ namespace wfg::tree
         MountResult result;
         result.ok = true;
 
-        mounts[mount.id] = Entry { mount, {}, {}, {}, {}, {}, {} };
+        mounts[mount.id] = Entry { mount, {}, {}, {}, {}, {}, {}, {} };
         bumpShape();
 
         return result;
@@ -1057,6 +1068,12 @@ namespace wfg::tree
     {
         const auto found = mounts.find (mountId);
         return found == mounts.end() ? std::string {} : found->second.getTemplate;
+    }
+
+    std::map<std::string, std::vector<std::string>> MountTable::carryFieldsOf (const std::string& mountId) const
+    {
+        const auto found = mounts.find (mountId);
+        return found == mounts.end() ? std::map<std::string, std::vector<std::string>> {} : found->second.carryFields;
     }
 
     std::map<std::string, std::string> MountTable::collectionIdsOf (const std::string& mountId) const

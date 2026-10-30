@@ -44,7 +44,8 @@ reached, its certificate shown and NOTHING sent - no request, no password -
 until it is trusted; a pin that is not its fingerprint refused and said; the
 right pin, then the subscription opened and the resources added, their values
 heard, a pack under the identifier the base station gave it; a cue renaming a
-pack as a PUT of that pack with the one field, heard back; a battery dropping
+pack as a PUT of that pack carrying its mtUid and its type, as the OpenAPI 18.3
+requires, then the field, heard back; an RF channel muted the same way; a battery dropping
 heard; a field the base station refuses kept as the last reply; the base
 station closing the subscription, opened again; and a wrong password said.
 
@@ -294,7 +295,7 @@ def run() -> int:
 
                 send("node.set", [spec + "host", "127.0.0.1"])
                 send("node.set", [spec + "port", str(bs.port)])
-                send("node.set", [spec + "login", "controlSennheiser mockpass"])
+                send("node.set", [spec + "login", "api mockpass"])
                 send("node.set", [spec + "rx", "true"])
 
                 fingerprint = bs.values("fingerprint")[0]
@@ -323,11 +324,18 @@ def run() -> int:
                              "and an RF channel's frequency")
 
                 report.check(fire(pack + "name", 's:"Lead Vox"'), "the fixture's cue re-aimed at the pack's name")
-                report.check(wait_for(lambda: 'PUT /api/mts/paired/all/7 {"name":"Lead Vox"}' in bs.values("requests")),
-                             "fired, it is a PUT of that pack with the one field", f"{bs.values('requests')[-2:]}")
+                report.check(wait_for(lambda: 'PUT /api/mts/paired/all/7 {"mtUid":7,"type":"SKM","name":"Lead Vox"}'
+                                      in bs.values("requests")),
+                             "fired, it is a PUT of that pack: its mtUid, its type as last heard, and the one field",
+                             f"{bs.values('requests')[-2:]}")
                 report.equal(bs.values("state", "/api/mts/paired/all/7")[0].get("name"), "Lead Vox",
                              "and the base station holds it")
                 report.check(wait_for(lambda: heard(pack + "name", 's:"Lead Vox"')), "its change heard back")
+
+                report.check(fire("/spectera/api/rf/channels/1/rfState", 's:"RfMuted"'), "re-aimed at RF channel 2's state")
+                report.check(wait_for(lambda: 'PUT /api/rf/channels/1 {"rfChannelId":1,"rfState":"RfMuted"}'
+                                      in bs.values("requests")),
+                             "fired, a PUT carrying the channel's identifier", f"{bs.values('requests')[-2:]}")
 
                 bs.values("hand", "/api/mts/paired/all/9/batteryFillLevel=20")
                 report.check(wait_for(lambda: heard("/spectera/api/mts/paired/all/9/batteryFillLevel", "i:20")),
@@ -345,7 +353,7 @@ def run() -> int:
                              "the base station closing the subscription, it is opened again",
                              f"{bs.values('subscribers')}")
 
-                send("node.set", [spec + "login", "controlSennheiser wrong"])
+                send("node.set", [spec + "login", "api wrong"])
                 report.check(wait_for(lambda: "refused the login" in read(spec + "linkProblem"), seconds=12.0),
                              "a wrong password is said", f"{read(spec + 'linkProblem')!r}")
 

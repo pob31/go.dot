@@ -252,10 +252,14 @@ namespace wfg::tree::wire
         address under the prefix is the resource's path and then the field:
         `/api/mts/paired/all/1234/name` is the field `name` of the resource
         `/api/mts/paired/all/1234`. A write is a PUT of that resource with the
-        field alone, `{"name":"Lead"}`; a question a GET of the resource, whose
-        answer is heard whole. Rendered as the request table takes it: the
-        method and the path, a new line, the body. */
-    std::string renderSscV2 (const std::string& relative, const osc::Values& values, bool asking);
+        field, after the fields it must `carry` - the Spectera OpenAPI 18.3
+        requires an element's identifier in every PUT of it, and a pack's
+        `type` too, the one its schema is picked by:
+        `{"mtUid":1234,"type":"SKM","name":"Lead"}`. A question is a GET of the
+        resource, whose answer is heard whole. Rendered as the request table
+        takes it: the method and the path, a new line, the body. */
+    std::string renderSscV2 (const std::string& relative, const osc::Values& values, bool asking,
+                             const std::vector<std::pair<std::string, osc::Value>>& carry = {});
 
     /*  What a resource holds, as addresses under it and values: an object's
         fields by name, nested; a collection - an array the file names an
