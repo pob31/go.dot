@@ -30,12 +30,21 @@ REP heard back; a name in braces; a mute as ON; a pack's battery dropping on
 the receiver's side heard; the meters' RF level heard in dBm; a REP ERR kept as
 the device's last reply.
 
+THEN SENNHEISER (BES), against mock_ssc.py, an EW-DX written from its SSC
+guide: a device from the EW-DX preset on the ssc wire over a datagram socket of
+its own; the subscription the first message, everything it covers heard; a
+cue's mute and gain as JSON, the gain adapted by the receiver to its step and
+the adapted value heard; a pack's battery dropping heard through the
+subscription; an address the receiver lacks kept as the last reply; and the
+subscription renewed before its lifetime runs out.
+
 WHAT WAS HEARD IS READ FROM THE SESSION'S LOG, where every report is a
 `mount.heard` record with its address and typed values: a mounted node's HTTP
 answer is what Go.dot wrote, and what the device said reaches no client yet
 (WR.6's panel is what publishes it).
 """
 
+import json
 import os
 import shutil
 import sys
@@ -49,19 +58,21 @@ import common
 from common import HarnessError, Report, Server
 
 MOCK = Path(__file__).resolve().parent / "mock_shure.py"
+MOCK_SSC = Path(__file__).resolve().parent / "mock_ssc.py"
 FIXTURE = Path(__file__).resolve().parent.parent / "fixtures" / "bundles" / "devices"
 
 RADIO = "AD4QRAD1"         # the device made from the Axient Digital preset
+EWDX = "EWDXRAD1"          # and the one from the EW-DX preset, on SSC
 CUE = "B3N8R5TW"           # the fixture's /light/go, re-aimed at the receiver
 
 locale = next((arg.split("=", 1)[1] for arg in sys.argv if arg.startswith("--wfg-locale=")), "C")
 
 
 class MockReceiver:
-    """`mock_shure.py`, on ports it chose, in a process of its own."""
+    """`mock_shure.py` or `mock_ssc.py`, on ports it chose, in a process of its own."""
 
-    def __init__(self):
-        self.process = subprocess.Popen([sys.executable, str(MOCK)],
+    def __init__(self, script=MOCK):
+        self.process = subprocess.Popen([sys.executable, str(script)],
                                         stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         line = self.process.stdout.readline().split()
 
@@ -95,7 +106,7 @@ class MockReceiver:
 
 
 def run() -> int:
-    report = Report(f"radio microphones: a Shure receiver's command strings ({locale})")
+    report = Report(f"radio microphones: Shure and Sennheiser receivers ({locale})")
 
     with tempfile.TemporaryDirectory(prefix="wfg-radios-") as scratch:
         bundle = common.copy_bundle(FIXTURE, Path(scratch) / "radios")
@@ -203,6 +214,60 @@ def run() -> int:
             ad4.values("say", "< REP ERR >")
             report.check(settle(base + "lastReply", "< REP ERR >"),
                          "a REP ERR is the device's last reply", f"{read(base + 'lastReply')!r}")
+
+            # --- a Sennheiser EW-DX on SSC (BES) -------------------------------------
+            with MockReceiver(MOCK_SSC) as em:
+                sen = f"/godot/mount/{EWDX}/"
+                send("mount.createFromPreset", ["sennheiser-ewdx-ssc", EWDX])
+                report.check(settle(sen + "wire", "ssc"),
+                             "a device made from the EW-DX preset is on the ssc wire",
+                             f"wire {read(sen + 'wire')!r}, problem {read(sen + 'problem')!r}")
+                report.equal(read(sen + "transport"), "udp", "by datagram")
+                report.equal(read(sen + "port"), "45", "at the receiver's own port")
+                report.equal(read(sen + "readback"), "subscribe", "and it subscribes")
+
+                send("node.set", [sen + "port", str(em.port)])
+                send("node.set", [sen + "rx", "true"])
+                report.check(settle(sen + "link", "open"),
+                             "pointed at the mock with Rx on, its own socket opens",
+                             f"link {read(sen + 'link')!r}, problem {read(sen + 'linkProblem')!r}")
+
+                def first_message():
+                    messages = em.values("messages")
+                    return json.loads(messages[0]) if messages else {}
+
+                report.check(wait_for(lambda: bool(em.values("messages"))), "a first datagram arrives")
+                report.check("subscribe" in first_message().get("osc", {}).get("state", {}),
+                             "and it is the file's subscription", f"{em.values('messages')[:1]}")
+                report.check(wait_for(lambda: heard("/ewdx/rx2/name", 's:"RX2"')),
+                             "what the subscription covers is heard: a channel's name")
+                report.check(wait_for(lambda: heard("/ewdx/mates/tx1/battery/gauge", "i:90")),
+                             "a pack's battery gauge")
+                report.check(wait_for(lambda: heard("/ewdx/m/rx1/af", "f:-24")), "a meter, as a float")
+
+                report.check(fire("/ewdx/rx1/mute", "T"), "the fixture's cue re-aimed at channel 1's mute")
+                report.check(wait_for(lambda: '{"rx1":{"mute":true}}' in em.values("messages")),
+                             "fired, it arrives as the JSON's path, true at its end", f"{em.values('messages')[-2:]}")
+                report.equal(em.values("state", "rx1/mute"), [True], "and the receiver holds it")
+
+                report.check(fire("/ewdx/rx1/gain", "i:20"), "re-aimed at channel 1's gain, 20 dB")
+                report.check(wait_for(lambda: '{"rx1":{"gain":20}}' in em.values("messages")), "sent as asked")
+                report.check(wait_for(lambda: heard("/ewdx/rx1/gain", "i:21")),
+                             "the receiver adapts it to its step of three, and the adapted value is heard")
+
+                em.values("hand", "mates/tx3/battery/gauge=20")
+                report.check(wait_for(lambda: heard("/ewdx/mates/tx3/battery/gauge", "i:20")),
+                             "a pack's battery dropping, told through the subscription, is heard")
+
+                report.check(fire("/ewdx/rx1/presets/active", "i:1"), "re-aimed at a property this receiver lacks")
+                report.check(wait_for(lambda: "404" in read(sen + "lastReply")),
+                             "its error is the device's last reply", f"{read(sen + 'lastReply')!r}")
+
+                subscribed = lambda: sum(1 for m in em.values("messages") if '"subscribe"' in m)
+                report.check(wait_for(lambda: subscribed() >= 2, seconds=12.0),
+                             "the subscription asked again before its fifteen seconds run out",
+                             f"{subscribed()} subscriptions")
+                report.equal(em.values("subscribers"), [1], "and the receiver still has it")
 
         #  WFG_KEEP_RADIOS_LOG=<file> keeps the session's log for a look after a red run.
         if os.environ.get("WFG_KEEP_RADIOS_LOG") and log.is_file():

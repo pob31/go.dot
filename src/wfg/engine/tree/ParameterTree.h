@@ -629,6 +629,10 @@ namespace wfg::tree
             mqtt, for the same two rows. */
         void setMqttLinks (const serial::SerialTable* table) noexcept { mqttLinks = table; }
 
+        /*  AND A DEVICE'S OWN DATAGRAM SOCKET (namespace draft §124, BES):
+            the table serve opens one on for each device on the ssc wire. */
+        void setDatagramLinks (const serial::SerialTable* table) noexcept { datagramLinks = table; }
+
         /*  THE DEVICE PRESETS installed beside the binary (namespace draft
             §57, AFN): what the Network tab's ADD menu offers, published
             under /godot/preset/<slug>. Absent in a replay and a tree dump,
@@ -790,6 +794,7 @@ namespace wfg::tree
         const serial::HeardLines* serialHeard = nullptr;
         const serial::SerialTable* links = nullptr;
         const serial::SerialTable* mqttLinks = nullptr;
+        const serial::SerialTable* datagramLinks = nullptr;
         const PresetTable* presets = nullptr;
 
         /*  THE PRESET ROWS, MADE ONCE PER TABLE (DP.11): two hundred and forty

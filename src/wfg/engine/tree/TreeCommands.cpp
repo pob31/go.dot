@@ -225,8 +225,9 @@ namespace wfg::tree
             rides a MIDI port, a connection or a datagram, never a serial
             line; a word the schema lacks never reaches here. */
         if (declaration->wire != "osc" && declaration->wire != "rcp" && declaration->wire != "line"
-              && declaration->wire != "midi" && declaration->wire != "mqtt" && declaration->wire != "shure")
-            return refuse ("wire \"" + declaration->wire + "\" is not one Go.dot renders - osc, rcp, line, midi, mqtt or shure");
+              && declaration->wire != "midi" && declaration->wire != "mqtt" && declaration->wire != "shure"
+              && declaration->wire != "ssc")
+            return refuse ("wire \"" + declaration->wire + "\" is not one Go.dot renders - osc, rcp, line, midi, mqtt, shure or ssc");
 
         /*  THE MQTT WIRE AND TRANSPORT ARE ONE THING SEEN TWICE (namespace
             draft §67, ANA): a publish on a topic is what a broker takes and
@@ -241,6 +242,10 @@ namespace wfg::tree
         if (declaration->wire == "shure" && declaration->transport != "tcp")
             return refuse ("the shure wire is a receiver's command strings on a connection - set the transport to tcp");
 
+        //  And Sennheiser's SSC a datagram each, on a socket of the device's own (§124, BES).
+        if (declaration->wire == "ssc" && declaration->transport != "udp")
+            return refuse ("the ssc wire is a Sennheiser receiver's JSON, a datagram each - set the transport to udp");
+
         if (declaration->wire == "midi" && declaration->transport == "serial")
             return refuse ("the midi wire does not ride a serial port - a MIDI port, a connection or a datagram");
 
@@ -248,7 +253,7 @@ namespace wfg::tree
             belongs to a wire, and a word on the wrong one would wait for an
             answer that cannot come. */
         if ((declaration->readback == "get" || declaration->readback == "xremote" || declaration->readback == "subscribe")
-              && declaration->wire != "osc")
+              && declaration->wire != "osc" && ! (declaration->readback == "subscribe" && declaration->wire == "ssc"))
             return refuse ("readback " + declaration->readback + " is an OSC device's way - set the wire to osc");
 
         if (declaration->readback == "notify" && declaration->wire != "rcp" && declaration->wire != "shure")

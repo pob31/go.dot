@@ -5105,7 +5105,12 @@ namespace wfg::tree
                         row that says so is the honest one. */
                     const auto transport = document.getAttribute (std::string (godot) + "/mount/" + mountId + "/transport")
                                                .value_or (std::string ("udp"));
-                    const auto* table = transport == "tcp" ? links : transport == "mqtt" ? mqttLinks : nullptr;
+                    const auto wire = document.getAttribute (std::string (godot) + "/mount/" + mountId + "/wire")
+                                          .value_or (std::string ("osc"));
+                    const auto* table = transport == "tcp" ? links
+                                      : transport == "mqtt" ? mqttLinks
+                                      : transport == "udp" && wire == "ssc" ? datagramLinks
+                                                                            : nullptr;
                     const auto overLink = table != nullptr;
                     const auto linkState = overLink ? table->stateOf (mountId) : serial::PortState {};
                     const auto base = std::string (godot) + "/mount/" + mountId + "/";

@@ -14,10 +14,13 @@
 
 #include <wfg/engine/tree/Wires.h>
 
+#include <wfg/engine/json/JsonWrite.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
+#include <functional>
 
 namespace wfg::tree::wire
 {
@@ -891,5 +894,113 @@ namespace wfg::tree::wire
         }
 
         return {};
+    }
+}
+
+namespace wfg::tree::wire
+{
+    namespace
+    {
+        std::string sscAtom (const osc::Value& value)
+        {
+            if (value.isBool())    return value.getBool() ? "true" : "false";
+            if (value.isInt32())   return std::to_string (value.getInt32());
+            if (value.isInt64())   return std::to_string (value.getInt64());
+            if (value.isFloat32()) return osc::formatFloat (value.getFloat32());
+            if (value.isFloat64()) return osc::formatDouble (value.getFloat64());
+            if (value.isString())  return json::quote (value.getString());
+            return "null";
+        }
+
+        void collectLeaves (const json::Value& value, const std::string& path,
+                            std::vector<std::pair<std::string, json::Value>>& out)
+        {
+            if (! value.isObject())
+            {
+                if (! path.empty())
+                    out.emplace_back (path, value);
+                return;
+            }
+
+            for (const auto& [key, child] : value.asObject())
+                collectLeaves (child, path + "/" + key, out);
+        }
+    }
+
+    std::string renderSsc (const std::string& relative, const osc::Values& values, bool asking)
+    {
+        const auto segments = segmentsOf (relative);
+
+        if (segments.empty())
+            return {};
+
+        std::string value = "null";
+
+        if (! asking && values.size() == 1)
+        {
+            value = sscAtom (values.front());
+        }
+        else if (! asking && values.size() > 1)
+        {
+            value = "[";
+            for (std::size_t at = 0; at < values.size(); ++at)
+                value += (at > 0 ? "," : "") + sscAtom (values[at]);
+            value += "]";
+        }
+
+        std::string out;
+
+        for (const auto& segment : segments)
+            out += "{" + json::quote (segment) + ":";
+
+        out += value;
+        out.append (segments.size(), '}');
+        return out;
+    }
+
+    std::vector<std::pair<std::string, json::Value>> sscLeavesOf (const json::Value& message)
+    {
+        std::vector<std::pair<std::string, json::Value>> out;
+
+        if (! message.isObject())
+            return out;
+
+        for (const auto& [key, child] : message.asObject())
+            if (key != "osc")
+                collectLeaves (child, "/" + key, out);
+
+        return out;
+    }
+
+    osc::Values sscValuesOf (const json::Value& value, const std::string& typeTags)
+    {
+        osc::Values out;
+        const auto whole = ! typeTags.empty() && typeTags[0] == 'i';
+
+        std::function<void (const json::Value&)> one = [&out, whole, &one] (const json::Value& atom)
+        {
+            //  An array inside one - a Digital 6000's meters, two channels of nine - is its atoms in order.
+            if (atom.isArray())
+                for (const auto& inner : atom.asArray())
+                    one (inner);
+            else if (atom.isBool())
+                out.push_back (osc::Value::boolean (atom.asBool()));
+            else if (atom.isNumber() && whole)
+                out.push_back (osc::Value::int32 (static_cast<std::int32_t> (std::llround (atom.asNumber()))));
+            else if (atom.isNumber())
+                out.push_back (osc::Value::float32 (static_cast<float> (atom.asNumber())));
+            else if (atom.isString())
+                out.push_back (osc::Value::string (atom.asString()));
+        };
+
+        one (value);
+        return out;
+    }
+
+    std::string sscErrorOf (const json::Value& message)
+    {
+        const auto* protocol = message.find ("osc");
+        const auto* error = protocol != nullptr ? protocol->find ("error") : nullptr;
+        return error != nullptr ? json::write (*error) : std::string {};
     }
 }

@@ -41,6 +41,7 @@
     verb is `set` and the indexes are the trailing segments that are whole
     numbers, two at most. */
 
+#include <wfg/engine/json/JsonValue.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/tree/Node.h>
 
@@ -207,4 +208,38 @@ namespace wfg::tree::wire
         field no node keeps); nothing when no layout fits. */
     std::vector<std::pair<std::string, ShureToken>> shureSampleOf (const ShureFrame& frame,
                                                                    const std::vector<std::vector<std::string>>& layouts);
+
+    //==========================================================================
+    /*  THE SSC WIRE (namespace draft §124, BES): Sennheiser's Sound Control
+        Protocol, version 1 - a Digital 6000, an EW-DX below firmware 4, a
+        SpeechLine receiver - one JSON object per UDP datagram, port 45. THE
+        ADDRESS IS THE JSON'S PATH: `/rx1/mute` true is
+
+            {"rx1":{"mute":true}}
+
+        a question is the same with null, and the receiver answers every
+        message with the same shape holding what the property now is - the
+        value it took, which may be one it adapted. The prefix is the
+        device's and never sent, as the shure wire's. */
+
+    /*  The message: a value, an array for several, null when `asking` or
+        with none. A number in the shortest spelling that reads back, with a
+        dot whatever the locale; a bool true or false; a string quoted. An
+        address with no segment renders nothing. */
+    std::string renderSsc (const std::string& relative, const osc::Values& values, bool asking);
+
+    /*  Every property a message holds, as its path and its value - the
+        `osc` part (errors, subscriptions, the protocol's own) left out - in
+        path order. A value is a JSON primitive or an array of them. */
+    std::vector<std::pair<std::string, json::Value>> sscLeavesOf (const json::Value& message);
+
+    /*  A value as the node takes it: a number an int32 on a node typed `i`
+        and a float32 otherwise, a bool T or F, a string as it is, each
+        element of an array one atom - an array inside it flattened in order;
+        null is nothing. */
+    osc::Values sscValuesOf (const json::Value& value, const std::string& typeTags);
+
+    /*  The error a message carries, `osc.error`, as compact JSON - what the
+        device's last reply keeps - or empty where there is none. */
+    std::string sscErrorOf (const json::Value& message);
 }

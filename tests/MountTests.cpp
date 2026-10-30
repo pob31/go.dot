@@ -2332,6 +2332,81 @@ TEST_CASE ("mount sender: a Shure receiver is sent its own frames, the prefix of
     CHECK (sender.outcomeOf (stray) == tree::MountSender::Outcome::failed);
 }
 
+TEST_CASE ("mount: the ssc wire rides a datagram of the device's own, and subscribes (§124, BES)")
+{
+    Rig rig;
+    const auto made = rig.document.createMount ("/ewdx", {}, {});
+    REQUIRE (made.ok);
+    const auto id = made.id;
+    const auto base = "/godot/mount/" + id + "/";
+    REQUIRE (rig.document.setAttribute (base + "port", "45").ok);
+    REQUIRE (rig.document.setAttribute (base + "wire", "ssc").ok);
+    REQUIRE (rig.document.setAttribute (base + "transport", "tcp").ok);
+
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK_FALSE (rig.mounts.isLoaded (id));
+    CHECK (rig.mounts.problemOf (id).find ("set the transport to udp") != std::string::npos);
+
+    REQUIRE (rig.document.setAttribute (base + "transport", "udp").ok);
+    REQUIRE (rig.document.setAttribute (base + "readback", "subscribe").ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK (rig.mounts.isLoaded (id));
+    CHECK (rig.mounts.problemOf (id).empty());
+
+    //  Reached as a link is, by its identifier, never through the one OSC socket.
+    const auto to = tree::MountSender::destinationFor (*rig.mounts.declarationOf (id));
+    CHECK (to.wire == "ssc");
+    CHECK (to.link == id);
+
+    //  xremote stays an OSC device's.
+    REQUIRE (rig.document.setAttribute (base + "readback", "xremote").ok);
+    CHECK_FALSE (loadMountFromBundle (rig.document, rig.mounts, rig.folder, id).ok);
+}
+
+TEST_CASE ("mount sender: a Sennheiser receiver is sent JSON, the prefix off, a datagram a message, null when asked")
+{
+    tree::MountTable mounts;
+    tree::MountDeclaration ewdx;
+    ewdx.id = "EWDX0001";
+    ewdx.prefix = "/ewdx";
+    ewdx.namespaceFile = "namespaces/ewdx.json";
+    ewdx.transport = "udp";
+    ewdx.wire = "ssc";
+    ewdx.readback = "subscribe";
+    ewdx.host = "10.0.0.30";
+    ewdx.port = 45;
+    ewdx.bundles = true;
+    REQUIRE (mounts.load (ewdx, R"JSON({"FULL_PATH": "/ewdx", "GODOT": {"SUBSCRIBE": "{\"osc\":{\"state\":{\"subscribe\":[{\"#\":{\"lifetime\":15},\"rx1\":{\"mute\":null}}]}}}"}, "CONTENTS": {"rx1": {"FULL_PATH": "/ewdx/rx1", "CONTENTS": {"mute": {"FULL_PATH": "/ewdx/rx1/mute", "TYPE": "T", "ACCESS": 3}, "gain": {"FULL_PATH": "/ewdx/rx1/gain", "TYPE": "i", "ACCESS": 3}}}}})JSON").ok);
+    CHECK (mounts.subscribeTemplateOf ("EWDX0001") == R"({"osc":{"state":{"subscribe":[{"#":{"lifetime":15},"rx1":{"mute":null}}]}}})");
+
+    tree::MountSender sender;
+    sender.setMounts (&mounts);
+    std::vector<std::string> sent;
+    std::vector<std::string> through;
+    sender.setLinkSink ([&sent, &through] (const std::string& mountId, const std::vector<std::uint8_t>& bytes)
+    {
+        through.push_back (mountId);
+        sent.emplace_back (bytes.begin(), bytes.end());
+        return true;
+    });
+
+    const auto to = tree::MountSender::destinationFor (ewdx);
+    sender.queue ("EWDX0001", to, "/ewdx/rx1/mute", osc::Value::boolean (true));
+    sender.queue ("EWDX0001", to, "/ewdx/rx1/gain", osc::Value::int32 (12));
+    sender.flush();
+
+    REQUIRE (sent.size() == 2u);
+    CHECK (sent[0] == R"({"rx1":{"mute":true}})");
+    CHECK (sent[1] == R"({"rx1":{"gain":12}})");
+    CHECK (through[0] == "EWDX0001");
+
+    sent.clear();
+    sender.queueQuery ("EWDX0001", to, "/ewdx/rx1/gain");
+    sender.flush();
+    REQUIRE (sent.size() == 1u);
+    CHECK (sent[0] == R"({"rx1":{"gain":null}})");
+}
+
 TEST_CASE ("mount sender: a device on the rcp wire is sent lines spelled as its nodes say, one each whatever the bundles row says")
 {
     tree::MountTable mounts;

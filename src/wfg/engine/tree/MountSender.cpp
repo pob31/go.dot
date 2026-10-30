@@ -343,6 +343,16 @@ namespace wfg::tree
             return wire::renderShure (address.substr (covered), values, spec, asking);
         }
 
+        /*  AND A SENNHEISER RECEIVER'S MESSAGE (§124, BES): the address under
+            the prefix as the JSON's path. Under none of its prefixes, nothing. */
+        std::string sscMessageOf (const MountTable* mounts, const std::string& mountId, const std::string& address,
+                                  const osc::Values& values, bool asking)
+        {
+            const auto* declaration = mounts != nullptr ? mounts->declarationOf (mountId) : nullptr;
+            const auto covered = declaration != nullptr ? prefixMatchLength (address, declaration->prefix) : 0;
+            return covered == 0 ? std::string {} : wire::renderSsc (address.substr (covered), values, asking);
+        }
+
         std::vector<std::string> wordsOf (const std::string& text)
         {
             std::vector<std::string> out;
@@ -397,6 +407,12 @@ namespace wfg::tree
                 const auto frame = shureFrameOf (mounts, message.mountId, message.address, {}, true);
                 ok = ! frame.empty() && deliver (message.destination, std::vector<std::uint8_t> (frame.begin(), frame.end()));
             }
+            else if (message.destination.wire == "ssc")
+            {
+                //  A Sennheiser receiver is asked with null (§124, BES).
+                const auto text = sscMessageOf (mounts, message.mountId, message.address, {}, true);
+                ok = ! text.empty() && deliver (message.destination, std::vector<std::uint8_t> (text.begin(), text.end()));
+            }
             else if (message.destination.wire == "osc")
             {
                 const auto words = wordsOf (mounts != nullptr ? mounts->getTemplateOf (message.mountId) : std::string {});
@@ -442,6 +458,14 @@ namespace wfg::tree
                 whose framing adds nothing after it. */
             const auto frame = shureFrameOf (mounts, message.mountId, message.address, message.values, false);
             ok = ! frame.empty() && deliver (message.destination, std::vector<std::uint8_t> (frame.begin(), frame.end()));
+        }
+        else if (message.destination.wire == "ssc")
+        {
+            /*  THE SSC WIRE (namespace draft §124, BES): the address under the
+                prefix as the JSON's path, the value at its end; a datagram of
+                its own down the device's socket. */
+            const auto text = sscMessageOf (mounts, message.mountId, message.address, message.values, false);
+            ok = ! text.empty() && deliver (message.destination, std::vector<std::uint8_t> (text.begin(), text.end()));
         }
         else if (message.destination.wire == "midi")
         {
@@ -734,7 +758,10 @@ namespace wfg::tree
         destination.bundles = declaration.bundles;
         destination.perTick = declaration.perTick;
         destination.serial = declaration.transport == "serial" ? declaration.serial : std::string {};
-        destination.link = declaration.transport == "tcp" || declaration.transport == "mqtt" ? declaration.id : std::string {};
+        /*  A device on the ssc wire has a socket of its own (§124, BES), so
+            it is reached as a link is, by its identifier. */
+        destination.link = declaration.transport == "tcp" || declaration.transport == "mqtt" || declaration.wire == "ssc"
+                               ? declaration.id : std::string {};
         destination.wire = declaration.wire.empty() ? std::string ("osc") : declaration.wire;
         destination.midiPort = declaration.transport == "midi" ? declaration.midiPort : std::string {};
         destination.midiChannel = declaration.midiChannel;

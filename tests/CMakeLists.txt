@@ -1332,7 +1332,9 @@ set_tests_properties(blackbox.wires.C blackbox.wires.fr_FR PROPERTIES
 # RADIO MICROPHONES (namespace draft §124, BER; WR.2): the shipped binary
 # against mock_shure.py, an Axient Digital receiver written from Shure's
 # command-string document - the greeting, what it answered heard, a cue's gain,
-# name and mute as its own SET, a pack's battery and the meters heard, REP ERR.
+# name and mute as its own SET, a pack's battery and the meters heard, REP ERR;
+# then mock_ssc.py, an EW-DX from Sennheiser's SSC guide (BES) - the subscription
+# first and renewed, JSON both ways, a value the receiver adapted heard back.
 add_test(NAME blackbox.radios.C
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/radios.py" --wfg-locale=C)
 add_test(NAME blackbox.radios.fr_FR

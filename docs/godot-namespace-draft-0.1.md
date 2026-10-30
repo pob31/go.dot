@@ -35091,9 +35091,11 @@ The codes after §123's BEM. The first three are the author's; the rest mine *(p
   per layout, picked by how many fields came (an AD4's channel is nine, thirteen in Quadversity, fourteen
   in FD-C, twenty-three in both).
 - **BES** **The ssc wire** (Sennheiser's version 1): the address is the JSON's path, `/rx1/mute` true is
-  `{"rx1":{"mute":true}}`, a datagram each, over a socket of the device's own, since the one OSC socket
-  cannot read JSON; what comes back is heard by the same path. `osc:#subscribe` on opening, renewed as
-  the document says.
+  `{"rx1":{"mute":true}}`, null a question, a datagram each, over a socket of the device's own, since the
+  one OSC socket cannot read JSON and the receiver answers the port it was asked from; every property a
+  reply holds is heard at its path, an `osc.error` kept as the last reply. Readback `subscribe`, its
+  message the file's root `SUBSCRIBE` whole: sent as the socket opens and every nine seconds, a lifetime of
+  fifteen and notifications at most one a second, so a subscription never lapses and meters never flood.
 - **BET** **The sscv2 wire**: a thread per device in `MountProbe`'s shape, its answers handed to the tick as
   commands; a write a `PUT` of the node's `GODOT.SSC` resource and key; the subscription a Server-Sent
   Events stream, each event heard. A self-signed certificate is trusted by its fingerprint, taken at the
@@ -35160,3 +35162,27 @@ answer is `MountTable::valueOf`, what Go.dot WROTE; a `mount.heard` is kept as a
 Runner (a verified wait, Doh!'s hand on the desk, a lane recorded) and counted on `mount/heard`, and
 nothing publishes the value. `blackbox.radios` reads what was heard from the session's log. The radio
 panel needs the observed value at the node, which every device with Rx on then gets.
+
+As built 2026-10-30, WR.3: `tree::wire::renderSsc`, `sscLeavesOf`, `sscValuesOf` (an array inside an array
+flattened, for the Digital 6000's `/mm`, two channels of nine) and `sscErrorOf`; `serial::openUdpLink`, a
+socket bound to any port that sends to the device and keeps only what its port - and its address, where the
+host is a number - sends back; a third table in serve, `datagramLinks`, its framing `raw`, reconciled and
+held with the connections, its first datagram the file's `SUBSCRIBE` while Rx is on (a greeting on a link
+of packets ends with nothing), renewed by the nine-second cadence beside `/xremote`; the link sink trying it
+first; `destinationFor` naming the device's link for the ssc wire; the link rows read from it; the load
+taking `ssc` over `udp` alone and `subscribe` on it. **The hearing rule keys such a device by its link, not
+its host**: keyed by host, its reports were taken as writes, refused read-only, and the writable ones sent
+straight back to the receiver - the loop O.8 exists to stop, found by `blackbox.radios` on its first run.
+`sennheiser-ewdx-ssc` generated from the EW-DX guide's method list, transcribed whole into
+`scripts/presets/sources/sennheiser/ewdx-em-ssc-3.0.tsv` (249 methods, the `/osc` part left out); and
+`sennheiser-d6000` written from TI 1109 v2.2's EM 6000 methods. Both subscribe to the names, mutes, gains or
+carriers, warnings, the packs and the meters, at most one notification a second (the D6000's meters every
+half). An EW-DX from firmware 4.0 speaks version 2 unless its legacy mode is on: WR.5's wire covers it.
+
+Tests: WireTests (the message from the guides' own examples - a level, a bool, a quoted name, a float under
+any locale, an array, null when asked; a reply's properties at their paths, typed by the node, an array of
+words, the D6000's meters flattened, the `osc` part kept out and its error kept), MountTests (ssc over udp
+alone, subscribing, reached by its link; JSON a datagram a message, null when asked), and `blackbox.radios`
+against `mock_ssc.py`, an EW-DX from its guide: the subscription first and renewed, what it covers heard, a
+mute and a gain as JSON, the gain the receiver adapted to its step heard back, a pack's battery dropping
+heard, a 404 kept - 47 checks with the Shure half, both locales.

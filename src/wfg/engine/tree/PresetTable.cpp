@@ -51,7 +51,7 @@ namespace wfg::tree
             MIDI bytes and nothing else. */
         bool carries (const std::string& transport, const std::string& wire)
         {
-            if (transport == "udp")  return wire == "osc" || wire == "midi";
+            if (transport == "udp")  return wire == "osc" || wire == "midi" || wire == "ssc";
             if (transport == "tcp")  return oneOf (wire, { "osc", "rcp", "line", "midi", "shure" });
             if (transport == "midi") return wire == "midi";
             return false;
@@ -108,8 +108,8 @@ namespace wfg::tree
         if (! oneOf (preset.transport, { "udp", "tcp", "midi" }))
             return (slug + ": TRANSPORT is udp, tcp or midi, not \"" + preset.transport + "\"");
 
-        if (! oneOf (preset.wire, { "osc", "rcp", "line", "midi", "shure" }))
-            return (slug + ": WIRE is osc, rcp, line, midi or shure, not \"" + preset.wire + "\"");
+        if (! oneOf (preset.wire, { "osc", "rcp", "line", "midi", "shure", "ssc" }))
+            return (slug + ": WIRE is osc, rcp, line, midi, shure or ssc, not \"" + preset.wire + "\"");
 
         if (! oneOf (preset.framing, { "length", "slip" }))
             return (slug + ": FRAMING is length or slip, not \"" + preset.framing + "\"");

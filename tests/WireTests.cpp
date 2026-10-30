@@ -22,6 +22,7 @@
 
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
+#include <wfg/engine/json/JsonValue.h>
 #include <wfg/engine/tree/Wires.h>
 #include <wfg/engine/tree/MountSender.h>
 
@@ -692,6 +693,75 @@ TEST_CASE ("wire: a Shure SAMPLE heard field by field through the layout of its 
     REQUIRE (three.size() == 3u);
     CHECK (three[1].first == "/4/RX_RF_LVL");
     CHECK (shureValuesOf ({ three[1].second }, { 128, false, 0 }, "i")[0].getInt32() == -33);
+}
+
+//==============================================================================
+/*  THE SSC WIRE (namespace draft §124, BES): Sennheiser's Sound Control
+    Protocol, version 1, against the EW-DX and Digital 6000 guides' own
+    examples. The address arrives with the device's prefix already off. */
+TEST_CASE ("wire: an SSC message is the address as the JSON's path, the value at its end, null when asked")
+{
+    //  "TX: { "audio": { "out1": { "level_db": 1 }}}".
+    CHECK (renderSsc ("/audio/out1/level_db", { osc::Value::int32 (1) }, false) == R"({"audio":{"out1":{"level_db":1}}})");
+    CHECK (renderSsc ("/rx1/mute", { osc::Value::boolean (true) }, false) == R"({"rx1":{"mute":true}})");
+    CHECK (renderSsc ("/rx1/name", { osc::Value::string ("Lead \"Vox\"") }, false) == R"({"rx1":{"name":"Lead \"Vox\""}})");
+    CHECK (renderSsc ("/rx1/frequency", { osc::Value::int32 (520000) }, false) == R"({"rx1":{"frequency":520000}})");
+
+    //  A float with a dot whatever the locale.
+    CHECK (renderSsc ("/m/rx1/af", { osc::Value::float32 (-12.5f) }, false) == R"({"m":{"rx1":{"af":-12.5}}})");
+
+    //  Several atoms an array: "{"rx1":{"active_bank_channel":["u2",63]}}".
+    CHECK (renderSsc ("/rx1/active_bank_channel", { osc::Value::string ("u2"), osc::Value::int32 (63) }, false)
+             == R"({"rx1":{"active_bank_channel":["u2",63]}})");
+
+    //  A question: null, whatever the message held.
+    CHECK (renderSsc ("/rx1/mute", { osc::Value::boolean (true) }, true) == R"({"rx1":{"mute":null}})");
+    CHECK (renderSsc ("/rx1/mute", {}, false) == R"({"rx1":{"mute":null}})");
+
+    CHECK (renderSsc ("", { osc::Value::int32 (1) }, false).empty());
+}
+
+TEST_CASE ("wire: an SSC reply's properties at their paths, the osc part left out, typed by the node")
+{
+    //  Several properties in one reply, one nested two deep.
+    const auto reply = json::parse (R"({"rx1":{"mute":false,"name":"Lead"},"mates":{"tx1":{"battery":{"gauge":70}}}})");
+    REQUIRE (reply.ok());
+    const auto leaves = sscLeavesOf (*reply.value);
+    REQUIRE (leaves.size() == 3u);
+    CHECK (leaves[0].first == "/mates/tx1/battery/gauge");
+    CHECK (leaves[1].first == "/rx1/mute");
+    CHECK (leaves[2].first == "/rx1/name");
+
+    CHECK (sscValuesOf (leaves[0].second, "i")[0].getInt32() == 70);
+    CHECK (sscValuesOf (leaves[0].second, "f")[0].getFloat32() == doctest::Approx (70.0));
+    CHECK_FALSE (sscValuesOf (leaves[1].second, "T")[0].getBool());
+    CHECK (sscValuesOf (leaves[2].second, "s")[0].getString() == "Lead");
+
+    //  An array of words, each an atom: "["Aes256Error","AfPeak"]".
+    const auto warnings = json::parse (R"(["Aes256Error","AfPeak"])");
+    REQUIRE (warnings.ok());
+    const auto words = sscValuesOf (*warnings.value, "s");
+    REQUIRE (words.size() == 2u);
+    CHECK (words[1].getString() == "AfPeak");
+
+    //  The Digital 6000's meters, two channels of nine, flattened in order.
+    const auto meters = json::parse (R"({"mm":[[0,0,0,0,0,0,0,0,0],[83,0,53,0,1,1,128,165,0]]})");
+    REQUIRE (meters.ok());
+    const auto mm = sscLeavesOf (*meters.value);
+    REQUIRE (mm.size() == 1u);
+    const auto flat = sscValuesOf (mm[0].second, std::string (18, 'i'));
+    REQUIRE (flat.size() == 18u);
+    CHECK (flat[9].getInt32() == 83);
+    CHECK (flat[16].getInt32() == 165);
+
+    //  Null is nothing; the protocol's own part is never a property.
+    const auto mixed = json::parse (R"({"osc":{"error":[{"rx1":{"bogus":[404]}}]},"rx1":{"name":null}})");
+    REQUIRE (mixed.ok());
+    const auto kept = sscLeavesOf (*mixed.value);
+    REQUIRE (kept.size() == 1u);
+    CHECK (sscValuesOf (kept[0].second, "s").empty());
+    CHECK (sscErrorOf (*mixed.value) == R"([{"rx1":{"bogus":[404]}}])");
+    CHECK (sscErrorOf (*reply.value).empty());
 }
 
 //==============================================================================

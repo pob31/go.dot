@@ -1,0 +1,250 @@
+address	access	value	units	min	max	inc	length	count	options	subscr	description
+/device/identification/visual	Read/Write	Boolean								true	Command to start/stop device identification visual (true: start; false: stop; null: read status).
+/device/identity/version	Read-only	String									Product version.
+/device/identity/vendor	Read-only	String									Command replies "Sennheiser electronic SE & CO KG".
+/device/identity/serial	Read-only	String									Not yet implemented. Serial no from production.
+/device/identity/product	Read-only	String									Product label
+/device/network/dante/identity/version	Read Only	String								true	EW-DX EM 2 Dante and EW-DX EM 4 Dante exclusive! Get version of DANTE SW as string value.
+/device/network/dante/ipv4/netmask	Read Only	String						2		true	EW-DX EM 2 Dante and EW-DX EM 4 Dante exclusive! Get the current network IPv4 netmask addresses of Dante interfaces [primary, secondary] as array of string values e.g. "255.255.255.0","0.0.0.0".
+/device/network/dante/ipv4/manual_netmask	Read/Write	String						2		true	EW-DX EM 2 Dante and EW-DX EM 4 Dante exclusive! Set/get manual network IPv4 netmask address of Dante interfaces [primary, secondary] as array of string values e.g. "255.255.255.0","255.255.255.0".
+/device/network/dante/ipv4/manual_ipaddr	Read/Write	String						2		true	EW-DX EM 2 Dante and EW-DX EM 4 Dante exclusive! Set/get manual network IPv4 IP address of Dante interfaces [primary, secondary] as array of string values e.g. "192.168.1.10","192.168.2.10".
+/device/network/dante/ipv4/manual_gateway	Read/Write	String						2		true	EW-DX EM 2 Dante and EW-DX EM 4 Dante exclusive! Set/get manual network IPv4 gateway address of Dante interfaces [primary, secondary] as array of string values e.g. "192.168.1.1","192.168.2.1".
+/device/network/dante/ipv4/ipaddr	Read Only	String						2		true	EW-DX EM 2 Dante and EW-DX EM 4 Dante exclusive! Get the current network IPv4 IP addresses of Dante interfaces [primary, secondary] as array of string values e.g. "192.168.1.10","0.0.0.0".
+/device/network/dante/ipv4/gateway	Read Only	String						2		true	EW-DX EM 2 Dante and EW-DX EM 4 Dante exclusive! Get the current network IPv4 gateway addresses of Dante interfaces [primary, secondary] as array of string values e.g. "192.168.1.1","0.0.0.0".
+/device/network/dante/ipv4/auto	Read/Write	Boolean						2		true	EW-DX EM 2 Dante and EW-DX EM 4 Dante exclusive! Set/read network mode of Dante interfaces [primary, secondary] -> true: Auto-IP/DHCP; false: Manual.
+/device/network/dante/macs	Read/Write	String						-1		true	EW-DX EM 2 Dante and EW-DX EM 4 Dante exclusive! Get DANTE MAC addresses as array of string values.
+/device/network/dante/interfaces	Read Only	String						-1			EW-DX EM 2 Dante and EW-DX EM 4 Dante exclusive! Get DANTE interfaces names as array of string values.
+/device/network/dante/interface_mapping	Read/Write	String							SINGLE_CABLE: single,off,single,single,off,single|SPLIT1: ctrl,off,ctrl,pri,off,ctrl|SPLIT2: ctrl,off,pri,pri,off,ctrl|SPLIT: ctrl,off,pri,pri,off,ctrl|AUDIO_REDUNDANCY: ctrl,off,sec,pri,off,ctrl	true	EW-DX EM 2 Dante and EW-DX EM 4 Dante exclusive! Set/get the dante interface or port mapping configuration ID as string.
+/device/network/ether/macs	Read-only	String						1			List of MAC addresses.
+/device/network/ether/interfaces	Read-only	String						1			List of all ethernet interfaces.
+/device/network/ipv4/manual_netmask	Read/Write	String						1		true	Static (Manual) Netmask like "255.255.255.0".
+/device/network/ipv4/manual_ipaddr	Read/Write	String						1		true	Static (Manual) IPv4 addr like "192.168.1.203".
+/device/network/ipv4/manual_gateway	Read/Write	String						1		true	Static (Manual) Gateway addr like "192.168.1.1".
+/device/network/ipv4/netmask	Read-only	String						1		true	Online Netmask like "255.255.255.0".
+/device/network/ipv4/ipaddr	Read-only	String						1		true	Online IPv4 addr like "192.168.1.203".
+/device/network/ipv4/interfaces	Read-only	String						1			List of ipv4 interface indices.
+/device/network/ipv4/gateway	Read-only	String						1		true	Online Gateway addr like "192.168.1.1".
+/device/network/ipv4/auto	Read/Write	Boolean								true	Command to configure ip settings automatically (true: use DHCP and ZeroConf (Auto-IP); false: set ip address/netmask/gateway manually).
+/device/network/mdns	Boolean	Boolean						1		true	Command to enable, disable or read mdns state.
+/device/preset_spacing	Read/Write	Number.	kHz								get device preset spacing in kHz depending on if LD mode is active or not.
+/device/time	Read * value: Integer		s	0	-1	1					Current absolute clock value (in seconds) of the device since 2000-01-01T00:00:00+0000 UTC.
+/device/restore	write-only	String							FACTORY_DEFAULTS = Restore all factory defaults|AUDIO_DEFAULTS = Restore audio defaults only		Command to restore device default settings. Valid options: "FACTORY_DEFAULTS" (restore all factory defaults), "AUDIO_DEFAULTS" (restore audio defaults only).
+/device/restart	Boolean										Restarts the device
+/device/remote_access	Read/Write	string								true	You can store a 15 characters long string here. It will not be stored persistently and will be cleared after 2 minutes!
+/device/name	Read/Write	String					18			true	Command to set or read device name.
+/device/lock	Read/Write	bool								true	Set EW-DX EM device keys locked (true) / unlocked (false)
+/device/location	Read/Write	String					400			true	Command to set or read device location.
+/device/link_density_mode	Read/Write	Boolean								true	Switch RF transmission link density mode on if true is specified or off (standard mode) if false is specified. Note: This command leads to a device reboot!
+/device/language	Read-only	String						1			List of supported languages. English only = ["en_GB"].
+/device/frequency_ranges	Read-only	String						-1			Command to read receiver device frequency ranges. Format of replied string array: ["<range_1 start frequency>:<range_1 step>:<range_1 end frequency>, <range_2 start frequency>:<range_2 step>:<range_2 end frequency>,..., <range_n start frequency>:<range_n step>:<range_n end frequency>"]
+/device/frequency_code	Read-only	String									Command to read receiver device frequency range code.
+/device/encryption	Read/Write	boolean								true	Activate/Deactivate encryption on the device.
+/device/brightness	Read/Write	number		1	5	1			1 = 20%|2 = 40%|3 = 60%|4 = 80%|5 = 100%	true	Brightness in percent index (1..5) corrresponds to (20%..100%).
+/device/booster	Read/Write	Boolean								true	EW-DX EM 4 Dante exclusive! Supply power for a external antenna booster. Write values: [true, false] -> [On, Off]
+/interface/version	Read-only	String									Command to read Win-Plus SSC interface version.
+/osc/state/auth/access	String							-1		true	Read authentication access of current SSC client. Response value is an array of strings, comma separated
+/osc/state/prettyprint											SSC reply output style is not supported. Returns false.
+/osc/state/close											SSC connection close.
+/osc/state/subscribe											SSC subscriptions.
+/osc/feature/timetag											SSC timed method execution is not supported. Returns false.
+/osc/feature/baseaddr											SSC interactive method address base is not supported. Returns false.
+/osc/feature/subscription											SSC subscriptions are supported. Returns true.
+/osc/feature/pattern											SSC message dispatching and pattern matching are supported. Returns "*?".
+/osc/limits											SSC method parameter range reflection.
+/osc/schema											SSC schema reflection.
+/osc/version											SSC protocol version.
+/osc/xid											SSC transaction ID.
+/osc/ping											SSC Ping.
+/osc/error											SSC error state.
+/rx1/identification/visual	Read/Write	Boolean								true	Command to start/stop receiver channel 1 identification visual (true: start; false: stop; null: read status).
+/rx1/presets/user/0	Read/Write	Number.						-1		true	set/get list of user frequencies [kHz] for receiver channel 1.
+/rx1/presets/active	Read/Write	Number.								true	set/get frequency from specific (presets) frequency list for receiver channel 1.
+/rx1/sync_settings/trim_ignore	Read/Write	boolean								true	Skip/apply trim setting on TX sync action for receiver channel 1.
+/rx1/sync_settings/trim	Read/Write	Number	dB	-12	6	1				true	TX trim for receivder channel 1.
+/rx1/sync_settings/name_ignore	Read/Write	boolean								true	Skip/apply channel name setting on TX sync action for receiver channel 1.
+/rx1/sync_settings/mute_config_ts	Read/Write	string							af_mute = AF Mute|off = Disabled|push_to_talk = Push to talk|push_to_mute = Push to mute	true	TS mute configuration (mute mode) for receiver channel 1.
+/rx1/sync_settings/mute_config_ignore	Read/Write	boolean								true	Skip/apply mute configuration (mute mode) setting on TX sync action for receiver channel 1.
+/rx1/sync_settings/mute_config	Read/Write	string							off = Disabled|rf_mute = RF Mute|af_mute = AF Mute	true	TX mute configuration (mute mode) for receiver channel 1.
+/rx1/sync_settings/lowcut_ignore	Read/Write	boolean								true	Skip/apply low cut frequency setting on TX sync action for receiver channel 1.
+/rx1/sync_settings/lowcut	Read/Write	String							off|30 Hz|60 Hz|80 Hz|100 Hz|120 Hz	true	TX low cut frequency for receiver channel 1.
+/rx1/sync_settings/lock_ignore	Read/Write	boolean								true	Skip/apply Auto Lock setting on TX sync action for receiver channel 1.
+/rx1/sync_settings/lock	Read/Write	Boolean								true	TX Autolock off/on for receiver channel 1.
+/rx1/sync_settings/led_ignore	Read/Write	boolean								true	Skip/apply LED setting on TX sync action for receiver channel 1.
+/rx1/sync_settings/led	Read/Write	Boolean								true	TX LED off/on for receiver channel 1.
+/rx1/sync_settings/frequency_ignore	Read/Write	boolean								true	Skip/apply frequency setting on TX sync action for receiver channel 1.
+/rx1/sync_settings/cable_emulation_ignore	Read/Write	boolean								true	Skip/apply cable emulation setting on TX sync action for receiver channel 1.
+/rx1/sync_settings/cable_emulation	Read/Write	string							off|type1|type2|type3	true	TX cable emulation for receiver channel 1.
+/rx1/warnings	Read only	String						-1	Aes256Error|LowSignal|NoLink|RfPeak|AfPeak	true	Active warnings on receiver channel 1 stored in an array of strings. Warnings: [Aes256Error, LowSignal, NoLink, RfPeak, AfPeak].
+/rx1/name	Read/Write	String					8			true	User-settable channel name for receiver channel 1.
+/rx1/mute	Read/Write	boolean								true	Set audio output mute on/off of receiver channel 1.
+/rx1/mates	Read only	String						1			Information about active mates of the receiver channel 1 stored as array of string values.
+/rx1/gain	Read/Write	Number	dB	-3	42	3				true	Gain level for receiver channel 1. Valid values in range [-3dB..+42dB], increment step = 3dB.
+/rx1/frequency	Read/Write	Number.	kHz	470200	1999000	25				true	Carrier Frequency in kHz for receiver channel 1.
+/rx1/audio	Read only	String						1			Information about active audio inputs/outputs of the receiver channel 1 stored as array of string values.
+/rx1/restore	write-only	String							AUDIO_DEFAULTS = Restore audio defaults only		Command to restore device audio default settings of receiver channel 1. Valid options: "AUDIO_DEFAULTS" (restore audio defaults only).
+/rx2/identification/visual	Read/Write	Boolean								true	Command to start/stop receiver channel 2 identification visual (true: start; false: stop; null: read status).
+/rx2/presets/user/0	Read/Write	Number.						-1		true	set/get list of user frequencies [kHz] for receiver channel 2.
+/rx2/presets/active	Read/Write	Number.								true	set/get frequency from specific (presets) frequency list for receiver channel 2.
+/rx2/sync_settings/trim_ignore	Read/Write	boolean								true	Skip/apply trim setting on TX sync action for receiver channel 2.
+/rx2/sync_settings/trim	Read/Write	Number	dB	-12	6	1				true	TX trim for receivder channel 2.
+/rx2/sync_settings/name_ignore	Read/Write	boolean								true	Skip/apply name setting on TX sync action for receiver channel 2.
+/rx2/sync_settings/mute_config_ts	Read/Write	string							af_mute = AF Mute|off = Disabled|push_to_talk = Push to talk|push_to_mute = Push to mute	true	TS mute configuration (mute mode) for receiver channel 2.
+/rx2/sync_settings/mute_config_ignore	Read/Write	boolean								true	Skip/apply mute configuration (mute mode) setting on TX sync action for receiver channel 2.
+/rx2/sync_settings/mute_config	Read/Write	string							off = Disabled|rf_mute = RF Mute|af_mute = AF Mute	true	TX mute configuration (mute mode) for receiver channel 2.
+/rx2/sync_settings/lowcut_ignore	Read/Write	boolean								true	Skip/apply low cut frequency setting on TX sync action for receiver channel 2.
+/rx2/sync_settings/lowcut	Read/Write	String							off|30 Hz|60 Hz|80 Hz|100 Hz|120 Hz	true	TX low cut frequency for receiver channel 2.
+/rx2/sync_settings/lock_ignore	Read/Write	boolean								true	Skip/apply Auto Lock setting on TX sync action for receiver channel 2.
+/rx2/sync_settings/lock	Read/Write	Boolean								true	TX Autolock off/on for receiver channel 2.
+/rx2/sync_settings/led_ignore	Read/Write	boolean								true	Skip/apply LED setting on TX sync action for receiver channel 2.
+/rx2/sync_settings/led	Read/Write	Boolean								true	TX LED off/on for receiver channel 2.
+/rx2/sync_settings/frequency_ignore	Read/Write	boolean								true	Skip/apply frequency setting on TX sync action for receiver channel 2.
+/rx2/sync_settings/cable_emulation_ignore	Read/Write	boolean								true	Skip/apply cable emulation setting on TX sync action for receiver channel 2.
+/rx2/sync_settings/cable_emulation	Read/Write	string							off|type1|type2|type3	true	TX cable emulation for receiver channel 2.
+/rx2/warnings	Read only	String						-1	Aes256Error|LowSignal|NoLink|RfPeak|AfPeak	true	Active warnings on receiver channel 2 stored in an array of strings. Warnings: [Aes256Error, LowSignal, NoLink, RfPeak, AfPeak].
+/rx2/name	Read/Write	String					8			true	User-settable channel name for receiver channel 2.
+/rx2/mute	Read/Write	boolean								true	Set audio output mute on/off of receiver channel 2.
+/rx2/mates	Read only	String						1			Information about active mates of the receiver channel 2 stored as array of string values.
+/rx2/gain	Read/Write	Number	dB	-3	42	3				true	Gain level for receiver channel 2. Valid values in range [-3dB..+42dB], increment step = 3dB.
+/rx2/frequency	Read/Write	Number.	kHz	470200	1999000	25				true	Carrier Frequency in kHz for receiver channel 2.
+/rx2/audio	Read only	String						1			Information about active audio inputs/outputs of the receiver channel 2 stored as array of string values.
+/rx2/restore	write-only	String							AUDIO_DEFAULTS = Restore audio defaults only		Command to restore device audio default settings of receiver channel 2. Valid options: "AUDIO_DEFAULTS" (restore audio defaults only).
+/rx3/identification/visual	Read/Write	Boolean								true	EW-DX EM 4 Dante exclusive! Command to start/stop receiver channel 3 identification visual (true: start; false: stop; null: read status).
+/rx3/presets/user/0	Read/Write	Number.						-1		true	EW-DX EM 4 Dante exclusive! set/get list of user frequencies [kHz] for receiver channel 3.
+/rx3/presets/active	Read/Write	Number.								true	EW-DX EM 4 Dante exclusive! set/get frequency from specific (presets) frequency list for receiver channel 3.
+/rx3/sync_settings/trim_ignore	Read/Write	boolean								true	EW-DX EM 4 Dante exclusive! Skip/apply trim setting on TX sync action for receiver channel 3.
+/rx3/sync_settings/trim	Read/Write	Number	dB	-12	6	1				true	EW-DX EM 4 Dante exclusive! TX trim for receivder channel 3.
+/rx3/sync_settings/name_ignore	Read/Write	boolean								true	EW-DX EM 4 Dante exclusive! Skip/apply name setting on TX sync action for receiver channel 3.
+/rx3/sync_settings/mute_config_ts	Read/Write	string							af_mute = AF Mute|off = Disabled|push_to_talk = Push to talk|push_to_mute = Push to mute	true	EW-DX EM 4 Dante exclusive! TS mute configuration (mute mode) for receiver channel 3.
+/rx3/sync_settings/mute_config_ignore	Read/Write	boolean								true	EW-DX EM 4 Dante exclusive! Skip/apply mute configuration (mute mode) setting on TX sync action for receiver channel 3.
+/rx3/sync_settings/mute_config	Read/Write	string							off = Disabled|rf_mute = RF Mute|af_mute = AF Mute	true	EW-DX EM 4 Dante exclusive! TX mute configuration (mute mode) for receiver channel 3.
+/rx3/sync_settings/lowcut_ignore	Read/Write	boolean								true	EW-DX EM 4 Dante exclusive! Skip/apply low cut frequency setting on TX sync action for receiver channel 3.
+/rx3/sync_settings/lowcut	Read/Write	String							off|30 Hz|60 Hz|80 Hz|100 Hz|120 Hz	true	EW-DX EM 4 Dante exclusive! TX low cut frequency for receiver channel 3.
+/rx3/sync_settings/lock_ignore	Read/Write	boolean								true	EW-DX EM 4 Dante exclusive! Skip/apply Auto Lock setting on TX sync action for receiver channel 3.
+/rx3/sync_settings/lock	Read/Write	Boolean								true	EW-DX EM 4 Dante exclusive! TX Autolock off/on for receiver channel 3.
+/rx3/sync_settings/led_ignore	Read/Write	boolean								true	EW-DX EM 4 Dante exclusive! Skip/apply LED setting on TX sync action for receiver channel 3.
+/rx3/sync_settings/led	Read/Write	Boolean								true	EW-DX EM 4 Dante exclusive! TX LED off/on for receiver channel 3.
+/rx3/sync_settings/frequency_ignore	Read/Write	boolean								true	EW-DX EM 4 Dante exclusive! Skip/apply frequency setting on TX sync action for receiver channel 3.
+/rx3/sync_settings/cable_emulation_ignore	Read/Write	boolean								true	EW-DX EM 4 Dante exclusive! Skip/apply cable emulation setting on TX sync action for receiver channel 3.
+/rx3/sync_settings/cable_emulation	Read/Write	string							off|type1|type2|type3	true	EW-DX EM 4 Dante exclusive! TX cable emulation for receiver channel 3.
+/rx3/warnings	Read only	String						-1	Aes256Error|LowSignal|NoLink|RfPeak|AfPeak	true	EW-DX EM 4 Dante exclusive! Active warnings on receiver channel 3 stored in an array of strings. Warnings: [Aes256Error, LowSignal, NoLink, RfPeak, AfPeak].
+/rx3/name	Read/Write	String					8			true	EW-DX EM 4 Dante exclusive! User-settable channel name for receiver channel 3.
+/rx3/mute	Read/Write	boolean								true	EW-DX EM 4 Dante exclusive! Set audio output mute on/off of receiver channel 3.
+/rx3/mates	Read only	String						1			EW-DX EM 4 Dante exclusive! Information about active mates of the receiver channel 3 stored as array of string values.
+/rx3/gain	Read/Write	Number	dB	-3	42	3				true	EW-DX EM 4 Dante exclusive! Gain level for receiver channel 3. Valid values in range [-3dB.. +42dB], increment step = 3dB.
+/rx3/frequency	Read/Write	Number.	kHz	470200	1999000	25				true	EW-DX EM 4 Dante exclusive! Carrier Frequency in kHz for receiver channel 3.
+/rx3/audio	Read only	String						1			EW-DX EM 4 Dante exclusive! Information about active audio inputs/outputs of the receiver channel 3 stored as array of string values.
+/rx3/restore	write-only	String							AUDIO_DEFAULTS = Restore audio defaults only		EW-DX EM 4 Dante exclusive! Command to restore device audio default settings of receiver channel 3. Valid options: "AUDIO_DEFAULTS" (restore audio defaults only).
+/rx4/identification/visual	Read/Write	Boolean								true	EW-DX EM 4 Dante exclusive! Command to start/stop receiver channel 4 identification visual (true: start; false: stop; null: read status).
+/rx4/presets/user/0	Read/Write	Number.						-1		true	EW-DX EM 4 Dante exclusive! set/get list of user frequencies [kHz] for receiver channel 4.
+/rx4/presets/active	Read/Write	Number.								true	EW-DX EM 4 Dante exclusive! set/get frequency from specific (presets) frequency list for receiver channel 4.
+/rx4/sync_settings/trim_ignore	Read/Write	boolean								true	EW-DX EM 4 Dante exclusive! Skip/apply trim setting on TX sync action for receiver channel 4.
+/rx4/sync_settings/trim	Read/Write	Number	dB	-12	6	1				true	EW-DX EM 4 Dante exclusive! TX trim for receivder channel 4.
+/rx4/sync_settings/name_ignore	Read/Write	boolean								true	EW-DX EM 4 Dante exclusive! Skip/apply name setting on TX sync action for receiver channel 4.
+/rx4/sync_settings/mute_config_ts	Read/Write	string							af_mute = AF Mute|off = Disabled|push_to_talk = Push to talk|push_to_mute = Push to mute	true	TS mute configuration (mute mode) for receiver channel 4.
+/rx4/sync_settings/mute_config_ignore	Read/Write	boolean								true	EW-DX EM 4 Dante exclusive! Skip/apply mute configuration (mute mode) setting on TX sync action for receiver channel 4.
+/rx4/sync_settings/mute_config	Read/Write	string							off = Disabled|rf_mute = RF Mute|af_mute = AF Mute	true	EW-DX EM 4 Dante exclusive! TX mute configuration (mute mode) for receiver channel 4.
+/rx4/sync_settings/lowcut_ignore	Read/Write	boolean								true	EW-DX EM 4 Dante exclusive! Skip/apply low cut frequency setting on TX sync action for receiver channel 4.
+/rx4/sync_settings/lowcut	Read/Write	String							off|30 Hz|60 Hz|80 Hz|100 Hz|120 Hz	true	EW-DX EM 4 Dante exclusive! TX low cut frequency for receiver channel 4.
+/rx4/sync_settings/lock_ignore	Read/Write	boolean								true	EW-DX EM 4 Dante exclusive! Skip/apply Auto Lock setting on TX sync action for receiver channel 4.
+/rx4/sync_settings/lock	Read/Write	Boolean								true	EW-DX EM 4 Dante exclusive! TX Autolock off/on for receiver channel 4.
+/rx4/sync_settings/led_ignore	Read/Write	boolean								true	EW-DX EM 4 Dante exclusive! Skip/apply LED setting on TX sync action for receiver channel 4.
+/rx4/sync_settings/led	Read/Write	Boolean								true	EW-DX EM 4 Dante exclusive! TX LED off/on for receiver channel 4.
+/rx4/sync_settings/frequency_ignore	Read/Write	boolean								true	EW-DX EM 4 Dante exclusive! Skip/apply frequency setting on TX sync action for receiver channel 4.
+/rx4/sync_settings/cable_emulation_ignore	Read/Write	boolean								true	EW-DX EM 4 Dante exclusive! Skip/apply cable emulation setting on TX sync action for receiver channel 4
+/rx4/sync_settings/cable_emulation	Read/Write	string							off|type1|type2|type3	true	EW-DX EM 4 Dante exclusive! TX cable emulation for receiver channel 4.
+/rx4/warnings	Read only	String						-1	Aes256Error|LowSignal|NoLink|RfPeak|AfPeak	true	EW-DX EM 4 Dante exclusive! Active warnings on receiver channel 4 stored in an array of strings. Warnings: [Aes256Error, LowSignal, NoLink, RfPeak, AfPeak].
+/rx4/name	Read/Write	String					8			true	EW-DX EM 4 Dante exclusive! User-settable channel name for receiver channel 4.
+/rx4/mute	Read/Write	boolean								true	EW-DX EM 4 Dante exclusive! Set audio output mute on/off of receiver channel 4.
+/rx4/mates	Read only	String						1			EW-DX EM 4 Dante exclusive! Information about active mates of the receiver channel 4 stored as array of string values.
+/rx4/gain	Read/Write	Number	dB	-3	42	3				true	EW-DX EM 4 Dante exclusive! Gain level for receiver channel 4. Valid values in range [-3dB.. +42dB], increment step = 3dB.
+/rx4/frequency	Read/Write	Number.	kHz	470200	1999000	25				true	EW-DX EM 4 Dante exclusive! Carrier Frequency in kHz for receiver channel 4.
+/rx4/audio	Read only	String						1			EW-DX EM 4 Dante exclusive! Information about active audio inputs/outputs of the receiver channel 4 stored as array of string values.
+/rx4/restore	write-only	String							AUDIO_DEFAULTS = Restore audio defaults only		EW-DX EM 4 Dante exclusive! Command to restore device audio default settings of receiver channel 4. Valid options: "AUDIO_DEFAULTS" (restore audio defaults only).
+/audio1/out1/level	Read/Write	Number	dB	-24	18	6				true	Af output level for receiver channel 1. Valid values in range [-24dB..+18dB], increment step = 6dB.
+/audio1/out2/level	Read/Write	Number	dB	-24	18	6				true	Af output level for receiver channel 2. Valid values in range [-24dB..+18dB], increment step = 6dB.
+/audio1/out3/level	Read/Write	Number	dB	-24	18	6				true	EW-DX EM 4 Dante exclusive! Af output level for receiver channel 3. Valid values in range [-24dB..+18dB], increment step = 6dB.
+/audio1/out4/level	Read/Write	Number	dB	-24	18	6				true	EW-DX EM 4 Dante exclusive! Af output level for receiver channel 4. Valid values in range -24dB..+18dB], increment step = 6dB.
+/m/rx1/rssi	Read only	Number	dBm	-107	0					true	Type: double (ro). Value range: -107.0..0.0 [dBm]. Returns RF radio signal strength indicator (RSSI) for receiver channel 1.
+/m/rx1/rsqi	Read only	Number	%	0	100	1				true	Type: number (ro). Value range: 0..100 [%], Returns RF signal quality indicator for receiver channel 1.
+/m/rx1/divi	Read only	Number		0	2	1			0 = None|1 = Antenna input A|2 = Antenna input B	true	Type: number (ro). Returns RF diversity indicator for receiver channel 1. 0 is for None; 1 is for antenna input A; 2 is for antenna input B.
+/m/rx1/af	Read only	Number	dBfs	-138.5	0	0.1				true	Type: double (ro). Value range : -138.5..0.0 [dBfs], Returns audio level for receiver channel 1.
+/m/rx2/rssi	Read only	Number	dBm	-107	0					true	Type: double (ro). Value range: -107.0..0.0 [dBm]. Returns RF radio signal strength indicator (RSSI) for receiver channel 2.
+/m/rx2/rsqi	Read only	Number	%	0	100	1				true	Type: number (ro). Value range: 0..100 [%], Returns RF signal quality indicator for receiver channel 2.
+/m/rx2/divi	Read only	Number		0	2	1			0 = None|1 = Antenna input A|2 = Antenna input B	true	Type: number (ro). Returns RF diversity indicator for receiver channel 2. 0 is for None; 1 is for antenna input A; 2 is for antenna input B.
+/m/rx2/af	Read only	Number	dBfs	-138.5	0	0.1				true	Type: double (ro). Value range : -138.5..0.0 [dBfs], Returns audio level for receiver channel 2.
+/m/rx3/rssi	Read only	Number	dBm	-107	0					true	EW-DX EM 4 Dante exclusive! Type: double (ro). Value range: -107.0..0.0 [dBm]. Returns RF radio signal strength indicator (RSSI) for receiver channel 3.
+/m/rx3/rsqi	Read only	Number	%	0	100	1				true	EW-DX EM 4 Dante exclusive! Type: number (ro). Value range: 0..100 [%], Returns RF signal quality indicator for receiver channel 3.
+/m/rx3/divi	Read only	Number		0	2	1			0 = None|1 = Antenna input A|2 = Antenna input B	true	EW-DX EM 4 Dante exclusive! Type: number (ro). Returns RF diversity indicator for receiver channel 3. 0 is for None; 1 is for antenna input A; 2 is for antenna input B.
+/m/rx3/af	Read only	Number	dBfs	-138.5	0	0.1				true	EW-DX EM 4 Dante exclusive! Type: double (ro). Value range : -138.5..0.0 [dBfs], Returns audio level for receiver channel 3.
+/m/rx4/rssi	Read only	Number	dBm	-107	0					true	EW-DX EM 4 Dante exclusive! Type: double (ro). Value range: -107.0..0.0 [dBm]. Returns RF radio signal strength indicator (RSSI) for receiver channel 4.
+/m/rx4/rsqi	Read only	Number	%	0	100	1				true	EW-DX EM 4 Dante exclusive! Type: number (ro). Value range: 0..100 [%], Returns RF signal quality indicator for receiver channel 4.
+/m/rx4/divi	Read only	Number		0	2	1			0 = None|1 = Antenna input A|2 = Antenna input B	true	EW-DX EM 4 Dante exclusive! Type: number (ro). Returns RF diversity indicator for receiver channel 4. 0 is for None; 1 is for antenna input A; 2 is for antenna input B.
+/m/rx4/af	Read only	Number	dBfs	-138.5	0	0.1				true	EW-DX EM 4 Dante exclusive! Type: double (ro). Value range : -138.5..0.0 [dBfs], Returns audio level for receiver channel 4.
+/mates/tx1/battery/type	Read only	string								true	TX battery type info got from receiver channel 1 stored as string. Possible values: "Battery", "Primary Cell". Replied error code 424 indicates that TX is not present or doesn't send valid battery information.
+/mates/tx1/battery/lifetime	Read only	int								true	TX battery lifetime in minutes got from receiver channel 1 stored as number. Replied error code 424 indicates that TX is not present or doesn't send valid battery lifetime.
+/mates/tx1/battery/gauge	Read only	int	%	0	100	1				true	TX battery gauge (charge in percent) got from receiver channel 1 stored as number. Replied error code 424 indicates that TX is not present or doesn't send valid battery gauge.
+/mates/tx1/warnings	Read only	String						-1	AfPeak|LowBattery	true	TX warnings occuring on receiver active link channel 1 stored in an array of strings. Warnings: [AfPeak, LowBattery].
+/mates/tx1/version	Read only	string								true	TX SW version information got from receiver channel 1 stored as a string . Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx1/type	Read only	string								true	TX type information got from receiver channel 1 stored as a string . Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx1/trim	Read only	number	dB	-12	6	1				true	TX trim information got from receiver channel 1 stored as a number . Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx1/name	Read only	string								true	TX name information got from receiver channel 1 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx1/mute_config_ts	Read only	string							af_mute = AF Mute|off = Disabled|push_to_talk = Push to talk|push_to_mute = Push to mute	true	TS mute configuration (mute mode) information got from receiver channel 1 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx1/mute_config	Read only	string							off = Disabled|rf_mute = RF Mute|af_mute = AF Mute	true	TX mute configuration (mute mode) information got from receiver channel 1 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx1/mute	Read only	bool								true	TX Mute Switch On/Off information got from receiver channel 1 stored as a bool. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx1/lowcut	Read only	string								true	TX lowcut information got from receiver channel 1 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information. Valid strings: "off", "30 Hz", "60 Hz", ...
+/mates/tx1/lock	Read only	bool								true	TX auto lock information got from receiver channel 1 stored as a bool. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx1/led	Read only	bool								true	TX LED information got from receiver channel 1 stored as a bool. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx1/identification	Read only	bool								true	TX identification information got from receiver channel 1 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx1/capsule	Read only	string								true	TX capsule information got from receiver channel 1 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information. Valid strings: "unknown", "KK 205", "KK 204", "ME 9002", "ME 9004", "ME 9005", "MME 865", "MD 9235", "MMD 945", "MMD 935", "MMD 845", "MMD 835", "MMD 815-1", "MMK 965", "MMD 42-I"
+/mates/tx1/cable_emulation	Read only	string							off|type1|type2|type3	true	TX cable emulation information got from receiver channel 1 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx2/battery/type	Read only	string								true	TX battery type info got from receiver channel 2 stored as string. Possible values: "Battery", "Primary Cell". Replied error code 424 indicates that TX is not present or doesn't send valid battery information.
+/mates/tx2/battery/lifetime	Read only	int								true	TX battery lifetime in minutes got from receiver channel 2 stored as number. Replied error code 424 indicates that TX is not present or doesn't send valid battery lifetime.
+/mates/tx2/battery/gauge	Read only	int	%	0	100	1				true	TX battery gauge (charge in percent) got from receiver channel 2 stored as number. Replied error code 424 indicates that TX is not present or doesn't send valid battery gauge.
+/mates/tx2/warnings	Read only	String						-1	AfPeak|LowBattery	true	TX occuring on receiver active link channel 2 stored in an array of strings. Warnings: [AfPeak, LowBattery].
+/mates/tx2/version	Read only	string								true	TX SW version information got from receiver channel 2 stored as a string . Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx2/type	Read only	string								true	TX type information got from receiver channel 2 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx2/trim	Read only	number	dB	-12	6	1				true	TX trim information got from receiver channel 2 stored as a number . Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx2/name	Read only	string								true	TX name information got from receiver channel 2 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx2/mute_config_ts	Read only	string							af_mute = AF Mute|off = Disabled|push_to_talk = Push to talk|push_to_mute = Push to mute	true	TS mute configuration (mute mode) information got from receiver channel 2 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx2/mute_config	Read only	string							off = Disabled|rf_mute = RF Mute|af_mute = AF Mute	true	TX mute configuration (mute mode) information got from receiver channel 2 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx2/mute	Read only	bool								true	TX Mute Switch On/Off information got from receiver channel 2 stored as a bool. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx2/lowcut	Read only	string								true	TX lowcut information got from receiver channel 2 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information. Valid strings: "off", "30 Hz", "60 Hz", ...
+/mates/tx2/lock	Read only	bool								true	TX auto lock information got from receiver channel 2 stored as a bool. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx2/led	Read only	bool								true	TX LED information got from receiver channel 2 stored as a bool. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx2/identification	Read only	bool								true	TX identification information got from receiver channel 2 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx2/capsule	Read only	string								true	TX capsule information got from receiver channel 2 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information. Valid strings: "unknown", "KK 205", "KK 204", "ME 9002", "ME 9004", "ME 9005", "MME 865", "MD 9235", "MMD 945", "MMD 935", "MMD 845", "MMD 835", "MMD 815-1", "MMK 965", "MMD 42-I"
+/mates/tx2/cable_emulation	Read only	string							off|type1|type2|type3	true	TX cable emulation information got from receiver channel 2 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx3/battery/type	Read only	string								true	EW-DX EM 4 Dante exclusive! TX battery type info got from receiver channel 3 stored as string. Possible values: "Battery", "Primary Cell". Replied error code 424 indicates that TX is not present or doesn't send valid battery information.
+/mates/tx3/battery/lifetime	Read only	int								true	EW-DX EM 4 Dante exclusive! TX battery lifetime in minutes got from receiver channel 3 stored as number. Replied error code 424 indicates that TX is not present or doesn't send valid battery lifetime.
+/mates/tx3/battery/gauge	Read only	int	%	0	100	1				true	EW-DX EM 4 Dante exclusive! TX battery gauge (charge in percent) got from receiver channel 3 stored as number. Replied error code 424 indicates that TX is not present or doesn't send valid battery gauge.
+/mates/tx3/warnings	Read only	String						-1	AfPeak|LowBattery	true	EW-DX EM 4 Dante exclusive! TX occuring on receiver active link channel 3 stored in an array of strings. Warnings: .
+/mates/tx3/version	Read only	string								true	EW-DX EM 4 Dante exclusive! TX SW version information got from receiver channel 3 stored as a string . Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx3/type	Read only	string								true	EW-DX EM 4 Dante exclusive! TX type information got from receiver channel 3 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx3/trim	Read only	number	dB	-12	6	1				true	EW-DX EM 4 Dante exclusive! TX trim information got from receiver channel 3 stored as a number . Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx3/name	Read only	string								true	EW-DX EM 4 Dante exclusive! TX name information got from receiver channel 3 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx3/mute_config_ts	Read only	string							af_mute = AF Mute|off = Disabled|push_to_talk = Push to talk|push_to_mute = Push to mute	true	EW-DX EM 4 Dante exclusive! TS mute configuration (mute mode) information got from receiver channel 3 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx3/mute_config	Read only	string							off = Disabled|rf_mute = RF Mute|af_mute = AF Mute	true	EW-DX EM 4 Dante exclusive! TX mute configuration (mute mode) information got from receiver channel 3 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx3/mute	Read only	bool								true	EW-DX EM 4 Dante exclusive! TX Mute Switch On/Off information got from receiver channel 3 stored as a bool. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx3/lowcut	Read only	string								true	EW-DX EM 4 Dante exclusive! TX lowcut information got from receiver channel 3 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information. Valid strings: "off", "30 Hz", "60 Hz", ...
+/mates/tx3/lock	Read only	bool								true	EW-DX EM 4 Dante exclusive! TX auto lock information got from receiver channel 3 stored as a bool. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx3/led	Read only	bool								true	EW-DX EM 4 Dante exclusive! TX LED information got from receiver channel 3 stored as a bool. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx3/identification	Read only	bool								true	EW-DX EM 4 Dante exclusive! TX identification information got from receiver channel 3 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx3/capsule	Read only	string								true	EW-DX EM 4 Dante exclusive! TX capsule information got from receiver channel 3 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information. Valid strings: "unknown", "KK 205", "KK 204", "ME 9002", "ME 9004", "ME 9005", "MME 865", "MD 9235", "MMD 945", "MMD 935", "MMD 845", "MMD 835", "MMD 815-1", "MMK 965", "MMD 42-I"
+/mates/tx3/cable_emulation	Read only	string							off|type1|type2|type3	true	EW-DX EM 4 Dante exclusive! TX cable emulation information got from receiver channel 3 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx4/battery/type	Read only	string								true	EW-DX EM 4 Dante exclusive! TX battery type info got from receiver channel 4 stored as string. Possible values: "Battery", "Primary Cell". Replied error code 424 indicates that TX is not present or doesn't send valid battery information.
+/mates/tx4/battery/lifetime	Read only	int								true	EW-DX EM 4 Dante exclusive! TX battery lifetime in minutes got from receiver channel 4 stored as number. Replied error code 424 indicates that TX is not present or doesn't send valid battery lifetime.
+/mates/tx4/battery/gauge	Read only	int	%	0	100	1				true	EW-DX EM 4 Dante exclusive! TX battery gauge (charge in percent) got from receiver channel 4 stored as number. Replied error code 424 indicates that TX is not present or doesn't send valid battery gauge.
+/mates/tx4/warnings	Read only	String						-1	AfPeak|LowBattery	true	EW-DX EM 4 Dante exclusive! TX occuring on receiver active link channel 4 stored in an array of strings. Warnings: .
+/mates/tx4/version	Read only	string								true	EW-DX EM 4 Dante exclusive! TX SW version information got from receiver channel 4 stored as a string . Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx4/type	Read only	string								true	EW-DX EM 4 Dante exclusive! TX type information got from receiver channel 4 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx4/trim	Read only	number	dB	-12	6	1				true	EW-DX EM 4 Dante exclusive! TX trim information got from receiver channel 4 stored as a number . Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx4/name	Read only	string								true	EW-DX EM 4 Dante exclusive! TX name information got from receiver channel 4 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx4/mute_config_ts	Read only	string							af_mute = AF Mute|off = Disabled|push_to_talk = Push to talk|push_to_mute = Push to mute	true	EW-DX EM 4 Dante exclusive! TS mute configuration (mute mode) information got from receiver channel 4 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx4/mute_config	Read only	string							off = Disabled|rf_mute = RF Mute|af_mute = AF Mute	true	EW-DX EM 4 Dante exclusive! TX mute configuration (mute mode) information got from receiver channel 4 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx4/mute	Read only	bool								true	EW-DX EM 4 Dante exclusive! TX Mute Switch On/Off information got from receiver channel 4 stored as a bool. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx4/lowcut	Read only	string								true	EW-DX EM 4 Dante exclusive! TX lowcut information got from receiver channel 4 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information. Valid strings: "off", "30 Hz", "60 Hz", ...
+/mates/tx4/lock	Read only	bool								true	EW-DX EM 4 Dante exclusive! TX auto lock information got from receiver channel 4 stored as a bool. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx4/led	Read only	bool								true	EW-DX EM 4 Dante exclusive! TX LED information got from receiver channel 4 stored as a bool. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx4/identification	Read only	bool								true	EW-DX EM 4 Dante exclusive! TX identification information got from receiver channel 4 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information.
+/mates/tx4/capsule	Read only	string								true	EW-DX EM 4 Dante exclusive! TX capsule information got from receiver channel 4 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information. Valid strings: "unknown", "KK 205", "KK 204", "ME 9002", "ME 9004", "ME 9005", "MME 865", "MD 9235", "MMD 945", "MMD 935", "MMD 845", "MMD 835", "MMD 815-1", "MMK 965", "MMD 42-I"
+/mates/tx4/cable_emulation	Read only	string							off|type1|type2|type3	true	EW-DX EM 4 Dante exclusive! TX cable emulation information got from receiver channel 4 stored as a string. Replied error code 424 indicates that TX is not present or doesn't send valid information.

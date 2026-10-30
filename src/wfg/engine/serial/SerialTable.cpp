@@ -43,10 +43,12 @@ namespace wfg::serial
         }
 
         /*  What ends a line sent: a new line, or nothing under `angles`, whose
-            frames end at their `>` (§124, BER). */
+            frames end at their `>` (§124, BER), nor after a greeting on a link
+            of packets - a Sennheiser receiver's subscription, a datagram whole
+            (BES). */
         std::string lineEnd (const std::string& framing)
         {
-            return framing == "angles" ? std::string {} : std::string ("\n");
+            return framing == "angles" || readsPackets (framing) ? std::string {} : std::string ("\n");
         }
 
         /*  One packet as the port's framing puts it on the wire: SLIP's

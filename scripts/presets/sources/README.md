@@ -16,3 +16,7 @@ vendor spells it; the preset it makes names it in `SOURCES`.
 - `flux/spat-revolution-osc-table.tsv`: FLUX:: Immersive's "SPAT Revolution OSC Guidelines and Table" (the
   public spreadsheet linked from doc.flux.audio's Appendix C), its first sheet as text, one row per message.
   Read by `flux_spat.py`.
+- `sennheiser/ewdx-em-ssc-3.0.tsv`: Sennheiser's "Sound Control Protocol (SSC), Developer's guide for EW-DX"
+  (firmware 3.0.x, publ. 03/2024), its EW-DX EM method list as text from the PDF - the address, the access,
+  the value's type, units, minimum, maximum, step, length, count, options, whether it can be subscribed, and
+  the description - ligatures undone. Tab-separated. Read by `sennheiser_ssc.py`.

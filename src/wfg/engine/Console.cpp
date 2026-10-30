@@ -29,6 +29,7 @@
 #include <wfg/engine/document/Template.h>
 #include <wfg/engine/import/AlsImport.h>
 #include <wfg/engine/import/QlabImport.h>
+#include <wfg/engine/json/JsonValue.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/cue/AutoName.h>
 #include <wfg/engine/cue/DcaTable.h>
@@ -66,6 +67,7 @@
 #include <wfg/engine/process/ProcessHost.h>
 #include <wfg/engine/serial/SerialTable.h>
 #include <wfg/engine/serial/TcpLink.h>
+#include <wfg/engine/serial/UdpLink.h>
 #include <wfg/engine/mqtt/Broker.h>
 #include <wfg/engine/mqtt/Packet.h>
 #include <wfg/engine/mqtt/Session.h>
@@ -3126,6 +3128,48 @@ namespace
         return wanted;
     }
 
+    /*  THE DEVICES WITH A DATAGRAM SOCKET OF THEIR OWN (namespace draft §124,
+        BES): a Sennheiser receiver on the ssc wire, at its host and port - 45
+        when the port says nothing - every datagram one packet. While Rx is on,
+        its first datagram is the file's subscription (the root's SUBSCRIBE,
+        a JSON message whole), which the cadence renews before its ten
+        seconds run out. */
+    std::vector<wfg::serial::Wanted> datagramWantedOf (const wfg::doc::ShowDocument& document,
+                                                       const wfg::tree::MountTable& mounts)
+    {
+        std::vector<wfg::serial::Wanted> wanted;
+
+        for (const auto& mountId : wfg::tree::declaredMountIds (document))
+        {
+            const auto base = "/godot/mount/" + mountId + "/";
+            const auto reads = [&document, &base] (const char* row, const char* otherwise)
+            { return document.getAttribute (base + row).value_or (std::string (otherwise)); };
+
+            if (reads ("transport", "udp") != "udp" || reads ("wire", "osc") != "ssc")
+                continue;
+
+            wfg::serial::Wanted wish;
+            wish.id = mountId;
+            wish.framing = "raw";
+
+            const auto host = reads ("host", "127.0.0.1");
+            const auto port = static_cast<int> (wfg::osc::parseDouble (reads ("port", "45")).value_or (45.0));
+
+            if (! host.empty() && port > 0 && port <= 65535)
+                wish.path = wfg::serial::hostPortOf (host, port);
+
+            wish.rx = reads ("rx", "false") == "true";
+            wish.tx = reads ("tx", "true") != "false";
+
+            if (wish.rx && reads ("readback", "none") == "subscribe")
+                wish.greeting = mounts.subscribeTemplateOf (mountId);
+
+            wanted.push_back (std::move (wish));
+        }
+
+        return wanted;
+    }
+
     /*  THE DEVICES ON MQTT BROKERS AS THE SHOW DECLARES THEM (namespace
         draft §67, ANE; MQ.3): one link per device whose transport is mqtt,
         at its broker's host and port - 1883 when the port says nothing -
@@ -4279,6 +4323,13 @@ namespace
         serialPorts.setHold (&machineHold);
         links.setHold (&machineHold);
 
+        /*  AND A DEVICE'S OWN DATAGRAM SOCKET (namespace draft §124, BES): a
+            Sennheiser receiver answers JSON to the port it was asked from,
+            which the one OSC socket cannot read. Held as the connections are:
+            the subscription is a send. */
+        wfg::serial::SerialTable datagramLinks { wfg::serial::openUdpLink };
+        datagramLinks.setHold (&machineHold);
+
         /*  AND THE DEVICES ON MQTT BROKERS (namespace draft §67, ANE, ANH;
             MQ.3): a third table, its links cut by MQTT's own framing, and a
             session per device on the tick thread speaking the protocol over
@@ -4366,10 +4417,12 @@ namespace
             are this machine's own hardware and stay open; only what is written
             to them is held. */
         bool linksReconciledHeld = false;
-        const auto reconcileLinks = [&links, &document, &machineHold, &linksReconciledHeld]
+        const auto reconcileLinks = [&links, &datagramLinks, &document, &mounts, &machineHold, &linksReconciledHeld]
         {
             linksReconciledHeld = machineHold.held();
             links.reconcile (linksReconciledHeld ? std::vector<wfg::serial::Wanted> {} : linkWantedOf (document));
+            datagramLinks.reconcile (linksReconciledHeld ? std::vector<wfg::serial::Wanted> {}
+                                                         : datagramWantedOf (document, mounts));
         };
 
         /*  AND WHAT A MIDI CONSOLE SAYS BACK (namespace draft §57, AFL; DP.10):
@@ -4435,8 +4488,12 @@ namespace
                               {
                                   return serialPorts.sendPacket (port, packet);
                               });
-        sender.setLinkSink ([&links, &mqttLinks, &mqttSessions] (const std::string& mountId, const std::vector<std::uint8_t>& packet)
+        sender.setLinkSink ([&links, &datagramLinks, &mqttLinks, &mqttSessions] (const std::string& mountId, const std::vector<std::uint8_t>& packet)
                             {
+                                //  A datagram of its own, for a device on the ssc wire (§124, BES).
+                                if (datagramLinks.sendPacket (mountId, packet))
+                                    return true;
+
                                 /*  A packet to a link cut by packets; a line to one
                                     reading lines - the rcp wire (DP.7) - its newline
                                     added by the table. Exactly one of the two takes
@@ -5724,6 +5781,7 @@ namespace
         parameters.setSerial (&serialPorts, &runner.heardLines());
         parameters.setLinks (&links);
         parameters.setMqttLinks (&mqttLinks);
+        parameters.setDatagramLinks (&datagramLinks);
         parameters.setPresets (&presets);
 
         /*  A PROCESS CUE'S PATCH OPENED IN PLUGDATA OR PD (namespace draft §51,
@@ -7434,6 +7492,13 @@ namespace
 
                                          if (declaration->readback == "xremote")
                                              sender.queue (mountId, wfg::tree::MountSender::destinationFor (*declaration), "/xremote", wfg::osc::Values {});
+                                         else if (declaration->readback == "subscribe" && declaration->wire == "ssc")
+                                         {
+                                             //  A Sennheiser subscription, the file's JSON whole (§124, BES).
+                                             const auto text = mounts.subscribeTemplateOf (mountId);
+                                             if (! text.empty())
+                                                 datagramLinks.sendPacket (mountId, std::vector<std::uint8_t> (text.begin(), text.end()));
+                                         }
                                          else if (declaration->readback == "subscribe")
                                              if (const auto line = mounts.subscribeTemplateOf (mountId); ! line.empty())
                                                  if (const auto parsed = wfg::tree::wire::parseSubscribe (line))
@@ -7505,6 +7570,43 @@ namespace
                                      for (const auto& bytes : packets)
                                          if (const auto decoded = wfg::osc::decode (bytes.data(), bytes.size()); decoded.ok)
                                              nameSpace.write ("link:" + mountId, decoded.packet);
+                                 }
+
+                                 /*  AND WHAT A SENNHEISER RECEIVER ANSWERED (namespace
+                                     draft §124, BES): a JSON message a datagram, every
+                                     property it holds heard at its path under the
+                                     prefix, valued as the node is typed; an error the
+                                     device's last reply. One that does not parse is
+                                     dropped, as an OSC datagram that does not decode. */
+                                 for (auto& [mountId, packets] : datagramLinks.takePackets (64))
+                                 {
+                                     const auto* declaration = mounts.declarationOf (mountId);
+                                     const auto roots = declaration != nullptr ? wfg::tree::prefixesOf (declaration->prefix)
+                                                                               : std::vector<std::string> {};
+                                     if (roots.empty())
+                                         continue;
+
+                                     const auto root = roots.front() == "/" ? std::string {} : roots.front();
+
+                                     for (const auto& bytes : packets)
+                                     {
+                                         const auto parsed = wfg::json::parse (std::string_view (reinterpret_cast<const char*> (bytes.data()),
+                                                                                                 bytes.size()));
+                                         if (! parsed.ok())
+                                             continue;
+
+                                         if (const auto error = wfg::tree::wire::sscErrorOf (*parsed.value); ! error.empty())
+                                             engine.submit ("link:" + mountId, "mount.replied",
+                                                            { wfg::osc::Value::string (mountId),
+                                                              wfg::osc::Value::string ("error"),
+                                                              wfg::osc::Value::string (error) });
+
+                                         for (const auto& [relative, value] : wfg::tree::wire::sscLeavesOf (*parsed.value))
+                                             if (const auto* node = mounts.nodeAt (root + relative); node != nullptr)
+                                                 if (auto values = wfg::tree::wire::sscValuesOf (value, node->typeTags); ! values.empty())
+                                                     nameSpace.write ("link:" + mountId,
+                                                                      wfg::osc::Packet::message (root + relative, std::move (values)));
+                                     }
                                  }
 
                                  /*  AND THE LINES A CONSOLE SAID DOWN ITS LINK (the
@@ -8162,8 +8264,11 @@ namespace
                 }
 
                 /*  AND ONE OVER A CONNECTION by its link (DP.6):
-                    what arrives down it is the device's. */
-                if (document.getAttribute (base + "transport").value_or (std::string ("udp")) == "tcp")
+                    what arrives down it is the device's. So too a
+                    Sennheiser receiver on the ssc wire, whose
+                    socket is its own (§124, BES). */
+                if (document.getAttribute (base + "transport").value_or (std::string ("udp")) == "tcp"
+                      || document.getAttribute (base + "wire").value_or (std::string ("osc")) == "ssc")
                 {
                     hearing->byHost["link:" + mountId].push_back (
                         { mountId, document.getAttribute (base + "prefix")
