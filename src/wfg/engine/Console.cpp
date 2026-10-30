@@ -3107,11 +3107,18 @@ namespace
             const auto wire = reads ("wire", "osc");
             wish.framing = wire == "rcp" || wire == "line" ? std::string ("lines")
                          : wire == "midi" ? std::string ("raw")
+                         : wire == "shure" ? std::string ("angles")
                                           : reads ("framing", "length");
 
             if (wire == "line")
                 wish.greeting = reads ("login", "");
             wish.rx = reads ("rx", "false") == "true";
+
+            /*  A SHURE RECEIVER HEARD (namespace draft §124, BER): asked for
+                everything it knows and for its meters once a second, on every
+                opening, while Rx is on - it tells every change after that. */
+            if (wire == "shure" && wish.rx)
+                wish.greeting = "< GET 0 ALL >< SET 0 METER_RATE 01000 >";
             wish.tx = reads ("tx", "true") != "false";
             wanted.push_back (std::move (wish));
         }
@@ -7524,6 +7531,57 @@ namespace
                                                                 { wfg::osc::Value::string (mountId),
                                                                   wfg::osc::Value::string ("line"),
                                                                   wfg::osc::Value::string (said) });
+                                             continue;
+                                         }
+
+                                         /*  A SHURE RECEIVER (namespace draft §124,
+                                             BER): a REP is the receiver telling, heard
+                                             at the first of its addresses the device
+                                             has, under its prefix, valued as the node
+                                             spells it; a SAMPLE its meters, field by
+                                             field through the file's layouts; REP ERR
+                                             a command it refused, the last reply. */
+                                         if (const auto* declaration = mounts.declarationOf (mountId);
+                                             declaration != nullptr && declaration->wire == "shure")
+                                         {
+                                             const auto said = wfg::tree::wire::parseShureFrame (line);
+                                             const auto roots = wfg::tree::prefixesOf (declaration->prefix);
+
+                                             if (! said.has_value() || roots.empty())
+                                                 continue;
+
+                                             const auto root = roots.front() == "/" ? std::string {} : roots.front();
+                                             const auto hear = [&] (const std::string& relative,
+                                                                    const std::vector<wfg::tree::wire::ShureToken>& tokens)
+                                             {
+                                                 const auto* node = mounts.nodeAt (root + relative);
+                                                 if (node == nullptr)
+                                                     return false;
+
+                                                 const wfg::tree::wire::ShureSpec spec { node->shureOffset(), node->shureBraces(), node->shurePad() };
+                                                 nameSpace.write ("link:" + mountId,
+                                                                  wfg::osc::Packet::message (root + relative,
+                                                                                             wfg::tree::wire::shureValuesOf (tokens, spec, node->typeTags)));
+                                                 return true;
+                                             };
+
+                                             if (said->word == "REP" && said->parameter == "ERR")
+                                                 engine.submit ("link:" + mountId, "mount.replied",
+                                                                { wfg::osc::Value::string (mountId),
+                                                                  wfg::osc::Value::string ("ERR"),
+                                                                  wfg::osc::Value::string (said->text) });
+                                             else if (said->word == "REP")
+                                             {
+                                                 for (const auto& [relative, tokens] : wfg::tree::wire::shureAddressesOf (*said))
+                                                     if (hear (relative, tokens))
+                                                         break;
+                                             }
+                                             else if (said->word == "SAMPLE")
+                                             {
+                                                 for (const auto& [relative, token] : wfg::tree::wire::shureSampleOf (*said, mounts.sampleLayoutsOf (mountId)))
+                                                     hear (relative, { token });
+                                             }
+
                                              continue;
                                          }
 

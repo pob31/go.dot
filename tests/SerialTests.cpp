@@ -23,6 +23,7 @@
 
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
+#include <wfg/engine/serial/Angles.h>
 #include <wfg/engine/serial/SerialTable.h>
 
 #include <chrono>
@@ -551,6 +552,56 @@ TEST_CASE ("serial: a port's greeting is said as it opens and again after it com
     REQUIRE (within (3s, [&] { return table.stateOf ("MA200001").state == "open"; }));
     std::this_thread::sleep_for (100ms);
     CHECK (desk->sent().empty());
+}
+
+TEST_CASE ("serial: the angles framing - a Shure receiver's frames however the bytes come, a > inside braces kept, nothing after a frame sent")
+{
+    //  §124, BER: the cutter alone first.
+    AngleCutter cutter;
+    CHECK (cutter.feed ("< REP 1 AUDIO_GAIN 030 >< REP 1 CHAN").size() == 1u);
+    const auto rest = cutter.feed (("_NAME {Lead > Vox} >"));
+    REQUIRE (rest.size() == 1u);
+    CHECK (rest[0] == "< REP 1 CHAN_NAME {Lead > Vox} >");
+
+    //  Noise before a frame dropped; a frame cut short by the next one counted.
+    AngleCutter noisy;
+    const auto frames = noisy.feed ("junk< REP 1 AUD< REP 2 AUDIO_MUTE ON >");
+    REQUIRE (frames.size() == 1u);
+    CHECK (frames[0] == "< REP 2 AUDIO_MUTE ON >");
+    CHECK (noisy.dropped == 1u);
+
+    //  One too long dropped whole.
+    AngleCutter longOne;
+    CHECK (longOne.feed ("< " + std::string (40, 'x') + " >", 16).empty());
+    CHECK (longOne.dropped == 1u);
+
+    //  And on a link: frames as lines, the greeting and every line sent with nothing after.
+    Bench bench;
+    auto receiver = bench.plug ("127.0.0.1:2202");
+    SerialTable table (bench.opener());
+    auto link = port ("SHURE001", "127.0.0.1:2202");
+    link.framing = "angles";
+    link.greeting = "< GET 0 ALL >";
+    table.reconcile ({ link });
+    REQUIRE (within (2s, [&] { return table.stateOf ("SHURE001").state == "open"; }));
+    CHECK (within (2s, [&] { return receiver->sent() == "< GET 0 ALL >"; }));
+
+    CHECK (table.send ("SHURE001", "< SET 1 AUDIO_MUTE ON >"));
+    CHECK (within (2s, [&] { return receiver->sent() == "< GET 0 ALL >< SET 1 AUDIO_MUTE ON >"; }));
+    CHECK_FALSE (table.sendPacket ("SHURE001", { 0x01 }));
+
+    receiver->say ("< REP 1 AUDIO_MUTE ON >< REP 1 CHAN_NAME {A>B} >< SAMP");
+    std::vector<std::string> got;
+    within (2s, [&]
+    {
+        for (auto& [id, lines] : table.takeLines (64))
+            for (auto& line : lines)
+                got.push_back (std::move (line));
+        return got.size() >= 2u;
+    });
+    REQUIRE (got.size() == 2u);
+    CHECK (got[0] == "< REP 1 AUDIO_MUTE ON >");
+    CHECK (got[1] == "< REP 1 CHAN_NAME {A>B} >");
 }
 
 //==============================================================================

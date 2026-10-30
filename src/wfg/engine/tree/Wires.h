@@ -127,4 +127,84 @@ namespace wfg::tree::wire
         atoms - "/eos/subscribe 1" - a whole number an int32, one with a dot a
         float32, anything else a string; nothing for an empty line. */
     std::optional<std::pair<std::string, osc::Values>> parseSubscribe (const std::string& line);
+
+    //==========================================================================
+    /*  THE SHURE WIRE (namespace draft §124, BER): a Shure receiver's command
+        strings - Axient Digital, ULX-D, SLX-D, QLX-D - on TCP 2202, ASCII,
+        each between `<` and `>` and nothing ending a line:
+
+            < GET 1 AUDIO_GAIN >        < SET 1 AUDIO_GAIN 30 >
+            < REP 1 AUDIO_GAIN 030 >    < SAMPLE 1 ALL 005 031 102 … >
+
+        The channel comes first, nought meaning every channel; a slot or an
+        antenna follows the parameter; a device's own property has no channel.
+        THE ADDRESS UNDER THE DEVICE'S PREFIX SPELLS THE STRING IN ITS ORDER -
+        `/1/AUDIO_GAIN`, `/1/SLOT_RF_OUTPUT/3`, `/FLASH` - and the prefix is
+        never sent, as an MQTT topic's is not (§67, ANA); these functions take
+        the address with the prefix already off. */
+
+    /*  What a node says about its spelling (`GODOT.SHURE`): `offset` added to
+        a number before it is sent and taken off one heard - the gain's 18,
+        so a cue says decibels and the receiver hears 0 to 60 - and `braces`,
+        a string sent in braces and heard with the receiver's padding trimmed:
+        a channel's name, `{Lead Vox}`; `pad`, the digits a number is sent
+        in, zeros before it - METER_RATE's five, `01000`. */
+    struct ShureSpec
+    {
+        int offset = 0;
+        bool braces = false;
+        int pad = 0;
+    };
+
+    /*  The frame a message is sent as, `<` to `>`: SET with the values, or
+        GET with none when `asking`. A bool is ON or OFF; a number has the
+        offset added and is rounded (the receiver takes whole numbers, and a
+        curve's move arrives as a float); a string goes in braces where the
+        spec says, as it is otherwise - TOGGLE, RF_MUTE, INC 5. An address
+        with no parameter renders nothing. */
+    std::string renderShure (const std::string& relative, const osc::Values& values, const ShureSpec& spec, bool asking);
+
+    /*  One frame a receiver said, taken apart: `word` REP or SAMPLE, the
+        `channel` when one came first, the `parameter`, then every token
+        after it - `braced` where it came in braces - and the whole frame as
+        `text`. `< REP ERR >` is the word REP and the parameter ERR. Nothing
+        for a frame with no word. */
+    struct ShureToken
+    {
+        std::string text;
+        bool braced = false;
+    };
+
+    struct ShureFrame
+    {
+        std::string word;
+        std::string channel;
+        std::string parameter;
+        std::vector<ShureToken> rest;
+        std::string text;
+    };
+
+    std::optional<ShureFrame> parseShureFrame (const std::string& frame);
+
+    /*  Where a REP might be a node, most specific first, each with the
+        tokens left for its value: with the first token after the parameter
+        as an index when it is a whole number and more follow
+        (`< REP 1 RSSI 1 083 >` is `/1/RSSI/1` at 83), then with none. The
+        caller keeps the first the device has, as RCP's (DP.7). */
+    std::vector<std::pair<std::string, std::vector<ShureToken>>> shureAddressesOf (const ShureFrame& frame);
+
+    /*  A REP's tokens as the node's values: braced text trimmed of its
+        padding; ON and OFF a bool on a node typed T; a whole number with the
+        offset taken off, an int32; anything else a string. `typeTags` is the
+        node's own. */
+    osc::Values shureValuesOf (const std::vector<ShureToken>& tokens, const ShureSpec& spec, const std::string& typeTags);
+
+    /*  A SAMPLE's fields by the file's layouts (`GODOT.SAMPLE` at the root):
+        each layout a list of node names under the channel - `RSSI/1` - and the
+        one whose length is the count of fields that came is used, since a
+        receiver's channel says more in Quadversity or FD-C than plainly. Each
+        field paired with `/<channel>/<name>`, a name left empty skipped (a
+        field no node keeps); nothing when no layout fits. */
+    std::vector<std::pair<std::string, ShureToken>> shureSampleOf (const ShureFrame& frame,
+                                                                   const std::vector<std::vector<std::string>>& layouts);
 }

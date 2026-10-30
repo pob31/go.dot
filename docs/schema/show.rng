@@ -3996,7 +3996,7 @@
       </optional>
       <optional>
         <attribute name="readback">
-          <a:documentation>Whether this target can be ASKED what a value is, and how, or TELLS without being asked (namespace draft 57, AFL, DP.10). Transport says how to send and says nothing about the other direction, so without this a cue whose wait is verified against a write-only device is a cue that can never succeed and nothing notices until the show. oscquery: asked over HTTP at its query port. get: asked on the wire, the bare address with no atoms or the file-s GET line, answered at the same address - Holophonix, a DS100. notify: a Yamaha console-s get line answered with OK, and its NOTIFY lines heard on their own. xremote: an X32-s or M32-s /xremote sent every nine seconds while rx is on, after which it tells every change. subscribe: the file-s SUBSCRIBE line sent the same way - an Eos. midi: a console-s echoes on the midi wire, read by its nodes- shapes. The last three tell and are never asked; a verified cue aimed at one is refused as at a none. None is the default because it is true of most devices: a mounted namespace is usually hand-written for a box that will never answer.</a:documentation>
+          <a:documentation>Whether this target can be ASKED what a value is, and how, or TELLS without being asked (namespace draft 57, AFL, DP.10). Transport says how to send and says nothing about the other direction, so without this a cue whose wait is verified against a write-only device is a cue that can never succeed and nothing notices until the show. oscquery: asked over HTTP at its query port. get: asked on the wire, the bare address with no atoms or the file-s GET line, answered at the same address - Holophonix, a DS100. notify: a Yamaha console-s get line answered with OK, and its NOTIFY lines heard on their own. xremote: an X32-s or M32-s /xremote sent every nine seconds while rx is on, after which it tells every change. subscribe: the file-s SUBSCRIBE line sent the same way - an Eos. midi: a console-s echoes on the midi wire, read by its nodes- shapes. The last three tell and are never asked; a verified cue aimed at one is refused as at a none. notify is also a Shure receiver-s REP lines, told on every change and asked with GET (namespace draft 124, BER). None is the default because it is true of most devices: a mounted namespace is usually hand-written for a box that will never answer.</a:documentation>
           <choice>
             <value>none</value>
             <value>oscquery</value>
@@ -4062,13 +4062,14 @@
       </optional>
       <optional>
         <attribute name="wire">
-          <a:documentation>What the bytes to this device are (namespace draft 57, AFJ): osc, the codec of namespace draft 45; rcp, a Yamaha console-s lines of text; line, a command line and its CR LF, a grandMA2-s; midi, the messages a node-s MIDI shape renders to; mqtt, a publish on the topic the address spells under the prefix, its payload the values joined by spaces (namespace draft 67, ANA, ANC), the mqtt transport only. Only osc is rendered today: a device naming another is refused when the show loads, in words, until the wire of DP.7, DP.8 or DP.9 is built - declared now so that the word is in the schema a show is checked against, and a device made from a preset carries what its file says.</a:documentation>
+          <a:documentation>What the bytes to this device are (namespace draft 57, AFJ): osc, the codec of namespace draft 45; rcp, a Yamaha console-s lines of text; line, a command line and its CR LF, a grandMA2-s; midi, the messages a node-s MIDI shape renders to; mqtt, a publish on the topic the address spells under the prefix, its payload the values joined by spaces (namespace draft 67, ANA, ANC), the mqtt transport only; shure, a Shure receiver-s command strings, &lt; SET 1 AUDIO_GAIN 30 &gt; for the address /1/AUDIO_GAIN under the prefix, over tcp only (namespace draft 124, BER). Only osc is rendered today: a device naming another is refused when the show loads, in words, until the wire of DP.7, DP.8 or DP.9 is built - declared now so that the word is in the schema a show is checked against, and a device made from a preset carries what its file says.</a:documentation>
           <choice>
             <value>osc</value>
             <value>rcp</value>
             <value>line</value>
             <value>midi</value>
             <value>mqtt</value>
+            <value>shure</value>
           </choice>
         </attribute>
       </optional>

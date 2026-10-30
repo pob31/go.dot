@@ -519,6 +519,19 @@ namespace wfg::tree
             //  And the command line it renders to on the line wire (DP.8).
             out.lineTemplate = stringProperty (*godot, "LINE");
 
+            //  And its spelling on the shure wire (§124, BER).
+            if (const auto* shure = property (*godot, "SHURE"); shure != nullptr)
+            {
+                if (const auto* offset = property (*shure, "OFFSET"); offset != nullptr && offset->isNumber())
+                    out.shureOffset = static_cast<int> (offset->asNumber());
+
+                if (const auto* braces = property (*shure, "BRACES"); braces != nullptr && braces->isBool())
+                    out.shureBraces = braces->asBool();
+
+                if (const auto* pad = property (*shure, "PAD"); pad != nullptr && pad->isNumber())
+                    out.shurePad = static_cast<int> (pad->asNumber());
+            }
+
             //  And its shape on the MIDI wire (DP.9), fixed keys.
             if (const auto* shape = property (*godot, "MIDI"); shape != nullptr)
             {
@@ -842,6 +855,20 @@ namespace wfg::tree
         {
             result.getTemplate = stringProperty (*godot, "GET");
             result.subscribeTemplate = stringProperty (*godot, "SUBSCRIBE");
+
+            //  A Shure receiver's meters, a list of names per layout (§124, BER).
+            if (const auto* sample = property (*godot, "SAMPLE"); sample != nullptr && sample->isArray())
+                for (const auto& layout : sample->asArray())
+                {
+                    if (! layout.isArray())
+                        continue;
+
+                    std::vector<std::string> names;
+                    for (const auto& name : layout.asArray())
+                        if (name.isString())
+                            names.push_back (name.asString());
+                    result.sampleLayouts.push_back (std::move (names));
+                }
         }
 
         collect (*parsed.value, {}, rootPath, mountAt, mount, result.nodes, result.problems, result.warnings);
@@ -881,7 +908,8 @@ namespace wfg::tree
             return result;
         }
 
-        mounts[mount.id] = Entry { mount, result.nodes, result.warnings, result.getTemplate, result.subscribeTemplate };
+        mounts[mount.id] = Entry { mount, result.nodes, result.warnings, result.getTemplate, result.subscribeTemplate,
+                                   result.sampleLayouts };
         bumpShape();
         return result;
     }
@@ -903,7 +931,7 @@ namespace wfg::tree
         MountResult result;
         result.ok = true;
 
-        mounts[mount.id] = Entry { mount, {}, {}, {}, {} };
+        mounts[mount.id] = Entry { mount, {}, {}, {}, {}, {} };
         bumpShape();
 
         return result;
@@ -1023,6 +1051,12 @@ namespace wfg::tree
     {
         const auto found = mounts.find (mountId);
         return found == mounts.end() ? std::string {} : found->second.getTemplate;
+    }
+
+    std::vector<std::vector<std::string>> MountTable::sampleLayoutsOf (const std::string& mountId) const
+    {
+        const auto found = mounts.find (mountId);
+        return found == mounts.end() ? std::vector<std::vector<std::string>> {} : found->second.sampleLayouts;
     }
 
     std::string MountTable::subscribeTemplateOf (const std::string& mountId) const

@@ -91,14 +91,14 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_group_timeSource[] = { "ltc", "mtc", "clock" };
     inline constexpr std::string_view enum_mount_transport[] = { "udp", "tcp", "ws", "serial", "midi", "mqtt" };
     inline constexpr std::string_view enum_mount_framing[] = { "length", "slip" };
-    inline constexpr std::string_view enum_mount_wire[] = { "osc", "rcp", "line", "midi", "mqtt" };
+    inline constexpr std::string_view enum_mount_wire[] = { "osc", "rcp", "line", "midi", "mqtt", "shure" };
     inline constexpr std::string_view enum_mount_panic[] = { "park", "snap" };
     inline constexpr std::string_view enum_mount_readback[] = { "none", "oscquery", "notify", "xremote", "subscribe", "get", "midi" };
     inline constexpr std::string_view enum_mount_listen[] = { "off", "connecting", "listening", "unsupported", "unreachable" };
     inline constexpr std::string_view enum_mount_doh[] = { "takeBack", "leave" };
     inline constexpr std::string_view enum_mount_link[] = { "off", "closed", "opening", "open", "retrying" };
     inline constexpr std::string_view enum_preset_transport[] = { "udp", "tcp", "midi" };
-    inline constexpr std::string_view enum_preset_wire[] = { "osc", "rcp", "line", "midi" };
+    inline constexpr std::string_view enum_preset_wire[] = { "osc", "rcp", "line", "midi", "shure" };
     inline constexpr std::string_view enum_preset_framing[] = { "length", "slip" };
     inline constexpr std::string_view enum_preset_origin[] = { "shipped", "yours" };
     inline constexpr std::string_view enum_network_brokerState[] = { "off", "listening", "problem" };
@@ -3704,10 +3704,10 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           true, "osc",
           false, 0.0, false, 0.0,
-          enum_mount_wire, 5,
+          enum_mount_wire, 6,
           "", 1.0, false, "park",
           "",
-          "What the bytes to this device are (namespace draft 57, AFJ): osc, the codec of namespace draft 45; rcp, a Yamaha console-s lines of text; line, a command line and its CR LF, a grandMA2-s; midi, the messages a node-s MIDI shape renders to; mqtt, a publish on the topic the address spells under the prefix, its payload the values joined by spaces (namespace draft 67, ANA, ANC), the mqtt transport only. Only osc is rendered today: a device naming another is refused when the show loads, in words, until the wire of DP.7, DP.8 or DP.9 is built - declared now so that the word is in the schema a show is checked against, and a device made from a preset carries what its file says." },
+          "What the bytes to this device are (namespace draft 57, AFJ): osc, the codec of namespace draft 45; rcp, a Yamaha console-s lines of text; line, a command line and its CR LF, a grandMA2-s; midi, the messages a node-s MIDI shape renders to; mqtt, a publish on the topic the address spells under the prefix, its payload the values joined by spaces (namespace draft 67, ANA, ANC), the mqtt transport only; shure, a Shure receiver-s command strings, < SET 1 AUDIO_GAIN 30 > for the address /1/AUDIO_GAIN under the prefix, over tcp only (namespace draft 124, BER). Only osc is rendered today: a device naming another is refused when the show loads, in words, until the wire of DP.7, DP.8 or DP.9 is built - declared now so that the word is in the schema a show is checked against, and a device made from a preset carries what its file says." },
         { "mount", "login",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           false, "",
@@ -3843,7 +3843,7 @@ namespace wfg::doc::generated
           enum_mount_readback, 7,
           "", 1.0, false, "park",
           "",
-          "Whether this target can be ASKED what a value is, and how, or TELLS without being asked (namespace draft 57, AFL, DP.10). Transport says how to send and says nothing about the other direction, so without this a cue whose wait is verified against a write-only device is a cue that can never succeed and nothing notices until the show. oscquery: asked over HTTP at its query port. get: asked on the wire, the bare address with no atoms or the file-s GET line, answered at the same address - Holophonix, a DS100. notify: a Yamaha console-s get line answered with OK, and its NOTIFY lines heard on their own. xremote: an X32-s or M32-s /xremote sent every nine seconds while rx is on, after which it tells every change. subscribe: the file-s SUBSCRIBE line sent the same way - an Eos. midi: a console-s echoes on the midi wire, read by its nodes- shapes. The last three tell and are never asked; a verified cue aimed at one is refused as at a none. None is the default because it is true of most devices: a mounted namespace is usually hand-written for a box that will never answer." },
+          "Whether this target can be ASKED what a value is, and how, or TELLS without being asked (namespace draft 57, AFL, DP.10). Transport says how to send and says nothing about the other direction, so without this a cue whose wait is verified against a write-only device is a cue that can never succeed and nothing notices until the show. oscquery: asked over HTTP at its query port. get: asked on the wire, the bare address with no atoms or the file-s GET line, answered at the same address - Holophonix, a DS100. notify: a Yamaha console-s get line answered with OK, and its NOTIFY lines heard on their own. xremote: an X32-s or M32-s /xremote sent every nine seconds while rx is on, after which it tells every change. subscribe: the file-s SUBSCRIBE line sent the same way - an Eos. midi: a console-s echoes on the midi wire, read by its nodes- shapes. The last three tell and are never asked; a verified cue aimed at one is refused as at a none. notify is also a Shure receiver-s REP lines, told on every change and asked with GET (namespace draft 124, BER). None is the default because it is true of most devices: a mounted namespace is usually hand-written for a box that will never answer." },
         { "mount", "sent",
           ValueType::integer, 'i', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "0",
@@ -3963,7 +3963,7 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 1.0, false, "park",
           "",
-          "The last line a console answered to one it was sent, whole, when the wire is rcp (namespace draft 57, AFJ, DP.7): OK with the request echoed, OKm when the console fitted the value, ERROR with the verb and a word. What mount.replied noted, so a console refusing a line is read on the Network tab rather than in the log alone. Empty until it answers." },
+          "The last line a console answered to one it was sent, whole, when the wire is rcp (namespace draft 57, AFJ, DP.7): OK with the request echoed, OKm when the console fitted the value, ERROR with the verb and a word; and on the shure wire a receiver-s < REP ERR >, a command it refused (namespace draft 124, BER). What mount.replied noted, so a console refusing a line is read on the Network tab rather than in the log alone. Empty until it answers." },
         { "preset", "vendor",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           false, "",
@@ -4000,10 +4000,10 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "osc",
           false, 0.0, false, 0.0,
-          enum_preset_wire, 4,
+          enum_preset_wire, 5,
           "", 1.0, false, "park",
           "",
-          "What its messages are rendered to on the way out: OSC, Yamaha's RCP text, a telnet line, MIDI bytes." },
+          "What its messages are rendered to on the way out: OSC, Yamaha's RCP text, a telnet line, MIDI bytes, a Shure receiver's command strings." },
         { "preset", "framing",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "length",

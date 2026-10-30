@@ -1329,6 +1329,17 @@ add_test(NAME blackbox.wires.fr_FR
 set_tests_properties(blackbox.wires.C blackbox.wires.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 400)
 
+# RADIO MICROPHONES (namespace draft §124, BER; WR.2): the shipped binary
+# against mock_shure.py, an Axient Digital receiver written from Shure's
+# command-string document - the greeting, what it answered heard, a cue's gain,
+# name and mute as its own SET, a pack's battery and the meters heard, REP ERR.
+add_test(NAME blackbox.radios.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/radios.py" --wfg-locale=C)
+add_test(NAME blackbox.radios.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/radios.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.radios.C blackbox.radios.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 200)
+
 # -----------------------------------------------------------------------------
 # A MACHINE THAT HOLDS (namespace draft §58, RD.1): `serve --hold` against a
 # device over UDP and one over TCP - nothing reaches either, the connection is

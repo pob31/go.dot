@@ -359,6 +359,12 @@ namespace wfg::tree
         std::string getTemplate;
         std::string subscribeTemplate;
 
+        /*  HOW A SHURE RECEIVER'S METERS ARE LAID OUT (namespace draft §124,
+            BER), from the file's root `GODOT.SAMPLE`: a list of node names
+            under the channel per layout, the one used picked by how many
+            fields a SAMPLE line carries. Empty for every other device. */
+        std::vector<std::vector<std::string>> sampleLayouts;
+
         static MountResult failed (std::string problem);
     };
 
@@ -535,6 +541,10 @@ namespace wfg::tree
         std::string getTemplateOf (const std::string& mountId) const;
         std::string subscribeTemplateOf (const std::string& mountId) const;
 
+        /*  And a Shure receiver's SAMPLE layouts (§124, BER), empty where the
+            file gave none. */
+        std::vector<std::vector<std::string>> sampleLayoutsOf (const std::string& mountId) const;
+
         /*  Every node of one mount, for a reader that indexes them - the MIDI
             echoes' table (DP.10). Empty for a mount not loaded. */
         std::vector<const Node*> nodesOf (const std::string& mountId) const;
@@ -676,6 +686,7 @@ namespace wfg::tree
             std::vector<std::string> warnings;
             std::string getTemplate;
             std::string subscribeTemplate;
+            std::vector<std::vector<std::string>> sampleLayouts;
         };
 
         Node* findNode (const std::string& address);

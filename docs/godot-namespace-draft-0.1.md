@@ -35039,3 +35039,124 @@ and inside a ramp, an odd count keeping the last whole clock).
 Owed: the words, mine; the author's bench - a tempo-synced delay on a hosted voice under a ramping tempo cue;
 the importer turning `followTempo` on for a set (rate = set tempo over clip tempo, the scene tempo cues doing
 the rest) if the stems want it; a hold and the anchor (§122's open question).
+
+## 124. Radio microphones - a receiver is a device
+
+**Asked 2026-10-30** by the author: *"Do you think we can add wireless microphone control to Go.dot?
+Sennheiser Spectera can be reprogrammed on the fly from the Streamdeck thanks to Bitfocus Companion. The
+others, such as Shure and Axient, Wysicom, DPA, Sound Devices Alpha might also enable external control
+through the network."* Asked three things, the author chose: **every role** - cues change the mics, Go.dot
+watches them, a deck or the D700 works them, the channel names come in; **Mbed TLS** for the HTTPS Spectera
+speaks; and, for the hardware, *"I can test some of them in a month's time at the JTSE in Paris"* (25-26
+November 2026).
+
+What the makers publish, read 2026-10-30:
+
+| Maker, range | Protocol | Transport | Document |
+|---|---|---|---|
+| Shure Axient Digital (AD4D, AD4Q), ULX-D, SLX-D, QLX-D | command strings: `< GET x PARAM >`, `< SET x PARAM value >`, `< REP x PARAM value >` told on every change, `< SAMPLE x ALL … >` meters at `METER_RATE` | TCP 2202, ASCII, no line ends | public, a PDF per range |
+| Sennheiser Spectera | SSC version 2: REST and JSON, subscriptions as Server-Sent Events | HTTPS 443, a self-signed certificate, basic authentication; off until third-party access is turned on with a password in Control Cockpit | public, OpenAPI |
+| Sennheiser Digital 6000, EW-DX, EW-D | SSC version 1: JSON whose shape is the address | UDP 45 (EW-DX from firmware 4 in its legacy mode) | public |
+| DPA N-Series (N-DR1) | OSC, by the dealers' pages | TCP or UDP | not found |
+| Wisycom, Sound Devices Astral | Wisycom's own manager and a Bluetooth app; Astral's AstralComm, a DiGiCo link | - | not public |
+
+Bitfocus Companion has a module for each of the first three - Sennheiser wrote Spectera's itself - read for
+the command surface and never copied, as §57 reads them (AFN).
+
+The codes after §123's BEM. The first three are the author's; the rest mine *(proposed)*.
+
+- **BEN** (the author's) **Every role.** A cue changes a receiver - a name, a mute, a gain, a frequency, a
+  pack swapped - Go.dot watches what the receivers say, a deck key or a dial works a channel, and a rack
+  channel takes its name from its radio.
+- **BEO** (the author's) **HTTPS through Mbed TLS**, a submodule under `ThirdParty/`, its client half
+  only. Apache-2.0, which GPL-3 takes. `deps.no-openssl` stands: OpenSSL is still refused.
+- **BEP** (the author's) **Built against the documents, tried at JTSE.** No receiver is on the bench before
+  25 November: each wire is built and tested against a mock that answers as the maker's document says,
+  and a preset bears `VERIFIED` only once its messages were seen landing on a real receiver (§57).
+- **BEQ** **A receiver is a device**, a `<Mount>` like a desk (§15, §57): a preset per range, the cue the OSC
+  cue (AFI) - several channels in one GO as its `<Message>` children, a gain moved by a curve - and what
+  the receiver tells heard at the node (AFL). A wire per protocol, `shure`, `ssc` and `sscv2`, rendered
+  at the flush as AFJ's are. The existing `mic` cue is a live input, not a radio: the words keep apart.
+- **BER** **The shure wire.** The address under the device's prefix spells the command string in its own
+  order - `/1/AUDIO_GAIN` is `< SET 1 AUDIO_GAIN … >`, `/1/SLOT_RF_OUTPUT/3` the slot after the
+  parameter, `/FLASH` the device's own; the prefix is the device's, never sent, as an MQTT topic's (ANA).
+  A node's `GODOT.SHURE` says how its value is spelled: `OFFSET` added before a number is sent and taken
+  off one heard (the gain's 18, so a cue says decibels and the receiver hears 0 to 60), `BRACES` a string
+  in braces, its padding trimmed when heard; a `T` node is ON or OFF. A connection under the new framing
+  `angles`: a frame runs from `<` to the `>` outside braces, since a name may hold one, and nothing ends a
+  line. On every opening, while Rx is on, `< GET 0 ALL >` and `< SET 0 METER_RATE 01000 >`. A `REP` is
+  heard at the first of its addresses the device has - with the number after the parameter an index, then
+  without - so readback is `notify`, and a verified cue asks with `GET`; `< REP ERR >` is the last reply.
+  A `SAMPLE` line is heard field by field through the file's root `GODOT.SAMPLE`: one list of addresses
+  per layout, picked by how many fields came (an AD4's channel is nine, thirteen in Quadversity, fourteen
+  in FD-C, twenty-three in both).
+- **BES** **The ssc wire** (Sennheiser's version 1): the address is the JSON's path, `/rx1/mute` true is
+  `{"rx1":{"mute":true}}`, a datagram each, over a socket of the device's own, since the one OSC socket
+  cannot read JSON; what comes back is heard by the same path. `osc:#subscribe` on opening, renewed as
+  the document says.
+- **BET** **The sscv2 wire**: a thread per device in `MountProbe`'s shape, its answers handed to the tick as
+  commands; a write a `PUT` of the node's `GODOT.SSC` resource and key; the subscription a Server-Sent
+  Events stream, each event heard. A self-signed certificate is trusted by its fingerprint, taken at the
+  first connection and shown on the device's row with *Trust*: trusting it is a decision, so the
+  fingerprint is the show's (`mount/pin`); the password follows `mount/login`.
+- **BEU** **Stops leave the radios alone.** Esc and double Esc never touch a receiver: it is the world, not
+  Go.dot's processing (§4.4). The panic values are `park` (§73). A node that can cut a performer off -
+  frequency, group and channel, RF channel, audio interface, settings copied between packs (the ones
+  Spectera's own module asks to confirm) - carries `GODOT.DISRUPTIVE`: left out of Doh!'s rollback,
+  marked in the inspector, pressed twice on a deck key.
+- **BEV** **Watched.** A panel of receiver channels - name, the pack on, off or muted, battery as bars and a
+  number, RF and audio meters, interference - from what was heard, never saved (§4.10), never by colour
+  alone (§4.8). Problem marks (§64) for a low battery, a pack gone, interference and a receiver out of
+  reach, by thresholds on the node's `GODOT.WATCH`.
+- **BEW** **A rack channel names its radio** (`/shure1/1`, a receiver channel), stored: *Take names from the
+  radios* writes the names once, undoably, never as a live link (§4.10); and a mic cue on that channel
+  carries its pack's problem mark before the GO.
+- **BEX** **A deck key on a radio**: the mute turned, the name and the battery drawn; the Stream Deck+ and
+  D700 dials on a channel's gain by the existing pages. Last, since it needs the rest.
+- **BEY** **The makers that publish nothing** are written to (the letters are the author's to send): DPA for
+  its OSC list - a plain OSC device the day it comes - Wisycom and Sound Devices for anything. At JTSE
+  their stands are asked too.
+
+| Stage | What | Commit |
+|---|---|---|
+| WR.0 | This section; PRD §3.35 | |
+| WR.1 | The shure wire, the `angles` framing, REP and SAMPLE heard; the Shure presets | |
+| WR.2 | A mock Shure receiver; `blackbox.radios` | |
+| WR.3 | The ssc wire, a datagram link; the Sennheiser presets | |
+| WR.4 | Mbed TLS, a TLS link, the pin | |
+| WR.5 | The sscv2 wire, Server-Sent Events; the Spectera preset | |
+| WR.6 | The radio panel, problem marks | |
+| WR.7 | A rack channel's radio, names taken | |
+| WR.8 | Deck keys and dials | |
+| WR.9 | The JTSE bench pages | |
+
+As built 2026-10-30, WR.1 and WR.2: `tree::wire::renderShure`, `parseShureFrame`, `shureAddressesOf`,
+`shureValuesOf` and `shureSampleOf` (`ShureSpec`: `offset`, `braces`, and `pad` - METER_RATE's five digits,
+`01000`, as the documents send it); `Node::shureOffset`/`shureBraces`/`shurePad` from `GODOT.SHURE`;
+`MountTable::sampleLayoutsOf` from the root's `GODOT.SAMPLE`, a name left empty a field not kept (FD-C's
+second frequency); `serial::AngleCutter` (its own file beside SLIP's: nothing in `serial/` reaches into
+`tree/`) and the `angles` framing, a line-reading framing whose lines end nothing they send; the sender's
+`shure` branch, the prefix off as the mqtt wire's, a GET when asked; the load taking `shure` over `tcp`
+alone and `notify` on it; serve's link loop hearing REP and SAMPLE under the prefix, REP ERR as
+`mount.replied`, and the greeting `< GET 0 ALL >< SET 0 METER_RATE 01000 >` while Rx is on.
+`shure-axient-digital` (four channels, eight slots, four antennas), `shure-ulxd` and `shure-slxd` from
+`scripts/presets/shure_wireless.py`, from Shure's documents (Axient Digital version 4, 2019-L; ULX-D 1.0,
+2022-L; SLX-D 2, 2020-G); the Companion module read for its surface and its framing - no line end sent,
+cut at `>` - and never copied. SLX-D has no mute command; its one SAMPLE RF value is kept as antenna A's,
+a reading to confirm at JTSE. A value with an offset and a sentinel both (a battery's temperature, less
+40, 255 unknown) is kept raw, the description saying how to read it.
+
+Tests: WireTests (the SET from the documents' examples - 22 dB as 40, ON, braces, five digits, a slot, the
+device's own, GET; a REP taken apart with a `>` inside a name; an antenna or slot before the plain address;
+the values back - decibels, a bool on a T node, a name trimmed, seven digits a number; SAMPLE through the
+layout of its length, FD-C's five not kept, ULX-D's three); SerialTests (the cutter however the bytes
+come, noise and a cut-short frame dropped and counted, the greeting and a line with nothing after them);
+MountTests (shure over tcp alone, telling; the sender's frames, the prefix off, one each whatever the
+bundles row, GET when asked, an address under no prefix failing); `blackbox.radios` against
+`mock_shure.py`, an Axient Digital written from the document - 26 checks, both locales.
+
+**Found while building, owed to WR.6: what a device reports reaches no client.** A mounted node's HTTP
+answer is `MountTable::valueOf`, what Go.dot WROTE; a `mount.heard` is kept as an observation for the
+Runner (a verified wait, Doh!'s hand on the desk, a lane recorded) and counted on `mount/heard`, and
+nothing publishes the value. `blackbox.radios` reads what was heard from the session's log. The radio
+panel needs the observed value at the node, which every device with Rx on then gets.

@@ -16,6 +16,8 @@
 
 #include <wfg/engine/serial/SerialTable.h>
 
+#include <wfg/engine/serial/Angles.h>
+
 #include <wfg/engine/mqtt/Packet.h>
 
 #include <wfg/engine/osc/OscValue.h>
@@ -38,6 +40,13 @@ namespace wfg::serial
         bool readsPackets (const std::string& framing) noexcept
         {
             return framing == "slip" || framing == "length" || framing == "raw" || framing == "mqtt";
+        }
+
+        /*  What ends a line sent: a new line, or nothing under `angles`, whose
+            frames end at their `>` (§124, BER). */
+        std::string lineEnd (const std::string& framing)
+        {
+            return framing == "angles" ? std::string {} : std::string ("\n");
         }
 
         /*  One packet as the port's framing puts it on the wire: SLIP's
@@ -79,6 +88,7 @@ namespace wfg::serial
         std::deque<std::string> lines;      // read, waiting for the tick
         std::deque<std::vector<std::uint8_t>> packets;   // the same, on a SLIP port
         slip::Decoder decoder;
+        AngleCutter angles;
         std::deque<std::string> outgoing;   // handed, waiting for the port
         PortState state;
         bool open = false;
@@ -110,6 +120,7 @@ namespace wfg::serial
                         const std::lock_guard<std::mutex> held (lock);
                         partial.clear();
                         decoder = slip::Decoder {};
+                        angles = AngleCutter {};
                         outgoing.clear();
                         open = true;
                         ++state.openings;
@@ -118,7 +129,7 @@ namespace wfg::serial
                             hands over: a console that wants a login before it
                             listens gets it on every opening, when tx is on. */
                         if (! wanted.greeting.empty() && tx)
-                            outgoing.push_back (wanted.greeting + "\n");
+                            outgoing.push_back (wanted.greeting + lineEnd (wanted.framing));
                     }
                     setState ("open", {});
                 }
@@ -269,6 +280,23 @@ namespace wfg::serial
             if (wanted.framing == "mqtt")
             {
                 heardByMqtt (bytes);
+                return;
+            }
+
+            /*  A SHURE RECEIVER'S FRAMES (§124, BER), each a line. */
+            if (wanted.framing == "angles")
+            {
+                const auto droppedBefore = angles.dropped;
+
+                for (auto& frame : angles.feed (bytes, maxLine))
+                {
+                    if (lines.size() < maxWaiting)
+                        lines.push_back (std::move (frame));
+                    else
+                        ++state.dropped;
+                }
+
+                state.dropped += angles.dropped - droppedBefore;
                 return;
             }
 
@@ -435,7 +463,7 @@ namespace wfg::serial
             ++worker.state.dropped;
             return false;
         }
-        worker.outgoing.push_back (line + "\n");
+        worker.outgoing.push_back (line + lineEnd (worker.wanted.framing));
         return true;
     }
 

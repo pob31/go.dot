@@ -524,6 +524,177 @@ TEST_CASE ("wire: a subscription line is an address and its atoms, and nothing w
 }
 
 //==============================================================================
+/*  THE SHURE WIRE (namespace draft §124, BER): a receiver's command strings,
+    against the Axient Digital, ULX-D and SLX-D documents' own examples. The
+    address arrives with the device's prefix already off. */
+TEST_CASE ("wire: a Shure SET is the channel, the parameter, a slot after it, and the value as the node spells it")
+{
+    //  The gain in decibels, the receiver's 0 to 60: "To set to 22 dB: < SET x AUDIO_GAIN 40 >".
+    CHECK (renderShure ("/1/AUDIO_GAIN", { osc::Value::int32 (22) }, { 18, false, 0 }, false) == "< SET 1 AUDIO_GAIN 40 >");
+    CHECK (renderShure ("/2/AUDIO_GAIN", { osc::Value::float32 (-17.6f) }, { 18, false, 0 }, false) == "< SET 2 AUDIO_GAIN 0 >");
+
+    //  A bool ON or OFF; a word as it is.
+    CHECK (renderShure ("/1/AUDIO_MUTE", { osc::Value::boolean (true) }, {}, false) == "< SET 1 AUDIO_MUTE ON >");
+    CHECK (renderShure ("/1/AUDIO_MUTE", { osc::Value::string ("TOGGLE") }, {}, false) == "< SET 1 AUDIO_MUTE TOGGLE >");
+    CHECK (renderShure ("/3/AUDIO_GAIN", { osc::Value::string ("INC 10") }, {}, false) == "< SET 3 AUDIO_GAIN INC 10 >");
+
+    //  A name in braces, any brace in it taken out: "< SET x CHAN_NAME {Lead Vox} >".
+    CHECK (renderShure ("/1/CHAN_NAME", { osc::Value::string ("Lead Vox") }, { 0, true, 0 }, false) == "< SET 1 CHAN_NAME {Lead Vox} >");
+    CHECK (renderShure ("/1/CHAN_NAME", { osc::Value::string ("a{b}") }, { 0, true, 0 }, false) == "< SET 1 CHAN_NAME {ab} >");
+
+    //  A frequency in kHz as it is; a meter rate in its five digits.
+    CHECK (renderShure ("/1/FREQUENCY", { osc::Value::int32 (602125) }, {}, false) == "< SET 1 FREQUENCY 602125 >");
+    CHECK (renderShure ("/1/METER_RATE", { osc::Value::int32 (1000) }, { 0, false, 5 }, false) == "< SET 1 METER_RATE 01000 >");
+
+    //  A slot after the parameter: "< SET x SLOT_RF_OUTPUT z RF_MUTE >".
+    CHECK (renderShure ("/1/SLOT_RF_OUTPUT/3", { osc::Value::string ("RF_MUTE") }, {}, false) == "< SET 1 SLOT_RF_OUTPUT 3 RF_MUTE >");
+
+    //  A device's own property has no channel: "< SET FLASH ON >".
+    CHECK (renderShure ("/FLASH", { osc::Value::boolean (true) }, {}, false) == "< SET FLASH ON >");
+
+    //  A question is GET with no value, whatever the message held.
+    CHECK (renderShure ("/1/AUDIO_GAIN", { osc::Value::int32 (3) }, { 18, false, 0 }, true) == "< GET 1 AUDIO_GAIN >");
+    CHECK (renderShure ("/MODEL", {}, {}, true) == "< GET MODEL >");
+
+    //  No parameter, nothing.
+    CHECK (renderShure ("/1", { osc::Value::int32 (1) }, {}, false).empty());
+    CHECK (renderShure ("", {}, {}, false).empty());
+}
+
+TEST_CASE ("wire: a Shure receiver's REP taken apart - the channel, the parameter, braces kept whole, ERR")
+{
+    const auto gain = parseShureFrame ("< REP 1 AUDIO_GAIN 030 >");
+    REQUIRE (gain.has_value());
+    CHECK (gain->word == "REP");
+    CHECK (gain->channel == "1");
+    CHECK (gain->parameter == "AUDIO_GAIN");
+    REQUIRE (gain->rest.size() == 1u);
+    CHECK (gain->rest[0].text == "030");
+    CHECK (gain->text == "< REP 1 AUDIO_GAIN 030 >");
+
+    //  A name padded to thirty-one, and a > inside it.
+    const auto name = parseShureFrame ("< REP 2 CHAN_NAME {Lead > Vox                } >");
+    REQUIRE (name.has_value());
+    REQUIRE (name->rest.size() == 1u);
+    CHECK (name->rest[0].braced);
+    CHECK (name->rest[0].text == "Lead > Vox                ");
+
+    //  A device's own: no channel.
+    const auto model = parseShureFrame ("< REP MODEL {AD4Q-A                          } >");
+    REQUIRE (model.has_value());
+    CHECK (model->channel.empty());
+    CHECK (model->parameter == "MODEL");
+
+    //  A command refused.
+    const auto error = parseShureFrame ("< REP ERR >");
+    REQUIRE (error.has_value());
+    CHECK (error->word == "REP");
+    CHECK (error->parameter == "ERR");
+    CHECK (error->rest.empty());
+
+    CHECK_FALSE (parseShureFrame ("<  >").has_value());
+    CHECK_FALSE (parseShureFrame ("").has_value());
+}
+
+TEST_CASE ("wire: where a Shure REP is a node - an antenna or a slot after the parameter first - and its values")
+{
+    //  "< REP x RSSI 1 083 >": the antenna, then the level less 120.
+    const auto rssi = parseShureFrame ("< REP 1 RSSI 1 083 >");
+    REQUIRE (rssi.has_value());
+    const auto places = shureAddressesOf (*rssi);
+    REQUIRE (places.size() == 2u);
+    CHECK (places[0].first == "/1/RSSI/1");
+    CHECK (places[1].first == "/1/RSSI");
+    const auto level = shureValuesOf (places[0].second, { 120, false, 0 }, "i");
+    REQUIRE (level.size() == 1u);
+    CHECK (level[0].getInt32() == -37);
+
+    //  "< REP x SLOT_STATUS 2 LINKED.ACTIVE >".
+    const auto slot = parseShureFrame ("< REP 3 SLOT_STATUS 2 LINKED.ACTIVE >");
+    REQUIRE (slot.has_value());
+    CHECK (shureAddressesOf (*slot)[0].first == "/3/SLOT_STATUS/2");
+    CHECK (shureValuesOf (shureAddressesOf (*slot)[0].second, {}, "s")[0].getString() == "LINKED.ACTIVE");
+
+    //  One value: only the plain address. The gain back in decibels.
+    const auto gain = parseShureFrame ("< REP 1 AUDIO_GAIN 040 >");
+    REQUIRE (gain.has_value());
+    REQUIRE (shureAddressesOf (*gain).size() == 1u);
+    CHECK (shureValuesOf (gain->rest, { 18, false, 0 }, "i")[0].getInt32() == 22);
+
+    //  ON and OFF on a T node a bool; on an s node the word.
+    const auto mute = parseShureFrame ("< REP 1 AUDIO_MUTE ON >");
+    REQUIRE (mute.has_value());
+    CHECK (shureValuesOf (mute->rest, {}, "T")[0].isBool());
+    CHECK (shureValuesOf (mute->rest, {}, "T")[0].getBool());
+    CHECK (shureValuesOf (mute->rest, {}, "s")[0].getString() == "ON");
+
+    //  A name trimmed of its padding; a frequency's seven digits a number.
+    const auto name = parseShureFrame ("< REP 1 CHAN_NAME {Lead Vox                       } >");
+    REQUIRE (name.has_value());
+    CHECK (shureValuesOf (name->rest, { 0, true, 0 }, "s")[0].getString() == "Lead Vox");
+    const auto frequency = parseShureFrame ("< REP 1 FREQUENCY 0578350 >");
+    REQUIRE (frequency.has_value());
+    CHECK (shureValuesOf (frequency->rest, {}, "i")[0].getInt32() == 578350);
+
+    //  ERR is nowhere.
+    const auto error = parseShureFrame ("< REP ERR >");
+    REQUIRE (error.has_value());
+    CHECK (shureAddressesOf (*error).size() == 1u);
+    CHECK (shureAddressesOf (*error)[0].first == "/ERR");
+}
+
+TEST_CASE ("wire: a Shure SAMPLE heard field by field through the layout of its length")
+{
+    const std::vector<std::string> plain { "CHAN_QUALITY", "AUDIO_LED_BITMAP", "AUDIO_LEVEL_PEAK", "AUDIO_LEVEL_RMS",
+                                           "ANTENNA_STATUS", "RSSI_LED_BITMAP/1", "RSSI/1", "RSSI_LED_BITMAP/2", "RSSI/2" };
+    auto quad = plain;
+    for (const auto* more : { "RSSI_LED_BITMAP/3", "RSSI/3", "RSSI_LED_BITMAP/4", "RSSI/4" })
+        quad.push_back (more);
+    auto fdc = plain;
+    fdc.resize (plain.size() + 5);
+
+    const std::vector<std::vector<std::string>> layouts { plain, quad, fdc };
+
+    //  The document's own: "< SAMPLE 1 ALL 005 031 102 102 BB 31 086 31 065 >".
+    const auto standard = parseShureFrame ("< SAMPLE 1 ALL 005 031 102 102 BB 31 086 31 065 >");
+    REQUIRE (standard.has_value());
+    CHECK (standard->parameter == "ALL");
+    const auto fields = shureSampleOf (*standard, layouts);
+    REQUIRE (fields.size() == 9u);
+    CHECK (fields[0].first == "/1/CHAN_QUALITY");
+    CHECK (fields[0].second.text == "005");
+    CHECK (fields[4].first == "/1/ANTENNA_STATUS");
+    CHECK (fields[4].second.text == "BB");
+    CHECK (fields[8].first == "/1/RSSI/2");
+    CHECK (fields[8].second.text == "065");
+
+    //  Quadversity: thirteen.
+    const auto four = parseShureFrame ("< SAMPLE 2 ALL 005 031 102 102 BBBB 31 083 31 068 31 069 31 072 >");
+    REQUIRE (four.has_value());
+    const auto quadFields = shureSampleOf (*four, layouts);
+    REQUIRE (quadFields.size() == 13u);
+    CHECK (quadFields[12].first == "/2/RSSI/4");
+
+    //  FD-C: fourteen, the second frequency's five not kept.
+    const auto both = parseShureFrame ("< SAMPLE 1 ALL 005 031 102 102 BB 31 082 31 060 BB 31 082 31 060 >");
+    REQUIRE (both.has_value());
+    CHECK (shureSampleOf (*both, layouts).size() == 9u);
+
+    //  A count no layout has: nothing.
+    const auto odd = parseShureFrame ("< SAMPLE 1 ALL 005 031 >");
+    REQUIRE (odd.has_value());
+    CHECK (shureSampleOf (*odd, layouts).empty());
+
+    //  ULX-D's three.
+    const auto ulxd = parseShureFrame ("< SAMPLE 4 ALL AX 095 120 >");
+    REQUIRE (ulxd.has_value());
+    const auto three = shureSampleOf (*ulxd, { { "RF_ANTENNA", "RX_RF_LVL", "AUDIO_LVL" } });
+    REQUIRE (three.size() == 3u);
+    CHECK (three[1].first == "/4/RX_RF_LVL");
+    CHECK (shureValuesOf ({ three[1].second }, { 128, false, 0 }, "i")[0].getInt32() == -33);
+}
+
+//==============================================================================
 /*  M60 (namespace draft §57.6): the cost of a flush that renders thirty-two
     NRPN faders and thirty-two RCP lines, on the tick thread - the wires'
     rendering is the only new work a flush does since DP.7, and a tick is

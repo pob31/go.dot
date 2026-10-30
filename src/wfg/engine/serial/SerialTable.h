@@ -63,13 +63,14 @@ namespace wfg::serial
         `openTcpLink`, and its framing is `length` - a four-byte size before
         each packet, OSC 1.0 over TCP, what an Eos takes on 3032 - or `slip`;
         `raw` hands every read as one packet, for a wire that frames itself
-        (DP.9). */
+        (DP.9); `angles` reads a Shure receiver's `< … >` frames as its lines
+        and ends nothing it sends with a new line (namespace draft §124, BER). */
     struct Wanted
     {
         std::string id;
         std::string path;
         int baud = 115200;
-        std::string framing = "lines";       // lines, slip, length, raw, mqtt
+        std::string framing = "lines";       // lines, slip, length, raw, mqtt, angles
         bool rx = true;
         bool tx = true;
 
@@ -119,8 +120,9 @@ namespace wfg::serial
             `perPort` from each - the rest wait for the next take. */
         std::vector<std::pair<std::string, std::vector<std::string>>> takeLines (std::size_t perPort);
 
-        /*  A line out, its new line added. False when the port is not
-            declared, does not transmit, is not open, or reads packets. */
+        /*  A line out, its new line added - none under `angles`, whose
+            frames end themselves. False when the port is not declared, does
+            not transmit, is not open, or reads packets. */
         bool send (const std::string& id, const std::string& line);
 
         /*  A PORT WHOSE FRAMING IS SLIP, LENGTH OR RAW (PC.11; DP.6) reads and

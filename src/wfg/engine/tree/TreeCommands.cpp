@@ -225,8 +225,8 @@ namespace wfg::tree
             rides a MIDI port, a connection or a datagram, never a serial
             line; a word the schema lacks never reaches here. */
         if (declaration->wire != "osc" && declaration->wire != "rcp" && declaration->wire != "line"
-              && declaration->wire != "midi" && declaration->wire != "mqtt")
-            return refuse ("wire \"" + declaration->wire + "\" is not one Go.dot renders - osc, rcp, line, midi or mqtt");
+              && declaration->wire != "midi" && declaration->wire != "mqtt" && declaration->wire != "shure")
+            return refuse ("wire \"" + declaration->wire + "\" is not one Go.dot renders - osc, rcp, line, midi, mqtt or shure");
 
         /*  THE MQTT WIRE AND TRANSPORT ARE ONE THING SEEN TWICE (namespace
             draft §67, ANA): a publish on a topic is what a broker takes and
@@ -236,6 +236,10 @@ namespace wfg::tree
 
         if ((declaration->wire == "rcp" || declaration->wire == "line") && declaration->transport != "tcp")
             return refuse ("the " + declaration->wire + " wire is lines of text on a connection - set the transport to tcp");
+
+        //  A Shure receiver's command strings ride its TCP port 2202 (§124, BER).
+        if (declaration->wire == "shure" && declaration->transport != "tcp")
+            return refuse ("the shure wire is a receiver's command strings on a connection - set the transport to tcp");
 
         if (declaration->wire == "midi" && declaration->transport == "serial")
             return refuse ("the midi wire does not ride a serial port - a MIDI port, a connection or a datagram");
@@ -247,8 +251,9 @@ namespace wfg::tree
               && declaration->wire != "osc")
             return refuse ("readback " + declaration->readback + " is an OSC device's way - set the wire to osc");
 
-        if (declaration->readback == "notify" && declaration->wire != "rcp")
-            return refuse ("readback notify is a Yamaha console's NOTIFY on the rcp wire - set the wire to rcp");
+        if (declaration->readback == "notify" && declaration->wire != "rcp" && declaration->wire != "shure")
+            return refuse ("readback notify is a Yamaha console's NOTIFY on the rcp wire, or a Shure receiver's REP on"
+                           " the shure wire - set the wire to rcp or shure");
 
         if (declaration->readback == "midi" && declaration->wire != "midi")
             return refuse ("readback midi is a console's echoes on the midi wire - set the wire to midi");

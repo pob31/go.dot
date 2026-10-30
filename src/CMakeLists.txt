@@ -268,6 +268,7 @@ add_library(wfg_engine STATIC
     wfg/engine/serial/SerialLink.cpp
     wfg/engine/serial/SerialTable.cpp
     wfg/engine/serial/Slip.cpp
+    wfg/engine/serial/Angles.cpp
     wfg/engine/mqtt/Packet.cpp
     wfg/engine/mqtt/Session.cpp
     wfg/engine/mqtt/Broker.cpp

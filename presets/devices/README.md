@@ -10,7 +10,7 @@ protocol's own spelling, so the address in a cue is the address in the device's 
 
 - The root's `GODOT` key names it: `PRESET` (the slug, equal to the file name without `.json`),
   `VERSION` (an integer, bumped when the tree changes), `VENDOR`, `MODEL`, `TRANSPORT` (`udp`, `tcp`
-  or `midi`), `WIRE` (`osc`, `rcp`, `line` or `midi`), `FRAMING` (`length` or `slip`, for OSC over
+  or `midi`), `WIRE` (`osc`, `rcp`, `line`, `midi` or `shure`), `FRAMING` (`length` or `slip`, for OSC over
   TCP only), `PORT` (the device's usual port, `0` when the device has none), `QUERY_PORT` (where it
   answers OSCQuery, for a preset saved from such a device; §76) and `SOURCES`.
 - A root of `/` with the device's roots as its first-level children mounts each child as a root
@@ -20,7 +20,10 @@ protocol's own spelling, so the address in a cue is the address in the device's 
   `PANIC` as `docs/godot-namespace-draft-0.1.md` §3 reads them; `ROLE` (§57, AFM); `BARE` (`true`: a
   command that takes its TYPE's arguments or none at all, so a cue with no value sends it bare - an Eos
   cue's `fire`, 2026-10-25); and the wire's own
-  key where the address alone cannot say how to send it - `RCP`, `LINE`, `MIDI` (§57, AFJ).
+  key where the address alone cannot say how to send it - `RCP`, `LINE`, `MIDI` (§57, AFJ), `SHURE` (§124,
+  BER: `OFFSET` added to a number sent and taken off one heard, `BRACES` for a name, `PAD` the digits).
+- At the root of a Shure receiver's file, `SAMPLE`: the fields of its meter line, a list of node names per
+  layout, picked by how many fields came (§124, BER).
 - On a part of the tree, `OPEN` (`true`: an address under it that the file does not list is sent as
   typed - an Eos cue numbered 98.1) and `SKIP` (`true`, or the word the menus offer it by: the level under it
   may be left out, offered as *[skip]* or *[word]* - Eos's *[current]*, a cue in the console's current list);

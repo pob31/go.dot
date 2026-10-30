@@ -2239,6 +2239,99 @@ TEST_CASE ("mount: the rcp wire rides a connection and nothing else, and a wire 
     CHECK (rig.mounts.problemOf (id).find ("wire \"ws\"") != std::string::npos);
 }
 
+TEST_CASE ("mount: the shure wire rides a connection and nothing else, and tells as notify does (§124, BER)")
+{
+    Rig rig;
+    const auto made = rig.document.createMount ("/ad4", {}, {});
+    REQUIRE (made.ok);
+    const auto id = made.id;
+    const auto base = "/godot/mount/" + id + "/";
+    REQUIRE (rig.document.setAttribute (base + "port", "2202").ok);
+    REQUIRE (rig.document.setAttribute (base + "wire", "shure").ok);
+
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK_FALSE (rig.mounts.isLoaded (id));
+    CHECK (rig.mounts.problemOf (id).find ("set the transport to tcp") != std::string::npos);
+
+    REQUIRE (rig.document.setAttribute (base + "transport", "tcp").ok);
+    REQUIRE (rig.document.setAttribute (base + "readback", "notify").ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK (rig.mounts.isLoaded (id));
+    CHECK (rig.mounts.problemOf (id).empty());
+    REQUIRE (rig.mounts.declarationOf (id) != nullptr);
+    //  It tells; made by hand it has no description, so it is never asked (a preset's is).
+    CHECK (rig.mounts.declarationOf (id)->isTelling());
+    CHECK_FALSE (rig.mounts.declarationOf (id)->canBeAsked());
+    CHECK (tree::MountSender::destinationFor (*rig.mounts.declarationOf (id)).wire == "shure");
+}
+
+TEST_CASE ("mount sender: a Shure receiver is sent its own frames, the prefix off and the value as the node spells it")
+{
+    tree::MountTable mounts;
+    tree::MountDeclaration ad4;
+    ad4.id = "AD4Q0001";
+    ad4.prefix = "/ad4";
+    ad4.namespaceFile = "namespaces/ad4.json";
+    ad4.transport = "tcp";
+    ad4.wire = "shure";
+    ad4.readback = "notify";
+    ad4.host = "10.0.0.20";
+    ad4.port = 2202;
+    ad4.bundles = true;
+    REQUIRE (mounts.load (ad4, R"JSON({"FULL_PATH": "/ad4", "GODOT": {"SAMPLE": [["AUDIO_LEVEL_PEAK", "", "RSSI/1"]]}, "CONTENTS": {"FLASH": {"FULL_PATH": "/ad4/FLASH", "TYPE": "T", "ACCESS": 2}, "1": {"FULL_PATH": "/ad4/1", "CONTENTS": {"AUDIO_GAIN": {"FULL_PATH": "/ad4/1/AUDIO_GAIN", "TYPE": "i", "ACCESS": 3, "GODOT": {"SHURE": {"OFFSET": 18}}}, "CHAN_NAME": {"FULL_PATH": "/ad4/1/CHAN_NAME", "TYPE": "s", "ACCESS": 3, "GODOT": {"SHURE": {"BRACES": true}}}, "METER_RATE": {"FULL_PATH": "/ad4/1/METER_RATE", "TYPE": "i", "ACCESS": 3, "GODOT": {"SHURE": {"PAD": 5}}}, "AUDIO_MUTE": {"FULL_PATH": "/ad4/1/AUDIO_MUTE", "TYPE": "T", "ACCESS": 3}}}}})JSON").ok);
+
+    //  The root's layouts, kept for the SAMPLE lines.
+    REQUIRE (mounts.sampleLayoutsOf ("AD4Q0001").size() == 1u);
+    CHECK (mounts.sampleLayoutsOf ("AD4Q0001")[0] == std::vector<std::string> { "AUDIO_LEVEL_PEAK", "", "RSSI/1" });
+
+    //  The node's spelling, read from its GODOT.SHURE.
+    REQUIRE (mounts.nodeAt ("/ad4/1/AUDIO_GAIN") != nullptr);
+    CHECK (mounts.nodeAt ("/ad4/1/AUDIO_GAIN")->shureOffset() == 18);
+    CHECK (mounts.nodeAt ("/ad4/1/CHAN_NAME")->shureBraces());
+    CHECK (mounts.nodeAt ("/ad4/1/METER_RATE")->shurePad() == 5);
+
+    tree::MountSender sender;
+    sender.setMounts (&mounts);
+    std::vector<std::string> frames;
+    sender.setLinkSink ([&frames] (const std::string&, const std::vector<std::uint8_t>& bytes)
+    {
+        frames.emplace_back (bytes.begin(), bytes.end());
+        return true;
+    });
+
+    const auto to = tree::MountSender::destinationFor (ad4);
+    REQUIRE (to.wire == "shure");
+    const auto gain = sender.queue ("AD4Q0001", to, "/ad4/1/AUDIO_GAIN", osc::Value::int32 (22));
+    sender.queue ("AD4Q0001", to, "/ad4/1/CHAN_NAME", osc::Value::string ("Lead Vox"));
+    sender.queue ("AD4Q0001", to, "/ad4/1/METER_RATE", osc::Value::int32 (1000));
+    sender.queue ("AD4Q0001", to, "/ad4/1/AUDIO_MUTE", osc::Value::boolean (true));
+    sender.queue ("AD4Q0001", to, "/ad4/FLASH", osc::Value::boolean (true));
+    sender.flush();
+
+    //  One frame each, the bundles row notwithstanding, nothing after any.
+    REQUIRE (frames.size() == 5u);
+    CHECK (frames[0] == "< SET 1 AUDIO_GAIN 40 >");
+    CHECK (frames[1] == "< SET 1 CHAN_NAME {Lead Vox} >");
+    CHECK (frames[2] == "< SET 1 METER_RATE 01000 >");
+    CHECK (frames[3] == "< SET 1 AUDIO_MUTE ON >");
+    CHECK (frames[4] == "< SET FLASH ON >");
+    CHECK (sender.outcomeOf (gain) == tree::MountSender::Outcome::sent);
+
+    //  Asked, a GET.
+    frames.clear();
+    sender.queueQuery ("AD4Q0001", to, "/ad4/1/AUDIO_GAIN");
+    sender.flush();
+    REQUIRE (frames.size() == 1u);
+    CHECK (frames[0] == "< GET 1 AUDIO_GAIN >");
+
+    //  An address under none of its prefixes renders nothing, and fails.
+    frames.clear();
+    const auto stray = sender.queue ("AD4Q0001", to, "/elsewhere/1/AUDIO_GAIN", osc::Value::int32 (1));
+    sender.flush();
+    CHECK (frames.empty());
+    CHECK (sender.outcomeOf (stray) == tree::MountSender::Outcome::failed);
+}
+
 TEST_CASE ("mount sender: a device on the rcp wire is sent lines spelled as its nodes say, one each whatever the bundles row says")
 {
     tree::MountTable mounts;

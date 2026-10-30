@@ -319,6 +319,30 @@ namespace wfg::tree
             return out;
         }
 
+        /*  A SHURE RECEIVER'S FRAME (namespace draft §124, BER): the address
+            with the device's prefix taken off, spelled as the node says. An
+            address under none of its prefixes renders nothing. */
+        std::string shureFrameOf (const MountTable* mounts, const std::string& mountId, const std::string& address,
+                                  const osc::Values& values, bool asking)
+        {
+            const auto* declaration = mounts != nullptr ? mounts->declarationOf (mountId) : nullptr;
+            const auto covered = declaration != nullptr ? prefixMatchLength (address, declaration->prefix) : 0;
+
+            if (covered == 0)
+                return {};
+
+            wire::ShureSpec spec;
+
+            if (const auto* node = mounts->nodeAt (address); node != nullptr)
+            {
+                spec.offset = node->shureOffset();
+                spec.braces = node->shureBraces();
+                spec.pad = node->shurePad();
+            }
+
+            return wire::renderShure (address.substr (covered), values, spec, asking);
+        }
+
         std::vector<std::string> wordsOf (const std::string& text)
         {
             std::vector<std::string> out;
@@ -367,6 +391,12 @@ namespace wfg::tree
                 const auto line = wire::renderRcp (message.address, {}, spec);
                 ok = deliver (message.destination, std::vector<std::uint8_t> (line.begin(), line.end()));
             }
+            else if (message.destination.wire == "shure")
+            {
+                //  A Shure receiver is asked with GET (§124, BER).
+                const auto frame = shureFrameOf (mounts, message.mountId, message.address, {}, true);
+                ok = ! frame.empty() && deliver (message.destination, std::vector<std::uint8_t> (frame.begin(), frame.end()));
+            }
             else if (message.destination.wire == "osc")
             {
                 const auto words = wordsOf (mounts != nullptr ? mounts->getTemplateOf (message.mountId) : std::string {});
@@ -404,6 +434,14 @@ namespace wfg::tree
 
             const auto line = wire::renderRcp (message.address, message.values, spec);
             ok = deliver (message.destination, std::vector<std::uint8_t> (line.begin(), line.end()));
+        }
+        else if (message.destination.wire == "shure")
+        {
+            /*  THE SHURE WIRE (namespace draft §124, BER): a SET frame, the
+                prefix off, the value spelled as the node says; to the link,
+                whose framing adds nothing after it. */
+            const auto frame = shureFrameOf (mounts, message.mountId, message.address, message.values, false);
+            ok = ! frame.empty() && deliver (message.destination, std::vector<std::uint8_t> (frame.begin(), frame.end()));
         }
         else if (message.destination.wire == "midi")
         {

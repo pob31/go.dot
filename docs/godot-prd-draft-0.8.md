@@ -3910,6 +3910,28 @@ to play?"*, and *"Add it to the Android remote too."*
   again is not paused. A backup follows its main into a pause and out of it, and a backup taking
   over keeps a pause its main may not have confirmed.
 
+### 3.35 Radio microphones
+
+*Added in 0.8, at the author's direction (2026-10-30); the mechanics are the namespace draft's
+§124.* The author: *"Do you think we can add wireless microphone control to Go.dot? Sennheiser
+Spectera can be reprogrammed on the fly from the Streamdeck thanks to Bitfocus Companion."*
+
+- **A receiver is a device**, as a desk is (§3.22): made from a preset in the Network tab, aimed at
+  by ordinary OSC cues, heard when it tells. Shure (Axient Digital, ULX-D, SLX-D, QLX-D) and
+  Sennheiser (Spectera, Digital 6000, EW-DX) publish how they are reached, and are built first.
+- **Every role**: a cue changes a receiver - a name, a mute, a gain, a frequency, a pack swapped;
+  Go.dot watches what the receivers say; a deck key or a dial works a channel; a rack channel takes
+  its name from its radio.
+- **Spectera speaks HTTPS**, so Go.dot carries a TLS library of its own, Mbed TLS. OpenSSL is still
+  refused.
+- **Tried at JTSE**, Paris, 25-26 November 2026: until then each protocol is built against the
+  maker's document and a mock receiver, and no preset says it was verified.
+- *(proposed)* **Stops leave the radios alone** (§4.4): Esc and double Esc are about what Go.dot
+  originates, and a performer's mic is not. A change that can cut a performer off - a frequency, an
+  RF channel - is left out of Doh! and pressed twice on a deck.
+- *(proposed)* **Watched, never saved** (§4.10): battery, pack, RF and audio on a panel and as problem
+  marks where the mic is used, in words and bars as well as colour (§4.8).
+
 ---
 
 ## 4. Constraints as law

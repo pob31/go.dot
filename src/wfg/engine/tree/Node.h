@@ -182,6 +182,14 @@ namespace wfg::tree
         /*  AND ON THE MIDI WIRE (DP.9), from `GODOT.MIDI`: empty kind, none. */
         MidiShape midi;
 
+        /*  AND ON THE SHURE WIRE (namespace draft §124, BER), from
+            `GODOT.SHURE`: the offset added to a number sent and taken off
+            one heard, whether a string goes in braces, and the digits a
+            number is padded to. */
+        int shureOffset = 0;
+        bool shureBraces = false;
+        int shurePad = 0;
+
         //======================================================================
         // The declared range, when the table gives one.
         bool hasMinimum = false;
@@ -309,6 +317,9 @@ namespace wfg::tree
         int rcpIndexes() const noexcept                                { return about().rcpIndexes; }
         const std::string& lineTemplate() const noexcept               { return about().lineTemplate; }
         const MidiShape& midi() const noexcept                         { return about().midi; }
+        int shureOffset() const noexcept                               { return about().shureOffset; }
+        bool shureBraces() const noexcept                              { return about().shureBraces; }
+        int shurePad() const noexcept                                  { return about().shurePad; }
         bool hasMinimum() const noexcept                               { return about().hasMinimum; }
         double minimum() const noexcept                                { return about().minimum; }
         bool hasMaximum() const noexcept                               { return about().hasMaximum; }

@@ -685,3 +685,211 @@ namespace wfg::tree::wire
         return out;
     }
 }
+
+namespace wfg::tree::wire
+{
+    namespace
+    {
+        /*  One atom as a Shure receiver reads it: ON or OFF for a bool, a
+            whole number with the node's offset added, a string in braces
+            where the node says - a name, its braces taken out of the text
+            since the receiver allows none in one - or as it is: TOGGLE,
+            RF_MUTE, INC 5. Anything else has no spelling. */
+        std::string shureNumber (long long number, const ShureSpec& spec)
+        {
+            auto text = std::to_string (number + spec.offset);
+
+            if (spec.pad > 0 && text.front() != '-' && text.size() < static_cast<std::size_t> (spec.pad))
+                text.insert (0, static_cast<std::size_t> (spec.pad) - text.size(), '0');
+
+            return text;
+        }
+
+        std::string shureAtom (const osc::Value& value, const ShureSpec& spec)
+        {
+            if (value.isBool())    return value.getBool() ? "ON" : "OFF";
+            if (value.isInt32())   return shureNumber (value.getInt32(), spec);
+            if (value.isInt64())   return shureNumber (static_cast<long long> (value.getInt64()), spec);
+            if (value.isFloat32()) return shureNumber (std::llround (static_cast<double> (value.getFloat32())), spec);
+            if (value.isFloat64()) return shureNumber (std::llround (value.getFloat64()), spec);
+
+            if (value.isString())
+            {
+                if (! spec.braces)
+                    return value.getString();
+
+                std::string name;
+                for (const char c : value.getString())
+                    if (c != '{' && c != '}')
+                        name.push_back (c);
+                return "{" + name + "}";
+            }
+
+            return {};
+        }
+
+        std::string trimmed (const std::string& text)
+        {
+            const auto first = text.find_first_not_of (' ');
+            if (first == std::string::npos)
+                return {};
+            return text.substr (first, text.find_last_not_of (' ') - first + 1);
+        }
+    }
+
+    std::string renderShure (const std::string& relative, const osc::Values& values, const ShureSpec& spec, bool asking)
+    {
+        const auto segments = segmentsOf (relative);
+        std::size_t at = 0;
+
+        std::string out = asking ? "< GET" : "< SET";
+
+        if (at < segments.size() && wholeNumber (segments[at]))
+            out += ' ' + segments[at++];
+
+        if (at >= segments.size())
+            return {};
+
+        for (; at < segments.size(); ++at)
+            out += ' ' + segments[at];
+
+        if (! asking)
+            for (const auto& value : values)
+                if (const auto text = shureAtom (value, spec); ! text.empty())
+                    out += ' ' + text;
+
+        return out + " >";
+    }
+
+    std::optional<ShureFrame> parseShureFrame (const std::string& frame)
+    {
+        auto inner = trimmed (frame);
+
+        if (! inner.empty() && inner.front() == '<')
+            inner.erase (0, 1);
+        if (! inner.empty() && inner.back() == '>')
+            inner.pop_back();
+
+        std::vector<ShureToken> tokens;
+        ShureToken current;
+        auto inBraces = false;
+
+        const auto close = [&]
+        {
+            if (! current.text.empty() || current.braced)
+                tokens.push_back (current);
+            current = {};
+        };
+
+        for (const char c : inner)
+        {
+            if (inBraces)
+            {
+                if (c == '}')
+                {
+                    inBraces = false;
+                    close();
+                }
+                else
+                {
+                    current.text.push_back (c);
+                }
+            }
+            else if (c == '{')
+            {
+                close();
+                inBraces = true;
+                current.braced = true;
+            }
+            else if (c == ' ' || c == '\t' || c == '\r' || c == '\n')
+            {
+                close();
+            }
+            else
+            {
+                current.text.push_back (c);
+            }
+        }
+
+        close();
+
+        if (tokens.empty() || tokens[0].braced)
+            return std::nullopt;
+
+        ShureFrame out;
+        out.text = "< " + trimmed (inner) + " >";
+        out.word = tokens[0].text;
+
+        std::size_t at = 1;
+
+        if (at < tokens.size() && ! tokens[at].braced && wholeNumber (tokens[at].text))
+            out.channel = tokens[at++].text;
+
+        if (at < tokens.size())
+            out.parameter = tokens[at++].text;
+
+        if (at < tokens.size())
+            out.rest.assign (tokens.begin() + static_cast<std::ptrdiff_t> (at), tokens.end());
+
+        return out;
+    }
+
+    std::vector<std::pair<std::string, std::vector<ShureToken>>> shureAddressesOf (const ShureFrame& frame)
+    {
+        if (frame.parameter.empty())
+            return {};
+
+        const auto base = (frame.channel.empty() ? std::string {} : "/" + frame.channel) + "/" + frame.parameter;
+        std::vector<std::pair<std::string, std::vector<ShureToken>>> out;
+
+        if (frame.rest.size() >= 2 && ! frame.rest[0].braced && wholeNumber (frame.rest[0].text))
+            out.emplace_back (base + "/" + std::to_string (std::atoi (frame.rest[0].text.c_str())),
+                              std::vector<ShureToken> (frame.rest.begin() + 1, frame.rest.end()));
+
+        out.emplace_back (base, frame.rest);
+        return out;
+    }
+
+    osc::Values shureValuesOf (const std::vector<ShureToken>& tokens, const ShureSpec& spec, const std::string& typeTags)
+    {
+        osc::Values out;
+        const auto boolean = ! typeTags.empty() && (typeTags[0] == 'T' || typeTags[0] == 'F');
+
+        for (const auto& token : tokens)
+        {
+            if (token.braced)
+                out.push_back (osc::Value::string (trimmed (token.text)));
+            else if (boolean && (token.text == "ON" || token.text == "OFF"))
+                out.push_back (osc::Value::boolean (token.text == "ON"));
+            else if (wholeNumber (token.text) && token.text.size() <= 9)
+                out.push_back (osc::Value::int32 (static_cast<std::int32_t> (std::atol (token.text.c_str()) - spec.offset)));
+            else
+                out.push_back (osc::Value::string (token.text));
+        }
+
+        return out;
+    }
+
+    std::vector<std::pair<std::string, ShureToken>> shureSampleOf (const ShureFrame& frame,
+                                                                   const std::vector<std::vector<std::string>>& layouts)
+    {
+        if (frame.channel.empty())
+            return {};
+
+        for (const auto& layout : layouts)
+        {
+            if (layout.size() != frame.rest.size())
+                continue;
+
+            std::vector<std::pair<std::string, ShureToken>> out;
+
+            for (std::size_t at = 0; at < layout.size(); ++at)
+                if (! layout[at].empty())
+                    out.emplace_back ("/" + frame.channel + "/" + layout[at], frame.rest[at]);
+
+            return out;
+        }
+
+        return {};
+    }
+}
