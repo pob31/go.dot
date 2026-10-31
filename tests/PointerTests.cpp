@@ -20,12 +20,14 @@
     lift that never came, and a finger's fader gearing. Pure: no window.
 */
 
+#include <wfg/client/model/DeckPresses.h>
 #include <wfg/client/model/FingerDrag.h>
 #include <wfg/client/model/Pointers.h>
 
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
 #include <cmath>
+#include <string>
 #include <vector>
 
 using namespace wfg::client::model;
@@ -182,5 +184,83 @@ TEST_CASE ("client: a finger on a fader moves from where it landed, finer the fu
     {
         FingerDrag drag (0.3, 0.0);
         CHECK (drag.moveTo (50.0, 0.0, 0.0) == doctest::Approx (0.3));
+    }
+}
+
+namespace
+{
+    std::vector<std::string> said (const std::vector<wfg::Event>& events)
+    {
+        std::vector<std::string> out;
+
+        for (const auto& event : events)
+            out.push_back (event.command + (event.args.empty() ? std::string {} : " " + event.args[0].getString()));
+
+        return out;
+    }
+
+    DeckKeyRow cueKey (const std::string& cue)
+    {
+        DeckKeyRow key;
+        key.action = "cue";
+        key.cue = cue;
+        return key;
+    }
+}
+
+TEST_CASE ("client: the Stream Deck's picture holds a key per finger, each let go by its own lift (§125)")
+{
+    DeckPresses presses;
+    const auto rain = cueKey ("PAD00001");
+    const auto thunder = cueKey ("PAD00002");
+
+    SUBCASE ("two fingers, two held clips, each released by its own finger")
+    {
+        CHECK (said (presses.press (firstFinger, 0, rain, 1)) == std::vector<std::string> { "cue.press PAD00001" });
+        CHECK (said (presses.press (firstFinger + 1, 1, thunder, 2)) == std::vector<std::string> { "cue.press PAD00002" });
+
+        CHECK (said (presses.release (firstFinger)) == std::vector<std::string> { "cue.release PAD00001" });
+        CHECK (said (presses.release (firstFinger + 1)) == std::vector<std::string> { "cue.release PAD00002" });
+        CHECK (presses.release (firstFinger).empty());
+    }
+
+    SUBCASE ("a key another finger holds is not pressed again, and that finger's lift lets go of nothing")
+    {
+        presses.press (firstFinger, 0, rain, 1);
+        CHECK (presses.press (firstFinger + 1, 0, rain, 2).empty());
+        CHECK (presses.release (firstFinger + 1).empty());
+        CHECK (said (presses.release (firstFinger)) == std::vector<std::string> { "cue.release PAD00001" });
+    }
+
+    SUBCASE ("a learnt key fires and releases its trigger; GO is one command on the press")
+    {
+        DeckKeyRow learnt;
+        learnt.action = "learnt";
+        learnt.trigger = "TRG00001";
+        DeckKeyRow go;
+        go.action = "go";
+
+        CHECK (said (presses.press (firstFinger, 3, learnt, 1)) == std::vector<std::string> { "trigger.fire TRG00001" });
+        CHECK (said (presses.press (firstFinger + 1, 14, go, 2)) == std::vector<std::string> { "go" });
+
+        //  A second finger on the GO already down is not a second GO.
+        CHECK (presses.press (firstFinger + 2, 14, go, 3).empty());
+
+        CHECK (presses.release (firstFinger + 1).empty());
+        CHECK (said (presses.release (firstFinger)) == std::vector<std::string> { "trigger.release TRG00001" });
+    }
+
+    SUBCASE ("the mouse waits for the fingers, a lost lift is released first, and everything goes at the end")
+    {
+        presses.press (firstFinger, 0, rain, 1);
+        CHECK (presses.press (mousePointer, 1, thunder, 2).empty());
+        presses.release (mousePointer);
+
+        //  The next lone press finds the first finger's lift was lost.
+        CHECK (said (presses.press (firstFinger + 1, 1, thunder, 1))
+                 == std::vector<std::string> { "cue.release PAD00001", "cue.press PAD00002" });
+
+        CHECK (said (presses.releaseAll()) == std::vector<std::string> { "cue.release PAD00002" });
+        CHECK_FALSE (presses.held (1));
     }
 }

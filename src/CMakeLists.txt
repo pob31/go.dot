@@ -906,6 +906,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Pointers.cpp
     wfg/client/model/FingerDrag.h
     wfg/client/model/FingerDrag.cpp
+    wfg/client/model/DeckPresses.h
+    wfg/client/model/DeckPresses.cpp
     wfg/client/model/ShowModel.h
     wfg/client/model/ShowModel.cpp
     wfg/client/model/Text.h

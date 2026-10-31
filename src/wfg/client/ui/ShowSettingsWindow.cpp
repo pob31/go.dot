@@ -1,6 +1,9 @@
 /* Go.dot — Copyright (C) 2026 Pierre-Olivier Boulant
    SPDX-License-Identifier: GPL-3.0-or-later */
 #include <wfg/client/ui/ShowSettingsWindow.h>
+#include <wfg/client/ui/PointerKeys.h>
+
+#include <wfg/client/model/DeckPresses.h>
 #include <wfg/client/ui/Look.h>
 #include <wfg/client/ui/MenuHold.h>
 #include <wfg/client/ui/Icons.h>
@@ -4018,6 +4021,10 @@ namespace wfg::client::ui
                                    keyBounds (static_cast<int> (at)).getY());
             }
 
+            /*  A KEY PER FINGER (namespace draft §125, BFA): each pointer
+                presses its own key and its lift lets go of that one
+                (`model::DeckPresses`) - two fingers on two cue keys are two
+                held clips, each released by its own finger. */
             void mouseDown (const juce::MouseEvent& event) override
             {
                 const auto at = keyAt (event.getPosition());
@@ -4025,36 +4032,27 @@ namespace wfg::client::ui
                 if (at < 0 || ! send)
                     return;
 
-                const auto& key = keys[static_cast<std::size_t> (at)];
+                const auto index = static_cast<std::size_t> (at);
 
-                if (key.action == "cue" && ! key.cue.empty())
-                {
-                    send (gesture::pressCue (key.cue));
-                    pressedCue = key.cue;
-                }
-                else if (key.action == "learnt" && ! key.trigger.empty())
-                {
-                    send (gesture::fireTrigger (key.trigger));
-                    pressedTrigger = key.trigger;
-                }
-                else if (key.action == "go")          send (gesture::go());
-                else if (key.action == "esc")         send (gesture::stopAll());
-                else if (key.action == "doh")         send (gesture::doh());
-                else if (key.action == "pause")       send (key.label == "Play" ? gesture::play() : gesture::pause());
-                else if (key.action == "standbyUp")   send (gesture::standbyPrevious());
-                else if (key.action == "standbyDown") send (gesture::standbyNext());
+                for (auto& command : presses.press (pointerKeyOf (event.source), index, keys[index], draggingPointers()))
+                    send (std::move (command));
             }
 
-            void mouseUp (const juce::MouseEvent&) override
+            void mouseUp (const juce::MouseEvent& event) override
             {
-                if (! pressedCue.empty() && send)
-                    send (gesture::releaseCue (pressedCue));
+                if (! send)
+                    return;
 
-                if (! pressedTrigger.empty() && send)
-                    send (gesture::releaseTrigger (pressedTrigger));
+                for (auto& command : presses.release (pointerKeyOf (event.source)))
+                    send (std::move (command));
+            }
 
-                pressedCue.clear();
-                pressedTrigger.clear();
+            ~DeckPanel() override
+            {
+                //  A key still held by a hand is let go: its lift will never reach a panel that is gone.
+                if (send)
+                    for (auto& command : presses.releaseAll())
+                        send (std::move (command));
             }
 
         private:
@@ -4070,7 +4068,8 @@ namespace wfg::client::ui
 
             std::string surfaceId;
             std::vector<std::pair<std::string, std::string>> deckMenu, cartMenu;
-            std::string keysText, problem, pressedCue, pressedTrigger;
+            std::string keysText, problem;
+            model::DeckPresses presses;
             std::vector<model::DeckKeyRow> keys;
             std::pair<int, int> columnsRows { 5, 3 };
             std::vector<juce::Image> drawn;
