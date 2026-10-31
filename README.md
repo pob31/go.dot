@@ -115,7 +115,9 @@ has stood in front of the thing.
   groups on the strips with fader-start, DCAs, EQ, Send and plugin pages on the
   rotaries, a master dial, standby on the arrows, and the faders flipped onto
   one cue to record its level and sends in one pass. A virtual surface panel
-  plays the same groups with a mouse. Elgato's Stream Decks, every model, over
+  plays the same groups with a mouse or with several fingers on a touch screen
+  (namespace draft §125), as do a cart shown as pads, the send and fade mixers
+  and the Stream Deck's picture; on a Mac Go.dot reads a USB touch screen itself. Elgato's Stream Decks, every model, over
   USB: a deck of keys plays a cart, with GO, Esc, Doh! and the standby on keys
   of their own if wanted, and a Stream Deck+'s dials turn the picked cue's
   sends, EQ, plugins and loop (namespace draft §95).
@@ -333,6 +335,7 @@ and says afterwards what was built against what was drawn.
 | Carts, keys and bindings | A list GO never meets, fired by triggers, keys and the remote's Cart tab; a MIDI control or an OSC address bound to any number, learned by moving it; the wheel over a number | §74 |
 | The web console by touch | The Android remote's gestures on the page: PANIC and Doh!, swipe to kill, a run's sheet, pills, the playhead, a cue's sheet, Pick several, numbers dragged and held | §75 |
 | Pause / Play | Everything Go.dot runs held where it stands and let go - the graph not run, the tick standing - on the desktop, the console, a Stream Deck and the remote; F8 | §120 |
+| Several fingers on the window | The desk, a cart shown as pads, the send and fade mixers and the Stream Deck's picture take a finger per control; two hands are one Undo; a Mac reads a USB touch screen itself, through spatcore and a change of Go.dot's own to JUCE | §125 |
 
 The documents, besides the PRD and the devplan:
 
