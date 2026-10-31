@@ -16,6 +16,8 @@
 
 #include <wfg/client/ui/EqPanelComponent.h>
 
+#include <wfg/client/ui/PointerKeys.h>
+
 #include <wfg/client/model/FadeMix.h>
 #include <wfg/engine/cue/FadeMoves.h>
 
@@ -622,12 +624,12 @@ namespace wfg::client::ui
             pinching = false;
         }
 
-        fingerDown (event.source.getIndex(), event.position);
+        fingerDown (pointerKeyOf (event.source), event.position);
     }
 
     void EqPanelComponent::mouseDrag (const juce::MouseEvent& event)
     {
-        fingerMoved (event.source.getIndex(), event.position, event.mods.isShiftDown());
+        fingerMoved (pointerKeyOf (event.source), event.position, event.mods.isShiftDown());
     }
 
     void EqPanelComponent::fingerDown (int finger, juce::Point<float> at)
@@ -885,7 +887,7 @@ namespace wfg::client::ui
 
     void EqPanelComponent::mouseUp (const juce::MouseEvent& event)
     {
-        fingerUp (event.source.getIndex());
+        fingerUp (pointerKeyOf (event.source));
     }
 
     void EqPanelComponent::endDrag()

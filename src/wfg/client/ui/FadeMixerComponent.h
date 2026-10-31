@@ -41,7 +41,9 @@
     reason.
 */
 
+#include <wfg/client/model/FingerDrag.h>
 #include <wfg/client/model/Foot.h>
+#include <wfg/client/model/Pointers.h>
 #include <wfg/client/model/Theme.h>
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -49,6 +51,7 @@
 #include <cstddef>
 #include <functional>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -61,6 +64,12 @@ namespace wfg::client::ui
         {
             /** One `node.set`: a fade row, or one entry through the fade's door. */
             std::function<void (const std::string& address, const std::string& text)> set;
+
+            /*  A HAND ON A STRIP HOLDS WHAT IT WRITES (namespace draft §125,
+                BFB): `node.touch` before the first write, `node.release` when it
+                comes off - two strips ridden together are one undo step. */
+            std::function<void (const std::string& address)> touch;
+            std::function<void (const std::string& address)> release;
 
             /** The EQ panel, on this fade. */
             std::function<void (const std::string& fadeId)> openEq;
@@ -106,6 +115,18 @@ namespace wfg::client::ui
 
         const model::FadeMixReading& mix() const noexcept { return reading.fadeMix; }
 
+        /*  A POINTER ON A STRIP, by its index, as the strip's mouse handlers
+            report it and as a test drives a finger (§125, BFB, BFE): its key,
+            where it is in the strip's own coordinates, how many pointers JUCE
+            says are down. One hand a strip; the mouse and the fingers take
+            turns. */
+        void pointerDown (std::size_t strip, int pointer, juce::Point<float> position, int dragging = 1);
+        void pointerMoved (std::size_t strip, int pointer, juce::Point<float> position, bool fine = false);
+        void pointerUp (std::size_t strip, int pointer);
+
+        /** Where a strip's throw is, in its own coordinates. */
+        juce::Rectangle<int> throwOf (std::size_t strip) const;
+
     private:
         struct Strip;
         struct MoveRow;
@@ -122,6 +143,12 @@ namespace wfg::client::ui
 
         std::vector<std::unique_ptr<Strip>> strips;
         std::vector<std::unique_ptr<MoveRow>> rows;
+
+        //  Whose turn it is, the mouse's or the fingers' (§125, BFE).
+        model::PointerTurns turns;
+
+        /** Every hand let go of what it held: the strips are about to go. */
+        void releaseHolds();
         std::vector<std::unique_ptr<juce::TextButton>> doors;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (FadeMixerComponent)

@@ -16,6 +16,8 @@
 
 #include <wfg/client/ui/FadeMixerComponent.h>
 
+#include <wfg/client/ui/PointerKeys.h>
+
 #include <wfg/client/ui/PlaceBar.h>
 
 #include <wfg/client/model/Fader.h>
@@ -190,10 +192,7 @@ namespace wfg::client::ui
             if (event.eventComponent != this)
                 return;
 
-            held = here();
-            shown = held;
-            dragging = true;
-            dragFrom = event.position.y;
+            owner.pointerDown (at, pointerKeyOf (event.source), event.position, draggingPointers());
         }
 
         void mouseUp (const juce::MouseEvent& event) override
@@ -201,8 +200,7 @@ namespace wfg::client::ui
             if (event.eventComponent != this)
                 return;
 
-            dragging = false;
-            owner.refresh();
+            owner.pointerUp (at, pointerKeyOf (event.source));
         }
 
         void mouseDrag (const juce::MouseEvent& event) override
@@ -210,16 +208,70 @@ namespace wfg::client::ui
             if (event.eventComponent != this)
                 return;
 
+            owner.pointerMoved (at, pointerKeyOf (event.source), event.position, event.mods.isShiftDown());
+        }
+
+        /*  A HAND TAKES THE STRIP (namespace draft §125, BFB): what it will
+            write - the value, and the switch that ticks it - held before the
+            first write, so two strips ridden together are one step. */
+        void take (int pointerToUse, juce::Point<float> position)
+        {
+            held = here();
+            shown = held;
+            dragging = true;
+            dragFrom = position.y;
+            pointer = pointerToUse;
+            byFinger = model::isFinger (pointerToUse);
+            finger = model::FingerDrag (fractionOf (strip(), held), -static_cast<double> (position.y));
+
+            hold (strip().address);
+
+            if (! strip().door)
+                hold (strip().switchAddress);
+        }
+
+        void hold (const std::string& address)
+        {
+            if (! address.empty() && touched.insert (address).second && owner.actions.touch)
+                owner.actions.touch (address);
+        }
+
+        void letGo()
+        {
+            dragging = false;
+            pointer = -1;
+
+            const auto released = touched;
+            touched.clear();
+
+            if (owner.actions.release)
+                for (const auto& address : released)
+                    owner.actions.release (address);
+        }
+
+        void moveTo (juce::Point<float> position, bool fine)
+        {
             const auto area = throwArea();
 
             if (area.getHeight() <= 0)
                 return;
 
-            const auto moved = (dragFrom - event.position.y) / static_cast<float> (area.getHeight());
-            const auto scale = event.mods.isShiftDown() ? 0.1f : 1.0f;
+            //  A finger is the page's finger (§125, BFF); the mouse from where it went down, Shift a tenth.
+            if (byFinger)
+            {
+                const auto off = model::outsideBand (static_cast<double> (position.x), 0.0,
+                                                     static_cast<double> (getWidth()));
+                shown = bounded (strip(), valueAt (strip(), finger.moveTo (-static_cast<double> (position.y), off,
+                                                                           static_cast<double> (area.getHeight()))));
+            }
+            else
+            {
+                const auto moved = (dragFrom - position.y) / static_cast<float> (area.getHeight());
+                const auto scale = fine ? 0.1f : 1.0f;
 
-            shown = bounded (strip(), valueAt (strip(), fractionOf (strip(), held)
-                                                        + static_cast<double> (moved * scale)));
+                shown = bounded (strip(), valueAt (strip(), fractionOf (strip(), held)
+                                                            + static_cast<double> (moved * scale)));
+            }
 
             owner.valueWanted (at, shown);
             repaint();
@@ -338,6 +390,12 @@ namespace wfg::client::ui
         double held = 0.0, shown = 0.0;
         bool dragging = false;
         float dragFrom = 0.0f;
+
+        //  The hand on this strip (§125): its pointer, a finger's gearing, what it holds.
+        int pointer = -1;
+        bool byFinger = false;
+        model::FingerDrag finger;
+        std::set<std::string> touched;
     };
 
     //==============================================================================
@@ -390,7 +448,59 @@ namespace wfg::client::ui
         applyTheme (theme);
     }
 
-    FadeMixerComponent::~FadeMixerComponent() = default;
+    FadeMixerComponent::~FadeMixerComponent()
+    {
+        //  A hand still on a strip lets go of what it held: nothing else will (§125).
+        releaseHolds();
+    }
+
+    //==============================================================================
+    void FadeMixerComponent::pointerDown (std::size_t at, int pointer, juce::Point<float> position, int dragging)
+    {
+        for (const auto stale : turns.sweep (dragging))
+            for (auto& strip : strips)
+                if (strip->dragging && strip->pointer == stale)
+                    strip->letGo();
+
+        //  One strip, one hand (§125, BFB).
+        if (! turns.down (pointer) || at >= strips.size() || strips[at]->dragging)
+            return;
+
+        strips[at]->take (pointer, position);
+    }
+
+    void FadeMixerComponent::pointerMoved (std::size_t at, int pointer, juce::Point<float> position, bool fine)
+    {
+        if (at >= strips.size() || ! turns.owns (pointer) || ! strips[at]->dragging || strips[at]->pointer != pointer)
+            return;
+
+        strips[at]->moveTo (position, fine);
+    }
+
+    void FadeMixerComponent::pointerUp (std::size_t at, int pointer)
+    {
+        turns.up (pointer);
+
+        if (at >= strips.size() || ! strips[at]->dragging || strips[at]->pointer != pointer)
+            return;
+
+        strips[at]->letGo();
+        refresh();
+    }
+
+    juce::Rectangle<int> FadeMixerComponent::throwOf (std::size_t at) const
+    {
+        return at < strips.size() ? strips[at]->throwArea() : juce::Rectangle<int> {};
+    }
+
+    void FadeMixerComponent::releaseHolds()
+    {
+        for (auto& strip : strips)
+            if (strip->dragging)
+                strip->letGo();
+
+        turns.clear();
+    }
 
     void FadeMixerComponent::applyTheme (const model::Theme& themeToUse)
     {
@@ -440,6 +550,7 @@ namespace wfg::client::ui
 
     void FadeMixerComponent::rebuild()
     {
+        releaseHolds();
         strips.clear();
         rows.clear();
         doors.clear();

@@ -39,7 +39,9 @@
     glance is read by its number.
 */
 
+#include <wfg/client/model/FingerDrag.h>
 #include <wfg/client/model/Foot.h>
+#include <wfg/client/model/Pointers.h>
 #include <wfg/client/model/Sends.h>
 #include <wfg/client/model/Theme.h>
 
@@ -47,6 +49,7 @@
 
 #include <cstddef>
 #include <functional>
+#include <map>
 #include <memory>
 #include <set>
 #include <string>
@@ -77,6 +80,12 @@ namespace wfg::client::ui
             /** A sentence for the panel's head. */
             std::function<void (const juce::String&)> say;
 
+            /*  A HAND ON A STRIP HOLDS ITS LEVELS (namespace draft §125, BFB):
+                `node.touch` before the first write, `node.release` when it comes
+                off - so two strips ridden together are one undo step. */
+            std::function<void (const std::string& address)> touch;
+            std::function<void (const std::string& address)> release;
+
             /** A click or a touch on a strip: its level on the master dial (2026-09-26). */
             std::function<void (const std::string& address)> dial;
 
@@ -99,6 +108,18 @@ namespace wfg::client::ui
         /*  THE NUMBER THE MASTER DIAL TURNS (2026-09-26): a strip whose level
             it is wears a dial before its name. */
         void showDial (const std::string& address);
+
+        /*  A POINTER ON A STRIP, by the mixer's index, as the strip's mouse
+            handlers report it and as a test drives a finger (§125, BFB, BFE):
+            `pointer` is its key (`model::pointerKey`), `position` in the
+            strip's own coordinates, `dragging` how many pointers JUCE says are
+            down. One hand a strip; the mouse and the fingers take turns. */
+        void pointerDown (std::size_t strip, int pointer, juce::Point<float> position, int dragging = 1);
+        void pointerMoved (std::size_t strip, int pointer, juce::Point<float> position, bool fine = false);
+        void pointerUp (std::size_t strip, int pointer);
+
+        /** Where a strip's throw is, in its own coordinates. */
+        juce::Rectangle<int> throwOf (std::size_t strip) const;
 
     private:
         struct Strip;
@@ -151,10 +172,17 @@ namespace wfg::client::ui
 
         model::FootReading reading;
 
-        /*  The strip a `send.create` is outstanding for, and what to write
-            when it arrives. Empty when nothing is pending. */
-        std::string awaitingBus;
-        double awaitingLevel = 0.0;
+        /*  The mixes a `send.create` is outstanding for, and what to write
+            when each arrives - several at once, two fingers raising two
+            silent strips (§125). */
+        std::map<std::string, double> awaiting;
+
+        //  Whose turn it is, the mouse's or the fingers' (§125, BFE).
+        model::PointerTurns turns;
+
+        /*  Every hand let go of what it held: the strips are about to go, and
+            no mouse-up will reach them. */
+        void releaseHolds();
 
         std::vector<std::unique_ptr<Strip>> strips;
 

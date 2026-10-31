@@ -68,6 +68,12 @@ namespace wfg::client::ui
                 frame. */
             std::function<void (const std::vector<std::pair<std::string, std::string>>& writes)> setMany;
 
+            /*  A HAND HOLDING A NODE, and letting go (namespace draft §125,
+                BFB): `node.touch` and `node.release`, from the send and fade
+                mixers' strips, so two strips ridden together are one step. */
+            std::function<void (const std::string& address)> touch;
+            std::function<void (const std::string& address)> release;
+
             /** `range.create`, asked for by the editor the panel is showing. */
             std::function<void (const std::string& cueId, double in, double out)> createRange;
 

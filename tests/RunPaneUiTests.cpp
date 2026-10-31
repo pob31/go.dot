@@ -12,6 +12,7 @@
 #include <wfg/client/ui/TakePanelComponent.h>
 #include <wfg/client/ui/PluginEditors.h>
 #include <wfg/client/ui/SendMixerComponent.h>
+#include <wfg/client/ui/FadeMixerComponent.h>
 #include <wfg/client/ui/CurveLaneComponent.h>
 #include <wfg/client/ui/OscMessagesComponent.h>
 #include <wfg/client/ui/PatchCanvasComponent.h>
@@ -3018,6 +3019,184 @@ TEST_CASE ("send mixer: over several cues a drag moves every one by the same dec
     }
 }
 
+TEST_CASE ("send mixer: two fingers raise two silent strips at once - two sends made, each with its level, every level held while it rides (§125)")
+{
+    std::vector<std::string> said;
+
+    ui::SendMixerComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string&) { said.push_back ("set " + address); };
+    actions.createSend = [&] (const std::string&, const std::string& busId, double) { said.push_back ("make " + busId); };
+    actions.touch = [&] (const std::string& address) { said.push_back ("touch " + address); };
+    actions.release = [&] (const std::string& address) { said.push_back ("release " + address); };
+
+    ui::SendMixerComponent mixer (model::Theme {}, actions);
+    mixer.setSize (420, 180);
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::sends, "CUE00001" };
+    reading.cueName = "The bed";
+    reading.cueKind = "media";
+    reading.cueLevel = -3.0;
+
+    model::SendStrip reverb;
+    reverb.busId = "BUS00001";
+    reverb.name = "Reverb";
+
+    model::SendStrip foldback;
+    foldback.busId = "BUS00002";
+    foldback.name = "Foldback";
+
+    reading.sends = { reverb, foldback };
+    mixer.show (reading);
+
+    constexpr auto one = model::firstFinger;
+    constexpr auto two = model::firstFinger + 1;
+
+    const auto centreOf = [&mixer] (std::size_t strip) { return mixer.throwOf (strip).toFloat().getCentre(); };
+    const auto countOf = [&said] (const std::string& line) { return std::count (said.begin(), said.end(), line); };
+
+    SUBCASE ("both silent strips raised together")
+    {
+        mixer.pointerDown (1, one, centreOf (1), 1);
+        mixer.pointerDown (2, two, centreOf (2), 2);
+
+        //  A silent strip has no level yet to hold.
+        CHECK (said.empty());
+
+        mixer.pointerMoved (1, one, centreOf (1) - juce::Point<float> (0.0f, 20.0f));
+        mixer.pointerMoved (2, two, centreOf (2) - juce::Point<float> (0.0f, 30.0f));
+        mixer.pointerMoved (1, one, centreOf (1) - juce::Point<float> (0.0f, 25.0f));
+
+        //  Each mix is asked for once, and neither waits on the other.
+        CHECK (countOf ("make BUS00001") == 1);
+        CHECK (countOf ("make BUS00002") == 1);
+
+        //  Both arrive: each new level is held, then written.
+        reading.sends[0].sendId = "SND00002";
+        reading.sends[1].sendId = "SND00003";
+        mixer.show (reading);
+
+        CHECK (countOf ("touch /godot/send/SND00002/level") == 1);
+        CHECK (countOf ("touch /godot/send/SND00003/level") == 1);
+        CHECK (countOf ("set /godot/send/SND00002/level") == 1);
+        CHECK (countOf ("set /godot/send/SND00003/level") == 1);
+
+        const auto touched = std::find (said.begin(), said.end(), "touch /godot/send/SND00002/level");
+        const auto written = std::find (said.begin(), said.end(), "set /godot/send/SND00002/level");
+        CHECK (touched < written);
+
+        //  Each lift lets go of its own.
+        mixer.pointerUp (1, one);
+        CHECK (said.back() == "release /godot/send/SND00002/level");
+        CHECK (countOf ("release /godot/send/SND00003/level") == 0);
+
+        mixer.pointerUp (2, two);
+        CHECK (said.back() == "release /godot/send/SND00003/level");
+    }
+
+    SUBCASE ("the master held from the press, one hand a strip, and the mouse waits its turn")
+    {
+        mixer.pointerDown (0, one, centreOf (0), 1);
+        CHECK (said == std::vector<std::string> { "touch /godot/cue/CUE00001/level" });
+
+        //  Another finger on the strip being ridden takes nothing.
+        mixer.pointerDown (0, two, centreOf (0), 2);
+        mixer.pointerMoved (0, two, centreOf (0) - juce::Point<float> (0.0f, 40.0f));
+        CHECK (said.size() == 1u);
+
+        //  Nor does the mouse, on another strip, while a finger is down.
+        mixer.pointerDown (1, model::mousePointer, centreOf (1), 3);
+        mixer.pointerMoved (1, model::mousePointer, centreOf (1) - juce::Point<float> (0.0f, 40.0f));
+        mixer.pointerUp (1, model::mousePointer);
+        CHECK (countOf ("make BUS00001") == 0);
+
+        mixer.pointerMoved (0, one, centreOf (0) - juce::Point<float> (0.0f, 10.0f));
+        CHECK (said.back() == "set /godot/cue/CUE00001/level");
+
+        mixer.pointerUp (0, two);
+        mixer.pointerUp (0, one);
+        CHECK (said.back() == "release /godot/cue/CUE00001/level");
+    }
+
+    SUBCASE ("a strip taken from under a hand by a new desk lets go of what it held")
+    {
+        reading.sends[0].sendId = "SND00002";
+        mixer.show (reading);
+        mixer.pointerDown (1, one, centreOf (1), 1);
+        CHECK (said.back() == "touch /godot/send/SND00002/level");
+
+        //  A mix appears: the desk is built again, and nothing will ever lift the finger here.
+        model::SendStrip third;
+        third.busId = "BUS00003";
+        reading.sends.push_back (third);
+        mixer.show (reading);
+
+        CHECK (countOf ("release /godot/send/SND00002/level") == 1);
+    }
+}
+
+TEST_CASE ("fade mixer: two fingers ride two strips, each holding what it writes - the value, and the switch that ticks it (§125)")
+{
+    std::vector<std::string> said;
+
+    ui::FadeMixerComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string&) { said.push_back ("set " + address); };
+    actions.touch = [&] (const std::string& address) { said.push_back ("touch " + address); };
+    actions.release = [&] (const std::string& address) { said.push_back ("release " + address); };
+
+    ui::FadeMixerComponent mixer (model::Theme {}, actions);
+    mixer.setSize (420, 220);
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::fade, "FAD00001" };
+    reading.fadeMix.present = true;
+    reading.fadeMix.fadeId = "FAD00001";
+
+    model::FadeStrip level;
+    level.kind = "level";
+    level.name = "Level";
+    level.address = "/godot/cue/FAD00001/level";
+    level.switchAddress = "/godot/cue/FAD00001/levelOn";
+    level.value = -6.0;
+
+    model::FadeStrip reverb;
+    reverb.kind = "send";
+    reverb.name = "Reverb";
+    reverb.busId = "BUS00001";
+    reverb.address = "/godot/cue/FAD00001/moves/send/BUS00001";
+    reverb.switchAddress = reverb.address;
+    reverb.door = true;
+    reverb.value = -20.0;
+
+    reading.fadeMix.strips = { level, reverb };
+    mixer.show (reading);
+
+    constexpr auto one = model::firstFinger;
+    constexpr auto two = model::firstFinger + 1;
+    const auto centreOf = [&mixer] (std::size_t strip) { return mixer.throwOf (strip).toFloat().getCentre(); };
+
+    mixer.pointerDown (0, one, centreOf (0), 1);
+    mixer.pointerDown (1, two, centreOf (1), 2);
+
+    CHECK (said == std::vector<std::string> { "touch /godot/cue/FAD00001/level", "touch /godot/cue/FAD00001/levelOn",
+                                              "touch /godot/cue/FAD00001/moves/send/BUS00001" });
+
+    mixer.pointerMoved (0, one, centreOf (0) - juce::Point<float> (0.0f, 20.0f));
+    mixer.pointerMoved (1, two, centreOf (1) - juce::Point<float> (0.0f, 20.0f));
+
+    //  The switch first, then the value; the send's door is its own tick.
+    CHECK (std::count (said.begin(), said.end(), "set /godot/cue/FAD00001/levelOn") == 1);
+    CHECK (std::count (said.begin(), said.end(), "set /godot/cue/FAD00001/level") == 1);
+    CHECK (std::count (said.begin(), said.end(), "set /godot/cue/FAD00001/moves/send/BUS00001") == 1);
+
+    mixer.pointerUp (1, two);
+    CHECK (said.back() == "release /godot/cue/FAD00001/moves/send/BUS00001");
+
+    mixer.pointerUp (0, one);
+    CHECK (std::count (said.begin(), said.end(), "release /godot/cue/FAD00001/level") == 1);
+    CHECK (std::count (said.begin(), said.end(), "release /godot/cue/FAD00001/levelOn") == 1);
+}
+
 TEST_CASE ("active cue errors: collapsed drawer retains failures and respects edit mode")
 {
     std::string inspected;
@@ -3731,7 +3910,7 @@ TEST_CASE ("surface panel: real touches through the window's peer are two hands 
     panel.addToDesktop (juce::ComponentPeer::windowIsTemporary);
 
     if (const auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
-        panel.setCentrePosition (display->userArea.getCentre());
+        panel.setCentrePosition (display->userBounds.getCentre().roundToInt());
 
     panel.toFront (false);
     auto* peer = panel.getPeer();

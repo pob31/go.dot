@@ -323,6 +323,8 @@ namespace wfg::client::ui
                     plugin's own window on the fade. */
                 FadeMixerComponent::Actions fading;
                 fading.set = actions.set;
+                fading.touch = actions.touch;
+                fading.release = actions.release;
                 fading.openEq = [this] (const std::string& fadeId)
                 {
                     if (actions.openSubject)
@@ -488,6 +490,8 @@ namespace wfg::client::ui
                 SendMixerComponent::Actions mixing;
                 mixing.set = actions.set;
                 mixing.setMany = actions.setMany;
+                mixing.touch = actions.touch;
+                mixing.release = actions.release;
                 mixing.createSend = actions.createSend;
                 mixing.removeSend = actions.removeObject;
                 mixing.say = [this] (const juce::String& sentence)

@@ -16,6 +16,8 @@
 
 #include <wfg/client/ui/SendMixerComponent.h>
 
+#include <wfg/client/ui/PointerKeys.h>
+
 #include <wfg/client/ui/PlaceBar.h>
 
 #include <wfg/client/model/Fader.h>
@@ -291,10 +293,38 @@ namespace wfg::client::ui
             if (event.eventComponent != this)
                 return;
 
+            owner.pointerDown (at, pointerKeyOf (event.source), event.position, draggingPointers());
+        }
+
+        void mouseUp (const juce::MouseEvent& event) override
+        {
+            if (event.eventComponent != this)
+                return;
+
+            owner.pointerUp (at, pointerKeyOf (event.source));
+        }
+
+        void mouseDrag (const juce::MouseEvent& event) override
+        {
+            if (event.eventComponent != this)
+                return;
+
+            owner.pointerMoved (at, pointerKeyOf (event.source), event.position, event.mods.isShiftDown());
+        }
+
+        /*  A HAND TAKES THE STRIP (namespace draft §125, BFB): one hand a
+            strip, so another pointer on a strip being ridden takes nothing;
+            the levels it will write are held (`node.touch`) before the first
+            of them, so two strips ridden together are one step to undo. */
+        void take (int pointerToUse, juce::Point<float> position)
+        {
             held = levelHere();
             shown = held;
             dragging = true;
-            dragFrom = event.position.y;
+            dragFrom = position.y;
+            pointer = pointerToUse;
+            byFinger = model::isFinger (pointerToUse);
+            finger = model::FingerDrag (model::fractionForDb (held), -static_cast<double> (position.y));
 
             /*  AND OVER SEVERAL CUES, where each one stood when the hand went
                 down: every frame of the drag moves them from there, never from
@@ -303,43 +333,70 @@ namespace wfg::client::ui
             if (owner.many())
             {
                 grabbed = owner.levelsAt (at);
-                owner.askedSends.clear();
+
+                for (const auto& level : grabbed)
+                    hold (level.first);
+            }
+            else
+            {
+                hold (owner.levelAddressAt (at));
             }
         }
 
-        void mouseUp (const juce::MouseEvent& event) override
+        /*  A LEVEL THIS HAND WILL WRITE, held before its first write - and a
+            send made while the hand is on its silent strip is held as it
+            arrives (`SendMixerComponent::show`). */
+        void hold (const std::string& address)
         {
-            if (event.eventComponent != this)
-                return;
-
-            /*  AND THE READING TAKES OVER AGAIN. By now the level that was
-                asked for has been applied and published; if it has not, the
-                next pass corrects the cap rather than this holding a number
-                the document never accepted. */
-            dragging = false;
-            owner.refresh();
+            if (! address.empty() && touched.insert (address).second && owner.actions.touch)
+                owner.actions.touch (address);
         }
 
-        void mouseDrag (const juce::MouseEvent& event) override
+        /*  THE HAND COMES OFF: what it held is let go, and the reading takes
+            over again. By now the level that was asked for has been applied
+            and published; if it has not, the next pass corrects the cap
+            rather than this holding a number the document never accepted. */
+        void letGo()
         {
-            if (event.eventComponent != this)
-                return;
+            dragging = false;
+            pointer = -1;
 
+            const auto released = touched;
+            touched.clear();
+
+            if (owner.actions.release)
+                for (const auto& address : released)
+                    owner.actions.release (address);
+        }
+
+        void moveTo (juce::Point<float> position, bool fine)
+        {
             const auto area = throwArea();
 
             if (area.getHeight() <= 0)
                 return;
 
-            /*  MEASURED FROM WHERE THE HAND WENT DOWN rather than from where
-                the pointer is, so a press does not jump the fader to the
-                pointer. Shift divides the movement by ten, which is the
-                fine-drag every other drag in this window has. */
-            const auto moved = (dragFrom - event.position.y)
-                                 / static_cast<float> (area.getHeight());
-            const auto scale = event.mods.isShiftDown() ? 0.1f : 1.0f;
+            if (byFinger)
+            {
+                /*  A FINGER: the page's finger (§125, BFF) - from where it
+                    landed, the distance off the strip sideways dividing the
+                    travel. */
+                const auto off = model::outsideBand (static_cast<double> (position.x), 0.0,
+                                                     static_cast<double> (getWidth()));
+                shown = model::dbForFraction (finger.moveTo (-static_cast<double> (position.y), off,
+                                                             static_cast<double> (area.getHeight())));
+            }
+            else
+            {
+                /*  MEASURED FROM WHERE THE HAND WENT DOWN rather than from
+                    where the pointer is, so a press does not jump the fader to
+                    the pointer. Shift divides the movement by ten, which is
+                    the fine-drag every other drag in this window has. */
+                const auto moved = (dragFrom - position.y) / static_cast<float> (area.getHeight());
+                const auto scale = fine ? 0.1f : 1.0f;
 
-            shown = model::dbForFraction (model::fractionForDb (held)
-                                            + static_cast<double> (moved * scale));
+                shown = model::dbForFraction (model::fractionForDb (held) + static_cast<double> (moved * scale));
+            }
 
             /*  OVER SEVERAL CUES THE SAME NUMBER OF DECIBELS FOR ALL (RA): the
                 cap is the lead's, and every cue that sends here moves by what
@@ -555,6 +612,12 @@ namespace wfg::client::ui
         bool dragging = false;
         float dragFrom = 0.0f;
 
+        //  The hand on this strip (§125): its pointer, a finger's gearing, what it holds.
+        int pointer = -1;
+        bool byFinger = false;
+        model::FingerDrag finger;
+        std::set<std::string> touched;
+
         /*  Over several cues, every level at this strip when the hand went
             down, by address (§30.11). */
         std::vector<std::pair<std::string, double>> grabbed;
@@ -583,6 +646,79 @@ namespace wfg::client::ui
                 actions.dial (address);
     }
 
+    //==============================================================================
+    void SendMixerComponent::pointerDown (std::size_t at, int pointer, juce::Point<float> position, int dragging)
+    {
+        for (const auto stale : turns.sweep (dragging))
+            for (auto& strip : strips)
+                if (strip->dragging && strip->pointer == stale)
+                    strip->letGo();
+
+        if (! turns.down (pointer) || at >= strips.size())
+            return;
+
+        auto& strip = *strips[at];
+
+        //  ONE STRIP, ONE HAND (§125, BFB): a strip being ridden is not taken from its hand.
+        if (strip.dragging)
+            return;
+
+        /*  THE SENDS A GESTURE OVER SEVERAL CUES ASKED TO BE MADE are
+            forgotten when the first hand goes down, not every hand: a second
+            finger landing must not have the first one's drag ask again. */
+        const auto first = std::none_of (strips.begin(), strips.end(),
+                                         [] (const auto& other) { return other->dragging; });
+
+        if (first)
+            askedSends.clear();
+
+        strip.take (pointer, position);
+        strip.repaint();
+    }
+
+    void SendMixerComponent::pointerMoved (std::size_t at, int pointer, juce::Point<float> position, bool fine)
+    {
+        if (at >= strips.size() || ! turns.owns (pointer))
+            return;
+
+        auto& strip = *strips[at];
+
+        if (! strip.dragging || strip.pointer != pointer)
+            return;
+
+        strip.moveTo (position, fine);
+    }
+
+    void SendMixerComponent::pointerUp (std::size_t at, int pointer)
+    {
+        turns.up (pointer);
+
+        if (at >= strips.size())
+            return;
+
+        auto& strip = *strips[at];
+
+        if (! strip.dragging || strip.pointer != pointer)
+            return;
+
+        strip.letGo();
+        refresh();
+    }
+
+    juce::Rectangle<int> SendMixerComponent::throwOf (std::size_t at) const
+    {
+        return at < strips.size() ? strips[at]->throwArea() : juce::Rectangle<int> {};
+    }
+
+    void SendMixerComponent::releaseHolds()
+    {
+        for (auto& strip : strips)
+            if (strip->dragging)
+                strip->letGo();
+
+        turns.clear();
+    }
+
     void SendMixerComponent::showDial (const std::string& address)
     {
         if (address == dialed)
@@ -601,7 +737,11 @@ namespace wfg::client::ui
         applyTheme (theme);
     }
 
-    SendMixerComponent::~SendMixerComponent() = default;
+    SendMixerComponent::~SendMixerComponent()
+    {
+        //  A hand still on a strip lets go of what it held: nothing else will (§125).
+        releaseHolds();
+    }
 
     void SendMixerComponent::applyTheme (const model::Theme& themeToUse)
     {
@@ -655,12 +795,21 @@ namespace wfg::client::ui
             it - the same two-step the importer uses to make a cue and then
             fill it in. Outside the rebuild branch, because a send arriving is
             no longer a change of shape. */
-        if (! awaitingBus.empty())
+        /*  ONE PENDING SEND PER MIX (§125): two fingers raising two silent
+            strips at once wait for two sends, each with its own level. And a
+            hand still on the strip holds the new send's level before writing
+            it, so the ride goes on as one step. */
+        const auto waiting = awaiting;
+
+        for (const auto& [busId, wanted] : waiting)
             for (std::size_t at = 0; at < reading.sends.size(); ++at)
-                if (reading.sends[at].busId == awaitingBus && reading.sends[at].present())
+                if (reading.sends[at].busId == busId && reading.sends[at].present())
                 {
-                    const auto wanted = awaitingLevel;
-                    awaitingBus.clear();
+                    awaiting.erase (busId);
+
+                    if (at + 1 < strips.size() && strips[at + 1]->dragging)
+                        strips[at + 1]->hold ("/godot/send/" + reading.sends[at].sendId + "/level");
+
                     levelWanted (at + 1, wanted);
                     break;
                 }
@@ -668,6 +817,7 @@ namespace wfg::client::ui
 
     void SendMixerComponent::rebuild()
     {
+        releaseHolds();
         strips.clear();
         removeAllChildren();
 
@@ -884,10 +1034,9 @@ namespace wfg::client::ui
                     after the first - correctly, but it would put fifty
                     refusals in the log for one gesture. The level keeps
                     catching up; only the making of the object is once. */
-                const auto asked = awaitingBus == strip.busId;
+                const auto asked = awaiting.count (strip.busId) != 0;
 
-                awaitingBus = strip.busId;
-                awaitingLevel = level;
+                awaiting[strip.busId] = level;
 
                 /*  BORN AT THE LEVEL ASKED FOR, rounded as every level
                     here is, so the voice never passes through the row's

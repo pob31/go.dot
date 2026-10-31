@@ -649,6 +649,11 @@ namespace wfg::client
                 footActions.setMany = [this] (const std::vector<std::pair<std::string, std::string>>& writes)
                 { send (gesture::setNodes (writes)); };
 
+                /*  A HAND ON A MIXER'S STRIP (namespace draft §125, BFB): held
+                    while it rides, so two strips ridden at once are one step. */
+                footActions.touch = [this] (const std::string& address) { send (gesture::touchNode (address)); };
+                footActions.release = [this] (const std::string& address) { send (gesture::releaseNode (address)); };
+
                 /*  AN OSC CUE'S MESSAGES AND CURVES, from its table (namespace
                     draft 45). */
                 footActions.createMessage = [this] (const std::string& cueId, const std::string& address,
