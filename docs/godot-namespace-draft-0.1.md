@@ -35331,18 +35331,49 @@ rest mine, or *(proposed)*.
 
 | Stage | What | Commit |
 |---|---|---|
-| MT.0 | This section; PRD §3.17; the devplan | |
-| MT.1 | Pointers and turns, the finger's fader rate: pure, in the client model | |
-| MT.2 | BFC in the engine's undo | |
-| MT.3 | The desk, a hand per finger | |
-| MT.4 | The send and fade mixers; the EQ's fingers by kind | |
-| MT.5 | The Stream Deck picture | |
-| MT.6 | Cart pads | |
-| MT.7 | `patches/JUCE-local/`, the Mac's touch source | |
-| MT.8 | The Mac's panel reader in the window; a self-test | |
-| MT.10 | spatcore: programs sharing a panel (BFH) | |
+| MT.0 | This section; PRD §3.17; the devplan | 078eb3c6 |
+| MT.1 | Pointers and turns, the finger's fader rate: pure, in the client model | 5bfc9547 |
+| MT.2 | BFC in the engine's undo | 5bfc9547 |
+| MT.3 | The desk, a hand per finger | 5bfc9547 |
+| MT.4 | The send and fade mixers; the EQ's fingers by kind | 7ebe8059 |
+| MT.5 | The Stream Deck picture | 97361bdb |
+| MT.6 | Cart pads | e3683c59 |
+| MT.7 | `patches/JUCE-local/`, the Mac's touch source | 951c30cc |
+| MT.8 | The Mac's panel reader in the window; a self-test | d62979c4, 9589bd8c |
+| MT.10 | spatcore: programs sharing a panel (BFH) | spatcore PR #30, not merged |
 | MT.11 | Go.dot's spatcore pin | |
-| MT.12 | README and the tester guides | |
+| MT.12 | README and the tester guides | 0b01ee3d |
 | MT.13 | M85: a finger to the command applied, Windows and the Mac | |
 
 MT.9, a window to set touch screens up by hand, is not scheduled (BFG).
+
+As built 2026-10-31, MT.1-MT.8 and MT.12. `model::pointerKey`, `PointerTurns` (with `sweep`, the lost lift
+named so its owner lets go of what it held) and `FingerDrag` (Scrub's `rateFor`, 48 px a halving) in the
+client model; `ui/PointerKeys.h` the one place a JUCE source becomes a key. BFC: `cue::beginUndoStep` reads the
+session's touch table - serve's and replay's - and `ShowDocument` keeps `lastWriteHeld`: a held write joins a
+held run from its origin within the window whatever its address, never a plain run, nor a plain write a held
+one; `noteHold` breaks a plain run as the hold's own transaction did and leaves a held one but for the last
+let-go. Every logged fixture replays as before. The desk: grabs, knobs and pads by pointer, one control one
+hand, a knob touching the marks it moves, the viewport no longer scrolling under a finger, another window
+becoming active letting go of the keys and the mouse only. The send and fade mixers: a hand per strip,
+`node.touch`/`node.release` through the foot's new `touch`/`release`, one pending send per mix. The Stream
+Deck picture: `model::DeckPresses`. Cart pads: `model::readCartPads` (DeckBridge's walk), `padVelocity`,
+`ui/CartPadsComponent` in the cue list's place, the switch's words from `cartViewWords`, the Show menu's
+item; a cart opens as its list, the pads being the window's for the session. `patches/JUCE-local/` beside
+`patches/JUCE/`: `WFG_PATCH_SERIES` and a stamp per series in the CMake machinery, `patches.py` and check (g)
+taking a series, no file in two patches of either. `ui/TouchPanels` on the Mac: the reader made once the
+window is shown and gone first, the identify circles, the foot's sentences, `WFG_TEST_TOUCH_INJECT`. The
+spatcore pin c139a97.
+
+Tried: the desk's, the mixers' and the pads' gestures by key in both locales (164 window tests); the undo
+rule's three cases and their subcases; the toolchain case on the Mac farm, where patched JUCE 8.0.13 makes a touch source for a
+finger at index 1; the strict GCC build on the NUC; the Mac's build with the reader and with PR #30's
+registry. A real two-finger touch through the window's peer is in the window tests, said and not failed when
+the screen is locked - it was, here. **Found on the farm:** `git am` strips the CR of a JUCE patch's CRLF
+hunks unless given `--keep-cr`, and the configure then refuses the tree; the commit itself was right.
+
+**Owed to the bench:** a Windows touch screen on the desk, the mixers, the cart's pads and the Stream Deck
+picture, and the Undo panel after a two-handed ride; the ILITEK panel on the Mac mini - the Input Monitoring
+prompt, the circles with two displays, WFS-DIY and Go.dot open together before and after PR #30 (MT.11 moves
+the pin once it is merged); `WFG_TEST_TOUCH_INJECT`, which opens a window on the Mac's screen; and M85. The
+words, and BFE-BFH, are owed the author's look.
