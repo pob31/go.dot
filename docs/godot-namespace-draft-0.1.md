@@ -35340,8 +35340,8 @@ rest mine, or *(proposed)*.
 | MT.6 | Cart pads | e3683c59 |
 | MT.7 | `patches/JUCE-local/`, the Mac's touch source | 951c30cc |
 | MT.8 | The Mac's panel reader in the window; a self-test | d62979c4, 9589bd8c |
-| MT.10 | spatcore: programs sharing a panel (BFH) | spatcore PR #30, not merged |
-| MT.11 | Go.dot's spatcore pin | |
+| MT.10 | spatcore: programs sharing a panel (BFH) | spatcore PR #30, merged as 3e0c940 |
+| MT.11 | Go.dot's spatcore pin | b4683166 |
 | MT.12 | README and the tester guides | 0b01ee3d |
 | MT.13 | M85: a finger to the command applied, Windows and the Mac | |
 
@@ -35374,6 +35374,6 @@ hunks unless given `--keep-cr`, and the configure then refuses the tree; the com
 
 **Owed to the bench:** a Windows touch screen on the desk, the mixers, the cart's pads and the Stream Deck
 picture, and the Undo panel after a two-handed ride; the ILITEK panel on the Mac mini - the Input Monitoring
-prompt, the circles with two displays, WFS-DIY and Go.dot open together before and after PR #30 (MT.11 moves
-the pin once it is merged); `WFG_TEST_TOUCH_INJECT`, which opens a window on the Mac's screen; and M85. The
+prompt, the circles with two displays, WFS-DIY and Go.dot open together (PR #30 merged, Go.dot's pin moved in MT.11;
+WFS-DIY's own pin still to move); `WFG_TEST_TOUCH_INJECT`, which opens a window on the Mac's screen; and M85. The
 words, and BFE-BFH, are owed the author's look.
