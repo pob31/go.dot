@@ -385,6 +385,10 @@ namespace wfg::client::ui
                 if (manager == nullptr || identify != nullptr || Manager::getDisplays().size() < 2)
                     return;
 
+                /*  WHAT ANOTHER READER HAS PLACED (BFH): a screen identified in
+                    WFS-DIY is placed here too, and is not offered again. */
+                manager->reloadSettings();
+
                 for (const auto& panel : manager->getPanels())
                     if (panel.connected && panel.problem.isEmpty() && ! manager->hasDisplay (panel.settings)
                           && offered.insert (panel.key).second)

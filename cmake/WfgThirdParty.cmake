@@ -585,6 +585,7 @@ target_sources(wfg_thirdparty PRIVATE
 if(APPLE)
     target_sources(wfg_thirdparty PRIVATE
         "${CMAKE_SOURCE_DIR}/ThirdParty/spatcore/controllers/touch/TouchInjector.cpp"
+        "${CMAKE_SOURCE_DIR}/ThirdParty/spatcore/controllers/touch/TouchPanelRegistry.cpp"
         "${CMAKE_SOURCE_DIR}/ThirdParty/spatcore/controllers/touch/macos/MacHidTouchManager.mm")
     target_link_libraries(wfg_thirdparty PUBLIC
         "-framework IOKit" "-framework CoreFoundation" "-framework ApplicationServices" "-framework AppKit")
