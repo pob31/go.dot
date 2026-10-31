@@ -90,33 +90,33 @@ namespace wfg::client::ui
 
                 void paint (juce::Graphics& g) override
                 {
-                    const auto& theme = owner.theme;
-                    g.fillAll (Look::colour (theme, "ground").withAlpha (0.9f));
+                    const auto& look = owner.theme;
+                    g.fillAll (Look::colour (look, "ground").withAlpha (0.9f));
 
                     const auto area = getLocalBounds().toFloat();
                     const auto centre = juce::Point<float> (area.getX() + across * area.getWidth(), area.getCentreY());
                     const auto radius = juce::jmin (area.getWidth(), area.getHeight()) * 0.06f;
 
-                    g.setColour (Look::colour (theme, "accent"));
+                    g.setColour (Look::colour (look, "accent"));
                     g.drawEllipse (juce::Rectangle<float> (radius * 2.0f, radius * 2.0f).withCentre (centre), 4.0f);
                     g.fillEllipse (juce::Rectangle<float> (radius * 0.5f, radius * 0.5f).withCentre (centre));
 
-                    g.setColour (Look::colour (theme, "ink"));
-                    g.setFont (Look::font (theme, juce::jmax (18.0f, area.getHeight() * 0.03f)));
+                    g.setColour (Look::colour (look, "ink"));
+                    g.setFont (Look::font (look, juce::jmax (18.0f, area.getHeight() * 0.03f)));
                     g.drawText ("Touch the circle on this screen",
                                 juce::Rectangle<float> (area.getWidth(), radius * 1.5f)
                                     .withCentre ({ area.getCentreX(), centre.y - radius * 2.2f }),
                                 juce::Justification::centred);
 
-                    g.setColour (Look::colour (theme, "ink-dim"));
-                    g.setFont (Look::font (theme, juce::jmax (14.0f, area.getHeight() * 0.018f)));
+                    g.setColour (Look::colour (look, "ink-dim"));
+                    g.setFont (Look::font (look, juce::jmax (14.0f, area.getHeight() * 0.018f)));
                     g.drawText ("Go.dot is finding which touch screen covers which display. A click or Esc stops.",
                                 area.withTrimmedTop (area.getHeight() * 0.88f), juce::Justification::centred);
 
                     if (! placed.isEmpty())
                     {
-                        g.setColour (Look::colour (theme, "ink"));
-                        g.setFont (Look::font (theme, juce::jmax (18.0f, area.getHeight() * 0.025f)));
+                        g.setColour (Look::colour (look, "ink"));
+                        g.setFont (Look::font (look, juce::jmax (18.0f, area.getHeight() * 0.025f)));
                         g.drawText ("This screen: " + placed.joinIntoString (", "),
                                     juce::Rectangle<float> (area.getWidth(), radius * 1.5f)
                                         .withCentre ({ area.getCentreX(), centre.y + radius * 2.2f }),
