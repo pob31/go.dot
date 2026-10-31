@@ -20,13 +20,16 @@
 #   WFG_PATCHED       the directory name, the same under ThirdParty/ and patches/
 #                     (tracktion_engine, JUCE)
 #   WFG_PATCHED_NAME  what the messages call it (Tracktion Engine, JUCE)
+#   WFG_PATCH_SERIES  which series under patches/, when it is not the tree's own name:
+#                     JUCE-local, Go.dot's own changes to JUCE beside JUCE's fixes
+#                     (namespace draft §125, BFD). Its stamp is wfg-applied-<series>.
 # WfgTracktionPatches.cmake and WfgJucePatches.cmake are those files. The decision that
 # patches live here, applied by the build, rather than in forks, is DQ (2026-09-28);
 # JUCE joined it on 2026-10-14. The price, accepted with it: `git status` reports the
 # submodule as modified, and moving its pin takes the patches off first (README,
 # "Bumping a pin").
 #
-# WHAT THIS DOES, in the order it asks. The series is patches/${WFG_PATCHED}/series.
+# WHAT THIS DOES, in the order it asks. The series is patches/<series>/series.
 #   1. The series reverses cleanly: it is already on. Nothing is touched, so a
 #      configure never causes a rebuild of the submodule.
 #   2. The series applies cleanly: a fresh checkout of the pin. It is applied, and a
@@ -51,7 +54,16 @@
 find_package(Git REQUIRED)
 
 set(_wfg_patched_dir "${CMAKE_SOURCE_DIR}/ThirdParty/${WFG_PATCHED}")
-set(_wfg_patch_dir "${CMAKE_SOURCE_DIR}/patches/${WFG_PATCHED}")
+# THE SERIES, which is the tree's own name unless the includer names another
+# (namespace draft §125, BFD): patches/JUCE holds JUCE's own fixes and
+# patches/JUCE-local Go.dot's own changes to JUCE, two series on one tree. Each
+# keeps its own stamp, and every file belongs to one patch of one series, so the
+# questions below - is this series on, does it fit - never see the other's.
+set(_wfg_series "${WFG_PATCH_SERIES}")
+if(_wfg_series STREQUAL "")
+    set(_wfg_series "${WFG_PATCHED}")
+endif()
+set(_wfg_patch_dir "${CMAKE_SOURCE_DIR}/patches/${_wfg_series}")
 
 # The series, in order: one file name a line, `#` for a comment.
 file(STRINGS "${_wfg_patch_dir}/series" _wfg_series_lines)
@@ -67,8 +79,8 @@ foreach(_wfg_line IN LISTS _wfg_series_lines)
 
     if(NOT EXISTS "${_wfg_patch_dir}/${_wfg_line}")
         message(FATAL_ERROR
-            "Go.dot: patches/${WFG_PATCHED}/series names ${_wfg_line}, which is not in "
-            "patches/${WFG_PATCHED}/.")
+            "Go.dot: patches/${_wfg_series}/series names ${_wfg_line}, which is not in "
+            "patches/${_wfg_series}/.")
     endif()
 
     list(APPEND _wfg_patches "${_wfg_patch_dir}/${_wfg_line}")
@@ -108,7 +120,11 @@ if(_wfg_count EQUAL 0)
     # standard input instead: the configure would wait for ever on nothing.
     message(STATUS "Go.dot: no patches for ${WFG_PATCHED_NAME} ${_wfg_head}")
 else()
-    set(_wfg_stamp_dir "${_wfg_git_dir}/wfg-applied")
+    if(_wfg_series STREQUAL WFG_PATCHED)
+        set(_wfg_stamp_dir "${_wfg_git_dir}/wfg-applied")
+    else()
+        set(_wfg_stamp_dir "${_wfg_git_dir}/wfg-applied-${_wfg_series}")
+    endif()
 
     file(LOCK "${_wfg_git_dir}/wfg-patches.lock" GUARD FILE TIMEOUT 300
          RESULT_VARIABLE _wfg_lock)
@@ -202,10 +218,10 @@ else()
                             OUTPUT_QUIET ERROR_QUIET)
 
                         message(FATAL_ERROR
-                            "Go.dot: patches/${WFG_PATCHED}/series does not apply to "
+                            "Go.dot: patches/${_wfg_series}/series does not apply to "
                             "${WFG_PATCHED_NAME} ${_wfg_head}; the tree was left carrying the series applied "
                             "before.\n${_wfg_err}\n"
-                            "    Rework the patch: python3 scripts/patches.py ${WFG_PATCHED} apply --3way, "
+                            "    Rework the patch: python3 scripts/patches.py ${_wfg_series} apply --3way, "
                             "resolve, then refresh.")
                     endif()
 
@@ -222,22 +238,22 @@ else()
 
                 if(_wfg_dirty STREQUAL "")
                     message(FATAL_ERROR
-                        "Go.dot: patches/${WFG_PATCHED}/series does not apply to a clean "
+                        "Go.dot: patches/${_wfg_series}/series does not apply to a clean "
                         "checkout of ${WFG_PATCHED_NAME} ${_wfg_head}.\n"
                         "    If the pin has just moved, the patches need reworking against it:\n"
-                        "        python3 scripts/patches.py ${WFG_PATCHED} apply --3way   (resolve what does not fit)\n"
-                        "        python3 scripts/patches.py ${WFG_PATCHED} refresh\n"
+                        "        python3 scripts/patches.py ${_wfg_series} apply --3way   (resolve what does not fit)\n"
+                        "        python3 scripts/patches.py ${_wfg_series} refresh\n"
                         "    README, \"Bumping a pin\", has the whole procedure.")
                 endif()
 
                 message(FATAL_ERROR
                     "Go.dot: ThirdParty/${WFG_PATCHED} has changes that are neither Go.dot's "
-                    "patches (patches/${WFG_PATCHED}/series) nor a clean checkout of "
+                    "patches (patches/${_wfg_series}/series) nor a clean checkout of "
                     "${_wfg_head}. They were left alone.\n"
                     "    See them:      git -C ThirdParty/${WFG_PATCHED} status   (and: diff)\n"
                     "    Discard them:  git -C ThirdParty/${WFG_PATCHED} checkout -- .\n"
                     "    then configure again. Before pulling a commit that moves the ${WFG_PATCHED_NAME}\n"
-                    "    pin, take the patches off: python3 scripts/patches.py ${WFG_PATCHED} revert")
+                    "    pin, take the patches off: python3 scripts/patches.py ${_wfg_series} revert")
             endif()
         endif()
     endif()
@@ -261,5 +277,5 @@ else()
     file(LOCK "${_wfg_git_dir}/wfg-patches.lock" RELEASE)
 
     message(STATUS "Go.dot: ${WFG_PATCHED_NAME} ${_wfg_head} ${_wfg_state} ${_wfg_count} patch(es) "
-                   "from patches/${WFG_PATCHED}/series")
+                   "from patches/${_wfg_series}/series")
 endif()

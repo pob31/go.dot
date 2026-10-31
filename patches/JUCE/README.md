@@ -12,8 +12,9 @@ releases' worth of other changes, carry the one fix.
 
 **What belongs here, and what does not.** A JUCE patch is JUCE's own commit, taken
 as JUCE wrote it, plus Go.dot's notice. A change of Go.dot's own to JUCE is not
-made here. Each patch says which JUCE release has it, and goes when the pin moves
-to that release or later.
+made here: it goes in `patches/JUCE-local/` (namespace draft §125, BFD).
+Each patch says which JUCE release has it, and goes when the pin moves to that
+release or later.
 
 - `series` lists the patches in the order they apply. A line starting with `#` is a
   comment.

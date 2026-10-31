@@ -822,12 +822,20 @@ covers it, and `patches/JUCE/README.md` lists each fix with the release that has
 it. JUCE keeps its sources in CRLF, so its patches do too, byte for byte - see
 that README before editing one.
 
+**Go.dot's own changes to JUCE** are a second series, `patches/JUCE-local/`
+(namespace draft §125), applied by the same file after the fixes and kept apart
+from them because they go for a different reason: today one, letting a touch
+source exist on macOS, so a USB touch panel's fingers reach the window. It works
+like the first - `python3 scripts/patches.py JUCE-local ...`, check (g), its own
+README - and no file is in two patches of either series.
+
 ### Bumping a pin
 
 0. Make sure nothing else is building from this checkout, then take Go.dot's
    patches off both: `python3 scripts/patches.py tracktion_engine revert` and
-   `python3 scripts/patches.py JUCE revert`. Git will not check a new commit out
-   over files the patches changed.
+   `python3 scripts/patches.py JUCE revert` and `python3 scripts/patches.py
+   JUCE-local revert`. Git will not check a new commit out over files the patches
+   changed.
 1. Move `ThirdParty/tracktion_engine` to the new tag.
 2. Read TE's new vendored JUCE SHA:
    `git -C ThirdParty/tracktion_engine ls-tree HEAD modules/juce`.
@@ -835,7 +843,7 @@ that README before editing one.
    to the nearest tag. Take out of `patches/JUCE/series` (and delete) every fix
    the new JUCE already has - `patches/JUCE/README.md` says from which release.
 4. Put the patches back on: `python3 scripts/patches.py tracktion_engine apply --3way`,
-   and the same for `JUCE` if any fix is left. If a hunk no longer fits, resolve
+   and the same for `JUCE` if any fix is left, and for `JUCE-local`. If a hunk no longer fits, resolve
    it in the submodule, then `python3 scripts/patches.py <submodule> refresh`
    rewrites the patch from the tree.
 5. Run `python3 scripts/check-pins.py`, then configure every build tree and run
@@ -973,7 +981,8 @@ Two directories that do **not** exist here, and will not:
    commit in the submodule: edit the submodule's files, then
    `python3 scripts/patches.py tracktion_engine refresh` (or `new` for a patch of
    its own), and carry the modification notice the other patches carry. JUCE
-   takes only fixes JUCE has already released, in `patches/JUCE/` the same way.
+   takes only fixes JUCE has already released, in `patches/JUCE/` the same way,
+   and Go.dot's own changes to it in `patches/JUCE-local/`.
 
 <!-- No CI badge: the repo is private until alpha, and a badge for a private
      repo renders as a broken image for everyone outside it. Add one at the

@@ -120,6 +120,10 @@ patches/tracktion_engine/series text eol=lf
 patches/JUCE/*.patch        -text
 patches/JUCE/series         text eol=lf
 
+# And Go.dot's own changes to JUCE (namespace draft §125, BFD), the same bytes.
+patches/JUCE-local/*.patch  -text
+patches/JUCE-local/series   text eol=lf
+
 # Nothing here reaches ThirdParty/: those are two gitlinks, and Git does not
 # apply a superproject's attributes across a submodule boundary. JUCE and
 # Tracktion Engine carry their own.

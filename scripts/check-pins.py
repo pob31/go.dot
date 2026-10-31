@@ -87,8 +87,10 @@ PUREDATA = "ThirdParty/pure-data"
 LIBAJANTV2 = "ThirdParty/libajantv2"
 TE_VENDORED_JUCE = "ThirdParty/tracktion_engine/modules/juce"
 SIMPLEWEB_ASIO = "ThirdParty/juce_simpleweb/asio"
-# The submodules Go.dot patches, and what check (g) calls each one.
-PATCHED = ((TE, "Tracktion"), (JUCE, "JUCE"))
+# The series Go.dot patches each submodule with - the tree, the folder under
+# patches/, and what check (g) calls it. JUCE has two (namespace draft §125, BFD).
+PATCHED = ((TE, "tracktion_engine", "Tracktion"), (JUCE, "JUCE", "JUCE"),
+           (JUCE, "JUCE-local", "JUCE (Go.dot's own changes)"))
 
 # How to repair each submodule, which is NOT the same command for all of them:
 # juce_simpleweb has a nested asio and needs a scoped --recursive, and the other
@@ -383,8 +385,9 @@ def check_g(failures):
     has at this point). A pin moved without the patches reworked against it
     fails here, before any toolchain exists.
     """
-    for tree, name in PATCHED:
-        submodule = tree.split("/")[-1]
+    owner = {}
+
+    for tree, submodule, name in PATCHED:
         patch_dir = f"patches/{submodule}"
         series = REPO_ROOT / patch_dir / "series"
         if not series.is_file():
@@ -400,6 +403,22 @@ def check_g(failures):
             continue
         if not patches:
             print(f"  ok  (g) no {name} patches in the series")
+            continue
+
+        #  ONE FILE, ONE PATCH, across every series on a tree: refresh splits the
+        #  tree's diff back by file, and two series on one file could not be told apart.
+        clashed = False
+        for patch in patches:
+            for line in patch.read_bytes().split(b"\n"):
+                if line.startswith(b"diff --git a/"):
+                    path = line[len(b"diff --git a/"):].split(b" b/", 1)[0].decode("utf-8")
+                    key = (tree, path)
+                    if key in owner and owner[key] != patch.name:
+                        failures.append(f"{tree}/{path} is changed by both {owner[key]} and {patch.name};"
+                                        " a file belongs to one patch of one series")
+                        clashed = True
+                    owner[key] = patch.name
+        if clashed:
             continue
         reversed_args = [str(p) for p in reversed(patches)]
         if git("apply", "--check", "--reverse", *reversed_args, cwd=REPO_ROOT / tree).returncode == 0:

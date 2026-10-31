@@ -33,4 +33,13 @@
 
 set(WFG_PATCHED "JUCE")
 set(WFG_PATCHED_NAME "JUCE")
+set(WFG_PATCH_SERIES "JUCE")
 include(WfgSubmodulePatches)
+
+# AND GO.DOT'S OWN CHANGES TO JUCE (namespace draft §125, BFD): a second series
+# on the same tree, apart from JUCE's own fixes above, on every platform so every
+# build tree has one state (patches/JUCE-local/README.md).
+set(WFG_PATCHED_NAME "JUCE (Go.dot's own changes)")
+set(WFG_PATCH_SERIES "JUCE-local")
+include(WfgSubmodulePatches)
+unset(WFG_PATCH_SERIES)

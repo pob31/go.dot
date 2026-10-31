@@ -28,6 +28,7 @@
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
 #include <juce_core/juce_core.h>
+#include <juce_gui_basics/juce_gui_basics.h>
 #include <tracktion_engine/tracktion_engine.h>
 
 #include <concepts>
@@ -230,6 +231,54 @@ TEST_CASE ("toolchain: JUCE carries Go.dot's patches - a String from malformed U
     // An overlong four-byte sequence, counted as U+FFFD's three: the path
     // String::fromUTF8 (text) takes, without its debug assertion on bad input.
     fits (juce::String (juce::CharPointer_UTF8 ("\xF0\x80\x80\x80" "trailing")));
+}
+
+//==============================================================================
+TEST_CASE ("toolchain: JUCE carries Go.dot's own changes - a touch source may exist on macOS (§125)")
+{
+    /*  patches/JUCE-local/0001 (namespace draft §125, BFD): Go.dot's own change
+        to JUCE, so the Mac's USB touch panel reader can hand JUCE a finger as a
+        touch source of its own. Applied on every platform, so every tree says
+        so; the file compiles on macOS alone, where JUCE is then asked. */
+    const auto source = juce::File (WFG_REPO_ROOT)
+                            .getChildFile ("ThirdParty/JUCE/modules/juce_gui_basics/native/juce_NSViewComponentPeer_mac.mm")
+                            .loadFileAsString();
+    REQUIRE (source.isNotEmpty());
+
+    const auto at = source.indexOf ("bool detail::MouseInputSourceList::canUseTouch() const");
+    REQUIRE (at >= 0);
+
+    const auto body = source.substring (at, source.indexOf (at, "}") + 1);
+    CHECK (body.contains ("patches/JUCE-local/0001-macos-touch-sources.patch"));
+    CHECK (body.contains ("return true;"));
+    CHECK_FALSE (body.contains ("return false;"));
+
+   #if JUCE_MAC
+    /*  AND JUCE MAKES ONE: a finger handed to a window's peer at index 1 is a
+        touch source of its own. The source is made before anything is hit,
+        so no window needs to be under the point. */
+    juce::Component window;
+    window.setSize (8, 8);
+    window.addToDesktop (0);
+    auto* peer = window.getPeer();
+    REQUIRE (peer != nullptr);
+
+    const auto down = juce::ModifierKeys().withFlags (juce::ModifierKeys::leftButtonModifier);
+    peer->handleMouseEvent (juce::MouseInputSource::InputSourceType::touch, { 2.0f, 2.0f }, down,
+                            juce::MouseInputSource::defaultPressure, juce::MouseInputSource::defaultOrientation,
+                            juce::Time::currentTimeMillis(), {}, 1);
+
+    auto made = false;
+
+    for (const auto& each : juce::Desktop::getInstance().getMouseSources())
+        made = made || (each.isTouch() && each.getIndex() == 1);
+
+    CHECK_MESSAGE (made, "JUCE made no touch source for a finger: is patches/JUCE-local on?");
+
+    peer->handleMouseEvent (juce::MouseInputSource::InputSourceType::touch, { 2.0f, 2.0f }, {}, 0.0f,
+                            juce::MouseInputSource::defaultOrientation, juce::Time::currentTimeMillis(), {}, 1);
+    window.removeFromDesktop();
+   #endif
 }
 
 //==============================================================================

@@ -69,10 +69,18 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-# The submodules Go.dot patches: directory name -> what a message calls it.
-PATCHED = {"tracktion_engine": "Tracktion Engine", "JUCE": "JUCE"}
+# The series of patches Go.dot keeps, by their folder under patches/: the tree
+# under ThirdParty/ each applies to, and what a message calls it. JUCE has two
+# (namespace draft §125, BFD): JUCE's own fixes, and Go.dot's own changes.
+PATCHED = {
+    "tracktion_engine": ("tracktion_engine", "Tracktion Engine"),
+    "JUCE": ("JUCE", "JUCE"),
+    "JUCE-local": ("JUCE", "JUCE (Go.dot's own changes)"),
+}
 
-# Set by main() from the first argument, before any command runs.
+# Set by main() from the first argument, before any command runs: the series,
+# and the submodule it applies to.
+SERIES_NAME = ""
 SUBMODULE = ""
 NAME = ""
 TREE = Path()
@@ -116,8 +124,22 @@ def series_patches():
     missing = [n for n in names if not (PATCH_DIR / n).is_file()]
     if missing:
         sys.exit(f"patches: the series names {', '.join(missing)}, "
-                 f"which is not in patches/{SUBMODULE}/")
+                 f"which is not in patches/{SERIES_NAME}/")
     return [PATCH_DIR / n for n in names]
+
+
+def other_series_files():
+    """The files the other series on the same tree change: never this one's, and
+    never a sign that the tree carries something foreign."""
+    files = set()
+    for name, (tree, _) in PATCHED.items():
+        if name == SERIES_NAME or tree != SUBMODULE:
+            continue
+        folder = REPO_ROOT / "patches" / name
+        for patch in read_series(folder / "series"):
+            if (folder / patch).is_file():
+                files.update(split_patch((folder / patch).read_bytes())[1])
+    return files
 
 
 def git_dir() -> Path:
@@ -130,7 +152,8 @@ def git_dir() -> Path:
 
 
 def stamp_dir() -> Path:
-    return git_dir() / "wfg-applied"
+    # The tree's own series keeps the stamp it always had; another its own (§125).
+    return git_dir() / ("wfg-applied" if SERIES_NAME == SUBMODULE else f"wfg-applied-{SERIES_NAME}")
 
 
 def signature(patches):
@@ -168,7 +191,13 @@ def fits(patches, reverse=False):
 
 
 def is_clean():
-    return git("status", "--porcelain", "--untracked-files=no").stdout.strip() == ""
+    """No change in the tree but what another series on it makes."""
+    others = other_series_files()
+    for line in git("status", "--porcelain", "--untracked-files=no").stdout.splitlines():
+        path = line[3:].strip()
+        if path and path not in others:
+            return False
+    return True
 
 
 def head():
@@ -207,7 +236,7 @@ def cmd_apply(args):
         print(r.stderr.rstrip())
         if args.three_way:
             print("patches: conflicts left in the tree; resolve them, then "
-                  f"`patches.py {SUBMODULE} refresh`")
+                  f"`patches.py {SERIES_NAME} refresh`")
         else:
             print("patches: the series does not apply cleanly; try --3way")
         return 1
@@ -258,7 +287,7 @@ def cmd_refresh(_args):
         body = git_bytes("diff", "--", *files)
         if not body.strip():
             sys.exit(f"patches: {p.name}'s files carry no change in the tree - "
-                     f"is the series on? (`patches.py {SUBMODULE} status`)")
+                     f"is the series on? (`patches.py {SERIES_NAME} status`)")
         p.write_bytes(header + body)
         print(f"patches: {p.name} rewritten from {len(files)} file(s)")
     write_stamp(patches)
@@ -270,10 +299,10 @@ def cmd_new(args):
     target = PATCH_DIR / name
     if target.exists():
         sys.exit(f"patches: {name} exists already; edit it and `refresh`")
-    taken = {f for p in series_patches() for f in split_patch(p.read_bytes())[1]}
+    taken = {f for p in series_patches() for f in split_patch(p.read_bytes())[1]} | other_series_files()
     clash = [f for f in args.files if f in taken]
     if clash:
-        sys.exit(f"patches: {', '.join(clash)} already belongs to a patch in the series; "
+        sys.exit(f"patches: {', '.join(clash)} already belongs to a patch of a series on this tree; "
                  "a file is kept in one patch, so refresh can split the tree's diff back")
     body = git_bytes("diff", "--", *args.files)
     if not body.strip():
@@ -282,8 +311,8 @@ def cmd_new(args):
               "<Why Go.dot needs it, what it changes, and that each file it touches\n"
               "carries a notice that Go.dot modified it (GPL-3, section 5(a)).>\n\n"
               "Applied by Go.dot's build, cmake/WfgSubmodulePatches.cmake, in the order\n"
-              f"patches/{SUBMODULE}/series gives; refreshed from the working tree with\n"
-              f"scripts/patches.py {SUBMODULE} refresh, which keeps this header. Against\n"
+              f"patches/{SERIES_NAME}/series gives; refreshed from the working tree with\n"
+              f"scripts/patches.py {SERIES_NAME} refresh, which keeps this header. Against\n"
               f"{NAME} {head()}.\n\n")
     target.write_bytes(header.encode("utf-8") + body)
     with SERIES.open("a", encoding="utf-8", newline="\n") as series:
@@ -294,7 +323,7 @@ def cmd_new(args):
 
 
 def main() -> int:
-    global SUBMODULE, NAME, TREE, PATCH_DIR, SERIES
+    global SERIES_NAME, SUBMODULE, NAME, TREE, PATCH_DIR, SERIES
 
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("submodule", choices=sorted(PATCHED))
@@ -310,10 +339,10 @@ def main() -> int:
     new.add_argument("files", nargs="+")
     args = parser.parse_args()
 
-    SUBMODULE = args.submodule
-    NAME = PATCHED[SUBMODULE]
+    SERIES_NAME = args.submodule
+    SUBMODULE, NAME = PATCHED[SERIES_NAME]
     TREE = REPO_ROOT / "ThirdParty" / SUBMODULE
-    PATCH_DIR = REPO_ROOT / "patches" / SUBMODULE
+    PATCH_DIR = REPO_ROOT / "patches" / SERIES_NAME
     SERIES = PATCH_DIR / "series"
 
     if not TREE.is_dir():

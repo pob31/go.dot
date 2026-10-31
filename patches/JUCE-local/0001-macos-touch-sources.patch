@@ -1,0 +1,49 @@
+Go.dot patch 0001 for JUCE, a change of Go.dot's own: a touch source may exist on macOS.
+
+macOS treats a USB touch screen as a mouse and never sends an application touch
+events. Go.dot reads the panel itself, through spatcore's MacHidTouchManager
+(controllers/touch/macos), which switches the panel out of mouse emulation and
+hands each finger to JUCE as a touch source of its own through
+ComponentPeer::handleMouseEvent with a touchIndex - so the desk, the cart's pads,
+the send and fade mixers and the Stream Deck picture take several fingers at once
+(namespace draft section 125, the author's decision BFD of 2026-10-31). JUCE
+answers MouseInputSourceList::canUseTouch() false on the Mac, and every injected
+finger is then dropped without a word. This answers true. AppKit itself never
+sends a touch event, so nothing else changes. It is spatcore's patches/juce/macos
+patch, which WFS-DIY carries the same way, with Go.dot's notice in place of
+WFS-DIY's.
+
+Not JUCE's own fix, which is why it is not in patches/JUCE: that series is for
+fixes JUCE has made. Applied on every platform so every build tree has one state;
+the file compiles on macOS alone. tests/ToolchainTests.cpp reads the notice on
+every platform and, on a Mac, asks JUCE for a second touch source. The hunk
+carries a notice that Go.dot modified the file (AGPL-3 and GPL-3, section 5(a)).
+
+LINE ENDINGS. JUCE stores this file with CRLF, so the hunk's lines end in CRLF and
+must stay so; .gitattributes keeps this file byte for byte (-text).
+
+Applied by Go.dot's build, cmake/WfgJucePatches.cmake, in the order
+patches/JUCE-local/series gives; refreshed from the working tree with
+scripts/patches.py JUCE-local refresh, which keeps this header. Against JUCE
+37c894f83d37 (8.0.13+7, the JUCE Tracktion Engine 13b5132 pins). Drop it when JUCE
+lets a touch source exist on macOS, or when the panel reader no longer injects.
+
+diff --git a/modules/juce_gui_basics/native/juce_NSViewComponentPeer_mac.mm b/modules/juce_gui_basics/native/juce_NSViewComponentPeer_mac.mm
+index 4eb8addb95..676f495b69 100644
+--- a/modules/juce_gui_basics/native/juce_NSViewComponentPeer_mac.mm
++++ b/modules/juce_gui_basics/native/juce_NSViewComponentPeer_mac.mm
+@@ -2995,7 +2995,13 @@ bool detail::MouseInputSourceList::addSource()
+ 
+ bool detail::MouseInputSourceList::canUseTouch() const
+ {
+-    return false;
++    // MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-10-31, by
++    // patches/JUCE-local/0001-macos-touch-sources.patch, a change of Go.dot's own: a
++    // touch source may exist on macOS, so the USB touch panel reader (spatcore's
++    // MacHidTouchManager) can inject one finger per touchIndex through
++    // ComponentPeer::handleMouseEvent. AppKit never sends touch events itself, so
++    // nothing else changes; without this every injected finger is dropped.
++    return true;
+ }
+ 
+ //==============================================================================

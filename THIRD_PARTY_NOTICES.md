@@ -49,6 +49,15 @@ AGPL-3, section 5(a):
   (in 8.0.16 and 9.0.4), so a `String` built from malformed UTF-8 is allocated
   the bytes it is filled with.
 
+**And Go.dot's own changes** (since 2026-10-31), a second series kept in
+`patches/JUCE-local/` and applied by the same file after the fixes above, each
+file it touches carrying the same notice. The corresponding source is the commit
+above plus both series:
+
+- `0001-macos-touch-sources.patch` (2026-10-31): `canUseTouch()` answers true on
+  macOS, so a USB touch panel's fingers reach JUCE as touch sources (namespace
+  draft §125).
+
 JUCE bundles further dependencies with their own licences; the two that reach
 every Go.dot binary through `juce_graphics` are listed separately below. See
 `ThirdParty/JUCE/LICENSE.md` for the complete list.
