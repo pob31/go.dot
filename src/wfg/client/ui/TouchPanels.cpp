@@ -382,7 +382,12 @@ namespace wfg::client::ui
 
             void offerIdentify()
             {
-                if (manager == nullptr || identify != nullptr || Manager::getDisplays().size() < 2)
+                if (manager == nullptr || identify != nullptr)
+                    return;
+
+                const auto displays = Manager::getDisplays();
+
+                if (displays.size() < 2)
                     return;
 
                 /*  WHAT ANOTHER READER HAS PLACED (BFH): a screen identified in
@@ -390,7 +395,10 @@ namespace wfg::client::ui
                 manager->reloadSettings();
 
                 for (const auto& panel : manager->getPanels())
-                    if (panel.connected && panel.problem.isEmpty() && ! manager->hasDisplay (panel.settings)
+                    /*  NEVER PLACED, OR PLACED ON A DISPLAY THAT NOW FITS TWO - two
+                        identical monitors told apart by macOS's unit number only
+                        (spatcore PR #32) - and never for a display merely unplugged. */
+                    if (panel.connected && panel.problem.isEmpty() && Manager::needsIdentify (panel.settings, displays)
                           && offered.insert (panel.key).second)
                     {
                         identify = std::make_unique<Identify> (*manager, theme, [this, token = std::weak_ptr<bool> (alive)]

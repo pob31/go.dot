@@ -770,7 +770,7 @@ live in `packaging/`.
 | JUCE | 8.0.13+7 (on `develop`), carrying one fix from 8.0.16 (below) | `37c894f83d379179b2070d437ccd0f1cd9af9576` |
 | Tracktion Engine | develop (3.5.0) | `13b51326693e3227ddef91b224114d12af6433ce` |
 | juce_simpleweb (the OSCQuery server's HTTP and WebSocket; the author's fork) | `pob31/juce_simpleweb` | `b72ec947548654cdd0a7e72b71ab5826fe574847` |
-| spatcore (the author's shared control-plane code; on the Mac its touch panel reader too) | main, after PR #30 | `3e0c94098330756dd05892c32da82890bc9bf900` |
+| spatcore (the author's shared control-plane code; on the Mac its touch panel reader too) | main, after PR #32 | `bd303d5cf6c433a2b63dd69d19b4ad457d792e0b` |
 | hidapi (the SpaceMouse, the Stream Decks) | 0.15.0 | `d6b2a974608dec3b76fb1e36c189f22b9cf3650c` |
 | Mbed TLS (HTTPS to a radio-mic base station; Apache-2.0; its `framework` submodule is not fetched) | 3.6.7 LTS | `068ff080b369adfac81509f9b57b2afabaf82dc5` |
 | sokol (the video renderer's graphics) | master, 2026-10-06 | `401f21f8b7039258c35fef75c11d9a8a0e616771` |
