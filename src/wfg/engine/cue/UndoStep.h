@@ -42,8 +42,20 @@
         writes the show, opened at that first write
         (`ShowDocument::beginEngineEdit`) - so a sound reported ready on one
         machine and a tick later on the other ends nobody's drag on either.
+      - A HOLD IS NOT AN EDIT EITHER (namespace draft §125, BFC): `node.touch`,
+        `node.release` and `node.releaseAll` change who holds a node and no row
+        of the show, so they open no step (`ShowDocument::noteHold`). A hold
+        still breaks a run of plain writes, as it always did; inside a run of
+        held writes it leaves the run alone, and the origin's last let-go ends
+        it - so two hands riding two faders at once are one step.
       - Everything else, a transaction of its own or the open one joined
-        (`ShowDocument::beginTransaction`).
+        (`ShowDocument::beginTransaction`), a write HELD when its origin holds
+        every address it writes.
+
+    The touch table is the one the session's `node.touch` commands fill; it
+    changes only through logged records, so a replay holding its own table
+    decides exactly as the session did. Null - a rig with no table - leaves
+    holds as the transactions they were before §125.
 */
 
 #include <cstdint>
@@ -60,6 +72,11 @@ namespace wfg
     {
         class ShowDocument;
     }
+
+    namespace tree
+    {
+        class TouchTable;
+    }
 }
 
 namespace wfg::cue
@@ -68,7 +85,10 @@ namespace wfg::cue
 
     /*  Tick thread, from the before-apply hook: `args` as coerced, the ones the
         handler is about to see. `live` may be null for a session with no live
-        layer, which then has no live edits to tell apart. */
+        layer, which then has no live edits to tell apart. `touches` is read
+        BEFORE the command applies, so a `node.release` still finds what it
+        lets go of. */
     void beginUndoStep (doc::ShowDocument& document, const LiveEdits* live, const Command& command,
-                        const Event& submitted, const std::vector<osc::Value>& args, std::int64_t tick);
+                        const Event& submitted, const std::vector<osc::Value>& args, std::int64_t tick,
+                        const tree::TouchTable* touches = nullptr);
 }

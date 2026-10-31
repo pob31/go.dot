@@ -3355,6 +3355,19 @@ TEST_CASE ("surface panel: the knob above a DCA strip turns the marks playing un
         panel.paintEntireComponent (g, true);
     }
 
+    /*  THE WRITES, without the holds around them: a knob touches the marks it
+        moves before their first value and lets go of them after (§125, BFC). */
+    const auto writes = [&sent]
+    {
+        std::vector<wfg::Event> out;
+
+        for (const auto& event : sent)
+            if (event.command != "node.touch" && event.command != "node.release")
+                out.push_back (event);
+
+        return out;
+    };
+
     const auto pairsOf = [] (const wfg::Event& event)
     {
         std::vector<std::string> out;
@@ -3368,33 +3381,33 @@ TEST_CASE ("surface panel: the knob above a DCA strip turns the marks playing un
     SUBCASE ("a turn is one write over the marks the curve moves, from where it was taken, on the pass")
     {
         panel.turnKnob (1, 2);
-        CHECK (sent.empty());
+        CHECK (writes().empty());
 
         //  Five detents from where it was taken, not seven: the target is sent whole.
         panel.turnKnob (1, 5);
         panel.show (surfaces, strips);
 
-        REQUIRE (sent.size() == 1u);
-        CHECK (sent[0].command == "node.setMany");
-        CHECK (sent[0].origin == "window");
-        CHECK (pairsOf (sent[0]) == std::vector<std::string> { "/godot/cue/MOV00001/dcaCurve", "30",
+        REQUIRE (writes().size() == 1u);
+        CHECK (writes()[0].command == "node.setMany");
+        CHECK (writes()[0].origin == "window");
+        CHECK (pairsOf (writes()[0]) == std::vector<std::string> { "/godot/cue/MOV00001/dcaCurve", "30",
                                                                 "/godot/cue/VID00002/dcaCurve", "30" });
 
         //  Let go with nothing unsent, nothing more goes.
         panel.endKnob (1);
-        CHECK (sent.size() == 1u);
+        CHECK (writes().size() == 1u);
     }
 
     SUBCASE ("a click switches it to the sound's offset and sends nothing; a turn then moves the marks with a sound")
     {
         panel.clickKnob (1);
-        CHECK (sent.empty());
+        CHECK (writes().empty());
 
         panel.turnKnob (1, -2);
         panel.endKnob (1);
 
-        REQUIRE (sent.size() == 1u);
-        CHECK (pairsOf (sent[0]) == std::vector<std::string> { "/godot/cue/MOV00001/dcaOffset", "-4" });
+        REQUIRE (writes().size() == 1u);
+        CHECK (pairsOf (writes()[0]) == std::vector<std::string> { "/godot/cue/MOV00001/dcaOffset", "-4" });
     }
 
     SUBCASE ("with nothing playing under its DCA, a turn sends nothing")
@@ -3405,7 +3418,7 @@ TEST_CASE ("surface panel: the knob above a DCA strip turns the marks playing un
 
         panel.turnKnob (1, 3);
         panel.endKnob (1);
-        CHECK (sent.empty());
+        CHECK (writes().empty());
     }
 
     SUBCASE ("an output the DCA rides moves by the detents from its own trim, beside the movie's mark set (§109, BBJ, BBM)")
@@ -3424,8 +3437,8 @@ TEST_CASE ("surface panel: the knob above a DCA strip turns the marks playing un
         panel.turnKnob (1, -2);
         panel.endKnob (1);
 
-        REQUIRE (sent.size() == 1u);
-        CHECK (pairsOf (sent[0]) == std::vector<std::string> { "/godot/cue/MOV00001/dcaOffset", "-4",
+        REQUIRE (writes().size() == 1u);
+        CHECK (pairsOf (writes()[0]) == std::vector<std::string> { "/godot/cue/MOV00001/dcaOffset", "-4",
                                                                 "/godot/bus/BUS00001/trim", "-10" });
     }
 
@@ -3446,21 +3459,324 @@ TEST_CASE ("surface panel: the knob above a DCA strip turns the marks playing un
         panel.turnKnob (1, -4);
         panel.endKnob (1);
 
-        REQUIRE (sent.size() == 1u);
-        CHECK (pairsOf (sent[0]) == std::vector<std::string> { "/godot/bus/BUS00001/trim", "-32" });
+        REQUIRE (writes().size() == 1u);
+        CHECK (pairsOf (writes()[0]) == std::vector<std::string> { "/godot/bus/BUS00001/trim", "-32" });
+    }
+
+    SUBCASE ("the marks a turn moves are held from their first write until the hand lets go (§125, BFC)")
+    {
+        panel.turnKnob (1, 3);
+        panel.show (surfaces, strips);
+
+        REQUIRE (sent.size() == 3u);
+        CHECK (sent[0].command == "node.touch");
+        CHECK (sent[1].command == "node.touch");
+        CHECK (sent[2].command == "node.setMany");
+
+        //  Turned again: nothing touched twice.
+        panel.turnKnob (1, 4);
+        panel.endKnob (1);
+
+        REQUIRE (sent.size() == 6u);
+        CHECK (sent[3].command == "node.setMany");
+        CHECK (sent[4].command == "node.release");
+        CHECK (sent[5].command == "node.release");
     }
 
     SUBCASE ("a sampler strip has no knob, and the DCA's pad still puts its trim back at nought")
     {
         panel.turnKnob (0, 3);
         panel.endKnob (0);
-        CHECK (sent.empty());
+        CHECK (writes().empty());
 
         panel.pressPad (1, 0.5);
-        REQUIRE (sent.size() == 1u);
-        CHECK (sent[0].command == "node.set");
-        CHECK (pairsOf (sent[0]) == std::vector<std::string> { "/godot/dca/DCA00001/trim", "0" });
+        REQUIRE (writes().size() == 1u);
+        CHECK (writes()[0].command == "node.set");
+        CHECK (pairsOf (writes()[0]) == std::vector<std::string> { "/godot/dca/DCA00001/trim", "0" });
     }
+}
+
+//==============================================================================
+//  Several fingers on the desk (namespace draft §125, BFA, BFE, BFF; MT.3).
+
+namespace wfg::test
+{
+    //  The system's own message queue, emptied, then a pause (UiPump.cpp: windows.h kept out of here).
+    void pumpWindowMessages (int milliseconds);
+}
+
+namespace
+{
+    /*  Two sampler strips, each riding a member's trim, and a dca strip: the
+        smallest desk on which two hands can each hold something. */
+    struct TwoHandsDesk
+    {
+        TwoHandsDesk()
+        {
+            panel.setSize (900, 420);
+
+            desk.id = "SRF00001";
+            desk.name = "Desk";
+            desk.profile = "virtual";
+            desk.strips = 3;
+            desk.connected = true;
+
+            for (int at = 0; at < 2; ++at)
+            {
+                model::StripRow strip;
+                strip.id = "STP0000" + std::to_string (at + 1);
+                strip.surface = desk.id;
+                strip.index = at;
+                strip.role = "sampler";
+                strip.endpoint = "absolute";
+                strip.target = "/godot/run/RUN0000" + std::to_string (at + 1) + "/trim";
+                strip.word = "armed";
+                strip.cue = "CUE0000" + std::to_string (at + 1);
+                strip.holder = "RUN0000" + std::to_string (at + 1);
+                strip.hasLevel = true;
+                strip.levelDb = -12.0;
+                strips.push_back (strip);
+            }
+
+            panel.show ({ desk }, strips);
+            REQUIRE (panel.columnCount() == 2u);
+        }
+
+        void pass() { panel.show ({ desk }, strips); }
+
+        std::vector<std::string> commands() const
+        {
+            std::vector<std::string> out;
+
+            for (const auto& event : sent)
+                out.push_back (event.command + " " + (event.args.empty() ? std::string {} : event.args[0].getString()));
+
+            return out;
+        }
+
+        std::vector<wfg::Event> sent;
+        ui::SurfacePanelComponent panel { model::Theme {}, [this] (wfg::Event event) { sent.push_back (std::move (event)); } };
+        model::SurfaceRow desk;
+        std::vector<model::StripRow> strips;
+
+        static long countOf (const std::vector<std::string>& lines, const std::string& line)
+        {
+            return static_cast<long> (std::count (lines.begin(), lines.end(), line));
+        }
+
+        static constexpr int one = model::firstFinger;
+        static constexpr int two = model::firstFinger + 1;
+    };
+}
+
+TEST_CASE ("surface panel: two fingers are two hands - two pads struck, each let go by its own lift (§125)")
+{
+    TwoHandsDesk rig;
+    auto& panel = rig.panel;
+
+    SUBCASE ("two pads at once, and a lift releases its own pad only")
+    {
+        panel.pointerDown (rig.one, panel.padCentre (0), 1);
+        panel.pointerDown (rig.two, panel.padCentre (1), 2);
+
+        CHECK (rig.commands() == std::vector<std::string> { "strip.press STP00001", "strip.press STP00002" });
+
+        panel.pointerUp (rig.one);
+        CHECK (rig.commands().back() == "strip.release STP00001");
+        CHECK (rig.sent.size() == 3u);
+
+        panel.pointerUp (rig.two);
+        CHECK (rig.commands().back() == "strip.release STP00002");
+        CHECK (rig.sent.size() == 4u);
+    }
+
+    SUBCASE ("a pad another finger holds is not struck again")
+    {
+        panel.pointerDown (rig.one, panel.padCentre (0), 1);
+        panel.pointerDown (rig.two, panel.padCentre (0), 2);
+        panel.pointerUp (rig.two);
+
+        CHECK (rig.commands() == std::vector<std::string> { "strip.press STP00001" });
+
+        panel.pointerUp (rig.one);
+        CHECK (rig.commands().back() == "strip.release STP00001");
+    }
+
+    SUBCASE ("the mouse does nothing while a finger is down, and a finger nothing while the mouse is")
+    {
+        panel.pointerDown (rig.one, panel.padCentre (0), 1);
+        panel.pointerDown (model::mousePointer, panel.padCentre (1), 2);
+        panel.pointerUp (model::mousePointer);
+        panel.pointerUp (rig.one);
+
+        CHECK (rig.commands() == std::vector<std::string> { "strip.press STP00001", "strip.release STP00001" });
+
+        rig.sent.clear();
+        panel.pointerDown (model::mousePointer, panel.padCentre (1), 1);
+        panel.pointerDown (rig.two, panel.padCentre (0), 2);
+        panel.pointerUp (rig.two);
+        panel.pointerUp (model::mousePointer);
+
+        CHECK (rig.commands() == std::vector<std::string> { "strip.press STP00002", "strip.release STP00002" });
+    }
+
+    SUBCASE ("a lift that never came is let go at the next lone press")
+    {
+        panel.pointerDown (rig.one, panel.padCentre (0), 1);
+
+        //  The second press is the only pointer JUCE knows of: the first lost its lift.
+        panel.pointerDown (rig.two, panel.padCentre (1), 1);
+
+        CHECK (rig.commands() == std::vector<std::string> { "strip.press STP00001", "strip.release STP00001",
+                                                            "strip.press STP00002" });
+    }
+}
+
+TEST_CASE ("surface panel: two fingers ride two faders, each its own, and another window taking the keys keeps them (§125)")
+{
+    TwoHandsDesk rig;
+    auto& panel = rig.panel;
+
+    const auto first = rig.strips[0].target;
+    const auto second = rig.strips[1].target;
+
+    panel.pointerDown (rig.one, panel.faderCentre (0), 1);
+    panel.pointerDown (rig.two, panel.faderCentre (1), 2);
+
+    CHECK (rig.commands() == std::vector<std::string> { "node.touch " + first, "node.touch " + second });
+
+    SUBCASE ("each finger moves its own fader, one set each a pass")
+    {
+        panel.pointerMoved (rig.one, panel.faderCentre (0) - juce::Point<float> (0.0f, 30.0f));
+        panel.pointerMoved (rig.two, panel.faderCentre (1) + juce::Point<float> (0.0f, 30.0f));
+        rig.pass();
+
+        REQUIRE (rig.sent.size() == 4u);
+        CHECK (rig.commands()[2] == "node.set " + first);
+        CHECK (rig.commands()[3] == "node.set " + second);
+
+        //  Up for one, down for the other: neither finger moved the other's fader.
+        const auto up = wfg::osc::parseDouble (rig.sent[2].args[1].getString()).value_or (0.0);
+        const auto down = wfg::osc::parseDouble (rig.sent[3].args[1].getString()).value_or (0.0);
+        CHECK (up > -12.0);
+        CHECK (down < -12.0);
+
+        //  One lift lets go of one fader.
+        panel.pointerUp (rig.one);
+        CHECK (rig.commands().back() == "node.release " + first);
+        CHECK (TwoHandsDesk::countOf (rig.commands(), "node.release " + second) == 0);
+    }
+
+    SUBCASE ("a third finger on a fader a hand is riding takes nothing")
+    {
+        panel.pointerDown (rig.one + 2, panel.faderCentre (0), 3);
+        panel.pointerMoved (rig.one + 2, panel.faderCentre (0) - juce::Point<float> (0.0f, 50.0f));
+        rig.pass();
+        panel.pointerUp (rig.one + 2);
+
+        CHECK (rig.sent.size() == 2u);
+    }
+
+    SUBCASE ("another window becoming active lets go of the keys and the mouse, never the fingers")
+    {
+        panel.releaseKeysAndMouse();
+        CHECK (rig.sent.size() == 2u);
+
+        panel.releaseEverything();
+        CHECK (TwoHandsDesk::countOf (rig.commands(), "node.release " + first) == 1);
+        CHECK (TwoHandsDesk::countOf (rig.commands(), "node.release " + second) == 1);
+    }
+}
+
+TEST_CASE ("surface panel: a finger on a fader is finer the further it strays off the strip (§125, BFF)")
+{
+    const auto movedBy = [] (float sideways)
+    {
+        TwoHandsDesk rig;
+        auto& panel = rig.panel;
+        const auto from = panel.faderCentre (0);
+
+        panel.pointerDown (rig.one, from, 1);
+        panel.pointerMoved (rig.one, from + juce::Point<float> (sideways, -1.0f));
+        panel.pointerMoved (rig.one, from + juce::Point<float> (sideways, -41.0f));
+        rig.pass();
+
+        REQUIRE (rig.sent.size() == 2u);
+        return wfg::osc::parseDouble (rig.sent[1].args[1].getString()).value_or (0.0) - (-12.0);
+    };
+
+    const auto onTheStrip = movedBy (0.0f);
+    const auto wellOff = movedBy (300.0f);
+
+    CHECK (onTheStrip > 0.0);
+    CHECK (wellOff >= 0.0);
+    CHECK (wellOff < onTheStrip / 4.0);
+}
+
+TEST_CASE ("surface panel: real touches through the window's peer are two hands (§125)")
+{
+    /*  THE WHOLE PATH, on Windows, where JUCE makes touch sources: the panel
+        on the desktop, two fingers handed to its peer as touch events, as
+        WM_POINTER would - each must become its own JUCE source and its own
+        hand. A component's drawn place is the peer's, the viewport and its
+        canvas both at the origin. */
+    TwoHandsDesk rig;
+    auto& panel = rig.panel;
+
+    /*  ON TOP, on the main display: JUCE asks the system which window is under
+        a point before it hands an event to a component, so a test window
+        behind another one would be given nothing. */
+    panel.setVisible (true);
+    panel.setAlwaysOnTop (true);
+    panel.addToDesktop (juce::ComponentPeer::windowIsTemporary);
+
+    if (const auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+        panel.setCentrePosition (display->userArea.getCentre());
+
+    panel.toFront (false);
+    auto* peer = panel.getPeer();
+    REQUIRE (peer != nullptr);
+
+    //  Shown for real: the system has to have put the window under the point.
+    for (int frame = 0; frame < 25 && ! peer->contains (panel.padCentre (0).roundToInt(), true); ++frame)
+        wfg::test::pumpWindowMessages (20);
+
+    /*  A LOCKED SCREEN, or a session with no desktop, never puts a window under
+        a point: then the real path cannot be tried here, and the cases above,
+        which drive the same gestures by key, are what is checked. Said, not
+        failed. */
+    if (! peer->contains (panel.padCentre (0).roundToInt(), true))
+    {
+        MESSAGE ("the test window never came under the point (a locked screen?): real touches not tried");
+        panel.removeFromDesktop();
+        return;
+    }
+
+    const auto finger = [peer] (juce::Point<float> at, int index, bool down)
+    {
+        const auto mods = down ? juce::ModifierKeys().withFlags (juce::ModifierKeys::leftButtonModifier)
+                               : juce::ModifierKeys();
+        juce::ModifierKeys::currentModifiers = mods;
+        peer->handleMouseEvent (juce::MouseInputSource::InputSourceType::touch, at, mods,
+                                down ? juce::MouseInputSource::defaultPressure : 0.0f,
+                                juce::MouseInputSource::defaultOrientation,
+                                juce::Time::currentTimeMillis(), {}, index);
+    };
+
+    finger (panel.padCentre (0), 0, true);
+    finger (panel.padCentre (1), 1, true);
+
+
+    CHECK (rig.commands() == std::vector<std::string> { "strip.press STP00001", "strip.press STP00002" });
+
+    finger (panel.padCentre (0), 0, false);
+    finger (panel.padCentre (1), 1, false);
+
+    CHECK (rig.commands() == std::vector<std::string> { "strip.press STP00001", "strip.press STP00002",
+                                                        "strip.release STP00001", "strip.release STP00002" });
+
+    juce::ModifierKeys::currentModifiers = juce::ModifierKeys();
+    panel.removeFromDesktop();
 }
 
 TEST_CASE ("run pane: a sampler group counts its members in words")

@@ -63,7 +63,10 @@
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/log/EventLog.h>
+#include <wfg/engine/cue/UndoStep.h>
 #include <wfg/engine/tree/Mount.h>
+#include <wfg/engine/tree/Touches.h>
+#include <wfg/engine/tree/TreeCommands.h>
 #include <wfg/engine/tree/ParameterTree.h>
 
 #include <juce_data_structures/juce_data_structures.h>
@@ -1508,4 +1511,187 @@ TEST_CASE ("undo: curves are refused where they cannot move anything, judged at 
     REQUIRE (rig.document.undo (doc::UndoDomain::document) == std::string ("message.promote"));
     CHECK (rig.document.findById (onFader).isValid());
     CHECK (rig.document.findById (onY).getParent() == rig.document.findById (message));
+}
+
+//==============================================================================
+//  Two hands, one step (namespace draft §125, BFC, MT.2).
+
+namespace
+{
+    /*  The serve's own rule, `cue::beginUndoStep`, over a touch table the
+        session's `node.touch` commands fill - the hook `serve` and `replay`
+        install, rather than the plain `beginTransaction` the rig above calls. */
+    struct HoldRig : Rig
+    {
+        HoldRig()
+        {
+            tree::registerTreeCommands (engine.commands(), touches);
+
+            engine.setBeforeApply ([this] (const Command& appliedCommand,
+                                           const Event& submitted,
+                                           const std::vector<osc::Value>& coerced,
+                                           std::int64_t tickIndex)
+                                   {
+                                       cue::beginUndoStep (document, nullptr, appliedCommand, submitted,
+                                                           coerced, tickIndex, &touches);
+                                   });
+
+            twoCues (*this);
+        }
+
+        void from (std::int64_t tick, const std::string& who, const std::string& command,
+                   std::vector<osc::Value> args)
+        {
+            REQUIRE (applyFrom (tick, who, command, std::move (args)).applied == 1);
+        }
+
+        void hand (std::int64_t tick, const std::string& command, const std::string& cue)
+        {
+            from (tick, window, command, { text (preWaitOf (cue)) });
+        }
+
+        void set (std::int64_t tick, const std::string& cue, double seconds)
+        {
+            from (tick, window, "node.set", { text (preWaitOf (cue)), osc::Value::float64 (seconds) });
+        }
+
+        std::string waitOf (const std::string& cue) const
+        {
+            return document.getAttribute (preWaitOf (cue)).value_or ("");
+        }
+
+        const std::string window { origin::window };
+        tree::TouchTable touches;
+    };
+}
+
+TEST_CASE ("undo: two hands riding two faders at once are one step, and one undo takes both back")
+{
+    HoldRig rig;
+
+    //  Both fingers land, and ride in turns: A, B, A, B, one origin.
+    rig.hand (10, "node.touch", firstCue);
+    rig.set (11, firstCue, 1.0);
+    rig.hand (12, "node.touch", inGroupA);
+    rig.set (13, inGroupA, 2.0);
+    rig.set (14, firstCue, 1.5);
+    rig.set (15, inGroupA, 2.5);
+
+    //  One finger lifts mid-gesture: the other rides on, in the same step.
+    rig.hand (16, "node.release", firstCue);
+    rig.set (17, inGroupA, 3.0);
+    rig.hand (18, "node.release", inGroupA);
+
+    CHECK (rig.undoName() == "node.set");
+    REQUIRE (rig.document.undo (doc::UndoDomain::document).has_value());
+
+    CHECK (rig.waitOf (firstCue) == "0");
+    CHECK (rig.waitOf (inGroupA) == "0");
+
+    //  The two cues and the list are what is left.
+    CHECK (rig.drainUndoSteps() == 3);
+}
+
+TEST_CASE ("undo: a held run ends at the last let-go, a pause or another hand, and holds open no step")
+{
+    HoldRig rig;
+
+    SUBCASE ("a hold alone is no step")
+    {
+        rig.hand (10, "node.touch", firstCue);
+        rig.hand (11, "node.release", firstCue);
+        CHECK (rig.drainUndoSteps() == 3);
+    }
+
+    SUBCASE ("the last let-go ends the gesture: a new grab at once is a new step")
+    {
+        rig.hand (10, "node.touch", firstCue);
+        rig.set (11, firstCue, 1.0);
+        rig.hand (12, "node.release", firstCue);
+        rig.hand (13, "node.touch", firstCue);
+        rig.set (14, firstCue, 2.0);
+        rig.hand (15, "node.release", firstCue);
+
+        CHECK (rig.drainUndoSteps() == 5);
+    }
+
+    SUBCASE ("let go of everything at once ends it too")
+    {
+        rig.hand (10, "node.touch", firstCue);
+        rig.hand (10, "node.touch", inGroupA);
+        rig.set (11, firstCue, 1.0);
+        rig.set (12, inGroupA, 2.0);
+        rig.from (13, rig.window, "node.releaseAll", {});
+        rig.hand (14, "node.touch", firstCue);
+        rig.set (15, firstCue, 3.0);
+
+        CHECK (rig.drainUndoSteps() == 5);
+    }
+
+    SUBCASE ("a pause is where a person stopped and looked, held or not")
+    {
+        rig.hand (10, "node.touch", firstCue);
+        rig.hand (10, "node.touch", inGroupA);
+        rig.set (11, firstCue, 1.0);
+        rig.set (12 + doc::ShowDocument::coalescingWindowTicks, inGroupA, 2.0);
+
+        CHECK (rig.drainUndoSteps() == 5);
+    }
+
+    SUBCASE ("another origin's write between is another hand")
+    {
+        rig.hand (10, "node.touch", firstCue);
+        rig.hand (10, "node.touch", inGroupA);
+        rig.set (11, firstCue, 1.0);
+        rig.from (12, "ws:192.168.1.20:51234", "node.set", { text (preWaitOf (firstCue)), osc::Value::float64 (5.0) });
+        rig.set (13, inGroupA, 2.0);
+
+        CHECK (rig.drainUndoSteps() == 6);
+    }
+
+    SUBCASE ("a write not held never joins a held run, nor a held one a plain run")
+    {
+        rig.hand (10, "node.touch", firstCue);
+        rig.set (11, firstCue, 1.0);
+        rig.set (12, inGroupA, 2.0);     // the window, not holding this one
+        rig.set (13, firstCue, 1.5);
+
+        CHECK (rig.drainUndoSteps() == 6);
+    }
+}
+
+TEST_CASE ("undo: a hold breaks an inspector's drag as it always did, and another origin's hold breaks nothing held")
+{
+    HoldRig rig;
+
+    SUBCASE ("a touch between two plain writes of one drag splits it")
+    {
+        rig.set (10, firstCue, 1.0);
+        rig.from (11, "udp:10.0.0.5:9000", "node.touch", { text (preWaitOf (inGroupA)) });
+        rig.set (12, firstCue, 2.0);
+
+        CHECK (rig.drainUndoSteps() == 5);
+    }
+
+    SUBCASE ("another origin landing a finger leaves the window's held run whole")
+    {
+        rig.hand (10, "node.touch", firstCue);
+        rig.set (11, firstCue, 1.0);
+        rig.from (12, "udp:10.0.0.5:9000", "node.touch", { text (preWaitOf (inGroupA)) });
+        rig.set (13, firstCue, 2.0);
+        rig.hand (14, "node.release", firstCue);
+
+        CHECK (rig.drainUndoSteps() == 4);
+    }
+
+    SUBCASE ("two held cues written as one node.setMany join the held run")
+    {
+        rig.hand (10, "node.touch", firstCue);
+        rig.hand (10, "node.touch", inGroupA);
+        rig.from (11, rig.window, "node.setMany", twoWaits (1.0, 2.0));
+        rig.set (12, firstCue, 1.5);
+        rig.from (13, rig.window, "node.setMany", twoWaits (1.7, 2.7));
+
+        CHECK (rig.drainUndoSteps() == 4);
+    }
 }

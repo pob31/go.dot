@@ -902,6 +902,10 @@ add_library(wfg_client_model STATIC
     wfg/client/model/RunModel.cpp
     wfg/client/model/Scrub.h
     wfg/client/model/Scrub.cpp
+    wfg/client/model/Pointers.h
+    wfg/client/model/Pointers.cpp
+    wfg/client/model/FingerDrag.h
+    wfg/client/model/FingerDrag.cpp
     wfg/client/model/ShowModel.h
     wfg/client/model/ShowModel.cpp
     wfg/client/model/Text.h
@@ -925,6 +929,7 @@ target_link_libraries(wfg_client_model
 add_library(wfg_client_ui STATIC
     wfg/client/ui/ShowSettingsWindow.h
     wfg/client/ui/ShowSettingsWindow.cpp
+    wfg/client/ui/PointerKeys.h
     wfg/client/ui/SurfacePanelComponent.h
     wfg/client/ui/SurfacePanelComponent.cpp
     wfg/client/Client.h

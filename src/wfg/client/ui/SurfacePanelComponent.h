@@ -52,6 +52,8 @@
     takes a snapshot (`check-client-boundary.py`, rule c).
 */
 
+#include <wfg/client/model/FingerDrag.h>
+#include <wfg/client/model/Pointers.h>
 #include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/Theme.h>
 #include <wfg/engine/command/Event.h>
@@ -63,6 +65,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -99,24 +102,47 @@ namespace wfg::client::ui
             bottom a soft one (1). `fraction` is a place on the fader's throw,
             nought at the bottom, on `model/Fader.h`'s curve; the first drag of
             a fader touches it, and `endFader` sends whatever the last pass has
-            not yet sent and then lets go. */
-        void pressPad (std::size_t column, double height);
-        void releasePad (std::size_t column);
-        void dragFader (std::size_t column, double fraction);
-        void endFader (std::size_t column);
+            not yet sent and then lets go.
+
+            `pointer` is the hand (`model::pointerKey`): every finger holds its
+            own pad, fader and knob, and a control another hand holds refuses
+            this one (namespace draft §125, BFA). Left out, it is the mouse. */
+        void pressPad (std::size_t column, double height, int pointer = model::mousePointer);
+        void releasePad (std::size_t column, int pointer = model::mousePointer);
+        void dragFader (std::size_t column, double fraction, int pointer = model::mousePointer);
+        void endFader (std::size_t column, int pointer = model::mousePointer);
 
         /*  THE KNOB ABOVE A DCA STRIP (namespace draft §50): a click switches
             what it turns; a turn is `steps` detents from where it was when it
             was taken, sent at the next pass or when it is let go - one
             `node.setMany` over the marks of what plays under the DCA. */
         void clickKnob (std::size_t column);
-        void turnKnob (std::size_t column, int steps);
-        void endKnob (std::size_t column);
+        void turnKnob (std::size_t column, int steps, int pointer = model::mousePointer);
+        void endKnob (std::size_t column, int pointer = model::mousePointer);
+
+        /*  A POINTER ON THE DESK, as the canvas's mouse handlers report it and
+            as a test drives a finger (§125, BFE): `pointer` is its key, `at`
+            in the canvas's coordinates, `dragging` how many pointers JUCE says
+            are down with this one among them - one means anything still listed
+            lost its lift - and `fine` the mouse's Shift. The mouse and the
+            fingers take turns. */
+        void pointerDown (int pointer, juce::Point<float> at, int dragging = 1);
+        void pointerMoved (int pointer, juce::Point<float> at, bool fine = false);
+        void pointerUp (int pointer);
+
+        /** Where a column's pad and fader throw are, in the canvas's coordinates. */
+        juce::Point<float> padCentre (std::size_t column) const;
+        juce::Point<float> faderCentre (std::size_t column) const;
 
         /*  EVERY HAND OFF AT ONCE: the window closing, or losing the keyboard
             while a key was holding a pad down - whose key-up would otherwise
             never arrive, leaving a hold clip sounding for ever. */
         void releaseEverything();
+
+        /*  The keys and the mouse let go, the fingers left on (BFA): another
+            window became the active one, and only a finger reports its own
+            lift wherever the keyboard went. */
+        void releaseKeysAndMouse();
 
         void paint (juce::Graphics& g) override;
         void resized() override;
@@ -170,6 +196,11 @@ namespace wfg::client::ui
             double wantedDb = 0.0;
             bool unsent = false;
             float fromY = 0.0f;
+
+            /*  A finger's gearing (§125, BFF): relative from where it landed,
+                finer the further it strays sideways. */
+            bool finger = false;
+            model::FingerDrag drag;
         };
 
         /*  A PAD HELD DOWN, by the mouse or by a key: which strip, and whether
@@ -197,17 +228,16 @@ namespace wfg::client::ui
         /** Where the fader is drawn: the hand's value while a hand is on it, else the engine's. */
         double levelShown (const model::StripRow& strip) const;
 
-        void pressed (const juce::MouseEvent& event);
-        void dragged (const juce::MouseEvent& event);
-        void released (const juce::MouseEvent& event);
-
         /*  One press, however it was made: `strip.press` on a sampler strip,
             and a reset to unity on a dca strip. Answers what the matching
             release has to do. */
         std::optional<Down> press (std::size_t column, int velocity);
         void letGoOf (const Down& down);
-        bool takeFader (std::size_t column);
-        void letGoOfFader();
+        bool padHeld (const std::string& stripId) const;
+        bool takeFader (std::size_t column, int pointer);
+        void letGoOfFader (int pointer);
+        void letGoOfPointer (int pointer);
+        void letGoOfKeys();
         void flush();
 
         /*  THE KNOB A HAND IS ON (namespace draft §50): its strip and DCA, what
@@ -228,11 +258,21 @@ namespace wfg::client::ui
             std::vector<surface::DcaMark> marks;
             float fromY = 0.0f;
             float travelled = 0.0f;
+
+            /*  The marks this hand has touched (§125, BFC): held from their
+                first write until it lets go, so two knobs turned at once are
+                one undo step. */
+            std::set<std::string> touched;
         };
 
         surface::KnobMode knobModeOf (const model::StripRow& strip) const;
-        bool takeKnob (std::size_t column);
-        void flushKnob();
+        bool takeKnob (std::size_t column, int pointer);
+        void flushKnob (KnobGrab& knob);
+        void letGoOfKnob (int pointer);
+
+        /** The hand on a strip's fader, or knob, if one is. */
+        const Grab* grabOn (const std::string& stripId) const;
+        const KnobGrab* knobOn (const std::string& stripId) const;
 
         model::Theme theme;
         std::function<void (Event)> send;
@@ -252,13 +292,16 @@ namespace wfg::client::ui
         std::vector<int> columnX;
         std::string shape;
 
-        std::optional<Grab> grab;
-        std::optional<KnobGrab> knobGrab;
+        /*  WHAT EACH HAND HOLDS, by its pointer's key (§125, BFA): a fader, a
+            knob, a pad - each held by one hand at most. */
+        std::map<int, Grab> grabs;
+        std::map<int, KnobGrab> knobGrabs;
+        model::PointerTurns turns;
 
         /*  WHAT EACH STRIP'S KNOB TURNS, where a click left it, by strip and the
             DCA it rides - a new DCA starts where its own letters say (ABX). */
         std::map<std::string, surface::KnobMode> knobModes;
-        std::optional<Down> mousePad;
+        std::map<int, Down> padsDown;
         std::map<std::size_t, Down> keysDown;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SurfacePanelComponent)

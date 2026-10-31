@@ -951,13 +951,13 @@ namespace
                 ride opens nothing, what is this machine's opens nothing
                 (RD.3), the engine's own record opens a step only when it
                 writes the show (RD.6), everything else is a transaction. */
-            engine.setBeforeApply ([&document, &liveEdits] (const wfg::Command& appliedCommand,
+            engine.setBeforeApply ([&document, &liveEdits, &touches] (const wfg::Command& appliedCommand,
                                                 const wfg::Event& submitted,
                                                 const std::vector<wfg::osc::Value>& coerced,
                                                 std::int64_t tickIndex)
                                    {
                                        wfg::cue::beginUndoStep (document, &liveEdits, appliedCommand,
-                                                                submitted, coerced, tickIndex);
+                                                                submitted, coerced, tickIndex, &touches);
                                    });
 
             /*  Saving goes to --out, never to the bundle that was handed in.
@@ -4838,13 +4838,13 @@ namespace
             the show, so a sound reported ready on one machine of a pair and a
             tick later on the other ends nobody's drag (RD.6); everything else
             is a transaction, or joins the one open. */
-        engine.setBeforeApply ([&document, &liveEdits] (const wfg::Command& appliedCommand,
+        engine.setBeforeApply ([&document, &liveEdits, &touches] (const wfg::Command& appliedCommand,
                                             const wfg::Event& submitted,
                                             const std::vector<wfg::osc::Value>& coerced,
                                             std::int64_t tickIndex)
                                {
                                    wfg::cue::beginUndoStep (document, &liveEdits, appliedCommand,
-                                                            submitted, coerced, tickIndex);
+                                                            submitted, coerced, tickIndex, &touches);
                                });
 
         runner.setMounts (&mounts, &sender, &probe);

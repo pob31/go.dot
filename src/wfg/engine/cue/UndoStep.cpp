@@ -22,11 +22,64 @@
 #include <wfg/engine/cue/LiveRows.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/pair/MachineLocal.h>
+#include <wfg/engine/tree/Touches.h>
+
+#include <cstddef>
+#include <string>
+#include <vector>
 
 namespace wfg::cue
 {
+    namespace
+    {
+        bool isHold (const std::string& name)
+        {
+            return name == "node.touch" || name == "node.release" || name == "node.releaseAll";
+        }
+
+        /*  WHETHER A WRITE IS HELD: its origin holds every address it writes
+            - one for `node.set`, each address of a `node.setMany` (its
+            arguments address, value, address, value...). A write with no
+            address is never held. */
+        bool isHeldWrite (const tree::TouchTable& touches, const std::string& holder,
+                          const std::string& name, const std::vector<osc::Value>& args)
+        {
+            if (name == "node.set")
+                return ! args.empty() && args[0].isString() && touches.isHeld (holder, args[0].getString());
+
+            if (name != "node.setMany" || args.empty())
+                return false;
+
+            for (std::size_t at = 0; at < args.size(); at += 2)
+                if (! args[at].isString() || ! touches.isHeld (holder, args[at].getString()))
+                    return false;
+
+            return true;
+        }
+
+        /*  WHETHER A HOLD IS THE ORIGIN'S LAST LET-GO: a release of the one
+            address it still holds (or of nothing), or everything let go. */
+        bool isLastLetGo (const tree::TouchTable& touches, const std::string& holder,
+                          const std::string& name, const std::vector<osc::Value>& args)
+        {
+            if (name == "node.releaseAll")
+                return true;
+
+            if (name != "node.release")
+                return false;
+
+            const auto held = touches.heldBy (holder);
+
+            if (held.empty())
+                return true;
+
+            return held.size() == 1 && ! args.empty() && args[0].isString() && held.front() == args[0].getString();
+        }
+    }
+
     void beginUndoStep (doc::ShowDocument& document, const LiveEdits* live, const Command& command,
-                        const Event& submitted, const std::vector<osc::Value>& args, std::int64_t tick)
+                        const Event& submitted, const std::vector<osc::Value>& args, std::int64_t tick,
+                        const tree::TouchTable* touches)
     {
         /*  A RIDE IS NOT AN EDIT: a fader on a live row writes fifty times a
             second and none of it is a decision about the show, so it opens no
@@ -58,6 +111,21 @@ namespace wfg::cue
             return;
         }
 
-        document.beginTransaction (command.name, tick, submitted.origin, args);
+        /*  WHO HOLDS IS THE CLIENT, as the touch table keys it: a record a
+            backup applies for its main's client is held by that client. */
+        const auto holder = std::string (origin::localClientOf (submitted.origin));
+
+        /*  A HOLD IS NOT AN EDIT (namespace draft §125, BFC): it changes who
+            holds a node, never a row of the show, and inside a run of held
+            writes it must not cut the run - a second hand landing, or one of
+            two lifting, is the middle of one gesture. */
+        if (touches != nullptr && isHold (command.name))
+        {
+            document.noteHold (submitted.origin, isLastLetGo (*touches, holder, command.name, args));
+            return;
+        }
+
+        const auto held = touches != nullptr && isHeldWrite (*touches, holder, command.name, args);
+        document.beginTransaction (command.name, tick, submitted.origin, args, held);
     }
 }

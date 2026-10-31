@@ -188,6 +188,7 @@ add_executable(wfg_tests
     TimbreTests.cpp
     OscQueryTests.cpp
     ProblemsTests.cpp
+    PointerTests.cpp
     ClientTests.cpp)
 
 # Where the hand-authored fixtures live. Passed as a definition rather than
@@ -245,7 +246,7 @@ endif()
 # These native-window checks need a Windows desktop and exercise the actual
 # settings panel with a live device; keep the ordinary unit runner headless.
 if(WIN32)
-    add_executable(wfg_audio_ui_tests TestMain.cpp ShowSettingsUiTests.cpp RunPaneUiTests.cpp MediaCopierUiTests.cpp
+    add_executable(wfg_audio_ui_tests TestMain.cpp ShowSettingsUiTests.cpp RunPaneUiTests.cpp UiPump.cpp MediaCopierUiTests.cpp
                                       UpdateCheckUiTests.cpp)
     target_link_libraries(wfg_audio_ui_tests PRIVATE wfg::engine wfg::client_ui wfg::warnings)
     # The repository root, for the one window test that reads the shipped

@@ -937,11 +937,33 @@ namespace wfg::doc
             named after itself). The first write after an `undo` or a `redo`
             does not join either, and nothing here has to arrange that: JUCE's
             `undo()` and `redo()` call `beginNewTransaction()` themselves before
-            returning. */
+            returning.
+
+            TWO HANDS, ONE STEP (namespace draft §125, BFC, the author's
+            2026-10-31). A write is `held` when its origin holds, by
+            `node.touch`, every address it writes (`cue::beginUndoStep` asks the
+            touch table). Two fingers on two faders write A, B, A, B from one
+            origin, and by the address rule every one of those would be a step.
+            So a held write joins a run of held writes from the same origin
+            within the window WHATEVER ITS ADDRESS - one gesture of two hands is
+            one step - and a held write never joins a plain run, nor a plain
+            write a held one, so what a hold groups is only what was held. The
+            holds themselves go through `noteHold`, not here. */
         void beginTransaction (const std::string& commandName,
                                std::int64_t tick,
                                const std::string& writeOrigin,
-                               const std::vector<osc::Value>& args);
+                               const std::vector<osc::Value>& args,
+                               bool held = false);
+
+        /*  A HOLD TAKEN OR LET GO (`node.touch`, `node.release`,
+            `node.releaseAll`; §125, BFC), in place of a transaction: it
+            writes no row of the show, so it opens no step. It ends a machine
+            edit and an engine step never opened, as every show command does.
+            Against a run of plain writes it breaks the run, as it did when it
+            was a transaction of its own; inside a run of held writes it leaves
+            the run alone - a second hand landing mid-gesture is the gesture -
+            unless it is `lastLetGo` from the run's own origin, which ends it. */
+        void noteHold (const std::string& holdOrigin, bool lastLetGo) noexcept;
 
         /** Half a second at 50 Hz. See `beginTransaction`. */
         static constexpr std::int64_t coalescingWindowTicks = 25;
@@ -1375,7 +1397,7 @@ namespace wfg::doc
             command. Shared with the engine's step opened late
             (`beginEngineEdit`), so the two can never decide differently. */
         void openStep (const std::string& commandName, std::int64_t tick, const std::string& writeOrigin,
-                       const std::string& address, const std::string& captured);
+                       const std::string& address, const std::string& captured, bool held = false);
 
         /*  The engine's step waiting for its first write (`beginEngineEdit`):
             opened, and forgotten, by the first call for a history below. */
@@ -1576,6 +1598,10 @@ namespace wfg::doc
         std::string lastWriteAddress;
         std::string lastWriteOrigin;
         std::int64_t lastWriteTick = 0;
+
+        /*  Whether the last write was held (§125, BFC): a run of held writes
+            joins whatever their addresses, and only held writes join it. */
+        bool lastWriteHeld = false;
 
         /** Nought means writes are recorded. See `ScopedUndoSuppression`. */
         int undoSuppressions = 0;

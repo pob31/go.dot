@@ -16,6 +16,8 @@
 
 #include <wfg/client/ui/SurfacePanelComponent.h>
 
+#include <wfg/client/ui/PointerKeys.h>
+
 #include <wfg/client/model/Fader.h>
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Text.h>
@@ -114,6 +116,11 @@ namespace wfg::client::ui
         viewport.setViewedComponent (&canvas, false);
         viewport.setScrollBarsShown (false, true);
         viewport.setWantsKeyboardFocus (false);
+
+        /*  A FINGER ON A FADER RIDES IT and does not scroll the desk (§125):
+            JUCE's viewport scrolls under any drag that is not a mouse's. The
+            scroll bar still scrolls. */
+        viewport.setScrollOnDragMode (juce::Viewport::ScrollOnDragMode::never);
         canvas.setWantsKeyboardFocus (false);
         addAndMakeVisible (viewport);
 
@@ -152,7 +159,6 @@ namespace wfg::client::ui
             fast the mouse reports (the send mixer's arrangement, and the
             bridge's coalescing for the hardware, §16.6). */
         flush();
-        flushKnob();
 
         std::vector<model::StripRow> ordered;
         std::vector<Band> laidOut;
@@ -347,8 +353,8 @@ namespace wfg::client::ui
             the send mixer's rule, for the send mixer's reason: a drag is a
             round trip through the tick thread, and a cap drawn from the reading
             alone lags the pointer by it. */
-        if (grab.has_value() && grab->strip == strip.id)
-            return grab->wantedDb;
+        if (const auto* held = grabOn (strip.id))
+            return held->wantedDb;
 
         return strip.hasLevel ? strip.levelDb : model::silenceDb;
     }
@@ -550,8 +556,10 @@ namespace wfg::client::ui
             const auto mode = knobModeOf (strip);
             auto reading = surface::knobReading (strip.dcaMarks, mode);
 
-            if (knobGrab.has_value() && knobGrab->strip == strip.id && knobGrab->any)
-                reading.value = knobGrab->wanted;
+            const auto* knobHeld = knobOn (strip.id);
+
+            if (knobHeld != nullptr && knobHeld->any)
+                reading.value = knobHeld->wanted;
 
             auto area = parts.knob;
             const auto said = area.removeFromBottom (scaled (14));
@@ -573,7 +581,7 @@ namespace wfg::client::ui
                 juce::Path arc;
                 arc.addCentredArc (dial.getCentreX(), dial.getCentreY(), radius, radius, 0.0f, 0.0f, angle, true);
 
-                const auto grabbed = knobGrab.has_value() && knobGrab->strip == strip.id;
+                const auto grabbed = knobHeld != nullptr;
                 g.setColour (Look::colour (theme, grabbed ? "picked" : "ink"));
                 g.strokePath (arc, juce::PathStrokeType (3.0f));
 
@@ -597,7 +605,7 @@ namespace wfg::client::ui
         {
             const auto track = throwOf (parts);
             const auto riding = ! strip.target.empty();
-            const auto grabbed = grab.has_value() && grab->strip == strip.id;
+            const auto grabbed = grabOn (strip.id) != nullptr;
 
             g.setColour (Look::colour (theme, "rule"));
             g.fillRect (juce::Rectangle<int> (track.getCentreX() - 1, track.getY(), 2, track.getHeight()));
@@ -657,9 +665,7 @@ namespace wfg::client::ui
         /*  THE PAD, on every strip. Lit while a hand is on it - this one's, or
             the engine's word that a press somewhere is holding it - and the
             word above says which of those it is. */
-        const auto byKey = std::any_of (keysDown.begin(), keysDown.end(),
-                                        [&strip] (const auto& entry) { return entry.second.strip == strip.id; });
-        const auto down = strip.held || byKey || (mousePad.has_value() && mousePad->strip == strip.id);
+        const auto down = strip.held || padHeld (strip.id);
         const auto pad = parts.pad.toFloat().reduced (1.0f);
 
         g.setColour (Look::colour (theme, down ? "picked" : "panel-high"));
@@ -696,35 +702,47 @@ namespace wfg::client::ui
 
     void SurfacePanelComponent::Canvas::mouseDown (const juce::MouseEvent& event)
     {
-        owner.pressed (event);
+        owner.pointerDown (pointerKeyOf (event.source), event.position, draggingPointers());
     }
 
     void SurfacePanelComponent::Canvas::mouseDrag (const juce::MouseEvent& event)
     {
-        owner.dragged (event);
+        owner.pointerMoved (pointerKeyOf (event.source), event.position, event.mods.isShiftDown());
     }
 
     void SurfacePanelComponent::Canvas::mouseUp (const juce::MouseEvent& event)
     {
-        owner.released (event);
+        owner.pointerUp (pointerKeyOf (event.source));
     }
 
-    void SurfacePanelComponent::pressed (const juce::MouseEvent& event)
+    /*  A POINTER ON THE DESK (namespace draft §125, BFA, BFE). Every finger is
+        a hand of its own: it takes the knob, the pad or the fader under it,
+        unless another hand already holds that one, and its lift lets go of
+        what it took and nothing else. The mouse and the fingers take turns
+        (`model::PointerTurns`), and a lift JUCE never reported is swept at the
+        next lone press, letting go of what it held. */
+    void SurfacePanelComponent::pointerDown (int pointer, juce::Point<float> at, int dragging)
     {
-        const auto column = columnAt (event.x);
+        for (const auto stale : turns.sweep (dragging))
+            letGoOfPointer (stale);
+
+        if (! turns.down (pointer))
+            return;
+
+        const auto column = columnAt (juce::roundToInt (at.x));
 
         if (column >= strips.size())
             return;
 
         const auto parts = partsOf (column);
-        const auto where = event.getPosition();
+        const auto where = at.roundToInt();
 
         /*  THE KNOB IS TAKEN where it is; whether the hand turns it or only
             clicks is known when it lets go (namespace draft §50). */
         if (parts.knob.contains (where))
         {
-            if (takeKnob (column))
-                knobGrab->fromY = event.position.y;
+            if (takeKnob (column, pointer))
+                knobGrabs.at (pointer).fromY = at.y;
 
             return;
         }
@@ -735,82 +753,110 @@ namespace wfg::client::ui
                 a hard hit, as the top of a fader is loud. */
             const auto tall = static_cast<float> (juce::jmax (1, parts.pad.getHeight()));
 
-            pressPad (column, static_cast<double> ((static_cast<float> (parts.pad.getBottom())
-                                                      - event.position.y) / tall));
+            pressPad (column, static_cast<double> ((static_cast<float> (parts.pad.getBottom()) - at.y) / tall), pointer);
             return;
         }
 
         /*  THE FADER IS TAKEN WHERE IT IS, not where the pointer landed: a
             press is a grab, and a grab that jumped the level to the pixel
-            under the hand would be a move nobody made. */
-        if ((parts.fader.contains (where) || parts.value.contains (where)) && takeFader (column))
-            grab->fromY = event.position.y;
+            under the hand would be a move nobody made. A finger keeps its
+            own gearing from here (BFF). */
+        if ((parts.fader.contains (where) || parts.value.contains (where)) && takeFader (column, pointer))
+        {
+            auto& taken = grabs.at (pointer);
+            taken.fromY = at.y;
+            taken.finger = model::isFinger (pointer);
+            taken.drag = model::FingerDrag (model::fractionForDb (taken.heldDb), -static_cast<double> (at.y));
+        }
     }
 
-    void SurfacePanelComponent::dragged (const juce::MouseEvent& event)
+    void SurfacePanelComponent::pointerMoved (int pointer, juce::Point<float> at, bool fine)
     {
+        if (! turns.owns (pointer))
+            return;
+
         /*  A KNOB TURNED BY A DRAG, up is clockwise, six pixels a detent from
             where the hand went down (namespace draft §50). */
-        if (knobGrab.has_value())
+        if (auto knob = knobGrabs.find (pointer); knob != knobGrabs.end())
         {
-            const auto moved = knobGrab->fromY - event.position.y;
-            knobGrab->travelled = juce::jmax (knobGrab->travelled, std::abs (moved));
-            turnKnob (columnOf (knobGrab->strip), juce::roundToInt (moved / static_cast<float> (scaled (6))));
+            const auto moved = knob->second.fromY - at.y;
+            knob->second.travelled = juce::jmax (knob->second.travelled, std::abs (moved));
+            turnKnob (columnOf (knob->second.strip), juce::roundToInt (moved / static_cast<float> (scaled (6))), pointer);
             return;
         }
 
-        if (! grab.has_value())
+        const auto held = grabs.find (pointer);
+
+        if (held == grabs.end())
             return;
 
-        const auto column = columnOf (grab->strip);
+        const auto column = columnOf (held->second.strip);
 
         if (column >= strips.size())
             return;
 
-        const auto track = throwOf (partsOf (column));
+        const auto parts = partsOf (column);
+        const auto track = throwOf (parts);
 
         if (track.getHeight() <= 0)
             return;
 
-        /*  MEASURED FROM WHERE THE HAND WENT DOWN, on the fader's own curve,
-            and shift divides the travel by ten - the send mixer's drag, which
-            is every fader's drag in this client. */
-        const auto moved = (grab->fromY - event.position.y) / static_cast<float> (track.getHeight());
-        const auto scale = event.mods.isShiftDown() ? 0.1f : 1.0f;
+        /*  A FINGER: the page's finger (BFF) - relative from where it landed,
+            the distance off the strip sideways dividing the travel, smoothly. */
+        if (held->second.finger)
+        {
+            const auto off = model::outsideBand (static_cast<double> (at.x),
+                                                 static_cast<double> (parts.column.getX()),
+                                                 static_cast<double> (parts.column.getRight()));
+            const auto place = held->second.drag.moveTo (-static_cast<double> (at.y), off,
+                                                         static_cast<double> (track.getHeight()));
+            dragFader (column, place, pointer);
+            return;
+        }
 
-        dragFader (column, model::fractionForDb (grab->heldDb) + static_cast<double> (moved * scale));
+        /*  THE MOUSE: MEASURED FROM WHERE IT WENT DOWN, on the fader's own
+            curve, and shift divides the travel by ten - the send mixer's drag,
+            which is every mouse's drag in this client. */
+        const auto moved = (held->second.fromY - at.y) / static_cast<float> (track.getHeight());
+        const auto scale = fine ? 0.1f : 1.0f;
+
+        dragFader (column, model::fractionForDb (held->second.heldDb) + static_cast<double> (moved * scale), pointer);
     }
 
-    void SurfacePanelComponent::released (const juce::MouseEvent&)
+    void SurfacePanelComponent::pointerUp (int pointer)
     {
-        //  A KNOB LET GO: a click under three pixels switches what it turns; a turn is sent.
-        if (knobGrab.has_value())
-        {
-            const auto column = columnOf (knobGrab->strip);
+        if (! turns.up (pointer))
+            return;
 
-            if (knobGrab->travelled < 3.0f)
+        //  A KNOB LET GO: a click under three pixels switches what it turns; a turn is sent.
+        if (auto knob = knobGrabs.find (pointer); knob != knobGrabs.end())
+        {
+            const auto column = columnOf (knob->second.strip);
+
+            if (knob->second.travelled < 3.0f)
             {
-                knobGrab.reset();
+                letGoOfKnob (pointer);
                 clickKnob (column);
             }
             else
             {
-                endKnob (column);
+                endKnob (column, pointer);
             }
 
             return;
         }
 
-        if (grab.has_value())
-            letGoOfFader();
+        letGoOfPointer (pointer);
+    }
 
-        if (mousePad.has_value())
-        {
-            const auto down = *mousePad;
-            mousePad.reset();
-            letGoOf (down);
-            canvas.repaint();
-        }
+    juce::Point<float> SurfacePanelComponent::padCentre (std::size_t column) const
+    {
+        return column < strips.size() ? partsOf (column).pad.toFloat().getCentre() : juce::Point<float> {};
+    }
+
+    juce::Point<float> SurfacePanelComponent::faderCentre (std::size_t column) const
+    {
+        return column < strips.size() ? throwOf (partsOf (column)).toFloat().getCentre() : juce::Point<float> {};
     }
 
     //==============================================================================
@@ -851,11 +897,23 @@ namespace wfg::client::ui
             send (gesture::releaseStrip (down.strip));
     }
 
-    void SurfacePanelComponent::pressPad (std::size_t column, double height)
+    bool SurfacePanelComponent::padHeld (const std::string& stripId) const
     {
+        const auto byPointer = std::any_of (padsDown.begin(), padsDown.end(),
+                                            [&stripId] (const auto& entry) { return entry.second.strip == stripId; });
+        const auto byKey = std::any_of (keysDown.begin(), keysDown.end(),
+                                        [&stripId] (const auto& entry) { return entry.second.strip == stripId; });
+        return byPointer || byKey;
+    }
+
+    void SurfacePanelComponent::pressPad (std::size_t column, double height, int pointer)
+    {
+        if (column >= strips.size())
+            return;
+
         /*  A FLIPPED FADER'S PAD IS ITS REC (§34): it arms or disarms the
             lane, against what the tree says it is now, and strikes nothing. */
-        if (const auto* lane = column < strips.size() ? laneOf (strips[column]) : nullptr; lane != nullptr)
+        if (const auto* lane = laneOf (strips[column]); lane != nullptr)
         {
             if (send)
                 send (gesture::laneRec (lane->key, ! lane->armed));
@@ -863,23 +921,29 @@ namespace wfg::client::ui
             return;
         }
 
-        //  One pointer, one pad: a second press while one is down is not a hand.
-        if (mousePad.has_value())
+        /*  ONE HAND, ONE PAD, AND ONE PAD A HAND (BFA): a pointer already on a
+            pad presses no other, and a pad another hand or a key is holding is
+            not struck again under it. */
+        if (padsDown.count (pointer) != 0 || padHeld (strips[column].id))
             return;
 
         const auto velocity = juce::jlimit (1, 127, 1 + juce::roundToInt (std::clamp (height, 0.0, 1.0) * 126.0));
 
-        mousePad = press (column, velocity);
+        if (auto down = press (column, velocity))
+            padsDown.emplace (pointer, *down);
+
         canvas.repaint();
     }
 
-    void SurfacePanelComponent::releasePad (std::size_t column)
+    void SurfacePanelComponent::releasePad (std::size_t column, int pointer)
     {
-        if (! mousePad.has_value() || column >= strips.size() || strips[column].id != mousePad->strip)
+        const auto held = padsDown.find (pointer);
+
+        if (held == padsDown.end() || column >= strips.size() || strips[column].id != held->second.strip)
             return;
 
-        const auto down = *mousePad;
-        mousePad.reset();
+        const auto down = held->second;
+        padsDown.erase (held);
         letGoOf (down);
         canvas.repaint();
     }
@@ -893,15 +957,29 @@ namespace wfg::client::ui
         return strip.dcaPictures ? surface::KnobMode::curve : surface::KnobMode::offset;
     }
 
-    bool SurfacePanelComponent::takeKnob (std::size_t column)
+    const SurfacePanelComponent::KnobGrab* SurfacePanelComponent::knobOn (const std::string& stripId) const
+    {
+        for (const auto& entry : knobGrabs)
+            if (entry.second.strip == stripId)
+                return &entry.second;
+
+        return nullptr;
+    }
+
+    bool SurfacePanelComponent::takeKnob (std::size_t column, int pointer)
     {
         if (column >= strips.size())
             return false;
 
         const auto& strip = strips[column];
 
-        if (knobGrab.has_value())
-            return knobGrab->strip == strip.id;
+        //  A hand already on a knob keeps that one.
+        if (const auto mine = knobGrabs.find (pointer); mine != knobGrabs.end())
+            return mine->second.strip == strip.id;
+
+        //  One knob, one hand (BFA).
+        if (knobOn (strip.id) != nullptr)
+            return false;
 
         if (strip.role != "dca" || strip.dca.empty())
             return false;
@@ -917,7 +995,7 @@ namespace wfg::client::ui
         taken.heldValue = reading.value;
         taken.heldPlace = reading.place;
         taken.wanted = reading.value;
-        knobGrab = taken;
+        knobGrabs.emplace (pointer, std::move (taken));
 
         canvas.repaint();
         return true;
@@ -935,57 +1013,102 @@ namespace wfg::client::ui
         canvas.repaint();
     }
 
-    void SurfacePanelComponent::turnKnob (std::size_t column, int steps)
+    void SurfacePanelComponent::turnKnob (std::size_t column, int steps, int pointer)
     {
-        if (! takeKnob (column) || ! knobGrab->any)
+        if (! takeKnob (column, pointer))
+            return;
+
+        auto& knob = knobGrabs.at (pointer);
+
+        if (! knob.any)
             return;
 
         /*  BY THE DETENTS, not the value shown: an output or a canvas still
             moves when the shown cue's mark is at its end (§109, BBM). */
-        if (steps == knobGrab->steps)
+        if (steps == knob.steps)
             return;
 
-        knobGrab->steps = steps;
-        knobGrab->wanted = surface::knobTurned (knobGrab->mode, knobGrab->heldValue, steps, knobGrab->heldPlace);
-        knobGrab->unsent = true;
+        knob.steps = steps;
+        knob.wanted = surface::knobTurned (knob.mode, knob.heldValue, steps, knob.heldPlace);
+        knob.unsent = true;
         canvas.repaint();
     }
 
-    void SurfacePanelComponent::endKnob (std::size_t column)
+    void SurfacePanelComponent::endKnob (std::size_t column, int pointer)
     {
-        if (! knobGrab.has_value() || column >= strips.size() || strips[column].id != knobGrab->strip)
+        const auto knob = knobGrabs.find (pointer);
+
+        if (knob == knobGrabs.end() || column >= strips.size() || strips[column].id != knob->second.strip)
             return;
 
-        flushKnob();
-        knobGrab.reset();
+        flushKnob (knob->second);
+        letGoOfKnob (pointer);
         canvas.repaint();
     }
 
-    void SurfacePanelComponent::flushKnob()
+    void SurfacePanelComponent::flushKnob (KnobGrab& knob)
     {
-        if (! knobGrab.has_value() || ! knobGrab->unsent)
+        if (! knob.unsent)
             return;
 
-        knobGrab->unsent = false;
+        knob.unsent = false;
 
         /*  EVERY MARK THE MODE MOVES, as one write - the bridge's rule
             (`knobWrites`), so the window and a desk agree. From the marks as
             they were when taken, so a write sent twice is the same write. */
-        if (const auto writes = surface::knobWrites (knobGrab->marks, knobGrab->mode, knobGrab->steps);
-            ! writes.empty() && send)
-            send (gesture::setNodes (writes));
+        const auto writes = surface::knobWrites (knob.marks, knob.mode, knob.steps);
+
+        if (writes.empty() || ! send)
+            return;
+
+        /*  HELD BEFORE IT IS WRITTEN (§125, BFC): every mark the turn moves is
+            touched once, before its first value, so two knobs turned together
+            are one undo step - and let go when the hand comes off. */
+        for (const auto& write : writes)
+            if (knob.touched.insert (write.first).second)
+                send (gesture::touchNode (write.first));
+
+        send (gesture::setNodes (writes));
     }
 
-    bool SurfacePanelComponent::takeFader (std::size_t column)
+    void SurfacePanelComponent::letGoOfKnob (int pointer)
+    {
+        const auto knob = knobGrabs.find (pointer);
+
+        if (knob == knobGrabs.end())
+            return;
+
+        const auto touched = knob->second.touched;
+        knobGrabs.erase (knob);
+
+        if (send)
+            for (const auto& address : touched)
+                send (gesture::releaseNode (address));
+    }
+
+    const SurfacePanelComponent::Grab* SurfacePanelComponent::grabOn (const std::string& stripId) const
+    {
+        for (const auto& entry : grabs)
+            if (entry.second.strip == stripId)
+                return &entry.second;
+
+        return nullptr;
+    }
+
+    bool SurfacePanelComponent::takeFader (std::size_t column, int pointer)
     {
         if (column >= strips.size())
             return false;
 
         const auto& strip = strips[column];
 
-        //  One hand, one fader: already on this one is taken; on another, not.
-        if (grab.has_value())
-            return grab->strip == strip.id;
+        //  A hand already on a fader keeps that one, and takes no other.
+        if (const auto mine = grabs.find (pointer); mine != grabs.end())
+            return mine->second.strip == strip.id;
+
+        //  ONE FADER, ONE HAND (BFA): a fader another hand is riding is not taken from it.
+        if (grabOn (strip.id) != nullptr)
+            return false;
 
         /*  A PAD STRIP HAS NO FADER, and a strip riding nothing has no node
             to hold: both are drawn and neither can be taken. */
@@ -997,7 +1120,7 @@ namespace wfg::client::ui
         taken.target = strip.target;
         taken.heldDb = strip.hasLevel ? strip.levelDb : model::silenceDb;
         taken.wantedDb = taken.heldDb;
-        grab = taken;
+        grabs.emplace (pointer, taken);
 
         /*  THE TOUCH GOES OUT AT ONCE, before any move: it is what tells the
             engine a hand is on this fader - a dip to the bottom while touched
@@ -1010,48 +1133,62 @@ namespace wfg::client::ui
         return true;
     }
 
-    void SurfacePanelComponent::dragFader (std::size_t column, double fraction)
+    void SurfacePanelComponent::dragFader (std::size_t column, double fraction, int pointer)
     {
-        if (! takeFader (column))
+        if (! takeFader (column, pointer))
             return;
 
+        auto& held = grabs.at (pointer);
         const auto wanted = tenthOf (model::dbForFraction (fraction));
 
         //  A move that lands on the same tenth is no move, and sends nothing.
-        if (std::abs (wanted - grab->wantedDb) < 0.05)
+        if (std::abs (wanted - held.wantedDb) < 0.05)
             return;
 
-        grab->wantedDb = wanted;
-        grab->unsent = true;
+        held.wantedDb = wanted;
+        held.unsent = true;
         canvas.repaint();
     }
 
-    void SurfacePanelComponent::endFader (std::size_t column)
+    void SurfacePanelComponent::endFader (std::size_t column, int pointer)
     {
-        if (! grab.has_value() || column >= strips.size() || strips[column].id != grab->strip)
+        const auto held = grabs.find (pointer);
+
+        if (held == grabs.end() || column >= strips.size() || strips[column].id != held->second.strip)
             return;
 
-        letGoOfFader();
+        letGoOfFader (pointer);
     }
 
     void SurfacePanelComponent::flush()
     {
-        if (! grab.has_value() || ! grab->unsent)
-            return;
+        //  Every hand's latest, one `node.set` each a pass.
+        for (auto& entry : grabs)
+        {
+            auto& held = entry.second;
 
-        grab->unsent = false;
+            if (! held.unsent)
+                continue;
 
-        if (send)
-            send (gesture::setNode (grab->target, osc::formatDouble (grab->wantedDb)));
+            held.unsent = false;
+
+            if (send)
+                send (gesture::setNode (held.target, osc::formatDouble (held.wantedDb)));
+        }
+
+        for (auto& entry : knobGrabs)
+            flushKnob (entry.second);
     }
 
-    void SurfacePanelComponent::letGoOfFader()
+    void SurfacePanelComponent::letGoOfFader (int pointer)
     {
-        if (! grab.has_value())
+        const auto found = grabs.find (pointer);
+
+        if (found == grabs.end())
             return;
 
-        const auto held = *grab;
-        grab.reset();
+        const auto held = found->second;
+        grabs.erase (found);
 
         /*  THE LAST VALUE, THEN THE RELEASE, in that order: the release is what
             the engine's fader-stop reads (released at the bottom, §16.5), so
@@ -1077,32 +1214,76 @@ namespace wfg::client::ui
         canvas.repaint();
     }
 
-    void SurfacePanelComponent::releaseEverything()
+    void SurfacePanelComponent::letGoOfPointer (int pointer)
     {
-        if (grab.has_value())
-            letGoOfFader();
+        letGoOfFader (pointer);
 
         //  A knob mid-turn sends where it got to (namespace draft §50).
-        if (knobGrab.has_value())
+        if (auto knob = knobGrabs.find (pointer); knob != knobGrabs.end())
         {
-            flushKnob();
-            knobGrab.reset();
+            flushKnob (knob->second);
+            letGoOfKnob (pointer);
         }
 
-        if (mousePad.has_value())
+        if (const auto pad = padsDown.find (pointer); pad != padsDown.end())
         {
-            const auto down = *mousePad;
-            mousePad.reset();
+            const auto down = pad->second;
+            padsDown.erase (pad);
             letGoOf (down);
         }
 
+        canvas.repaint();
+    }
+
+    void SurfacePanelComponent::releaseEverything()
+    {
+        for (const auto pointer : turns.clear())
+            letGoOfPointer (pointer);
+
+        /*  And whatever a test's gesture took with no pointer down to say so
+            (the public gestures default to the mouse's key). */
+        std::vector<int> others;
+
+        for (const auto& entry : grabs)     others.push_back (entry.first);
+        for (const auto& entry : knobGrabs) others.push_back (entry.first);
+        for (const auto& entry : padsDown)  others.push_back (entry.first);
+
+        for (const auto pointer : others)
+            letGoOfPointer (pointer);
+
+        letGoOfKeys();
+        canvas.repaint();
+    }
+
+    void SurfacePanelComponent::releaseKeysAndMouse()
+    {
+        /*  THE FINGERS STAY (BFA): a finger landing on another window makes it
+            the active one, and the finger still on this desk will report its
+            own lift. The keys and the mouse will not report theirs here. */
+        for (const auto pointer : turns.held())
+        {
+            if (model::isFinger (pointer))
+                continue;
+
+            turns.up (pointer);
+            letGoOfPointer (pointer);
+        }
+
+        if (grabs.count (model::mousePointer) != 0 || knobGrabs.count (model::mousePointer) != 0
+              || padsDown.count (model::mousePointer) != 0)
+            letGoOfPointer (model::mousePointer);
+
+        letGoOfKeys();
+        canvas.repaint();
+    }
+
+    void SurfacePanelComponent::letGoOfKeys()
+    {
         const auto held = keysDown;
         keysDown.clear();
 
         for (const auto& entry : held)
             letGoOf (entry.second);
-
-        canvas.repaint();
     }
 
     //==============================================================================
@@ -1118,6 +1299,10 @@ namespace wfg::client::ui
         /*  A HELD KEY REPEATS, and a repeat is not a second strike: the pad
             is pressed once and let go when the key comes up. */
         if (keysDown.count (column) != 0)
+            return true;
+
+        //  A pad a hand is holding is not struck again by its key (BFA).
+        if (column < strips.size() && padHeld (strips[column].id))
             return true;
 
         if (auto down = press (column, keyVelocity))
@@ -1165,12 +1350,7 @@ namespace wfg::client::ui
         if (keysDown.empty())
             return;
 
-        const auto held = keysDown;
-        keysDown.clear();
-
-        for (const auto& entry : held)
-            letGoOf (entry.second);
-
+        letGoOfKeys();
         canvas.repaint();
     }
 
@@ -1238,9 +1418,12 @@ namespace wfg::client::ui
         DocumentWindow::activeWindowStatusChanged();
 
         /*  ANOTHER WINDOW TAKING OVER TAKES THE KEYS AND THE MOUSE WITH IT,
-            and neither will report letting go here. Everything held is let go
-            now, which is also what the hardware does when a hand leaves it. */
+            and neither will report letting go here: they are let go now, which
+            is also what the hardware does when a hand leaves it. NOT THE
+            FINGERS (§125, BFA): a second finger landing on the main window
+            makes it the active one while the first is still on a fader here,
+            and that finger reports its own lift. */
         if (panel != nullptr && ! isActiveWindow())
-            panel->releaseEverything();
+            panel->releaseKeysAndMouse();
     }
 }

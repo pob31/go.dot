@@ -880,6 +880,7 @@ namespace wfg::doc
         lastWriteAddress.clear();
         lastWriteOrigin.clear();
         lastWriteTick = 0;
+        lastWriteHeld = false;
     }
 
     ShowDocument::~ShowDocument()
@@ -1315,7 +1316,8 @@ namespace wfg::doc
     void ShowDocument::beginTransaction (const std::string& commandName,
                                          std::int64_t tick,
                                          const std::string& writeOrigin,
-                                         const std::vector<osc::Value>& args)
+                                         const std::vector<osc::Value>& args,
+                                         bool held)
     {
         //  Every command that is the show's ends a machine edit (RD.3), and an engine step never opened (RD.6).
         machineEditing = false;
@@ -1341,21 +1343,44 @@ namespace wfg::doc
                                 ? args[0].getString()
                                 : std::string {};
 
-        openStep (commandName, tick, writeOrigin, address, captured);
+        openStep (commandName, tick, writeOrigin, address, captured, held && ! address.empty());
+    }
+
+    void ShowDocument::noteHold (const std::string& holdOrigin, bool lastLetGo) noexcept
+    {
+        machineEditing = false;
+        engineStepPending = false;
+
+        /*  A PLAIN RUN IS BROKEN, as the hold's own transaction always broke
+            it: a touch was never the middle of an inspector's drag. A HELD RUN
+            IS LEFT ALONE but by its own origin's last let-go, which is where
+            the two hands' gesture ends. */
+        if (! lastWriteHeld || (lastLetGo && holdOrigin == lastWriteOrigin))
+            forgetCoalescing();
     }
 
     void ShowDocument::openStep (const std::string& commandName, std::int64_t tick, const std::string& writeOrigin,
-                                 const std::string& address, const std::string& captured)
+                                 const std::string& address, const std::string& captured, bool held)
     {
         /*  The address is tested FIRST and the arithmetic is behind it, so the
             tick difference is only ever computed against a tick a real write
             stamped. `tick >= lastWriteTick` is there for the caller that hands
             them out of order: a window measured backwards is not a window. */
         const auto joinsOpenTransaction = ! address.empty()
+                                            && ! held
+                                            && ! lastWriteHeld
                                             && address == lastWriteAddress
                                             && writeOrigin == lastWriteOrigin
                                             && tick >= lastWriteTick
                                             && tick - lastWriteTick <= coalescingWindowTicks;
+
+        /*  TWO HANDS, ONE STEP (§125, BFC): a held write joins a held run from
+            its origin within the window, whatever the address. */
+        const auto joinsHeldRun = held
+                                    && lastWriteHeld
+                                    && writeOrigin == lastWriteOrigin
+                                    && tick >= lastWriteTick
+                                    && tick - lastWriteTick <= coalescingWindowTicks;
 
         /*  A PLUGIN'S STATE JOINS THE TURN THAT LEFT IT (the author's decision
             of 2026-09-25: "one Undo"). The editing helper keeps a plugin's
@@ -1377,7 +1402,7 @@ namespace wfg::doc
                                  && tick >= lastWriteTick
                                  && tick - lastWriteTick <= captureJoinWindowTicks;
 
-        if (! joinsOpenTransaction && ! joinsTurn)
+        if (! joinsOpenTransaction && ! joinsHeldRun && ! joinsTurn)
         {
             /*  EVERY DOMAIN, because which one a command writes to is the
                 command's business and not this hook's, and naming a transaction
@@ -1391,6 +1416,7 @@ namespace wfg::doc
         lastWriteAddress = address;
         lastWriteOrigin = writeOrigin;
         lastWriteTick = tick;
+        lastWriteHeld = held;
     }
 
     void ShowDocument::beginEngineEdit (const std::string& commandName, std::int64_t tick,
