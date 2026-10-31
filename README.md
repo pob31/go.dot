@@ -32,6 +32,9 @@ The specification lives in `docs/`, and it is the spec — not background readin
 [français](docs/Go.dot_TryItOut_Français.md) — and download the latest release
 from the [releases page](https://github.com/pob31/go.dot/releases).
 
+**How it was built** — one sound engineer and Claude, in two months:
+[`docs/how-go-dot-was-built.md`](docs/how-go-dot-was-built.md).
+
 ---
 
 ## Status: ready to try, not yet for a performance
