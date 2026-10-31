@@ -908,6 +908,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/FingerDrag.cpp
     wfg/client/model/DeckPresses.h
     wfg/client/model/DeckPresses.cpp
+    wfg/client/model/Cart.h
+    wfg/client/model/Cart.cpp
     wfg/client/model/ShowModel.h
     wfg/client/model/ShowModel.cpp
     wfg/client/model/Text.h
@@ -932,6 +934,8 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/ShowSettingsWindow.h
     wfg/client/ui/ShowSettingsWindow.cpp
     wfg/client/ui/PointerKeys.h
+    wfg/client/ui/CartPadsComponent.h
+    wfg/client/ui/CartPadsComponent.cpp
     wfg/client/ui/SurfacePanelComponent.h
     wfg/client/ui/SurfacePanelComponent.cpp
     wfg/client/Client.h

@@ -48,6 +48,7 @@
 
 #include <wfg/client/Client.h>
 
+#include <wfg/client/model/Cart.h>
 #include <wfg/client/model/Video.h>
 #include <wfg/client/model/Devices.h>
 #include <wfg/client/model/DeviceTree.h>
@@ -170,6 +171,10 @@ namespace wfg::client
 
             /*  PAUSE / PLAY (PRD §3.34), under Show beside Doh!. */
             menuGoPause,
+
+            /*  THE CART DRAWN AS PADS, OR AS ITS LIST (namespace draft §125,
+                BEZ): the tabs' switch, in the menu too (§4.11). */
+            menuCartPads,
 
             /*  THE SHOWS OPEN RECENT OFFERS, newest first, numbered from here
                 (§106): ten at most (app/RecentShows.h), so well short of 1000. */
@@ -998,7 +1003,11 @@ namespace wfg::client
                     tabActions.create = [this] (bool cart) { newList (cart); };
                     tabActions.rename = [this] (const std::string& listId) { renameList (listId); };
                     tabActions.remove = [this] (const std::string& listId) { removeList (listId); };
+                    tabActions.padsView = [this] (const std::string& listId, bool pads) { setCartView (listId, pads); };
                     shell->tabs.setActions (std::move (tabActions));
+
+                    //  A CART'S PADS (§125, BEZ) press and let go through the one door.
+                    shell->pads.setSend ([this] (Event event) { send (std::move (event)); });
                 }
 
                 shell->triggerKeysUp = [this]
@@ -1155,6 +1164,7 @@ namespace wfg::client
                         once it is open, and needs no key of its own to open. */
                     case menuRevert:
                     case menuRemoveList:
+                    case menuCartPads:
                     case menuShowSettings:
                     case menuSurfaces:
                     case menuNetworkMonitor:
@@ -1284,6 +1294,10 @@ namespace wfg::client
                     /*  OFFERED UNDER THE LOCK TOO: riding a fader and pressing a
                         pad are playing the show, not editing it. */
                     case menuSurfaces:  return true;
+
+                    /*  A CART AS PADS, under the lock too: pressing a pad is
+                        playing the show (§125). Only while a cart is drawn. */
+                    case menuCartPads:  return cartDrawn();
 
                     /*  Whenever the engine has a tap to read: watching the wire
                         changes nothing, under the lock or not. */
@@ -1570,6 +1584,9 @@ namespace wfg::client
                         settings, where the surfaces it draws are declared. */
                     addMenuItem (menu, menuSurfaces, "Surfaces...");
 
+                    //  THE CART DRAWN, AS PADS OR AS ITS LIST (§125, BEZ).
+                    addMenuItem (menu, menuCartPads, juce::String (model::cartViewWords (shell->padsShown())));
+
                     /*  WHAT CROSSED THE WIRE (author, 2026-09-30): OSC and MIDI,
                         in and out, in a window of its own. */
                     menu.addSeparator();
@@ -1657,6 +1674,7 @@ namespace wfg::client
                     case menuSelectAll: selection.all (show.rows()); inspectNow(); break;
                     case menuDeleteCue: removeChosen(); break;
                     case menuRemoveList: removeList (listShown()); break;
+                    case menuCartPads:   setCartView (listDrawn, ! shell->padsShown()); break;
                     case menuLock:      send (gesture::setLocked (! model::isYes (last.locked))); break;
                     case menuGoDoh:     doh(); break;
                     case menuGoPause:   send (last.showPaused() ? gesture::play() : gesture::pause()); break;
@@ -2928,6 +2946,43 @@ namespace wfg::client
             std::string listDrawn;
             std::string listAwaited;
 
+            /*  THE CARTS THIS WINDOW SHOWS AS PADS (namespace draft §125, BEZ):
+                the window's, for this session - which way a cart is looked at
+                is never the show's (§4.10). */
+            std::set<std::string> cartsAsPads;
+
+            bool cartDrawn() const
+            {
+                return latest != nullptr && ! listDrawn.empty()
+                         && model::text (*latest, "/godot/list/" + listDrawn + "/kind") == "cart";
+            }
+
+            void setCartView (const std::string& listId, bool pads)
+            {
+                if (pads)
+                    cartsAsPads.insert (listId);
+                else
+                    cartsAsPads.erase (listId);
+
+                if (latest != nullptr)
+                    showCartView (*latest);
+            }
+
+            /*  THE CART DRAWN AS PADS, OR ITS ROWS: the switch says which, and
+                the pads read their cues every pass, so a pad lights as its cue
+                goes. */
+            void showCartView (const tree::TreeSnapshot& snapshot)
+            {
+                const auto cart = model::text (snapshot, "/godot/list/" + listDrawn + "/kind") == "cart";
+                const auto asPads = cart && cartsAsPads.count (listDrawn) != 0;
+
+                shell->tabs.setCartView (cart, asPads);
+                shell->showPads (asPads);
+
+                if (asPads)
+                    shell->pads.show (model::readCartPads (snapshot, listDrawn));
+            }
+
             /*  A BINDING ASKED FOR FROM A NUMBER and not yet arrived (§74,
                 BD.11): what it moves, for which cue's runs, the bindings the
                 show had then, and when it was asked for. And the binding the
@@ -3333,6 +3388,7 @@ namespace wfg::client
                 listDrawn = drawnListFor (*snapshot, reading.listId);
                 shell->tabs.setTabs (model::readListTabs (*snapshot), listDrawn, reading.listId,
                                      ! model::isYes (reading.locked));
+                showCartView (*snapshot);
 
                 const auto rebuilt = show.refresh (*snapshot, listDrawn);
 

@@ -33,6 +33,7 @@
 */
 
 #include <wfg/client/model/Theme.h>
+#include <wfg/client/ui/CartPadsComponent.h>
 #include <wfg/client/ui/CueListComponent.h>
 #include <wfg/client/ui/FootPanelComponent.h>
 #include <wfg/client/ui/HistoryPanelComponent.h>
@@ -104,6 +105,16 @@ namespace wfg::client::ui
         /*  THE SHOW'S LISTS AS TABS, over the cue list (namespace draft §74):
             its actions given after it is made, by the window. */
         ListTabsComponent tabs;
+
+        /*  A CART AS PADS, in the cue list's place (namespace draft §125,
+            BEZ): shown instead of the rows while the window shows that cart
+            so. Its door is given by the window. */
+        CartPadsComponent pads;
+
+        /*  The pads in the list's place, or the rows: going back to the rows
+            lets go of every pad still held. */
+        void showPads (bool wanted);
+        bool padsShown() const noexcept { return pads.isVisible(); }
 
         HistoryPanelComponent history;
         UndoPanelComponent undoPanel;

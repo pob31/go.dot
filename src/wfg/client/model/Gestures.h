@@ -534,6 +534,10 @@ namespace wfg::client::gesture
         the deck's own key would be. */
     Event pressCue (const std::string& cueId);
 
+    /*  A cart's pad struck (namespace draft §125, BEZ): `cue.press` at the
+        velocity where the hand landed, 1 to 127. */
+    Event pressCue (const std::string& cueId, int velocity);
+
     /*  The next Stream Deck key pressed taken as this cue's key, while the Key
         line listens; empty stops (namespace draft §104). */
     Event learnDeckKey (const std::string& cueId);

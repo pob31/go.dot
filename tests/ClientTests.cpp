@@ -65,6 +65,7 @@
 #include <wfg/engine/osc/OscCodec.h>
 #include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/KeyTriggers.h>
+#include <wfg/client/model/Cart.h>
 #include <wfg/client/model/ListTabs.h>
 #include <wfg/client/model/LoadToTime.h>
 #include <wfg/client/model/Media.h>
@@ -785,6 +786,10 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::releaseStrip ("STRP0001"),
         gesture::touchNode ("/godot/dca/DCA00001/trim"),
         gesture::releaseNode ("/godot/dca/DCA00001/trim"),
+
+        /*  A CART'S PAD STRUCK (namespace draft §125, BEZ): cue.press at the
+            velocity where the hand landed, and let go. */
+        gesture::pressCue ("B3N8R5TW", 127), gesture::pressCue ("B3N8R5TW", 1), gesture::releaseCue ("B3N8R5TW"),
 
         /*  THE ROTARIES' AIM AND THE LIVE BAR (2026-09-25). */
         gesture::aimSurfaces ("B3N8R5TW"), gesture::aimSurfaces (""),
@@ -16607,6 +16612,55 @@ TEST_CASE ("client: a Stream Deck key learnt for a cue is its Key line's, in wor
     REQUIRE (line != nullptr);
     CHECK (line->value == "Desk deck key 7");
     CHECK (line->address == "/godot/trigger/DKTRG001/key");
+}
+
+TEST_CASE ("client: a cart as pads - a cue a pad, a sampler group its members under its name, as the tablet and the deck walk it (§125)")
+{
+    /*  Namespace draft §125, BEZ (the tablet's Cart tab, §74 AQQ; DeckBridge's
+        padsOf): the window's pads are the same cues in the same order. */
+    Rig rig;
+
+    REQUIRE (rig.document.createList ("Pads", "CRT00001", { { "kind", "cart" } }).ok);
+    REQUIRE (rig.document.createCue ("CRT00001", 0, "memo", "Door slam", "PAD00001").ok);
+    REQUIRE (rig.document.createCue ("CRT00001", 1, "group", "Thunder", "GRP00001").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/GRP00001/mode", "sampler").ok);
+    REQUIRE (rig.document.createCue ("GRP00001", 0, "media", "Near", "MBR00001").ok);
+    REQUIRE (rig.document.createCue ("GRP00001", 1, "media", "Far", "MBR00002").ok);
+    REQUIRE (rig.document.createCue ("CRT00001", 2, "memo", "Backup tracker", "PAD00003").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/PAD00003/colour", "#a03030").ok);
+    rig.parameters.markStale();
+
+    const auto snapshot = rig.publish (1);
+    const auto pads = model::readCartPads (*snapshot, "CRT00001");
+
+    REQUIRE (pads.size() == 4u);
+    CHECK (pads[0].cue == "PAD00001");
+    CHECK (pads[0].name == "Door slam");
+    CHECK (pads[0].bank.empty());
+    CHECK (pads[1].cue == "MBR00001");
+    CHECK (pads[1].bank == "Thunder");
+    CHECK (pads[2].cue == "MBR00002");
+    CHECK (pads[2].bank == "Thunder");
+    CHECK (pads[3].cue == "PAD00003");
+    CHECK (pads[3].colour == "#a03030");
+
+    for (const auto& pad : pads)
+        CHECK_FALSE (pad.going);
+
+    //  A show list is not a cart, and has no pads; nor has nothing.
+    CHECK (model::readCartPads (*snapshot, model::goListOf (*snapshot)).empty());
+    CHECK (model::readCartPads (*snapshot, "").empty());
+
+    //  The velocity of where a pad is struck: the desk's pads' rule.
+    CHECK (model::padVelocity (0.0) == 1);
+    CHECK (model::padVelocity (1.0) == 127);
+    CHECK (model::padVelocity (0.5) == 64);
+    CHECK (model::padVelocity (-3.0) == 1);
+    CHECK (model::padVelocity (9.0) == 127);
+
+    //  The switch's words say where it goes.
+    CHECK (model::cartViewWords (false) == "Show as pads");
+    CHECK (model::cartViewWords (true) == "Show as a list");
 }
 
 TEST_CASE ("client: the lists as tabs - a cart says so, GO's list is never one, and new names are free")

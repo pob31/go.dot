@@ -24,6 +24,7 @@
 #include <wfg/client/ui/RunPaneComponent.h>
 #include <wfg/client/ui/Shell.h>
 #include <wfg/client/ui/SurfacePanelComponent.h>
+#include <wfg/client/ui/CartPadsComponent.h>
 #include <wfg/client/ui/TransportComponent.h>
 #include <wfg/client/model/Problems.h>
 #include <wfg/client/ui/NewCueBarComponent.h>
@@ -3956,6 +3957,153 @@ TEST_CASE ("surface panel: real touches through the window's peer are two hands 
 
     juce::ModifierKeys::currentModifiers = juce::ModifierKeys();
     panel.removeFromDesktop();
+}
+
+TEST_CASE ("cart pads: two fingers strike two pads with the velocity where they landed, and each lift lets go of its own (§125)")
+{
+    std::vector<wfg::Event> sent;
+
+    {
+        ui::CartPadsComponent pads (model::Theme {}, [&sent] (wfg::Event event) { sent.push_back (std::move (event)); });
+        pads.setSize (700, 400);
+
+        model::CartPad slam;
+        slam.cue = "PAD00001";
+        slam.number = "1";
+        slam.name = "Door slam";
+        slam.kind = "media";
+
+        model::CartPad near = slam;
+        near.cue = "MBR00001";
+        near.name = "Near";
+        near.bank = "Thunder";
+        near.colour = "#3060c0";
+
+        model::CartPad far = near;
+        far.cue = "MBR00002";
+        far.name = "Far";
+        far.going = true;
+
+        pads.show ({ slam, near, far });
+        REQUIRE (pads.padCount() == 3u);
+
+        //  It draws, lit and not: a construction fault shows as a stack here.
+        juce::Image canvas (juce::Image::ARGB, 700, 400, true);
+        {
+            juce::Graphics g (canvas);
+            pads.paintEntireComponent (g, true);
+        }
+
+        const auto said = [&sent]
+        {
+            std::vector<std::string> out;
+
+            for (const auto& event : sent)
+                out.push_back (event.command + " " + event.args[0].getString()
+                               + (event.args.size() > 1 ? " " + std::to_string (event.args[1].getInt32()) : std::string {}));
+
+            return out;
+        };
+
+        constexpr auto one = model::firstFinger;
+        constexpr auto two = model::firstFinger + 1;
+
+        const auto top = [&pads] (std::size_t at) { auto r = pads.padBounds (at); return juce::Point<float> ((float) r.getCentreX(), (float) r.getY() + 1.0f); };
+        const auto bottom = [&pads] (std::size_t at) { auto r = pads.padBounds (at); return juce::Point<float> ((float) r.getCentreX(), (float) r.getBottom() - 1.0f); };
+
+        SUBCASE ("two pads at once, the top hard and the bottom soft, each released by its own lift")
+        {
+            pads.pointerDown (one, top (0), 1);
+            pads.pointerDown (two, bottom (1), 2);
+
+            REQUIRE (sent.size() == 2u);
+            CHECK (sent[0].command == "cue.press");
+            CHECK (sent[0].origin == "window");
+            CHECK (sent[0].args[0].getString() == "PAD00001");
+            CHECK (sent[0].args[1].getInt32() > 120);
+            CHECK (sent[1].args[0].getString() == "MBR00001");
+            CHECK (sent[1].args[1].getInt32() < 8);
+
+            pads.pointerUp (one);
+            CHECK (said().back() == "cue.release PAD00001");
+
+            pads.pointerUp (two);
+            CHECK (said().back() == "cue.release MBR00001");
+            CHECK (sent.size() == 4u);
+        }
+
+        SUBCASE ("a pad another finger holds is not struck again, and the mouse waits for the fingers")
+        {
+            pads.pointerDown (one, top (2), 1);
+            pads.pointerDown (two, top (2), 2);
+            pads.pointerDown (model::mousePointer, top (0), 3);
+            pads.pointerUp (model::mousePointer);
+            pads.pointerUp (two);
+
+            REQUIRE (sent.size() == 1u);
+            CHECK (sent[0].args[0].getString() == "MBR00002");
+
+            pads.pointerUp (one);
+            CHECK (said().back() == "cue.release MBR00002");
+        }
+
+        SUBCASE ("a lift that never came is let go at the next lone press")
+        {
+            pads.pointerDown (one, top (0), 1);
+            pads.pointerDown (two, top (1), 1);
+
+            REQUIRE (sent.size() == 3u);
+            CHECK (said()[1] == "cue.release PAD00001");
+            CHECK (sent[2].args[0].getString() == "MBR00001");
+        }
+
+        SUBCASE ("a press between pads strikes nothing")
+        {
+            pads.pointerDown (one, { 2.0f, 2.0f }, 1);
+            pads.pointerUp (one);
+            CHECK (sent.empty());
+        }
+
+        //  Held when the view goes: its finger's lift will never reach it.
+        pads.pointerDown (one, top (0), 1);
+        sent.clear();
+    }
+
+    REQUIRE (sent.size() == 1u);
+    CHECK (sent[0].command == "cue.release");
+}
+
+TEST_CASE ("cart pads: the switch over a cart says where it goes and asks for the other view; over a show list it is hidden (§125)")
+{
+    ui::ListTabsComponent tabs (model::Theme {});
+    tabs.setSize (700, 30);
+
+    std::vector<std::pair<std::string, bool>> asked;
+    ui::ListTabsComponent::Actions actions;
+    actions.padsView = [&asked] (const std::string& listId, bool pads) { asked.emplace_back (listId, pads); };
+    tabs.setActions (actions);
+
+    const std::vector<model::ListTab> lists { { "LIST0001", "Main", false }, { "CRT00001", "Pads", true } };
+
+    tabs.setTabs (lists, "CRT00001", "LIST0001", true);
+    tabs.setCartView (true, false);
+    CHECK (tabs.cartViewText() == "Show as pads");
+
+    tabs.pressCartView();
+    REQUIRE (asked.size() == 1u);
+    CHECK (asked[0] == std::make_pair (std::string ("CRT00001"), true));
+
+    tabs.setCartView (true, true);
+    CHECK (tabs.cartViewText() == "Show as a list");
+    tabs.pressCartView();
+    CHECK (asked.back() == std::make_pair (std::string ("CRT00001"), false));
+
+    //  Over a show list there is nothing to switch.
+    tabs.setTabs (lists, "LIST0001", "LIST0001", true);
+    tabs.setCartView (false, false);
+    CHECK (tabs.cartViewText().isEmpty());
+    tabs.pressCartView();
+    CHECK (asked.size() == 2u);
 }
 
 TEST_CASE ("run pane: a sampler group counts its members in words")

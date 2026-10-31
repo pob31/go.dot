@@ -56,6 +56,10 @@ namespace wfg::client::ui
             /*  A TAB'S RIGHT-CLICK, "Remove" (namespace draft §85): the list to
                 be taken away, which the window asks about first. */
             std::function<void (const std::string& listId)> remove;
+
+            /*  THE SWITCH OVER A CART (namespace draft §125, BEZ): the cart
+                drawn shown as pads, or as its rows again. */
+            std::function<void (const std::string& listId, bool pads)> padsView;
         };
 
         explicit ListTabsComponent (const model::Theme& theme);
@@ -68,6 +72,16 @@ namespace wfg::client::ui
             while the show may be edited. */
         void setTabs (const std::vector<model::ListTab>& tabs, const std::string& drawnId,
                       const std::string& goId, bool editable);
+
+        /*  THE SWITCH, at the row's right while a cart is drawn: its words say
+            where it goes (`model::cartViewWords`). Hidden over a show list. */
+        void setCartView (bool cartDrawn, bool showingPads);
+
+        /** What a test presses: the switch. */
+        void pressCartView();
+
+        /** The switch's words now, empty while it is hidden. */
+        juce::String cartViewText() const;
 
         int preferredHeight() const noexcept;
 
@@ -118,6 +132,8 @@ namespace wfg::client::ui
 
         std::vector<std::unique_ptr<Tab>> buttons;    ///< in step with `drawnTabs`
         juce::TextButton plus { "+" };
+        juce::TextButton viewSwitch;
+        bool padsNow = false;
 
         int rowHeight() const noexcept;
         void relight();

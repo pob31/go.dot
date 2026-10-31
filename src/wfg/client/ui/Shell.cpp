@@ -38,6 +38,7 @@ namespace wfg::client::ui
           inspector (themeToUse, std::move (inspectorActions)),
           newCues (themeToUse, std::move (newCueActions)),
           tabs (themeToUse),
+          pads (themeToUse, {}),
           history (themeToUse, std::move (historyActions)),
           undoPanel (themeToUse, std::move (undoActions)),
           liveBar (themeToUse, {}),
@@ -57,6 +58,9 @@ namespace wfg::client::ui
         addAndMakeVisible (tabs);
         addAndMakeVisible (cues);
         addAndMakeVisible (runs);
+
+        pads.setVisible (false);
+        addChildComponent (pads);
 
         inspector.setVisible (false);
         addChildComponent (inspector);
@@ -78,6 +82,7 @@ namespace wfg::client::ui
         transport.applyTheme (theme);
         newCues.applyTheme (theme);
         tabs.applyTheme (theme);
+        pads.applyTheme (theme);
         cues.applyTheme (theme);
         runs.applyTheme (theme);
         inspector.applyTheme (theme);
@@ -202,6 +207,19 @@ namespace wfg::client::ui
         //  The lists' tabs over the cue list, under the new-cue row (namespace draft §74).
         tabs.setBounds (area.removeFromTop (juce::jmin (tabs.preferredHeight(), area.getHeight())));
         cues.setBounds (area);
+        pads.setBounds (area);
+    }
+
+    void Shell::showPads (bool wanted)
+    {
+        if (wanted == pads.isVisible())
+            return;
+
+        if (! wanted)
+            pads.releaseEverything();
+
+        pads.setVisible (wanted);
+        cues.setVisible (! wanted);
     }
 
     void Shell::setLive (int count, bool locked)

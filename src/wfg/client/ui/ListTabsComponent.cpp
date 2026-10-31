@@ -16,6 +16,8 @@
 
 #include <wfg/client/ui/ListTabsComponent.h>
 
+#include <wfg/client/model/Cart.h>
+
 #include <wfg/client/ui/Look.h>
 
 #include <algorithm>
@@ -26,6 +28,13 @@ namespace wfg::client::ui
     ListTabsComponent::ListTabsComponent (const model::Theme& themeToUse)
         : theme (themeToUse)
     {
+        /*  THE SWITCH OVER A CART (namespace draft §125, BEZ): its words say
+            where it goes, so the state is in the words and not in a colour. */
+        viewSwitch.setWantsKeyboardFocus (false);
+        viewSwitch.setTooltip ("A cart's cues as pads several fingers can play at once, or as its list of cues");
+        viewSwitch.onClick = [this] { pressCartView(); };
+        addChildComponent (viewSwitch);
+
         plus.setWantsKeyboardFocus (false);
         plus.setTooltip ("A new cue list, or a cart - a list GO never meets, its cues fired by a key, a pad or a"
                          " message");
@@ -226,6 +235,30 @@ namespace wfg::client::ui
         g.fillRect (0, getHeight() - 1, getWidth(), 1);
     }
 
+    void ListTabsComponent::setCartView (bool cartDrawn, bool showingPads)
+    {
+        const auto words = juce::String (model::cartViewWords (showingPads));
+
+        if (cartDrawn == viewSwitch.isVisible() && showingPads == padsNow && viewSwitch.getButtonText() == words)
+            return;
+
+        padsNow = showingPads;
+        viewSwitch.setButtonText (words);
+        viewSwitch.setVisible (cartDrawn);
+        resized();
+    }
+
+    void ListTabsComponent::pressCartView()
+    {
+        if (viewSwitch.isVisible() && actions.padsView && ! drawn.empty())
+            actions.padsView (drawn, ! padsNow);
+    }
+
+    juce::String ListTabsComponent::cartViewText() const
+    {
+        return viewSwitch.isVisible() ? viewSwitch.getButtonText() : juce::String {};
+    }
+
     void ListTabsComponent::resized()
     {
         auto area = getLocalBounds().reduced (2, 1);
@@ -235,6 +268,14 @@ namespace wfg::client::ui
         {
             plus.setBounds (area.removeFromRight (row + row / 2));
             area.removeFromRight (2);
+        }
+
+        if (viewSwitch.isVisible())
+        {
+            const auto words = juce::GlyphArrangement::getStringWidthInt (Look::font (theme, 13.0f),
+                                                                          viewSwitch.getButtonText());
+            viewSwitch.setBounds (area.removeFromRight (words + row));
+            area.removeFromRight (6);
         }
 
         /*  EACH TAB AS WIDE AS ITS WORDS, up to an even share of the row, so a
