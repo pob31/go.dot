@@ -82,6 +82,7 @@
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/model/Transport.h>
+#include <wfg/client/ui/TouchPanels.h>
 #include <wfg/client/ui/KeyNames.h>
 #include <wfg/client/ui/Look.h>
 #include <wfg/client/ui/NetworkMonitorWindow.h>
@@ -1057,6 +1058,14 @@ namespace wfg::client
                 window->setVisible (true);
                 shell->grabKeyboardFocus();
 
+                /*  A USB TOUCH SCREEN ON THE MAC (namespace draft §125, MT.8):
+                    read by Go.dot itself, so each finger is its own; nothing on
+                    any other system, where the system hands fingers over. Made
+                    once the window is on the screen. */
+                touchPanels = ui::makeTouchPanels (theme,
+                                                   [this] (const juce::String& sentence) { shell->transport.setNotice (sentence); },
+                                                   [this] { closeRequested(); });
+
                 //  A newer Go.dot (§78): what was found before, at once; GitHub again once a day.
                 askForUpdateAtLaunch();
 
@@ -1065,6 +1074,10 @@ namespace wfg::client
 
             ~Window() override
             {
+                /*  THE TOUCH SCREENS FIRST (§125): fingers lift while the windows
+                    still exist, and the panels go back to being mice. */
+                touchPanels.reset();
+
                 stopTimer();
 
                 //  A newer Go.dot asked about (§78): told to give up before anything it would answer to goes.
@@ -6615,6 +6628,9 @@ namespace wfg::client
                 (§4.8): without one, setTooltip is a value nothing reads. */
             juce::TooltipWindow tooltips { nullptr, 700 };
             std::unique_ptr<ui::MainWindow> window;
+
+            //  The Mac's USB touch screens, read by Go.dot (§125, MT.8); null elsewhere.
+            std::unique_ptr<ui::TouchPanels> touchPanels;
             std::unique_ptr<ui::ShowSettingsWindow> audioSettings;
             std::unique_ptr<ui::SurfaceWindow> surfaces;    // Show > Surfaces..., made on first open
             std::unique_ptr<ui::NetworkMonitorWindow> networkMonitor;   // Show > Network monitor...

@@ -936,6 +936,8 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/PointerKeys.h
     wfg/client/ui/CartPadsComponent.h
     wfg/client/ui/CartPadsComponent.cpp
+    wfg/client/ui/TouchPanels.h
+    wfg/client/ui/TouchPanels.cpp
     wfg/client/ui/SurfacePanelComponent.h
     wfg/client/ui/SurfacePanelComponent.cpp
     wfg/client/Client.h

@@ -577,6 +577,18 @@ add_library(wfg_thirdparty STATIC)
 # spatcore's API or pulling a second set of JUCE module sources into the build.
 target_sources(wfg_thirdparty PRIVATE
     "${CMAKE_SOURCE_DIR}/ThirdParty/spatcore/ui/patch/PatchMatrixComponent.cpp")
+# And on the Mac, spatcore's USB touch panel reader (namespace draft §125, MT.8):
+# macOS gives a touch screen's fingers to no application, so Go.dot reads the
+# panel itself, as WFS-DIY does. The reader is Objective-C++; the injector that
+# hands each finger to JUCE is plain C++. IOKit reads the panel, ApplicationServices
+# moves the cursor for a finger outside Go.dot's windows.
+if(APPLE)
+    target_sources(wfg_thirdparty PRIVATE
+        "${CMAKE_SOURCE_DIR}/ThirdParty/spatcore/controllers/touch/TouchInjector.cpp"
+        "${CMAKE_SOURCE_DIR}/ThirdParty/spatcore/controllers/touch/macos/MacHidTouchManager.mm")
+    target_link_libraries(wfg_thirdparty PUBLIC
+        "-framework IOKit" "-framework CoreFoundation" "-framework ApplicationServices" "-framework AppKit")
+endif()
 # sokol_gfx's implementation, once, under the vendor warning policy (namespace
 # draft §44). Objective-C++ on Apple, where its Metal half is written in it.
 if(APPLE)
