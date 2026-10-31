@@ -486,6 +486,33 @@ app's numbers and words, with no C++ changed - the console's tests 144 of 144 an
 and fr_FR, the page seen in a browser at desktop and tablet widths. Owed: the author's hands on an
 iPad, which no runner has, and his look at the words and calls ARL-ARP.
 
+### Several fingers on the desktop window (2026-10-31)
+
+The author, the day after WFS-DIY took multitouch on macOS: carts and the desk, then the sends foot
+panel, take several fingers (namespace draft §125, BEZ-BFD the author's, BFE-BFI mine or proposed;
+PRD §3.17). Windows needs only the components to keep a hand per finger; the Mac needs spatcore's
+panel reader and `patches/JUCE-local/`; Linux waits for JUCE 9.
+
+| Stage | What | Depends on |
+|---|---|---|
+| MT.0 | Docs: namespace §125, PRD §3.17, this | - |
+| MT.1 | Pointers, turns and the finger's fader rate, pure | MT.0 |
+| MT.2 | Two hands, one undo step (BFC) | MT.0 |
+| MT.3 | The desk, a hand per finger | MT.1 |
+| MT.4 | The send and fade mixers hold what a finger holds | MT.1, MT.2 |
+| MT.5 | The Stream Deck picture | MT.1 |
+| MT.6 | Cart pads | MT.1 |
+| MT.7 | `patches/JUCE-local/`: a touch source on the Mac | MT.0 |
+| MT.8 | The Mac's panel reader in the window; a self-test | MT.7 |
+| MT.10 | spatcore: programs sharing a panel (BFH), then WFS-DIY's pin | MT.8 |
+| MT.11 | Go.dot's spatcore pin | MT.10 |
+| MT.12 | README, guides, the whole suite | all |
+| MT.13 | M85 on a real panel, Windows and the Mac | MT.8 |
+
+**Done when:** on a touch screen two fingers play two cart pads and ride two desk faders and two send
+strips at once, one undo takes the two-handed move back, the mouse cannot steal a held control; on the
+Mac mini the panel does the same with WFS-DIY open beside Go.dot and neither clicks for the other.
+
 ### The Android remote (2026-10-15)
 
 The author asked for a native Android app beside the page: a background link

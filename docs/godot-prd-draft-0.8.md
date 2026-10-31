@@ -1542,6 +1542,18 @@ Multitouch principles:
 - Wifi loss must leave the pane **visibly stale**, never silently frozen, and
   any in-flight adjustment lands on a defined value.
 
+**Several fingers on the desktop window** *(added 2026-10-31, at the author's
+direction; namespace draft §125, BEZ-BFI)*. Where two hands make sense - a cart
+shown as pads, the desk (Show › Surfaces), the send and fade mixers, the Stream
+Deck picture - every finger holds its own control, and a control held by one
+finger refuses another. The mouse and the fingers take turns on a control. Two
+hands moving at once are one undo step. A finger on a fader follows the cross-axis
+rule above. Windows gives each finger to the window under it; on macOS Go.dot reads
+a USB touch panel itself, through spatcore, with a change of Go.dot's own to JUCE;
+Linux waits for JUCE 9 (§3.25). Programs sharing one panel on a Mac agree on which
+of them moves the cursor *(proposed, a spatcore change)*. The rest of the window
+stays a one-pointer interface.
+
 #### How the tablet client is delivered *(amended in 0.8)*
 
 **A web client is the primary surface, and a native companion is an optional

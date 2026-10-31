@@ -35254,3 +35254,95 @@ Tests: MountTests (a PUT carrying the identifier, then the type once heard, an R
 to a resource of its own with nothing carried that is not its, the question still asking the resource it is read
 in); WireTests (what is carried comes first and never twice); `blackbox.radios` (the pack's PUT carrying its mtUid and
 type, an RF channel muted with its identifier) - 71 checks, both locales.
+
+## 125. Several fingers on the desktop window
+
+**Asked 2026-10-31** by the author, the day after WFS-DIY took multitouch from USB touch panels on macOS
+(spatcore's `controllers/touch`, PRs #28 and #29; WFS-DIY 1.0.0beta62-63): *"In Go.dot it would be great to
+have multitouch on carts and the console at least. The rest is mostly single point as far as I can recall
+from the UI."* Then: *"Maybe the sends foot panel too could be multitouch."* And, about two programs on one
+computer: *"how would WFS-DIY (or XOA, Tight-WFS) using the same touchscreen yield the touch info to the
+proper app if running on the same computer (mac)"* - XOA and Tight-WFS are not multitouch on the Mac yet.
+
+What was there, read 2026-10-31:
+
+- **Windows** already hands JUCE each finger as its own pointer (`WM_POINTER`), so a finger on one strip
+  and a finger on another reach two components - but the components kept one pointer's state. On the desk
+  (Show › Surfaces, decision AB) a second pad was refused ("one pointer, one pad"), a second fader too, a second
+  finger's drag moved the first finger's fader, and either lift let go of everything. The Stream Deck
+  picture (§95) kept one pressed key: two fingers left the first clip held for ever. The send mixer raised
+  two silent strips at once as one `send.create` sent again and again, and kept the last level only.
+- **macOS** treats a touch screen as a mouse. Fingers reach JUCE only when the program reads the panel
+  itself (spatcore's `MacHidTouchManager`, which switches the panel out of mouse emulation and injects one
+  touch per finger) **and** JUCE lets a touch source exist: JUCE 8.0.13 (and 9.0.4) answer `canUseTouch()`
+  false on the Mac, and every injected finger is dropped without a word.
+- **Linux**: JUCE 8.0.13 has no XInput2 touch; PRD §3.25 already gates it on Tracktion's JUCE 9.
+- **Undo**: two hands on two send faders write in turns from one origin, so the coalescing rule (§14,
+  `ShowDocument::beginTransaction`: same address, same origin, twenty-five ticks) cut a step at every frame.
+- **Two programs on one Mac** reading one panel each ask macOS which window is topmost under a finger, so
+  each injects only the fingers on its own windows - that part is right. Two things are not: each moves
+  the system cursor for a finger outside its own windows (on by default), so a finger on WFS-DIY is also
+  a synthetic click from Go.dot; and the first to quit puts the panel back in mouse mode under the other.
+  Windows, and Linux under JUCE 9, give each window its own fingers with no help: this is the Mac's alone.
+
+A cart on the desktop is drawn as rows (AQM): pads exist on the desk, on the tablet's Cart tab (BD.6) and on
+a Stream Deck, nowhere in the window.
+
+The codes after §124's BEY. The first four are the author's, chosen 2026-10-31 among options I wrote; the
+rest mine, or *(proposed)*.
+
+- **BEZ** (the author's) **A cart can be shown as pads.** The cart's tab offers *Pads* beside *List*; a pad
+  is a cue as the tablet's Cart tab draws one (a sampler group's members each a pad under the group's
+  name), pressed it sends `cue.press <cue> <velocity>`, lifted `cue.release`, and several fingers press
+  several pads. Which of the two a cart shows is the window's, never the show's (§4.10). The Show menu
+  has the same switch (§4.11).
+- **BFA** (the author's) **The desk and the Stream Deck picture take a hand per finger.** Every pad, fader
+  and knob of the desk, and every key of the picture, is held by the pointer that took it; another
+  pointer on a held control is refused, a free one is taken, and a lift lets go of its own control only.
+- **BFB** (the author's) **The send and fade mixers hold what a finger holds**: a strip grabbed sends
+  `node.touch` on its addresses, let go `node.release`, as the desk's faders always did. Two silent strips
+  raised together are two sends made, each with its own level.
+- **BFC** (the author's) **Two hands, one step.** While an origin holds addresses (`node.touch`), its
+  writes to addresses it holds join one undo step, whatever the address, within the twenty-five ticks:
+  one undo takes back a two-handed move whole. A hold is not an edit: `node.touch` and `node.release`
+  leave the run alone, and the last let-go ends it. Every other rule of §14's coalescing stands - a
+  different origin, a pause, anything not a write - and replay reproduces it, since holds are commands
+  in the log.
+- **BFD** (the author's) **Go.dot's own changes to JUCE are a second series**, `patches/JUCE-local/`,
+  beside `patches/JUCE/` (JUCE's own fixes, as JUCE wrote them); applied by the same machinery on every
+  platform, so every tree has one state. Its first patch lets a touch source exist on the Mac; it goes
+  when JUCE does the same, or when the panel reader no longer needs it.
+- **BFE** **A pointer is its kind and its number** (`kind × 1000 + index`): the mouse and the first finger
+  are both number 0. **Mouse and fingers take turns on a control**, as WFS-DIY's map learnt (e14b297d):
+  while a finger is down the mouse does nothing there, while the mouse button is down a landing finger is
+  ignored, and a press ignored at its start stays ignored until it ends.
+- **BFF** **A finger on a fader is the page's finger** (§75, ARM): relative from where it landed, the
+  distance across the strip dividing the travel (`rateFor`, halving per 48 px, never finer than 1/256), the
+  divisor changing without a jump. The mouse keeps Shift for a tenth.
+- **BFG** *(proposed)* **A touch screen needs no setup on one display.** With two or more, the screens are
+  identified when a panel arrives (a circle on each display, touched once), as WFS-DIY does; a window to
+  set panels up by hand comes later, and is not needed once BFH shares the settings.
+- **BFH** *(proposed, a spatcore change)* **Programs sharing a panel on a Mac agree.** One of them, chosen
+  by a lock file, moves the cursor for fingers outside every reader's windows, the next taking over when it
+  quits; a finger on another reader's window is left to that reader; the last reader to quit puts the
+  panel back in mouse mode; and the panels' displays are kept in one file for all of them, so a screen
+  identified in WFS-DIY is known to Go.dot. No message passes between them.
+- **BFI** **Linux waits for JUCE 9** (PRD §3.25), where X11 gives each window its fingers itself.
+
+| Stage | What | Commit |
+|---|---|---|
+| MT.0 | This section; PRD §3.17; the devplan | |
+| MT.1 | Pointers and turns, the finger's fader rate: pure, in the client model | |
+| MT.2 | BFC in the engine's undo | |
+| MT.3 | The desk, a hand per finger | |
+| MT.4 | The send and fade mixers; the EQ's fingers by kind | |
+| MT.5 | The Stream Deck picture | |
+| MT.6 | Cart pads | |
+| MT.7 | `patches/JUCE-local/`, the Mac's touch source | |
+| MT.8 | The Mac's panel reader in the window; a self-test | |
+| MT.10 | spatcore: programs sharing a panel (BFH) | |
+| MT.11 | Go.dot's spatcore pin | |
+| MT.12 | README and the tester guides | |
+| MT.13 | M85: a finger to the command applied, Windows and the Mac | |
+
+MT.9, a window to set touch screens up by hand, is not scheduled (BFG).
