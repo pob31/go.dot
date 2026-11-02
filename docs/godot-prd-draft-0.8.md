@@ -1550,7 +1550,7 @@ finger refuses another. The mouse and the fingers take turns on a control. Two
 hands moving at once are one undo step. A finger on a fader follows the cross-axis
 rule above. Windows gives each finger to the window under it; on macOS Go.dot reads
 a USB touch panel itself, through spatcore, with a change of Go.dot's own to JUCE;
-Linux waits for JUCE 9 (§3.25). Programs sharing one panel on a Mac agree on which
+on Linux JUCE 9's XInput touch gives each finger to the window, and GNOME Shell's own touch gestures are held while Go.dot is open, through an extension spatcore shares with WFS-DIY *(amended in 0.8, 2026-11-02: the move to JUCE 9, §3.25)*. Programs sharing one panel on a Mac agree on which
 of them moves the cursor *(proposed, a spatcore change)*. The rest of the window
 stays a one-pointer interface.
 
@@ -2950,7 +2950,12 @@ The JUCE version coupling proved real in the other direction too: Tracktion
 v3.2.0 does not build against JUCE 9, and Tracktion's own development branch was
 still on JUCE 8 at the time of writing. Linux native multitouch is a JUCE 9
 feature (`JUCE_USE_XINPUT`, XInput2 touch events), so **that surface is gated on
-Tracktion adopting JUCE 9** and cannot be unlocked from Go.dot's side.
+Tracktion adopting JUCE 9** and cannot be unlocked from Go.dot's side. *Unlocked
+2026-11-02 (amended in 0.8): Tracktion's development branch moved to JUCE 9 on
+2026-10-20 (`877e39c`), Go.dot followed it to Tracktion `a5e44996f5f` and the JUCE
+it pins, `7ff644f` (9.0.4+26), with the loop and offset measurements re-run (the
+wrap still exact, an offset still on the sample), and several fingers on Linux were
+tried on a real panel.*
 
 ### 3.26 Authoring from a processor — Go.dot's own programming protocol
 
