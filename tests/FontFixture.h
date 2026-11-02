@@ -215,11 +215,14 @@ namespace wfg::test::fonts
         file.replaceWithData (bytes.data(), bytes.size());
     }
 
-    /** A folder of its own for a test, deleted when it ends. */
+    /** A folder of its own for a test, deleted when it ends. Named apart for
+        each run: the two locales' runs go side by side, and a name free when
+        one looked could be the other's a moment later - then one run deleted
+        the folder the other was saving into. */
     struct Folder
     {
         juce::File file = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                              .getNonexistentChildFile ("godot-fonts", {}, false);
+                              .getNonexistentChildFile ("godot-fonts-" + juce::Uuid().toString().substring (0, 8), {}, false);
 
         Folder() { file.createDirectory(); }
         ~Folder() { file.deleteRecursively(); }

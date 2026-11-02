@@ -282,9 +282,10 @@ TEST_CASE ("toolchain: JUCE carries Go.dot's patches - a malformed WAV is refuse
                    "is patches/JUCE/0003-xml-entities-depth.patch on?");
 
     // 0003: a document read from a file no longer reads the external DTD it
-    // names, which could be any file on the machine.
+    // names, which could be any file on the machine. The folder is named apart
+    // for each run, as the two locales' runs go side by side.
     const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory)
-                            .getNonexistentChildFile ("wfg-toolchain-xml", {});
+                            .getNonexistentChildFile ("wfg-toolchain-xml-" + juce::Uuid().toString().substring (0, 8), {});
     REQUIRE (folder.createDirectory());
     REQUIRE (folder.getChildFile ("outside.dtd").replaceWithText ("<!ENTITY secret \"from outside\">"));
     const auto show = folder.getChildFile ("show.xml");
