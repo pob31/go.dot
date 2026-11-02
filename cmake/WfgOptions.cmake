@@ -110,11 +110,12 @@ unset(_wfg_locale_fr_default)
 # while a stale ccache entry or an un-rebuilt wfg_thirdparty.lib can still be
 # linking the PREVIOUS JUCE. Only asking the linked binary what version it is will
 # catch that.
+# 7ff644f is 9.0.4+26 on develop, past the commit that names itself 9.0.5.
 # FORCE: a pin follows the checkout. Without it a build tree configured before
 # a pin move keeps the old string in its cache, and the runtime check above
 # reports the right JUCE as the wrong one - both ways round, on the NUC farm's
 # trees, 2026-11-02 (a JUCE 9 trial, then main again).
-set(WFG_PIN_JUCE "8.0.13" CACHE STRING
+set(WFG_PIN_JUCE "9.0.5" CACHE STRING
     "JUCE version pinned by ThirdParty/JUCE; asserted at runtime against SystemStats::getJUCEVersion()" FORCE)
 
 # Documentation only — there is no runtime counterpart to the check above, and

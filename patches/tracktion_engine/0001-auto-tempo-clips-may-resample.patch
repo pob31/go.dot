@@ -21,7 +21,7 @@ scripts/te-patches.py refresh, which keeps this header. Against Tracktion Engine
 13b5132 (2026-09-23). Namespace draft section 22.3, decision DQ.
 
 diff --git a/modules/tracktion_engine/model/clips/tracktion_AudioClipBase.cpp b/modules/tracktion_engine/model/clips/tracktion_AudioClipBase.cpp
-index 23657cac089..0e11cee73e4 100644
+index 7cd796b0816..0da50b34347 100644
 --- a/modules/tracktion_engine/model/clips/tracktion_AudioClipBase.cpp
 +++ b/modules/tracktion_engine/model/clips/tracktion_AudioClipBase.cpp
 @@ -666,7 +666,14 @@ TimeStretcher::Mode AudioClipBase::getActualTimeStretchMode() const noexcept
@@ -41,10 +41,10 @@ index 23657cac089..0e11cee73e4 100644
  
      return ts;
 diff --git a/modules/tracktion_engine/utilities/tracktion_EngineBehaviour.h b/modules/tracktion_engine/utilities/tracktion_EngineBehaviour.h
-index a21ea9c0d8d..2cd688c1175 100644
+index 5b85d2a9ad5..afa4779c6a6 100644
 --- a/modules/tracktion_engine/utilities/tracktion_EngineBehaviour.h
 +++ b/modules/tracktion_engine/utilities/tracktion_EngineBehaviour.h
-@@ -124,6 +124,17 @@ public:
+@@ -132,6 +132,17 @@ public:
      /// thread to reduce audio CPU use.
      virtual bool enableReadAheadForTimeStretchNodes()                               { return false; }
  

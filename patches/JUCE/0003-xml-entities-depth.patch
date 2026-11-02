@@ -31,27 +31,26 @@ file byte for byte (-text), and scripts/patches.py writes it as bytes.
 Applied by Go.dot's build, cmake/WfgJucePatches.cmake, in the order
 patches/JUCE/series gives; refreshed from the working tree with
 scripts/patches.py JUCE refresh, which keeps this header. Against JUCE
-37c894f83d37 (8.0.13+7, the JUCE Tracktion Engine 13b5132 pins). Drop it when
-the pin moves to 8.0.17, 9.0.5 or later. The author's decision of 2026-11-02.
+7ff644f65d7d (9.0.4+26, the JUCE Tracktion Engine a5e44996f5f pins), where the
+fixes are JUCE develop's own commits, cherry-picked. Drop it when the pin moves
+to 9.0.5 or later. The author's decision of 2026-11-02.
 
 diff --git a/modules/juce_core/xml/juce_XmlDocument.cpp b/modules/juce_core/xml/juce_XmlDocument.cpp
-index 4d40e0b7c7..a2a2919a1f 100644
+index 93e64bdfb1..ca5fda4758 100644
 --- a/modules/juce_core/xml/juce_XmlDocument.cpp
 +++ b/modules/juce_core/xml/juce_XmlDocument.cpp
-@@ -32,6 +32,12 @@
+@@ -32,6 +32,10 @@
    ==============================================================================
  */
  
 +// MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-11-02, by
-+// patches/JUCE/0003-xml-entities-depth.patch: the whole of this file is as JUCE 8.0.17-security has it,
-+// JUCE's own fixes f8a5c5d80f3b and 3342d409111e ("XmlDocument: Only load external
-+// entities through a caller-supplied InputSource", "XmlDocument: Limit entity expansion
-+// and element nesting depth"; in 8.0.17 and 9.0.5), carried on the 8.0.13 Tracktion pins.
++// patches/JUCE/0003-xml-entities-depth.patch: JUCE's own fixes f8a5c5d80f3b and 3342d409111e (in 8.0.17 and 9.0.5),
++// cherry-picked from JUCE's develop onto 9.0.4-26, the JUCE Tracktion Engine pins.
 +
  namespace juce
  {
  
-@@ -73,6 +79,7 @@ std::unique_ptr<XmlElement> parseXMLIfTagMatches (const File& file, StringRef re
+@@ -73,6 +77,7 @@ std::unique_ptr<XmlElement> parseXMLIfTagMatches (const File& file, StringRef re
  void XmlDocument::setInputSource (InputSource* newSource) noexcept
  {
      inputSource.reset (newSource);
@@ -59,7 +58,7 @@ index 4d40e0b7c7..a2a2919a1f 100644
  }
  
  void XmlDocument::setEmptyTextElementsIgnored (bool shouldBeIgnored) noexcept
-@@ -80,6 +87,15 @@ void XmlDocument::setEmptyTextElementsIgnored (bool shouldBeIgnored) noexcept
+@@ -80,6 +85,15 @@ void XmlDocument::setEmptyTextElementsIgnored (bool shouldBeIgnored) noexcept
      ignoreEmptyTextElements = shouldBeIgnored;
  }
  
@@ -75,7 +74,7 @@ index 4d40e0b7c7..a2a2919a1f 100644
  namespace XmlIdentifierChars
  {
      static bool isIdentifierCharSlow (juce_wchar c) noexcept
-@@ -175,13 +191,18 @@ const String& XmlDocument::getLastParseError() const noexcept
+@@ -175,13 +189,18 @@ const String& XmlDocument::getLastParseError() const noexcept
  
  void XmlDocument::setLastError (const String& desc, const bool carryOn)
  {
@@ -95,7 +94,7 @@ index 4d40e0b7c7..a2a2919a1f 100644
      {
          std::unique_ptr<InputStream> in (inputSource->createInputStreamFor (filename.trim().unquoted()));
  
-@@ -212,6 +233,10 @@ std::unique_ptr<XmlElement> XmlDocument::parseDocumentElement (String::CharPoint
+@@ -212,6 +231,10 @@ std::unique_ptr<XmlElement> XmlDocument::parseDocumentElement (String::CharPoint
      errorOccurred = false;
      outOfData = false;
      needToLoadDTD = true;
@@ -106,7 +105,7 @@ index 4d40e0b7c7..a2a2919a1f 100644
  
      if (textToParse.isEmpty())
      {
-@@ -450,7 +475,18 @@ XmlElement* XmlDocument::readNextElement (const bool alsoParseSubElements)
+@@ -467,7 +490,18 @@ XmlElement* XmlDocument::readNextElement (const bool alsoParseSubElements)
                  ++input;
  
                  if (alsoParseSubElements)
@@ -125,7 +124,7 @@ index 4d40e0b7c7..a2a2919a1f 100644
  
                  break;
              }
-@@ -606,7 +642,7 @@ void XmlDocument::readChildElements (XmlElement& parent)
+@@ -620,7 +654,7 @@ void XmlDocument::readChildElements (XmlElement& parent)
                  if (c == '&')
                  {
                      String entity;
@@ -134,7 +133,7 @@ index 4d40e0b7c7..a2a2919a1f 100644
  
                      if (entity.startsWithChar ('<') && entity [1] != 0)
                      {
-@@ -616,9 +652,15 @@ void XmlDocument::readChildElements (XmlElement& parent)
+@@ -630,9 +664,15 @@ void XmlDocument::readChildElements (XmlElement& parent)
                          input = entity.getCharPointer();
                          outOfData = false;
  
@@ -150,7 +149,7 @@ index 4d40e0b7c7..a2a2919a1f 100644
                          input = oldInput;
                          outOfData = oldOutOfData;
                      }
-@@ -664,7 +706,7 @@ void XmlDocument::readChildElements (XmlElement& parent)
+@@ -678,7 +718,7 @@ void XmlDocument::readChildElements (XmlElement& parent)
      }
  }
  
@@ -159,7 +158,7 @@ index 4d40e0b7c7..a2a2919a1f 100644
  {
      // skip over the ampersand
      ++input;
-@@ -731,7 +773,7 @@ void XmlDocument::readEntity (String& result)
+@@ -745,7 +785,7 @@ void XmlDocument::readEntity (String& result)
                  if (firstChar == 0)
                  {
                      setLastError ("unexpected end of input", true);
@@ -168,7 +167,7 @@ index 4d40e0b7c7..a2a2919a1f 100644
                  }
  
                  if (firstChar == ';')
-@@ -753,7 +795,7 @@ void XmlDocument::readEntity (String& result)
+@@ -767,7 +807,7 @@ void XmlDocument::readEntity (String& result)
          {
              setLastError ("illegal escape sequence", true);
              result += '&';
@@ -177,7 +176,7 @@ index 4d40e0b7c7..a2a2919a1f 100644
          }
  
          result << (juce_wchar) charCode;
-@@ -771,9 +813,13 @@ void XmlDocument::readEntity (String& result)
+@@ -785,9 +825,13 @@ void XmlDocument::readEntity (String& result)
          else
          {
              input += closingSemiColon + 1;
@@ -192,7 +191,7 @@ index 4d40e0b7c7..a2a2919a1f 100644
  }
  
  String XmlDocument::expandEntity (const String& ent)
-@@ -803,6 +849,9 @@ String XmlDocument::expandEntity (const String& ent)
+@@ -817,6 +861,9 @@ String XmlDocument::expandEntity (const String& ent)
  
  String XmlDocument::expandExternalEntity (const String& entity)
  {
@@ -202,7 +201,7 @@ index 4d40e0b7c7..a2a2919a1f 100644
      if (needToLoadDTD)
      {
          if (dtdText.isNotEmpty())
-@@ -839,6 +888,11 @@ String XmlDocument::expandExternalEntity (const String& entity)
+@@ -853,6 +900,11 @@ String XmlDocument::expandExternalEntity (const String& entity)
                       && tokenisedDTD[i].endsWithChar (';'))
                  {
                      auto parsed = getParameterEntity (tokenisedDTD[i].substring (1, tokenisedDTD[i].length() - 1));
@@ -214,7 +213,7 @@ index 4d40e0b7c7..a2a2919a1f 100644
                      StringArray newToks;
                      newToks.addTokens (parsed, true);
  
-@@ -859,14 +913,29 @@ String XmlDocument::expandExternalEntity (const String& entity)
+@@ -873,14 +925,29 @@ String XmlDocument::expandExternalEntity (const String& entity)
          {
              if (tokenisedDTD[i - 1].equalsIgnoreCase ("<!entity"))
              {
@@ -246,7 +245,7 @@ index 4d40e0b7c7..a2a2919a1f 100644
  
                      if (semiColon < 0)
                      {
-@@ -874,16 +943,21 @@ String XmlDocument::expandExternalEntity (const String& entity)
+@@ -888,16 +955,21 @@ String XmlDocument::expandExternalEntity (const String& entity)
                          break;
                      }
  
@@ -271,7 +270,7 @@ index 4d40e0b7c7..a2a2919a1f 100644
              }
          }
      }
-@@ -892,6 +966,18 @@ String XmlDocument::expandExternalEntity (const String& entity)
+@@ -906,6 +978,18 @@ String XmlDocument::expandExternalEntity (const String& entity)
      return entity;
  }
  
@@ -290,7 +289,7 @@ index 4d40e0b7c7..a2a2919a1f 100644
  String XmlDocument::getParameterEntity (const String& entity)
  {
      for (int i = 0; i < tokenisedDTD.size(); ++i)
-@@ -912,4 +998,94 @@ String XmlDocument::getParameterEntity (const String& entity)
+@@ -926,4 +1010,94 @@ String XmlDocument::getParameterEntity (const String& entity)
      return entity;
  }
  
@@ -386,23 +385,21 @@ index 4d40e0b7c7..a2a2919a1f 100644
 +
  }
 diff --git a/modules/juce_core/xml/juce_XmlDocument.h b/modules/juce_core/xml/juce_XmlDocument.h
-index 1c9c7dc28c..885fdf2d20 100644
+index da0dc75170..9c2879a735 100644
 --- a/modules/juce_core/xml/juce_XmlDocument.h
 +++ b/modules/juce_core/xml/juce_XmlDocument.h
-@@ -32,6 +32,12 @@
+@@ -32,6 +32,10 @@
    ==============================================================================
  */
  
 +// MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-11-02, by
-+// patches/JUCE/0003-xml-entities-depth.patch: the whole of this file is as JUCE 8.0.17-security has it,
-+// JUCE's own fixes f8a5c5d80f3b and 3342d409111e ("XmlDocument: Only load external
-+// entities through a caller-supplied InputSource", "XmlDocument: Limit entity expansion
-+// and element nesting depth"; in 8.0.17 and 9.0.5), carried on the 8.0.13 Tracktion pins.
++// patches/JUCE/0003-xml-entities-depth.patch: JUCE's own fixes f8a5c5d80f3b and 3342d409111e (in 8.0.17 and 9.0.5),
++// cherry-picked from JUCE's develop onto 9.0.4-26, the JUCE Tracktion Engine pins.
 +
  namespace juce
  {
  
-@@ -39,8 +45,12 @@ namespace juce
+@@ -39,8 +43,12 @@ namespace juce
  /**
      Parses a text-based XML document and creates an XmlElement object from it.
  
@@ -417,7 +414,7 @@ index 1c9c7dc28c..885fdf2d20 100644
  
      e.g.
      @code
-@@ -121,12 +131,18 @@ public:
+@@ -121,12 +129,18 @@ public:
      */
      const String& getLastParseError() const noexcept;
  
@@ -441,7 +438,7 @@ index 1c9c7dc28c..885fdf2d20 100644
  
          The object that is passed-in will be deleted automatically when no longer needed.
  
-@@ -163,8 +179,10 @@ private:
+@@ -163,8 +177,10 @@ private:
      String::CharPointerType input { nullptr };
      bool outOfData = false, errorOccurred = false;
      String lastError, dtdText;
@@ -454,7 +451,7 @@ index 1c9c7dc28c..885fdf2d20 100644
      std::unique_ptr<InputSource> inputSource;
  
      std::unique_ptr<XmlElement> parseDocumentElement (String::CharPointerType, bool outer);
-@@ -176,11 +194,12 @@ private:
+@@ -176,11 +192,12 @@ private:
      XmlElement* readNextElement (bool alsoParseSubElements);
      void readChildElements (XmlElement&);
      void readQuotedString (String&);

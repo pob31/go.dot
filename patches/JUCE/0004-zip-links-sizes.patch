@@ -27,28 +27,26 @@ file byte for byte (-text), and scripts/patches.py writes it as bytes.
 Applied by Go.dot's build, cmake/WfgJucePatches.cmake, in the order
 patches/JUCE/series gives; refreshed from the working tree with
 scripts/patches.py JUCE refresh, which keeps this header. Against JUCE
-37c894f83d37 (8.0.13+7, the JUCE Tracktion Engine 13b5132 pins). Drop it when
-the pin moves to 8.0.17, 9.0.5 or later. The author's decision of 2026-11-02.
+7ff644f65d7d (9.0.4+26, the JUCE Tracktion Engine a5e44996f5f pins), where the
+fixes are JUCE develop's own commits, cherry-picked. Drop it when the pin moves
+to 9.0.5 or later. The author's decision of 2026-11-02.
 
 diff --git a/modules/juce_core/zip/juce_ZipFile.cpp b/modules/juce_core/zip/juce_ZipFile.cpp
-index 35f39a47b3..41ee47aa3c 100644
+index a95d3c5f8f..842a37eaab 100644
 --- a/modules/juce_core/zip/juce_ZipFile.cpp
 +++ b/modules/juce_core/zip/juce_ZipFile.cpp
-@@ -32,6 +32,13 @@
+@@ -32,6 +32,10 @@
    ==============================================================================
  */
  
 +// MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-11-02, by
-+// patches/JUCE/0004-zip-links-sizes.patch: the whole of this file is as JUCE 8.0.17-security has it,
-+// JUCE's own fixes 31b3b680639c and 2303b551cf51 ("ZipFile: Confine symbolic links to the
-+// target directory and reject oversized entries", "ZipFile: Check for a symbolic parent
-+// before deleting an existing target file"; in 8.0.17 and 9.0.5), carried on the 8.0.13
-+// Tracktion pins.
++// patches/JUCE/0004-zip-links-sizes.patch: JUCE's own fixes 31b3b680639c and 2303b551cf51 (in 8.0.17 and 9.0.5),
++// cherry-picked from JUCE's develop onto 9.0.4-26, the JUCE Tracktion Engine pins.
 +
  namespace juce
  {
  
-@@ -147,6 +154,45 @@ static bool hasSymbolicPart (const File& root, const File& f)
+@@ -147,6 +151,45 @@ static bool hasSymbolicPart (const File& root, const File& f)
      return false;
  }
  
@@ -94,7 +92,7 @@ index 35f39a47b3..41ee47aa3c 100644
  //==============================================================================
  struct ZipFile::ZipInputStream final : public InputStream
  {
-@@ -478,6 +524,11 @@ Result ZipFile::uncompressEntry (int index, const File& targetDirectory, Overwri
+@@ -478,6 +521,11 @@ Result ZipFile::uncompressEntry (int index, const File& targetDirectory, Overwri
      if (in == nullptr)
          return Result::fail ("Failed to open the zip file for reading");
  
@@ -106,7 +104,7 @@ index 35f39a47b3..41ee47aa3c 100644
      if (targetFile.exists())
      {
          if (overwriteFiles == OverwriteFiles::no)
-@@ -487,28 +538,45 @@ Result ZipFile::uncompressEntry (int index, const File& targetDirectory, Overwri
+@@ -487,28 +535,45 @@ Result ZipFile::uncompressEntry (int index, const File& targetDirectory, Overwri
              return Result::fail ("Failed to write to target file: " + targetFile.getFullPathName());
      }
  
@@ -163,7 +161,7 @@ index 35f39a47b3..41ee47aa3c 100644
      }
  
      targetFile.setCreationTime (zei->entry.fileTime);
-@@ -795,23 +863,175 @@ struct ZIPTests final : public UnitTest
+@@ -795,23 +860,175 @@ struct ZIPTests final : public UnitTest
      void runTest() override
      {
          beginTest ("ZIP");
@@ -351,24 +349,21 @@ index 35f39a47b3..41ee47aa3c 100644
  };
  
 diff --git a/modules/juce_core/zip/juce_ZipFile.h b/modules/juce_core/zip/juce_ZipFile.h
-index e7ebe2c931..ca8f75f060 100644
+index c4639a1e41..c319ff0da8 100644
 --- a/modules/juce_core/zip/juce_ZipFile.h
 +++ b/modules/juce_core/zip/juce_ZipFile.h
-@@ -32,6 +32,13 @@
+@@ -32,6 +32,10 @@
    ==============================================================================
  */
  
 +// MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-11-02, by
-+// patches/JUCE/0004-zip-links-sizes.patch: the whole of this file is as JUCE 8.0.17-security has it,
-+// JUCE's own fixes 31b3b680639c and 2303b551cf51 ("ZipFile: Confine symbolic links to the
-+// target directory and reject oversized entries", "ZipFile: Check for a symbolic parent
-+// before deleting an existing target file"; in 8.0.17 and 9.0.5), carried on the 8.0.13
-+// Tracktion pins.
++// patches/JUCE/0004-zip-links-sizes.patch: JUCE's own fixes 31b3b680639c and 2303b551cf51 (in 8.0.17 and 9.0.5),
++// cherry-picked from JUCE's develop onto 9.0.4-26, the JUCE Tracktion Engine pins.
 +
  namespace juce
  {
  
-@@ -178,9 +185,17 @@ public:
+@@ -178,9 +182,17 @@ public:
          This will expand all the entries into a target directory. The relative
          paths of the entries are used.
  
@@ -386,7 +381,7 @@ index e7ebe2c931..ca8f75f060 100644
      */
      Result uncompressTo (const File& targetDirectory,
                           bool shouldOverwriteFiles = true);
-@@ -190,6 +205,11 @@ public:
+@@ -190,6 +202,11 @@ public:
          This will expand the entry and write it in a target directory. The entry's path is used to
          determine which subfolder of the target should contain the new file.
  
@@ -398,7 +393,7 @@ index e7ebe2c931..ca8f75f060 100644
          @param index                the index of the entry to uncompress - this must be a valid index
                                      between 0 and (getNumEntries() - 1).
          @param targetDirectory      the root folder to uncompress into
-@@ -208,11 +228,19 @@ public:
+@@ -208,11 +225,19 @@ public:
          This will expand the entry and write it in a target directory. The entry's path is used to
          determine which subfolder of the target should contain the new file.
  

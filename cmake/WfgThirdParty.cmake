@@ -269,6 +269,10 @@ target_compile_definitions(wfg_deps INTERFACE
     JUCE_WEB_BROWSER=0              # drops libwebkit2gtk-4.1-dev; revisit at Phase 11 (PRD 3.23)
     JUCE_STRICT_REFCOUNTEDPOINTER=1 # hygiene; TE's own reference sets it, zero TE references
     JUCE_MODAL_LOOPS_PERMITTED=0    # all 20 TE uses are #if-guarded; a modal loop in a show engine is a hang
+    # JUCE 9.0.3 added an Opus reader, on by default and picked up by
+    # registerBasicFormats; Tracktion's own format list has none, so Go.dot's
+    # readers would take a .opus that playback then refuses. Off, both lists agree.
+    JUCE_USE_OPUS=0
     # JACK on Linux (namespace draft decision I, 2026-09-05, carried out 2026-09-30):
     # the way to every channel of a multichannel interface on a desktop where
     # PipeWire holds it and ALSA offers its stereo pair. Only the header is

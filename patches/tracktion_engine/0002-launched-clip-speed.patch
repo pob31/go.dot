@@ -146,7 +146,7 @@ index cd13f2e98b8..c175ff9e5c7 100644
  
  					// analyse a new input
 diff --git a/modules/tracktion_engine/audio_files/tracktion_AudioFileCache.cpp b/modules/tracktion_engine/audio_files/tracktion_AudioFileCache.cpp
-index 13f50a9e148..6bad5f599f2 100644
+index 04c981bdc56..5be53b35695 100644
 --- a/modules/tracktion_engine/audio_files/tracktion_AudioFileCache.cpp
 +++ b/modules/tracktion_engine/audio_files/tracktion_AudioFileCache.cpp
 @@ -79,6 +79,13 @@ public:
@@ -192,7 +192,7 @@ index 13f50a9e148..6bad5f599f2 100644
  
      void touchAllReaders (SampleRange range) const
 diff --git a/modules/tracktion_engine/audio_files/tracktion_AudioFileCache.h b/modules/tracktion_engine/audio_files/tracktion_AudioFileCache.h
-index 1c6e88cccfa..bcf1733bf21 100644
+index 1bae03c2a4c..36033e6d4dc 100644
 --- a/modules/tracktion_engine/audio_files/tracktion_AudioFileCache.h
 +++ b/modules/tracktion_engine/audio_files/tracktion_AudioFileCache.h
 @@ -63,6 +63,13 @@ public:
@@ -220,10 +220,10 @@ index 1c6e88cccfa..bcf1733bf21 100644
  
          Reader (AudioFileCache&, void*, std::unique_ptr<AudioFormatReaderWithTimeout>);
 diff --git a/modules/tracktion_engine/model/clips/tracktion_LaunchHandle.h b/modules/tracktion_engine/model/clips/tracktion_LaunchHandle.h
-index 264346b5f0c..e023a4bef03 100644
+index 42bf5780a19..911e5380afc 100644
 --- a/modules/tracktion_engine/model/clips/tracktion_LaunchHandle.h
 +++ b/modules/tracktion_engine/model/clips/tracktion_LaunchHandle.h
-@@ -74,6 +74,123 @@ public:
+@@ -81,6 +81,123 @@ public:
      /** Moves the playhead by a given number of beats. */
      void nudge (BeatDuration);
  
@@ -347,10 +347,10 @@ index 264346b5f0c..e023a4bef03 100644
      //==============================================================================
      /** Represents two beat ranges where the play state can be different in each. */
      struct SplitStatus
-@@ -151,6 +268,14 @@ private:
-     //==============================================================================
-     // audio-write/read, message-read/write
-     std::atomic<double> nudgeBeats { 0.0 };
+@@ -170,6 +287,14 @@ private:
+ 
+     static std::optional<BeatRange> getPlayedRange (const std::optional<CurrentState>&);
+     static std::optional<BeatRange> getMonotonicLengthPlayedRange (const std::optional<CurrentState>&);
 +
 +    //==============================================================================
 +    // MODIFIED BY GO.DOT, 2026-09-28 (patch 0002): message-write, audio-read. A copy
@@ -363,7 +363,7 @@ index 264346b5f0c..e023a4bef03 100644
  
  } // namespace tracktion::inline engine
 diff --git a/modules/tracktion_engine/playback/graph/tracktion_SlotControlNode.cpp b/modules/tracktion_engine/playback/graph/tracktion_SlotControlNode.cpp
-index 90ee2402c5c..a0cc72e02d3 100644
+index 5beb171f4cc..f98f8632aab 100644
 --- a/modules/tracktion_engine/playback/graph/tracktion_SlotControlNode.cpp
 +++ b/modules/tracktion_engine/playback/graph/tracktion_SlotControlNode.cpp
 @@ -12,6 +12,23 @@
@@ -402,7 +402,7 @@ index 90ee2402c5c..a0cc72e02d3 100644
          if (auto mn = dynamic_cast<LoopingMidiNode*> (n))
              midiNode = mn;
      }
-@@ -92,10 +114,42 @@ void SlotControlNode::prepareToPlay (const tracktion::graph::PlaybackInitialisat
+@@ -98,10 +120,42 @@ void SlotControlNode::prepareToPlay (const tracktion::graph::PlaybackInitialisat
          return;
  
      if (auto oldGraph = info.nodeGraphToReplace)
@@ -445,13 +445,15 @@ index 90ee2402c5c..a0cc72e02d3 100644
      if (lastSamples)
          return;
  
-@@ -136,16 +190,23 @@ void SlotControlNode::process (ProcessContext& pc)
+@@ -142,11 +196,18 @@ void SlotControlNode::process (ProcessContext& pc)
              if (auto playedMonotonicRange = launchHandle->getPlayedMonotonicRange())
              {
                  const auto blockRange = MonotonicBeatRange { { syncRange.start.monotonicBeat.v, syncRange.end.monotonicBeat.v } };
 -                const auto stopPoint = MonotonicBeat { playedMonotonicRange->v.getStart() + *stopDuration };
  
 -                if (blockRange.v.contains (stopPoint.v))
+-                    if (launchHandle->stopAtEndOfPlay (stopPoint) && stopFunction)
+-                        stopFunction (stopPoint);
 +                // MODIFIED BY GO.DOT, 2026-09-28 (patch 0002): with a speed, the stop is
 +                // where the source has played the clip's length, which a change of speed
 +                // can bring before this block - then it is this block's start.
@@ -461,18 +463,11 @@ index 90ee2402c5c..a0cc72e02d3 100644
 +                    stopPoint = MonotonicBeat { blockRange.v.getStart() };
 +
 +                if (stopPoint && blockRange.v.contains (stopPoint->v))
-                 {
-                     const auto stopQueued = launchHandle->getQueuedStatus() == LaunchHandle::QueueState::stopQueued;
--                    launchHandle->stop (stopPoint);
-+                    launchHandle->stop (*stopPoint);
- 
-                     // If there was a stop already queued, ignore the follow action
-                     if (! stopQueued && stopFunction)
--                        stopFunction (stopPoint);
++                    if (launchHandle->stopAtEndOfPlay (*stopPoint) && stopFunction)
 +                        stopFunction (*stopPoint);
-                 }
              }
          }
+ 
 @@ -161,9 +222,11 @@ void SlotControlNode::process (ProcessContext& pc)
                  && ! splitStatus.playing1 && splitStatus.playing2)
              {

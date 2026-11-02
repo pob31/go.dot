@@ -24,27 +24,26 @@ file byte for byte (-text), and scripts/patches.py writes it as bytes.
 Applied by Go.dot's build, cmake/WfgJucePatches.cmake, in the order
 patches/JUCE/series gives; refreshed from the working tree with
 scripts/patches.py JUCE refresh, which keeps this header. Against JUCE
-37c894f83d37 (8.0.13+7, the JUCE Tracktion Engine 13b5132 pins). Drop it when
-the pin moves to 8.0.17, 9.0.5 or later. The author's decision of 2026-11-02.
+7ff644f65d7d (9.0.4+26, the JUCE Tracktion Engine a5e44996f5f pins), where the
+fixes are JUCE develop's own commits, cherry-picked. Drop it when the pin moves
+to 9.0.5 or later. The author's decision of 2026-11-02.
 
 diff --git a/modules/juce_graphics/image_formats/juce_GIFLoader.cpp b/modules/juce_graphics/image_formats/juce_GIFLoader.cpp
-index 8d3cf0f681..e92d5cf07c 100644
+index 706ca409c9..153c60b395 100644
 --- a/modules/juce_graphics/image_formats/juce_GIFLoader.cpp
 +++ b/modules/juce_graphics/image_formats/juce_GIFLoader.cpp
-@@ -32,6 +32,12 @@
+@@ -32,6 +32,10 @@
    ==============================================================================
  */
  
 +// MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-11-02, by
-+// patches/JUCE/0005-png-gif-loaders.patch: the whole of this file is as JUCE 8.0.17-security has it,
-+// JUCE's own fixes ab9047fb26f2 and b90de9702124 ("PNGLoader: Validate image dimensions
-+// before allocating the decode buffer", "GIFLoader: Validate the LZW minimum code size
-+// and first code"; in 8.0.17 and 9.0.5), carried on the 8.0.13 Tracktion pins.
++// patches/JUCE/0005-png-gif-loaders.patch: JUCE's own fixes ab9047fb26f2 and b90de9702124 (in 8.0.17 and 9.0.5),
++// cherry-picked from JUCE's develop onto 9.0.4-26, the JUCE Tracktion Engine pins.
 +
  namespace juce
  {
  
-@@ -230,19 +236,26 @@ private:
+@@ -230,19 +234,26 @@ private:
          sp = stack;
      }
  
@@ -79,7 +78,7 @@ index 8d3cf0f681..e92d5cf07c 100644
          }
  
          if (sp > stack)
-@@ -259,8 +272,7 @@ private:
+@@ -259,8 +270,7 @@ private:
                  maxCodeSize = 2 * clearCode;
                  maxCode = clearCode + 2;
                  sp = stack;
@@ -89,7 +88,7 @@ index 8d3cf0f681..e92d5cf07c 100644
              }
              else if (code == endCode)
              {
-@@ -365,6 +377,9 @@ private:
+@@ -365,6 +375,9 @@ private:
          if (input.read (&c, 1) != 1)
              return false;
  
@@ -100,23 +99,21 @@ index 8d3cf0f681..e92d5cf07c 100644
  
          if (transparent >= 0)
 diff --git a/modules/juce_graphics/image_formats/juce_PNGLoader.cpp b/modules/juce_graphics/image_formats/juce_PNGLoader.cpp
-index 8eaa1f598a..4837691654 100644
+index b70679438f..4b0cf46cc2 100644
 --- a/modules/juce_graphics/image_formats/juce_PNGLoader.cpp
 +++ b/modules/juce_graphics/image_formats/juce_PNGLoader.cpp
-@@ -32,6 +32,12 @@
+@@ -32,6 +32,10 @@
    ==============================================================================
  */
  
 +// MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-11-02, by
-+// patches/JUCE/0005-png-gif-loaders.patch: the whole of this file is as JUCE 8.0.17-security has it,
-+// JUCE's own fixes ab9047fb26f2 and b90de9702124 ("PNGLoader: Validate image dimensions
-+// before allocating the decode buffer", "GIFLoader: Validate the LZW minimum code size
-+// and first code"; in 8.0.17 and 9.0.5), carried on the 8.0.13 Tracktion pins.
++// patches/JUCE/0005-png-gif-loaders.patch: JUCE's own fixes ab9047fb26f2 and b90de9702124 (in 8.0.17 and 9.0.5),
++// cherry-picked from JUCE's develop onto 9.0.4-26, the JUCE Tracktion Engine pins.
 +
- namespace juce
- {
- 
-@@ -455,11 +461,29 @@ namespace PNGHelpers
+ #if ! defined (JUCE_INCLUDE_PNGLIB_CODE) || JUCE_INCLUDE_PNGLIB_CODE
+ #include "juce_graphics/image_formats/pnglib/png.h"
+ #else
+@@ -174,11 +178,29 @@ namespace PNGHelpers
          if (readHeader (in, pngReadStruct, pngInfoStruct, errorJumpBuf,
                          width, height, bitDepth, colorType, interlaceType))
          {

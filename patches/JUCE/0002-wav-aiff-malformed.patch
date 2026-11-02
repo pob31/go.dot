@@ -29,27 +29,26 @@ file byte for byte (-text), and scripts/patches.py writes it as bytes.
 Applied by Go.dot's build, cmake/WfgJucePatches.cmake, in the order
 patches/JUCE/series gives; refreshed from the working tree with
 scripts/patches.py JUCE refresh, which keeps this header. Against JUCE
-37c894f83d37 (8.0.13+7, the JUCE Tracktion Engine 13b5132 pins). Drop it when
-the pin moves to 8.0.17, 9.0.5 or later. The author's decision of 2026-11-02.
+7ff644f65d7d (9.0.4+26, the JUCE Tracktion Engine a5e44996f5f pins), where the
+fixes are JUCE develop's own commits, cherry-picked. Drop it when the pin moves
+to 9.0.5 or later. The author's decision of 2026-11-02.
 
 diff --git a/modules/juce_audio_formats/codecs/juce_AiffAudioFormat.cpp b/modules/juce_audio_formats/codecs/juce_AiffAudioFormat.cpp
-index 38ac383bec..825c29d619 100644
+index 471d5de6b1..7050e186cd 100644
 --- a/modules/juce_audio_formats/codecs/juce_AiffAudioFormat.cpp
 +++ b/modules/juce_audio_formats/codecs/juce_AiffAudioFormat.cpp
-@@ -32,6 +32,12 @@
+@@ -32,6 +32,10 @@
    ==============================================================================
  */
  
 +// MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-11-02, by
-+// patches/JUCE/0002-wav-aiff-malformed.patch: the whole of this file is as JUCE 8.0.17-security has it,
-+// JUCE's own fixes 8c0c0d9b25ca and 8493b2c3caae ("AIFF/WAV Audio Format: Fix a crash when
-+// reading files with malformed channel counts", "WAV and AIFF files: Harden metadata
-+// parsing"; in 8.0.17 and 9.0.5), carried on the 8.0.13 Tracktion pins.
++// patches/JUCE/0002-wav-aiff-malformed.patch: JUCE's own fixes 8c0c0d9b25ca and 8493b2c3caae (in 8.0.17 and 9.0.5),
++// cherry-picked from JUCE's develop onto 9.0.4-26, the JUCE Tracktion Engine pins.
 +
  namespace juce
  {
  
-@@ -52,6 +58,8 @@ namespace AiffFileHelpers
+@@ -52,6 +56,8 @@ namespace AiffFileHelpers
  {
      inline int chunkName (const char* name) noexcept    { return (int) ByteOrder::littleEndianInt (name); }
  
@@ -58,7 +57,7 @@ index 38ac383bec..825c29d619 100644
     #if JUCE_MSVC
      #pragma pack (push, 1)
     #endif
-@@ -243,6 +251,9 @@ namespace AiffFileHelpers
+@@ -244,6 +250,9 @@ namespace AiffFileHelpers
  
          static String read (InputStream& input, const uint32 length)
          {
@@ -68,7 +67,7 @@ index 38ac383bec..825c29d619 100644
              MemoryBlock mb;
              input.skipNextBytes (4);
              input.readIntoMemoryBlock (mb, (ssize_t) length - 4);
-@@ -440,9 +451,9 @@ public:
+@@ -455,9 +464,9 @@ public:
                      {
                          hasGotType = true;
  
@@ -80,7 +79,7 @@ index 38ac383bec..825c29d619 100644
                          bytesPerFrame = (int) ((numChannels * bitsPerSample) >> 3);
  
                          unsigned char sampleRateBytes[10];
-@@ -496,78 +507,81 @@ public:
+@@ -511,82 +520,85 @@ public:
                          dataChunkStart = input->getPosition() + 4 + offset;
                          lengthInSamples = (bytesPerFrame > 0) ? jmin (lengthInSamples, ((int64) length) / (int64) bytesPerFrame) : 0;
                      }
@@ -157,55 +156,43 @@ index 38ac383bec..825c29d619 100644
 -                            auto stringLength = (uint16) input->readShortBigEndian();
 +                            auto numNotes = (uint16) input->readShortBigEndian();
 +                            metadataValuesMap.emplace ("NumCueNotes", String (numNotes));
- 
--                            MemoryBlock textBlock;
--                            input->readIntoMemoryBlock (textBlock, stringLength + (stringLength & 1));
++
 +                            for (uint16 i = 0; i < numNotes; ++i)
 +                            {
 +                                auto timestamp = (uint32) input->readIntBigEndian();
 +                                auto identifier = (uint16) input->readShortBigEndian(); // may be zero in this case
 +                                auto stringLength = (uint16) input->readShortBigEndian();
  
+-                            MemoryBlock textBlock;
+-                            input->readIntoMemoryBlock (textBlock, stringLength + (stringLength & 1));
++                                MemoryBlock textBlock;
++                                input->readIntoMemoryBlock (textBlock, stringLength + (stringLength & 1));
+ 
 -                            auto prefix = "CueNote" + String (i);
 -                            metadataValuesMap.emplace (prefix + "TimeStamp", String (timestamp));
 -                            metadataValuesMap.emplace (prefix + "Identifier", String (identifier));
 -                            metadataValuesMap.emplace (prefix + "Text", textBlock.toString());
-+                                MemoryBlock textBlock;
-+                                input->readIntoMemoryBlock (textBlock, stringLength + (stringLength & 1));
-+
 +                                auto prefix = "CueNote" + String (i);
 +                                metadataValuesMap.emplace (prefix + "TimeStamp", String (timestamp));
 +                                metadataValuesMap.emplace (prefix + "Identifier", String (identifier));
 +                                metadataValuesMap.emplace (prefix + "Text", textBlock.toString());
 +                            }
-+                        }
-+                        else if (type == chunkName ("INST"))
-+                        {
-+                            HeapBlock<InstChunk> inst;
-+                            inst.calloc (jmax ((size_t) length + 1, sizeof (InstChunk)), 1);
-+                            input->read (inst, (int) length);
-+                            inst->copyTo (metadataValuesMap);
-+                        }
-+                        else if (type == chunkName ("basc"))
-+                        {
-+                            AiffFileHelpers::BASCChunk (*input).addToMetadata (metadataValuesMap);
-+                        }
-+                        else if (type == chunkName ("cate"))
-+                        {
-+                            metadataValuesMap.emplace (AiffAudioFormat::appleTag,
-+                                                      AiffFileHelpers::CATEChunk::read (*input, length));
-+                        }
-+                        else if ((hasGotVer && hasGotData && hasGotType)
-+                                  || chunkEnd < input->getPosition()
-+                                  || input->isExhausted())
-+                        {
-+                            break;
                          }
 -                    }
 -                    else if (type == chunkName ("INST"))
 -                    {
 -                        HeapBlock<InstChunk> inst;
 -                        inst.calloc (jmax ((size_t) length + 1, sizeof (InstChunk)), 1);
++                        else if (type == chunkName ("INST"))
++                        {
++                            HeapBlock<InstChunk> inst;
++                            inst.calloc (jmax ((size_t) length + 1, sizeof (InstChunk)), 1);
+ 
+-                        if (inst.getData() == nullptr)
+-                            break;
++                            if (inst.getData() == nullptr)
++                                break;
+ 
 -                        input->read (inst, (int) length);
 -                        inst->copyTo (metadataValuesMap);
 -                    }
@@ -223,10 +210,28 @@ index 38ac383bec..825c29d619 100644
 -                              || input->isExhausted())
 -                    {
 -                        break;
++                            input->read (inst, (int) length);
++                            inst->copyTo (metadataValuesMap);
++                        }
++                        else if (type == chunkName ("basc"))
++                        {
++                            AiffFileHelpers::BASCChunk (*input).addToMetadata (metadataValuesMap);
++                        }
++                        else if (type == chunkName ("cate"))
++                        {
++                            metadataValuesMap.emplace (AiffAudioFormat::appleTag,
++                                                      AiffFileHelpers::CATEChunk::read (*input, length));
++                        }
++                        else if ((hasGotVer && hasGotData && hasGotType)
++                                  || chunkEnd < input->getPosition()
++                                  || input->isExhausted())
++                        {
++                            break;
++                        }
                      }
  
                      input->setPosition (chunkEnd + (chunkEnd & 1)); // (chunks should be aligned to an even byte address)
-@@ -593,11 +607,18 @@ public:
+@@ -612,11 +624,18 @@ public:
  
          input->setPosition (dataChunkStart + startSampleInFile * bytesPerFrame);
  
@@ -248,7 +253,7 @@ index 38ac383bec..825c29d619 100644
              const int numThisTime = jmin (tempBufSize / bytesPerFrame, numSamples);
              const int bytesRead = input->read (tempBuffer, numThisTime * bytesPerFrame);
  
-@@ -640,6 +661,15 @@ public:
+@@ -659,6 +678,15 @@ public:
          }
      }
  
@@ -264,7 +269,7 @@ index 38ac383bec..825c29d619 100644
      int bytesPerFrame;
      int64 dataChunkStart;
      bool littleEndian;
-@@ -990,7 +1020,7 @@ AudioFormatReader* AiffAudioFormat::createReaderFor (InputStream* sourceStream,
+@@ -1009,7 +1037,7 @@ AudioFormatReader* AiffAudioFormat::createReaderFor (InputStream* sourceStream,
  {
      std::unique_ptr<AiffAudioFormatReader> w (new AiffAudioFormatReader (sourceStream));
  
@@ -273,7 +278,7 @@ index 38ac383bec..825c29d619 100644
          return w.release();
  
      if (! deleteStreamIfOpeningFails)
-@@ -1010,7 +1040,7 @@ MemoryMappedAudioFormatReader* AiffAudioFormat::createMemoryMappedReader (FileIn
+@@ -1029,7 +1057,7 @@ MemoryMappedAudioFormatReader* AiffAudioFormat::createMemoryMappedReader (FileIn
      {
          AiffAudioFormatReader reader (fin);
  
@@ -282,7 +287,7 @@ index 38ac383bec..825c29d619 100644
              return new MemoryMappedAiffReader (fin->getFile(), reader);
      }
  
-@@ -1023,12 +1053,17 @@ std::unique_ptr<AudioFormatWriter> AiffAudioFormat::createWriterFor (std::unique
+@@ -1042,12 +1070,17 @@ std::unique_ptr<AudioFormatWriter> AiffAudioFormat::createWriterFor (std::unique
      if (streamToWriteTo == nullptr || ! getPossibleBitDepths().contains (options.getBitsPerSample()))
          return nullptr;
  
@@ -302,23 +307,21 @@ index 38ac383bec..825c29d619 100644
                                                      metadata);
  }
 diff --git a/modules/juce_audio_formats/codecs/juce_WavAudioFormat.cpp b/modules/juce_audio_formats/codecs/juce_WavAudioFormat.cpp
-index ce472b5681..59690dfed7 100644
+index 66dfadde7e..03fa86180a 100644
 --- a/modules/juce_audio_formats/codecs/juce_WavAudioFormat.cpp
 +++ b/modules/juce_audio_formats/codecs/juce_WavAudioFormat.cpp
-@@ -32,6 +32,12 @@
+@@ -32,6 +32,10 @@
    ==============================================================================
  */
  
 +// MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-11-02, by
-+// patches/JUCE/0002-wav-aiff-malformed.patch: the whole of this file is as JUCE 8.0.17-security has it,
-+// JUCE's own fixes 8c0c0d9b25ca and 8493b2c3caae ("AIFF/WAV Audio Format: Fix a crash when
-+// reading files with malformed channel counts", "WAV and AIFF files: Harden metadata
-+// parsing"; in 8.0.17 and 9.0.5), carried on the 8.0.13 Tracktion pins.
++// patches/JUCE/0002-wav-aiff-malformed.patch: JUCE's own fixes 8c0c0d9b25ca and 8493b2c3caae (in 8.0.17 and 9.0.5),
++// cherry-picked from JUCE's develop onto 9.0.4-26, the JUCE Tracktion Engine pins.
 +
  namespace juce
  {
  
-@@ -260,6 +266,8 @@ namespace WavFileHelpers
+@@ -260,6 +264,8 @@ namespace WavFileHelpers
      constexpr inline int chunkName (const char* name) noexcept         { return (int) ByteOrder::littleEndianInt (name); }
      constexpr inline size_t roundUpSize (size_t sz) noexcept           { return (sz + 3) & ~3u; }
  
@@ -327,7 +330,7 @@ index ce472b5681..59690dfed7 100644
      #if JUCE_MSVC
       #pragma pack (push, 1)
      #endif
-@@ -1264,12 +1272,12 @@ public:
+@@ -1277,12 +1283,12 @@ public:
                  {
                      // read the format chunk
                      auto format = (unsigned short) input->readShort();
@@ -342,17 +345,28 @@ index ce472b5681..59690dfed7 100644
  
                      if (bitsPerSample > 64 && intSampleRate > 0)
                      {
-@@ -1345,125 +1353,137 @@ public:
+@@ -1358,141 +1364,153 @@ public:
                      dataChunkStart = input->getPosition();
                      lengthInSamples = (bytesPerFrame > 0) ? (dataLength / bytesPerFrame) : 0;
                  }
 -                else if (chunkType == chunkName ("bext"))
--                {
++                else if (length <= maxMetadataChunkSize)
+                 {
 -                    bwavChunkStart = input->getPosition();
 -                    bwavSize = length;
 -
 -                    HeapBlock<BWAVChunk> bwav;
 -                    bwav.calloc (jmax ((size_t) length + 1, sizeof (BWAVChunk)), 1);
++                    if (chunkType == chunkName ("bext"))
++                    {
++                        bwavChunkStart = input->getPosition();
++                        bwavSize = length;
+ 
+-                    if (bwav.getData() == nullptr)
+-                        break;
++                        HeapBlock<BWAVChunk> bwav;
++                        bwav.calloc (jmax ((size_t) length + 1, sizeof (BWAVChunk)), 1);
+ 
 -                    input->read (bwav, (int) length);
 -                    bwav->copyTo (dict, (int) length);
 -                }
@@ -360,6 +374,19 @@ index ce472b5681..59690dfed7 100644
 -                {
 -                    HeapBlock<SMPLChunk> smpl;
 -                    smpl.calloc (jmax ((size_t) length + 1, sizeof (SMPLChunk)), 1);
++                        if (bwav.getData() == nullptr)
++                            break;
+ 
+-                    if (smpl.getData() == nullptr)
+-                        break;
++                        input->read (bwav, (int) length);
++                        bwav->copyTo (dict, (int) length);
++                    }
++                    else if (chunkType == chunkName ("smpl"))
++                    {
++                        HeapBlock<SMPLChunk> smpl;
++                        smpl.calloc (jmax ((size_t) length + 1, sizeof (SMPLChunk)), 1);
+ 
 -                    input->read (smpl, (int) length);
 -                    smpl->copyTo (dict, (int) length);
 -                }
@@ -367,6 +394,19 @@ index ce472b5681..59690dfed7 100644
 -                {
 -                    HeapBlock<InstChunk> inst;
 -                    inst.calloc (jmax ((size_t) length + 1, sizeof (InstChunk)), 1);
++                        if (smpl.getData() == nullptr)
++                            break;
+ 
+-                    if (inst.getData() == nullptr)
+-                        break;
++                        input->read (smpl, (int) length);
++                        smpl->copyTo (dict, (int) length);
++                    }
++                    else if (chunkType == chunkName ("inst") || chunkType == chunkName ("INST")) // need to check which...
++                    {
++                        HeapBlock<InstChunk> inst;
++                        inst.calloc (jmax ((size_t) length + 1, sizeof (InstChunk)), 1);
+ 
 -                    input->read (inst, (int) length);
 -                    inst->copyTo (dict);
 -                }
@@ -374,6 +414,19 @@ index ce472b5681..59690dfed7 100644
 -                {
 -                    HeapBlock<CueChunk> cue;
 -                    cue.calloc (jmax ((size_t) length + 1, sizeof (CueChunk)), 1);
++                        if (inst.getData() == nullptr)
++                            break;
+ 
+-                    if (cue.getData() == nullptr)
+-                        break;
++                        input->read (inst, (int) length);
++                        inst->copyTo (dict);
++                    }
++                    else if (chunkType == chunkName ("cue "))
++                    {
++                        HeapBlock<CueChunk> cue;
++                        cue.calloc (jmax ((size_t) length + 1, sizeof (CueChunk)), 1);
+ 
 -                    input->read (cue, (int) length);
 -                    cue->copyTo (dict, (int) length);
 -                }
@@ -390,38 +443,12 @@ index ce472b5681..59690dfed7 100644
 -                    IXMLChunk::addToMetadata (dict, ixml.toString());
 -                }
 -                else if (chunkType == chunkName ("LIST"))
-+                else if (length <= maxMetadataChunkSize)
-                 {
+-                {
 -                    auto subChunkType = input->readInt();
-+                    if (chunkType == chunkName ("bext"))
-+                    {
-+                        bwavChunkStart = input->getPosition();
-+                        bwavSize = length;
++                        if (cue.getData() == nullptr)
++                            break;
  
 -                    if (subChunkType == chunkName ("info") || subChunkType == chunkName ("INFO"))
-+                        HeapBlock<BWAVChunk> bwav;
-+                        bwav.calloc (jmax ((size_t) length + 1, sizeof (BWAVChunk)), 1);
-+                        input->read (bwav, (int) length);
-+                        bwav->copyTo (dict, (int) length);
-+                    }
-+                    else if (chunkType == chunkName ("smpl"))
-+                    {
-+                        HeapBlock<SMPLChunk> smpl;
-+                        smpl.calloc (jmax ((size_t) length + 1, sizeof (SMPLChunk)), 1);
-+                        input->read (smpl, (int) length);
-+                        smpl->copyTo (dict, (int) length);
-+                    }
-+                    else if (chunkType == chunkName ("inst") || chunkType == chunkName ("INST")) // need to check which...
-+                    {
-+                        HeapBlock<InstChunk> inst;
-+                        inst.calloc (jmax ((size_t) length + 1, sizeof (InstChunk)), 1);
-+                        input->read (inst, (int) length);
-+                        inst->copyTo (dict);
-+                    }
-+                    else if (chunkType == chunkName ("cue "))
-+                    {
-+                        HeapBlock<CueChunk> cue;
-+                        cue.calloc (jmax ((size_t) length + 1, sizeof (CueChunk)), 1);
 +                        input->read (cue, (int) length);
 +                        cue->copyTo (dict, (int) length);
 +                    }
@@ -513,11 +540,11 @@ index ce472b5681..59690dfed7 100644
 +                                        prefix << "CueLabel" << cueLabelIndex++;
 +                                    else if (adtlChunkType == chunkName ("note"))
 +                                        prefix << "CueNote" << cueNoteIndex++;
- 
--                            input->setPosition (adtlChunkEnd);
++
 +                                    auto identifier = (uint32) input->readInt();
 +                                    auto stringLength = (int) (adtlLength - labelHeaderSize);
-+
+ 
+-                            input->setPosition (adtlChunkEnd);
 +                                    MemoryBlock textBlock;
 +                                    input->readIntoMemoryBlock (textBlock, stringLength);
 +
@@ -584,7 +611,7 @@ index ce472b5681..59690dfed7 100644
                  }
  
                  input->setPosition (chunkEnd);
-@@ -1490,11 +1510,18 @@ public:
+@@ -1519,11 +1537,18 @@ public:
  
          input->setPosition (dataChunkStart + startSampleInFile * bytesPerFrame);
  
@@ -606,7 +633,7 @@ index ce472b5681..59690dfed7 100644
              auto numThisTime = jmin (tempBufSize / bytesPerFrame, numSamples);
              auto bytesRead = input->read (tempBuffer, numThisTime * bytesPerFrame);
  
-@@ -1569,6 +1596,15 @@ public:
+@@ -1598,6 +1623,15 @@ public:
          return wavFileChannelLayout;
      }
  
@@ -622,7 +649,7 @@ index ce472b5681..59690dfed7 100644
      int64 bwavChunkStart = 0, bwavSize = 0;
      int64 dataChunkStart = 0, dataLength = 0;
      int bytesPerFrame = 0;
-@@ -1777,7 +1813,7 @@ private:
+@@ -1806,7 +1840,7 @@ private:
  
          output->writeShort ((short) numChannels);
          output->writeInt ((int) sampleRate);
@@ -631,7 +658,7 @@ index ce472b5681..59690dfed7 100644
          output->writeShort ((short) bytesPerFrame); // nBlockAlign
          output->writeShort ((short) bitsPerSample); // wBitsPerSample
  
-@@ -1996,7 +2032,7 @@ AudioFormatReader* WavAudioFormat::createReaderFor (InputStream* sourceStream, b
+@@ -2025,7 +2059,7 @@ AudioFormatReader* WavAudioFormat::createReaderFor (InputStream* sourceStream, b
      }
     #endif
  
@@ -640,7 +667,7 @@ index ce472b5681..59690dfed7 100644
          return r.release();
  
      if (! deleteStreamIfOpeningFails)
-@@ -2016,7 +2052,7 @@ MemoryMappedAudioFormatReader* WavAudioFormat::createMemoryMappedReader (FileInp
+@@ -2045,7 +2079,7 @@ MemoryMappedAudioFormatReader* WavAudioFormat::createMemoryMappedReader (FileInp
      {
          WavAudioFormatReader reader (fin);
  
@@ -649,7 +676,7 @@ index ce472b5681..59690dfed7 100644
              return new MemoryMappedWavReader (fin->getFile(), reader);
      }
  
-@@ -2029,7 +2065,16 @@ std::unique_ptr<AudioFormatWriter> WavAudioFormat::createWriterFor (std::unique_
+@@ -2058,7 +2092,16 @@ std::unique_ptr<AudioFormatWriter> WavAudioFormat::createWriterFor (std::unique_
      if (streamToWriteTo == nullptr || ! getPossibleBitDepths().contains (options.getBitsPerSample()))
          return nullptr;
  
@@ -667,24 +694,252 @@ index ce472b5681..59690dfed7 100644
  
      if (! isChannelLayoutSupported (layout))
          return nullptr;
+@@ -2414,6 +2457,123 @@ struct WaveAudioFormatTests final : public UnitTest
+                 expectEquals (reader->metadataValues["CueLabel0Text"], String ("ab"));
+             }
+         }
++
++        {
++            beginTest ("Files declaring an unsupported bit depth are rejected");
++
++            const auto wav = createPcmWav (1, 12, 8, std::vector<uint8> (8, 0x80));
++            expect (createReader (wav) == nullptr);
++        }
++
++        {
++            beginTest ("Files with the maximum channel count can be read");
++
++            // 8-bit is the widest depth for which a frame of the maximum channel count fits the block-align field
++            constexpr auto numChannels = std::numeric_limits<uint16>::max();
++            constexpr int numFrames = 2;
++            const auto dataBytes = createInterleavedPattern (numChannels, numFrames);
++
++            const auto wav = createPcmWav (numChannels, 8, (uint32) dataBytes.size(), dataBytes);
++            const auto reader = createReader (wav);
++            expect (reader != nullptr);
++
++            if (reader == nullptr)
++                return;
++
++            expectEquals ((int) reader->numChannels, (int) numChannels);
++            expectEquals (reader->lengthInSamples, (int64) numFrames);
++
++            AudioBuffer<float> result (numChannels, numFrames);
++            expect (reader->read (&result, 0, numFrames, 0, true, true));
++
++            for (const int channel : { 0, 1, (int) numChannels - 1 })
++                for (int frame = 0; frame < numFrames; ++frame)
++                    expect (approximatelyEqual (result.getSample (channel, frame), expectedUnsigned8BitSample (channel, frame)));
++        }
++
++        {
++            beginTest ("Writers are not created for channel counts or frame sizes that the header cannot describe");
++
++            constexpr auto maxChannels = std::numeric_limits<uint16>::max();
++
++            expect (createWriter (0, 8) == nullptr);
++            expect (createWriter (maxChannels + 1, 8) == nullptr);
++            expect (createWriter (maxChannels, 16) == nullptr);
++            expect (createWriter (maxChannels, 8, 96000.0) == nullptr);
++            expect (createWriter (maxChannels, 8) != nullptr);
++        }
++
++        {
++            beginTest ("Implausibly large metadata chunks are skipped");
++
++            const auto wav = createPcm8Wav (2, { 0x80, 0x81 }, [] (OutputStream& out)
++            {
++                out.writeInt (WavFileHelpers::chunkName ("bext"));
++                out.writeInt ((int) 0x80000000);
++            });
++
++            // A stream of unknown length can't reject the chunk for being longer than the stream
++            const auto reader = rawToUniquePtr (WavAudioFormat().createReaderFor (new UnknownLengthInputStream (wav), true));
++            expect (reader != nullptr);
++
++            if (reader != nullptr)
++            {
++                expectEquals (reader->lengthInSamples, (int64) 2);
++                expect (! reader->metadataValues.containsKey (WavAudioFormat::bwavDescription));
++            }
++        }
++
++        {
++            beginTest ("Malformed cue label sub-chunks are not read beyond their LIST chunk");
++
++            const auto wav = createPcm8Wav (2, { 0x80, 0x81 }, [] (OutputStream& out)
++            {
++                out.writeInt (WavFileHelpers::chunkName ("LIST"));
++                out.writeInt (4 + 8 + 2 + 8 + 7 + 1);               // adtl, a truncated label, a valid label and its pad byte
++                out.writeInt (WavFileHelpers::chunkName ("adtl"));
++                out.writeInt (WavFileHelpers::chunkName ("labl"));
++                out.writeInt (2);                                   // too short to hold a cue ID
++                out.writeShort (0);
++                out.writeInt (WavFileHelpers::chunkName ("labl"));
++                out.writeInt (7);
++                out.writeInt (1);
++                out.write ("ab\0", 3);
++                out.writeByte (0);
++
++                out.writeInt (WavFileHelpers::chunkName ("LIST"));
++                out.writeInt (4 + 8);                               // adtl and a note header with no body
++                out.writeInt (WavFileHelpers::chunkName ("adtl"));
++                out.writeInt (WavFileHelpers::chunkName ("note"));
++                out.writeInt (1000);                                // longer than the enclosing chunk
++            });
++
++            const auto reader = createReader (wav);
++            expect (reader != nullptr);
++
++            if (reader != nullptr)
++            {
++                expectEquals (reader->metadataValues["NumCueLabels"], String ("1"));
++                expectEquals (reader->metadataValues["CueLabel0Text"], String ("ab"));
++                expect (! reader->metadataValues.containsKey ("CueNote0Text"));
++            }
++        }
++
++        {
++            beginTest ("A truncated LIST chunk on a stream of unknown length does not hang the reader");
++
++            const auto wav = createPcm8Wav (2, { 0x80, 0x81 }, [] (OutputStream& out)
++            {
++                out.writeInt (WavFileHelpers::chunkName ("LIST"));
++                out.writeInt (100);                                 // claims more than the stream holds
++                out.writeInt (WavFileHelpers::chunkName ("adtl"));
++            });
++
++            const auto reader = rawToUniquePtr (WavAudioFormat().createReaderFor (new UnknownLengthInputStream (wav), true));
++            expect (reader != nullptr);
++
++            if (reader != nullptr)
++                expectEquals (reader->lengthInSamples, (int64) 2);
++        }
+     }
+ 
+ private:
+@@ -2450,6 +2610,14 @@ private:
+         std::unique_ptr<AudioFormatReader> reader;
+     };
+ 
++    // Reads from a block without reporting its length, as a network stream might
++    struct UnknownLengthInputStream final : public MemoryInputStream
++    {
++        explicit UnknownLengthInputStream (const MemoryBlock& mb) : MemoryInputStream (mb, true) {}
++
++        int64 getTotalLength() override { return -1; }
++    };
++
+     MemoryBlock writeToBlock (WavAudioFormat& format, const StringMap& meta)
+     {
+         MemoryBlock mb;
+@@ -2473,26 +2641,34 @@ private:
+         return mb;
+     }
+ 
+-    /*  Creates a minimal 8-bit mono PCM wav file. The declared length of the data chunk may
+-        differ from the number of data bytes actually written, in order to simulate malformed files.
++    /*  Creates a minimal PCM wav file. The declared length of the data chunk may differ from
++        the number of data bytes actually written, in order to simulate malformed files.
+     */
+-    static MemoryBlock createPcm8Wav (uint32 declaredDataLength,
+-                                      const std::vector<uint8>& dataBytes,
+-                                      const std::function<void (OutputStream&)>& appendTrailingChunks = nullptr)
++    static MemoryBlock createPcmWav (uint16 numChannels,
++                                     uint16 bitsPerSample,
++                                     uint32 declaredDataLength,
++                                     const std::vector<uint8>& dataBytes,
++                                     const std::function<void (OutputStream&)>& appendTrailingChunks = nullptr)
+     {
+         using namespace WavFileHelpers;
+ 
++        constexpr int sampleRate = 44100;
++        const auto bytesPerFrame = numChannels * bitsPerSample / 8;
++
++        // The block-align field is 16 bits wide, so this helper can't describe a wider frame
++        jassert (bytesPerFrame <= std::numeric_limits<uint16>::max());
++
+         MemoryOutputStream body;
+         body.writeInt (chunkName ("WAVE"));
+ 
+         body.writeInt (chunkName ("fmt "));
+         body.writeInt (16);
+-        body.writeShort (1);        // WAVE_FORMAT_PCM
+-        body.writeShort (1);        // channels
+-        body.writeInt (44100);      // sample rate
+-        body.writeInt (44100);      // bytes per second
+-        body.writeShort (1);        // block align
+-        body.writeShort (8);        // bits per sample
++        body.writeShort (1);                            // WAVE_FORMAT_PCM
++        body.writeShort ((short) numChannels);
++        body.writeInt (sampleRate);
++        body.writeInt (sampleRate * bytesPerFrame);     // bytes per second
++        body.writeShort ((short) bytesPerFrame);        // block align
++        body.writeShort ((short) bitsPerSample);
+ 
+         body.writeInt (chunkName ("data"));
+         body.writeInt ((int) declaredDataLength);
+@@ -2508,11 +2684,44 @@ private:
+         return out.getMemoryBlock();
+     }
+ 
++    static MemoryBlock createPcm8Wav (uint32 declaredDataLength,
++                                      const std::vector<uint8>& dataBytes,
++                                      const std::function<void (OutputStream&)>& appendTrailingChunks = nullptr)
++    {
++        return createPcmWav (1, 8, declaredDataLength, dataBytes, appendTrailingChunks);
++    }
++
+     static std::unique_ptr<AudioFormatReader> createReader (const MemoryBlock& mb)
+     {
+         return rawToUniquePtr (WavAudioFormat().createReaderFor (new MemoryInputStream (mb, true), true));
+     }
+ 
++    static std::unique_ptr<AudioFormatWriter> createWriter (int numChannels, int bitsPerSample, double sampleRate = 44100.0)
++    {
++        std::unique_ptr<OutputStream> stream = std::make_unique<MemoryOutputStream>();
++
++        return WavAudioFormat().createWriterFor (stream, AudioFormatWriterOptions{}.withSampleRate (sampleRate)
++                                                                                   .withNumChannels (numChannels)
++                                                                                   .withBitsPerSample (bitsPerSample));
++    }
++
++    // Interleaved 8-bit sample data in which each sample identifies its channel and frame.
++    static std::vector<uint8> createInterleavedPattern (int numChannels, int numFrames)
++    {
++        std::vector<uint8> bytes;
++
++        for (int frame = 0; frame < numFrames; ++frame)
++            for (int channel = 0; channel < numChannels; ++channel)
++                bytes.push_back ((uint8) (channel + frame));
++
++        return bytes;
++    }
++
++    static float expectedUnsigned8BitSample (int channel, int frame)
++    {
++        return (float) ((uint8) (channel + frame) - 128) / 128.0f;
++    }
++
+     StringPairArray getMetadataAfterReading (WavAudioFormat& format, const MemoryBlock& mb)
+     {
+         auto reader = rawToUniquePtr (format.createReaderFor (new MemoryInputStream (mb, false), true));
 diff --git a/modules/juce_audio_formats/format/juce_AudioFormatReader.cpp b/modules/juce_audio_formats/format/juce_AudioFormatReader.cpp
-index 12f01901db..fb1af154b4 100644
+index 8e0da109bd..6d6987a70d 100644
 --- a/modules/juce_audio_formats/format/juce_AudioFormatReader.cpp
 +++ b/modules/juce_audio_formats/format/juce_AudioFormatReader.cpp
-@@ -32,6 +32,12 @@
+@@ -32,6 +32,10 @@
    ==============================================================================
  */
  
 +// MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-11-02, by
-+// patches/JUCE/0002-wav-aiff-malformed.patch: the whole of this file is as JUCE 8.0.17-security has it,
-+// JUCE's own fixes 8c0c0d9b25ca and 8493b2c3caae ("AIFF/WAV Audio Format: Fix a crash when
-+// reading files with malformed channel counts", "WAV and AIFF files: Harden metadata
-+// parsing"; in 8.0.17 and 9.0.5), carried on the 8.0.13 Tracktion pins.
++// patches/JUCE/0002-wav-aiff-malformed.patch: JUCE's own fixes 8c0c0d9b25ca and 8493b2c3caae (in 8.0.17 and 9.0.5),
++// cherry-picked from JUCE's develop onto 9.0.4-26, the JUCE Tracktion Engine pins.
 +
  namespace juce
  {
  
-@@ -95,18 +101,21 @@ bool AudioFormatReader::read (int* const* destChannels,
+@@ -95,18 +99,21 @@ bool AudioFormatReader::read (int* const* destChannels,
      if (numSamplesToRead <= 0)
          return true;
  
@@ -709,7 +964,7 @@ index 12f01901db..fb1af154b4 100644
              {
                  if (destChannels[i] != nullptr)
                  {
-@@ -116,13 +125,13 @@ bool AudioFormatReader::read (int* const* destChannels,
+@@ -116,13 +123,13 @@ bool AudioFormatReader::read (int* const* destChannels,
              }
  
              if (lastFullChannel != nullptr)
@@ -726,23 +981,21 @@ index 12f01901db..fb1af154b4 100644
                      zeromem (d, sizeof (int) * originalNumSamplesToRead);
          }
 diff --git a/modules/juce_audio_formats/format/juce_AudioFormatWriter.cpp b/modules/juce_audio_formats/format/juce_AudioFormatWriter.cpp
-index 5b91fbc8ab..24cfc23570 100644
+index 1cf4021637..1b8d9214e8 100644
 --- a/modules/juce_audio_formats/format/juce_AudioFormatWriter.cpp
 +++ b/modules/juce_audio_formats/format/juce_AudioFormatWriter.cpp
-@@ -32,6 +32,12 @@
+@@ -32,6 +32,10 @@
    ==============================================================================
  */
  
 +// MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-11-02, by
-+// patches/JUCE/0002-wav-aiff-malformed.patch: the whole of this file is as JUCE 8.0.17-security has it,
-+// JUCE's own fixes 8c0c0d9b25ca and 8493b2c3caae ("AIFF/WAV Audio Format: Fix a crash when
-+// reading files with malformed channel counts", "WAV and AIFF files: Harden metadata
-+// parsing"; in 8.0.17 and 9.0.5), carried on the 8.0.13 Tracktion pins.
++// patches/JUCE/0002-wav-aiff-malformed.patch: JUCE's own fixes 8c0c0d9b25ca and 8493b2c3caae (in 8.0.17 and 9.0.5),
++// cherry-picked from JUCE's develop onto 9.0.4-26, the JUCE Tracktion Engine pins.
 +
  namespace juce
  {
  
-@@ -91,13 +97,18 @@ bool AudioFormatWriter::writeFromAudioReader (AudioFormatReader& reader,
+@@ -91,13 +95,18 @@ bool AudioFormatWriter::writeFromAudioReader (AudioFormatReader& reader,
                                                int64 startSample,
                                                int64 numSamplesToRead)
  {
@@ -765,7 +1018,7 @@ index 5b91fbc8ab..24cfc23570 100644
  
      if (numSamplesToRead < 0)
          numSamplesToRead = reader.lengthInSamples;
-@@ -106,12 +117,12 @@ bool AudioFormatWriter::writeFromAudioReader (AudioFormatReader& reader,
+@@ -106,12 +115,12 @@ bool AudioFormatWriter::writeFromAudioReader (AudioFormatReader& reader,
      {
          const int numToDo = (int) jmin (numSamplesToRead, (int64) bufferSize);
  
@@ -780,7 +1033,7 @@ index 5b91fbc8ab..24cfc23570 100644
  
              while (*bufferChan != nullptr)
              {
-@@ -126,7 +137,7 @@ bool AudioFormatWriter::writeFromAudioReader (AudioFormatReader& reader,
+@@ -126,7 +135,7 @@ bool AudioFormatWriter::writeFromAudioReader (AudioFormatReader& reader,
              }
          }
  
@@ -789,7 +1042,7 @@ index 5b91fbc8ab..24cfc23570 100644
              return false;
  
          numSamplesToRead -= numToDo;
-@@ -163,13 +174,18 @@ bool AudioFormatWriter::writeFromFloatArrays (const float* const* channels, int
+@@ -163,13 +172,18 @@ bool AudioFormatWriter::writeFromFloatArrays (const float* const* channels, int
      if (numSamples <= 0)
          return true;
  
@@ -811,7 +1064,7 @@ index 5b91fbc8ab..24cfc23570 100644
      const int maxSamples = (int) scratch.size() / numSourceChannels;
  
      for (int i = 0; i < numSourceChannels; ++i)
-@@ -203,15 +219,12 @@ bool AudioFormatWriter::writeFromAudioSampleBuffer (const AudioBuffer<float>& so
+@@ -203,15 +217,12 @@ bool AudioFormatWriter::writeFromAudioSampleBuffer (const AudioBuffer<float>& so
      if (startSample == 0)
          return writeFromFloatArrays (source.getArrayOfReadPointers(), numSourceChannels, numSamples);
  
