@@ -177,6 +177,32 @@ and the verdict, stand.
 The hardware checklist's extra listen at 48 kHz and 512 frames no longer has a measured
 blemish behind it. It stays on the list as a check of the whole path through a real device.
 
+### Re-run on JUCE 9 and Tracktion `develop` (2026-11-02)
+
+Go.dot's JUCE 9 trial moves Tracktion Engine from `13b5132` to `develop` `a5e44996f5f`
+(2026-10-24) and JUCE to the `7ff644f` it pins (9.0.4+26, reporting itself 9.0.5). Same
+command, same Debug build type, same box (`build: Debug`, `juce: JUCE v9.0.5`):
+
+| block | 48 kHz wrap | 48 kHz placed | 96 kHz wrap | 96 kHz placed |
+|---|---|---|---|---|
+| 64   | **1.6e-10** | 0.11 | **7.2e-11** | 0.035 |
+| 128  | **1.6e-10** | 0.11 | **7.2e-11** | 0.035 |
+| 256  | **1.6e-10** | 0.14 | **7.2e-11** | 0.035 |
+| 512  | **1.6e-10** | 0.14 | **7.2e-11** | 0.035 |
+| 1024 | **1.6e-10** | 0.42 | **7.2e-11** | 0.035 |
+
+**The wrap stays exact**: no damaged sample and `join_error_samples` 0 in all ten cells, a
+worst deviation of 4.1e-7 - float rounding, a little above the 1.2e-7 of 2026-09-24, as the
+energy is above 2.8e-11. **The placed boundary is several times cleaner** than it was (about
+1.0 at every block size before): the same 25-33 damaged samples and one silent sample, but a
+worst deviation of 0.24 at 48 kHz and 0.05 at 96 kHz, against 0.49. Tracktion `e42d82f`
+(*launched clips ... clicking before they stop*) is the likely change. `setLooping` still
+reports *it stopped at the end of the first pass and did not come back*. The verdict stands:
+the wrap is the loop.
+
+M17 on the same build: start offsets of 0.5 s, 1.25 s and 2 s land on the sample asked for, 0
+samples out.
+
 ## Status
 
 Answered. `spikes/spike03b_loop_joins/` stays in the tree until Phase 3 closes, like the other
