@@ -1,0 +1,149 @@
+Go.dot patch 0005 for JUCE: a PNG or GIF with impossible numbers is refused before it is decoded.
+
+JUCE's own fixes, in 8.0.17-security (and 9.0.5), taken verbatim from that tag:
+  ceb1b3f0717f "PNGLoader: Validate image dimensions before allocating the decode
+               buffer" (ab9047fb26f2 on develop, Tom Poole, 2026-10-27)
+  3d969a1e0fc3 "GIFLoader: Validate the LZW minimum code size and first code"
+               (b90de9702124 on develop, Tom Poole, 2026-10-26)
+These two files are the same at this pin as at 8.0.16-security, so each is
+8.0.17-security's own, with Go.dot's notice after JUCE's licence block.
+
+The faults: a PNG's width and height sized the decode buffer unchecked, so the
+size could wrap and the decode write past it, and a failed allocation was not
+noticed; a GIF's LZW minimum code size and first code were trusted, indexing
+past the decoder's tables. Go.dot loads pictures through juce::ImageFileFormat
+for image cues (VideoRenderChild.cpp), the media analyser and QLab imports.
+
+What changes for Go.dot: nothing for a real picture; such a file loads as no
+picture, which a cue already reports.
+
+LINE ENDINGS. JUCE stores these files with CRLF in its own repository, so every
+line of the hunks below ends in CRLF and must stay so; .gitattributes keeps this
+file byte for byte (-text), and scripts/patches.py writes it as bytes.
+
+Applied by Go.dot's build, cmake/WfgJucePatches.cmake, in the order
+patches/JUCE/series gives; refreshed from the working tree with
+scripts/patches.py JUCE refresh, which keeps this header. Against JUCE
+37c894f83d37 (8.0.13+7, the JUCE Tracktion Engine 13b5132 pins). Drop it when
+the pin moves to 8.0.17, 9.0.5 or later. The author's decision of 2026-11-02.
+
+diff --git a/modules/juce_graphics/image_formats/juce_GIFLoader.cpp b/modules/juce_graphics/image_formats/juce_GIFLoader.cpp
+index 8d3cf0f681..e92d5cf07c 100644
+--- a/modules/juce_graphics/image_formats/juce_GIFLoader.cpp
++++ b/modules/juce_graphics/image_formats/juce_GIFLoader.cpp
+@@ -32,6 +32,12 @@
+   ==============================================================================
+ */
+ 
++// MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-11-02, by
++// patches/JUCE/0005-png-gif-loaders.patch: the whole of this file is as JUCE 8.0.17-security has it,
++// JUCE's own fixes ab9047fb26f2 and b90de9702124 ("PNGLoader: Validate image dimensions
++// before allocating the decode buffer", "GIFLoader: Validate the LZW minimum code size
++// and first code"; in 8.0.17 and 9.0.5), carried on the 8.0.13 Tracktion pins.
++
+ namespace juce
+ {
+ 
+@@ -230,19 +236,26 @@ private:
+         sp = stack;
+     }
+ 
++    int readFirstCode()
++    {
++        for (;;)
++        {
++            firstcode = oldcode = getCode (codeSize, false);
++
++            if (clearCode < firstcode)
++                return -2;
++
++            if (firstcode != clearCode)
++                return firstcode;
++        }
++    }
++
+     int readLZWByte()
+     {
+         if (fresh)
+         {
+             fresh = false;
+-
+-            for (;;)
+-            {
+-                firstcode = oldcode = getCode (codeSize, false);
+-
+-                if (firstcode != clearCode)
+-                    return firstcode;
+-            }
++            return readFirstCode();
+         }
+ 
+         if (sp > stack)
+@@ -259,8 +272,7 @@ private:
+                 maxCodeSize = 2 * clearCode;
+                 maxCode = clearCode + 2;
+                 sp = stack;
+-                firstcode = oldcode = getCode (codeSize, false);
+-                return firstcode;
++                return readFirstCode();
+             }
+             else if (code == endCode)
+             {
+@@ -365,6 +377,9 @@ private:
+         if (input.read (&c, 1) != 1)
+             return false;
+ 
++        if (8 < c)
++            return false;
++
+         initialise (c);
+ 
+         if (transparent >= 0)
+diff --git a/modules/juce_graphics/image_formats/juce_PNGLoader.cpp b/modules/juce_graphics/image_formats/juce_PNGLoader.cpp
+index 8eaa1f598a..4837691654 100644
+--- a/modules/juce_graphics/image_formats/juce_PNGLoader.cpp
++++ b/modules/juce_graphics/image_formats/juce_PNGLoader.cpp
+@@ -32,6 +32,12 @@
+   ==============================================================================
+ */
+ 
++// MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-11-02, by
++// patches/JUCE/0005-png-gif-loaders.patch: the whole of this file is as JUCE 8.0.17-security has it,
++// JUCE's own fixes ab9047fb26f2 and b90de9702124 ("PNGLoader: Validate image dimensions
++// before allocating the decode buffer", "GIFLoader: Validate the LZW minimum code size
++// and first code"; in 8.0.17 and 9.0.5), carried on the 8.0.13 Tracktion pins.
++
+ namespace juce
+ {
+ 
+@@ -455,11 +461,29 @@ namespace PNGHelpers
+         if (readHeader (in, pngReadStruct, pngInfoStruct, errorJumpBuf,
+                         width, height, bitDepth, colorType, interlaceType))
+         {
++            constexpr auto maxDimension = (png_uint_32) std::numeric_limits<int>::max();
++
++            if (width == 0 || height == 0 || maxDimension < width || maxDimension < height)
++                return Image();
++
++            constexpr size_t bytesPerPixel = 4;
++            constexpr auto maxBytes = std::numeric_limits<size_t>::max();
++
++            if (maxBytes / bytesPerPixel < (size_t) width)
++                return Image();
++
++            const auto lineStride = (size_t) width * bytesPerPixel;
++
++            if (maxBytes / lineStride < (size_t) height || maxBytes / sizeof (png_bytep) < (size_t) height)
++                return Image();
++
+             // load the image into a temp buffer
+-            const size_t lineStride = width * 4;
+             HeapBlock<uint8> tempBuffer (height * lineStride);
+             HeapBlock<png_bytep> rows (height);
+ 
++            if (tempBuffer == nullptr || rows == nullptr)
++                return Image();
++
+             for (size_t y = 0; y < height; ++y)
+                 rows[y] = (png_bytep) (tempBuffer + lineStride * y);
+ 

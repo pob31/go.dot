@@ -234,6 +234,70 @@ TEST_CASE ("toolchain: JUCE carries Go.dot's patches - a String from malformed U
 }
 
 //==============================================================================
+TEST_CASE ("toolchain: JUCE carries Go.dot's patches - a malformed WAV is refused, an XML document reads only itself")
+{
+    /*  patches/JUCE/0002 and 0003: JUCE's own fixes from 8.0.17-security, carried
+        on the 8.0.13 Tracktion pins by the author's decision of 2026-11-02
+        (cmake/WfgJucePatches.cmake). Each check below is one an unpatched JUCE
+        fails quietly, without reading past anything: the faults themselves are
+        not reproduced here. 0004 (zip) and 0005 (PNG, GIF) have no such quiet
+        check; check-pins (g) and the configure's stamp say they are on. */
+
+    // 0002: a reader is made only for a format that holds together. A 12-bit
+    // PCM WAV was taken before - any depth up to 32 was - and is refused now.
+    juce::MemoryOutputStream wav;
+    wav.write ("RIFF", 4);
+    wav.writeInt (36 + 4);
+    wav.write ("WAVEfmt ", 8);
+    wav.writeInt (16);
+    wav.writeShort (1);            // PCM
+    wav.writeShort (1);            // one channel
+    wav.writeInt (44100);
+    wav.writeInt (44100 * 2);
+    wav.writeShort (2);
+    wav.writeShort (12);           // bits per sample
+    wav.write ("data", 4);
+    wav.writeInt (4);
+    wav.writeInt (0);
+
+    juce::WavAudioFormat format;
+    const std::unique_ptr<juce::AudioFormatReader> reader (
+        format.createReaderFor (new juce::MemoryInputStream (wav.getMemoryBlock(), true), true));
+    CHECK_MESSAGE (reader == nullptr,
+                   "a 12-bit WAV was opened: is patches/JUCE/0002-wav-aiff-malformed.patch on?");
+
+    // 0003: elements nested past 256 deep are refused, where the parser used
+    // to recurse once a level for as deep as the document went.
+    juce::String deep;
+
+    for (int i = 0; i < 300; ++i)
+        deep << "<e>";
+
+    for (int i = 0; i < 300; ++i)
+        deep << "</e>";
+
+    juce::XmlDocument deepDocument (deep);
+    CHECK (deepDocument.getDocumentElement() == nullptr);
+    CHECK_MESSAGE (deepDocument.getLastParseError().contains ("nested too deeply"),
+                   "is patches/JUCE/0003-xml-entities-depth.patch on?");
+
+    // 0003: a document read from a file no longer reads the external DTD it
+    // names, which could be any file on the machine.
+    const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                            .getNonexistentChildFile ("wfg-toolchain-xml", {});
+    REQUIRE (folder.createDirectory());
+    REQUIRE (folder.getChildFile ("outside.dtd").replaceWithText ("<!ENTITY secret \"from outside\">"));
+    const auto show = folder.getChildFile ("show.xml");
+    REQUIRE (show.replaceWithText ("<!DOCTYPE doc SYSTEM \"outside.dtd\"><doc>&secret;</doc>"));
+
+    juce::XmlDocument fromFile (show);
+    const auto element = fromFile.getDocumentElement();
+    CHECK_MESSAGE ((element == nullptr || ! element->getAllSubText().contains ("from outside")),
+                   "the document read outside.dtd: is patches/JUCE/0003-xml-entities-depth.patch on?");
+    folder.deleteRecursively();
+}
+
+//==============================================================================
 TEST_CASE ("toolchain: JUCE carries Go.dot's own changes - a touch source may exist on macOS (§125)")
 {
     /*  patches/JUCE-local/0001 (namespace draft §125, BFD): Go.dot's own change

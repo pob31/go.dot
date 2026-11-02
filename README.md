@@ -820,10 +820,12 @@ JUCE is built the same way, with a series in `patches/JUCE/` applied by every
 configure before JUCE is added (`cmake/WfgJucePatches.cmake`; both share
 `cmake/WfgSubmodulePatches.cmake`). It differs in what it may hold: **only fixes
 JUCE has already made** in a later release, taken from JUCE's history as JUCE
-wrote them, carried because the pin stays where Tracktion's is. Today one,
+wrote them, carried because the pin stays where Tracktion's is. Today five:
 JUCE's own fix for a `String` built from malformed UTF-8 overrunning its
 allocation (in 8.0.16 and 9.0.4; the author's decision of 2026-10-14 to carry it
-rather than move ahead of Tracktion). `git status` shows `ThirdParty/JUCE` as
+rather than move ahead of Tracktion), and four from 8.0.17-security, for the
+readers of malformed WAV and AIFF files, XML documents, zip archives and PNG and
+GIF pictures (in 8.0.17 and 9.0.5; the same decision again, 2026-11-02). `git status` shows `ThirdParty/JUCE` as
 modified, `python3 scripts/patches.py JUCE ...` works on it by hand, check (g)
 covers it, and `patches/JUCE/README.md` lists each fix with the release that has
 it. JUCE keeps its sources in CRLF, so its patches do too, byte for byte - see

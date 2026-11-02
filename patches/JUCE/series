@@ -2,3 +2,7 @@
 # (cmake/WfgJucePatches.cmake) and by scripts/patches.py JUCE.
 # One file name per line; a line starting with # is a comment.
 0001-string-malformed-utf8.patch
+0002-wav-aiff-malformed.patch
+0003-xml-entities-depth.patch
+0004-zip-links-sizes.patch
+0005-png-gif-loaders.patch

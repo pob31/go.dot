@@ -1,0 +1,470 @@
+Go.dot patch 0003 for JUCE: an XML document cannot read other files, nest without end, or expand without end.
+
+JUCE's own fixes, in 8.0.17-security (and 9.0.5), taken verbatim from that tag:
+  d383026706fc "XmlDocument: Only load external entities through a
+               caller-supplied InputSource" (f8a5c5d80f3b on develop, Tom Poole, 2026-10-20)
+  9985d048df0b "XmlDocument: Limit entity expansion and element nesting depth"
+               (3342d409111e on develop, Tom Poole, 2026-10-20)
+These two files are the same at this pin as at 8.0.16-security, so each is
+8.0.17-security's own, with Go.dot's notice after JUCE's licence block.
+
+The faults: a document parsed from a File could name any file on the machine as
+its external DTD subset, and the parser read it - so a show file someone sends
+could pull a local file's text into the show it becomes. Elements nested deep
+enough overflowed the stack, one recursion a level, and entities expanded
+without limit (the "billion laughs"). Go.dot parses with XmlDocument show files
+(CanonicalXml.cpp, Bundle.cpp, EphemeralState.cpp), Ableton .als sets
+(AlsReader.cpp), and its own settings and plugin lists.
+
+What changes for Go.dot: nothing it writes. A document is refused when elements
+nest more than 256 deep, entities more than 40, or expansion builds more than
+8 MB that is also 100 times the document; external entities are left unexpanded
+unless the caller supplies an InputSource, which Go.dot never does. Not taken:
+9.0.5's 94410931f43f, "Fix double expansion of escaped references inside entity
+markup", which is not in 8.0.17 - a correctness fix for documents declaring
+entities, and Go.dot's documents declare none.
+
+LINE ENDINGS. JUCE stores these files with CRLF in its own repository, so every
+line of the hunks below ends in CRLF and must stay so; .gitattributes keeps this
+file byte for byte (-text), and scripts/patches.py writes it as bytes.
+
+Applied by Go.dot's build, cmake/WfgJucePatches.cmake, in the order
+patches/JUCE/series gives; refreshed from the working tree with
+scripts/patches.py JUCE refresh, which keeps this header. Against JUCE
+37c894f83d37 (8.0.13+7, the JUCE Tracktion Engine 13b5132 pins). Drop it when
+the pin moves to 8.0.17, 9.0.5 or later. The author's decision of 2026-11-02.
+
+diff --git a/modules/juce_core/xml/juce_XmlDocument.cpp b/modules/juce_core/xml/juce_XmlDocument.cpp
+index 4d40e0b7c7..a2a2919a1f 100644
+--- a/modules/juce_core/xml/juce_XmlDocument.cpp
++++ b/modules/juce_core/xml/juce_XmlDocument.cpp
+@@ -32,6 +32,12 @@
+   ==============================================================================
+ */
+ 
++// MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-11-02, by
++// patches/JUCE/0003-xml-entities-depth.patch: the whole of this file is as JUCE 8.0.17-security has it,
++// JUCE's own fixes f8a5c5d80f3b and 3342d409111e ("XmlDocument: Only load external
++// entities through a caller-supplied InputSource", "XmlDocument: Limit entity expansion
++// and element nesting depth"; in 8.0.17 and 9.0.5), carried on the 8.0.13 Tracktion pins.
++
+ namespace juce
+ {
+ 
+@@ -73,6 +79,7 @@ std::unique_ptr<XmlElement> parseXMLIfTagMatches (const File& file, StringRef re
+ void XmlDocument::setInputSource (InputSource* newSource) noexcept
+ {
+     inputSource.reset (newSource);
++    externalEntitiesAllowed = true;
+ }
+ 
+ void XmlDocument::setEmptyTextElementsIgnored (bool shouldBeIgnored) noexcept
+@@ -80,6 +87,15 @@ void XmlDocument::setEmptyTextElementsIgnored (bool shouldBeIgnored) noexcept
+     ignoreEmptyTextElements = shouldBeIgnored;
+ }
+ 
++namespace XmlParsingLimits
++{
++    constexpr int maxElementNestingDepth = 256,
++                  maxEntityNestingDepth = 40;
++
++    constexpr int64 entityAmplificationThreshold = 8 * 1024 * 1024,
++                    maxEntityAmplification = 100;
++}
++
+ namespace XmlIdentifierChars
+ {
+     static bool isIdentifierCharSlow (juce_wchar c) noexcept
+@@ -175,13 +191,18 @@ const String& XmlDocument::getLastParseError() const noexcept
+ 
+ void XmlDocument::setLastError (const String& desc, const bool carryOn)
+ {
++    if (errorOccurred)
++        return;
++
+     lastError = desc;
+     errorOccurred = ! carryOn;
+ }
+ 
+ String XmlDocument::getFileContents (const String& filename) const
+ {
+-    if (inputSource != nullptr)
++    // A document can name any file or URL as an external entity, so these are only fetched
++    // through an input source that the caller has explicitly supplied
++    if (externalEntitiesAllowed && inputSource != nullptr)
+     {
+         std::unique_ptr<InputStream> in (inputSource->createInputStreamFor (filename.trim().unquoted()));
+ 
+@@ -212,6 +233,10 @@ std::unique_ptr<XmlElement> XmlDocument::parseDocumentElement (String::CharPoint
+     errorOccurred = false;
+     outOfData = false;
+     needToLoadDTD = true;
++    elementNestingDepth = 0;
++    inputLength = (int64) textToParse.length();
++    expandedEntityLength = 0;
++    entitiesBeingExpanded.clear();
+ 
+     if (textToParse.isEmpty())
+     {
+@@ -450,7 +475,18 @@ XmlElement* XmlDocument::readNextElement (const bool alsoParseSubElements)
+                 ++input;
+ 
+                 if (alsoParseSubElements)
++                {
++                    if (XmlParsingLimits::maxElementNestingDepth <= elementNestingDepth)
++                    {
++                        setLastError ("elements nested too deeply", false);
++                        outOfData = true;
++                        return node;
++                    }
++
++                    ++elementNestingDepth;
+                     readChildElements (*node);
++                    --elementNestingDepth;
++                }
+ 
+                 break;
+             }
+@@ -606,7 +642,7 @@ void XmlDocument::readChildElements (XmlElement& parent)
+                 if (c == '&')
+                 {
+                     String entity;
+-                    readEntity (entity);
++                    const auto entityName = readEntity (entity);
+ 
+                     if (entity.startsWithChar ('<') && entity [1] != 0)
+                     {
+@@ -616,9 +652,15 @@ void XmlDocument::readChildElements (XmlElement& parent)
+                         input = entity.getCharPointer();
+                         outOfData = false;
+ 
++                        // The entity's text may contain escaped references back to itself, so it
++                        // stays marked as expanding while the text is parsed
++                        entitiesBeingExpanded.add (entityName);
++
+                         while (auto* n = readNextElement (true))
+                             childAppender.append (n);
+ 
++                        entitiesBeingExpanded.removeString (entityName);
++
+                         input = oldInput;
+                         outOfData = oldOutOfData;
+                     }
+@@ -664,7 +706,7 @@ void XmlDocument::readChildElements (XmlElement& parent)
+     }
+ }
+ 
+-void XmlDocument::readEntity (String& result)
++String XmlDocument::readEntity (String& result)
+ {
+     // skip over the ampersand
+     ++input;
+@@ -731,7 +773,7 @@ void XmlDocument::readEntity (String& result)
+                 if (firstChar == 0)
+                 {
+                     setLastError ("unexpected end of input", true);
+-                    return;
++                    return {};
+                 }
+ 
+                 if (firstChar == ';')
+@@ -753,7 +795,7 @@ void XmlDocument::readEntity (String& result)
+         {
+             setLastError ("illegal escape sequence", true);
+             result += '&';
+-            return;
++            return {};
+         }
+ 
+         result << (juce_wchar) charCode;
+@@ -771,9 +813,13 @@ void XmlDocument::readEntity (String& result)
+         else
+         {
+             input += closingSemiColon + 1;
+-            result += expandExternalEntity (String (entityNameStart, (size_t) closingSemiColon));
++            const String entityName (entityNameStart, (size_t) closingSemiColon);
++            result += expandExternalEntity (entityName);
++            return entityName;
+         }
+     }
++
++    return {};
+ }
+ 
+ String XmlDocument::expandEntity (const String& ent)
+@@ -803,6 +849,9 @@ String XmlDocument::expandEntity (const String& ent)
+ 
+ String XmlDocument::expandExternalEntity (const String& entity)
+ {
++    if (errorOccurred)
++        return {};
++
+     if (needToLoadDTD)
+     {
+         if (dtdText.isNotEmpty())
+@@ -839,6 +888,11 @@ String XmlDocument::expandExternalEntity (const String& entity)
+                      && tokenisedDTD[i].endsWithChar (';'))
+                 {
+                     auto parsed = getParameterEntity (tokenisedDTD[i].substring (1, tokenisedDTD[i].length() - 1));
++                    checkEntityExpansionLimit (parsed);
++
++                    if (errorOccurred)
++                        break;
++
+                     StringArray newToks;
+                     newToks.addTokens (parsed, true);
+ 
+@@ -859,14 +913,29 @@ String XmlDocument::expandExternalEntity (const String& entity)
+         {
+             if (tokenisedDTD[i - 1].equalsIgnoreCase ("<!entity"))
+             {
++                if (entitiesBeingExpanded.contains (entity))
++                {
++                    setLastError ("recursive entity reference", false);
++                    outOfData = true;
++                    return {};
++                }
++
++                if (XmlParsingLimits::maxEntityNestingDepth <= entitiesBeingExpanded.size())
++                {
++                    setLastError ("entities nested too deeply", false);
++                    outOfData = true;
++                    return {};
++                }
++
++                entitiesBeingExpanded.add (entity);
+                 auto ent = tokenisedDTD [i + 1].trimCharactersAtEnd (">").trim().unquoted();
+ 
+                 // check for sub-entities
+                 auto ampersand = ent.indexOfChar ('&');
+ 
+-                while (ampersand >= 0)
++                while (ampersand >= 0 && ! errorOccurred)
+                 {
+-                    auto semiColon = ent.indexOf (i + 1, ";");
++                    auto semiColon = ent.indexOf (ampersand + 1, ";");
+ 
+                     if (semiColon < 0)
+                     {
+@@ -874,16 +943,21 @@ String XmlDocument::expandExternalEntity (const String& entity)
+                         break;
+                     }
+ 
+-                    auto resolved = expandEntity (ent.substring (i + 1, semiColon));
++                    auto resolved = expandEntity (ent.substring (ampersand + 1, semiColon));
+ 
+                     ent = ent.substring (0, ampersand)
+                            + resolved
+                            + ent.substring (semiColon + 1);
+ 
+-                    ampersand = ent.indexOfChar (semiColon + 1, '&');
++                    ampersand = ent.indexOfChar (ampersand + resolved.length(), '&');
+                 }
+ 
+-                return ent;
++                entitiesBeingExpanded.removeString (entity);
++
++                if (! errorOccurred)
++                    checkEntityExpansionLimit (ent);
++
++                return errorOccurred ? String() : ent;
+             }
+         }
+     }
+@@ -892,6 +966,18 @@ String XmlDocument::expandExternalEntity (const String& entity)
+     return entity;
+ }
+ 
++void XmlDocument::checkEntityExpansionLimit (const String& expandedText)
++{
++    expandedEntityLength += (int64) expandedText.length();
++
++    if (XmlParsingLimits::entityAmplificationThreshold < expandedEntityLength
++         && inputLength * XmlParsingLimits::maxEntityAmplification < expandedEntityLength)
++    {
++        setLastError ("entity expansion too large", false);
++        outOfData = true;
++    }
++}
++
+ String XmlDocument::getParameterEntity (const String& entity)
+ {
+     for (int i = 0; i < tokenisedDTD.size(); ++i)
+@@ -912,4 +998,94 @@ String XmlDocument::getParameterEntity (const String& entity)
+     return entity;
+ }
+ 
++//==============================================================================
++#if JUCE_UNIT_TESTS
++
++class XmlDocumentTests final : public UnitTest
++{
++public:
++    XmlDocumentTests()
++        : UnitTest ("XmlDocument", UnitTestCategories::xml)
++    {}
++
++    void runTest() override
++    {
++        testCase ("Entities referenced from other entities are expanded", [&]
++        {
++            const auto xml = parseXML ("<!DOCTYPE doc [<!ENTITY a \"1\"> <!ENTITY b \"&a;2&a;\">]><doc>&b;</doc>");
++            expect (xml != nullptr);
++
++            if (xml != nullptr)
++                expectEquals (xml->getAllSubText(), String ("121"));
++        });
++
++        testCase ("Entities that refer to themselves are rejected", [&]
++        {
++            expectParseFailure ("<!DOCTYPE doc [<!ENTITY a \"x&a;\">]><doc>&a;</doc>", "recursive entity reference");
++            expectParseFailure ("<!DOCTYPE doc [<!ENTITY a \"&b;\"> <!ENTITY b \"<e>&a;</e>\">]><doc>&a;</doc>", "recursive entity reference");
++            expectParseFailure ("<!DOCTYPE doc [<!ENTITY a \"<e>&amp;a;</e>\">]><doc>&a;</doc>", "recursive entity reference");
++
++            // A recoverable error before or after the fatal one, or an attribute value, must not hide it
++            expectParseFailure ("<!DOCTYPE doc [<!ENTITY a \"x&a;\">]><doc>&a;&nope;</doc>", "recursive entity reference");
++            expectParseFailure ("<!DOCTYPE doc [<!ENTITY a \"x&a;\">]><doc>&nope;&a;</doc>", "recursive entity reference");
++            expectParseFailure ("<!DOCTYPE doc [<!ENTITY a \"x&a;\">]><doc y=\"&a;\"/>", "recursive entity reference");
++        });
++
++        testCase ("Deeply nested entity references are rejected", [&]
++        {
++            const auto chainedDocument = [] (int chainLength)
++            {
++                String dtd ("<!ENTITY e0 \"x\">");
++
++                for (int i = 1; i < chainLength; ++i)
++                    dtd << " <!ENTITY e" << i << " \"&e" << (i - 1) << ";\">";
++
++                return "<!DOCTYPE doc [" + dtd + "]><doc>&e" + String (chainLength - 1) + ";</doc>";
++            };
++
++            expect (parseXML (chainedDocument (XmlParsingLimits::maxEntityNestingDepth)) != nullptr);
++            expectParseFailure (chainedDocument (XmlParsingLimits::maxEntityNestingDepth + 1), "entities nested too deeply");
++        });
++
++        testCase ("Entity expansion that grows far beyond the document is rejected", [&]
++        {
++            const auto doublingDocument = [] (int numDoublings)
++            {
++                String dtd ("<!ENTITY e0 \"" + String::repeatedString ("x", 1024) + "\">");
++
++                for (int i = 1; i <= numDoublings; ++i)
++                    dtd << " <!ENTITY e" << i << " \"&e" << (i - 1) << ";&e" << (i - 1) << ";\">";
++
++                return "<!DOCTYPE doc [" + dtd + "]><doc>&e" + String (numDoublings) + ";</doc>";
++            };
++
++            expect (parseXML (doublingDocument (9)) != nullptr);
++            expectParseFailure (doublingDocument (10), "entity expansion too large");
++        });
++
++        testCase ("Deeply nested elements are rejected", [&]
++        {
++            const auto nestedDocument = [] (int depth)
++            {
++                return String::repeatedString ("<e>", depth) + String::repeatedString ("</e>", depth);
++            };
++
++            expect (parseXML (nestedDocument (XmlParsingLimits::maxElementNestingDepth)) != nullptr);
++            expectParseFailure (nestedDocument (XmlParsingLimits::maxElementNestingDepth + 1), "elements nested too deeply");
++        });
++    }
++
++private:
++    void expectParseFailure (const String& documentText, const String& expectedError)
++    {
++        XmlDocument document (documentText);
++        expect (document.getDocumentElement() == nullptr);
++        expectEquals (document.getLastParseError(), expectedError);
++    }
++};
++
++static XmlDocumentTests xmlDocumentTests;
++
++#endif
++
+ }
+diff --git a/modules/juce_core/xml/juce_XmlDocument.h b/modules/juce_core/xml/juce_XmlDocument.h
+index 1c9c7dc28c..885fdf2d20 100644
+--- a/modules/juce_core/xml/juce_XmlDocument.h
++++ b/modules/juce_core/xml/juce_XmlDocument.h
+@@ -32,6 +32,12 @@
+   ==============================================================================
+ */
+ 
++// MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-11-02, by
++// patches/JUCE/0003-xml-entities-depth.patch: the whole of this file is as JUCE 8.0.17-security has it,
++// JUCE's own fixes f8a5c5d80f3b and 3342d409111e ("XmlDocument: Only load external
++// entities through a caller-supplied InputSource", "XmlDocument: Limit entity expansion
++// and element nesting depth"; in 8.0.17 and 9.0.5), carried on the 8.0.13 Tracktion pins.
++
+ namespace juce
+ {
+ 
+@@ -39,8 +45,12 @@ namespace juce
+ /**
+     Parses a text-based XML document and creates an XmlElement object from it.
+ 
+-    The parser will parse DTDs to load external entities but won't
+-    check the document for validity against the DTD.
++    The parser will expand entities that are defined in the document's DTD, but won't
++    check the document for validity against the DTD. External DTD subsets and external
++    parameter entities are only loaded through an input source supplied with
++    setInputSource(). Documents whose elements are nested more than 256 levels deep, or
++    whose entities are nested more than 40 levels deep or expand to many times the size
++    of the document, are rejected as malformed.
+ 
+     e.g.
+     @code
+@@ -121,12 +131,18 @@ public:
+     */
+     const String& getLastParseError() const noexcept;
+ 
+-    /** Sets an input source object to use for parsing documents that reference external entities.
++    /** Sets an input source object to use for reading the document and any external
++        entities that it references.
++
++        Supplying an input source is the only way to enable the loading of external DTD
++        subsets and external parameter entities; a document created from a file or a string
++        will not load them on its own. A document can name any file or URL as an external
++        entity, so an input source used with untrusted documents should restrict what its
++        createInputStreamFor() method will open.
+ 
+-        If the document has been created from a file, this probably won't be needed, but
+-        if you're parsing some text and there might be a DTD that references external
+-        files, you may need to create a custom input source that can retrieve the
+-        other files it needs.
++        The input source is also used to read the document itself if the document was
++        constructed from a file or from an empty string, as any text passed to the
++        constructor takes precedence over it.
+ 
+         The object that is passed-in will be deleted automatically when no longer needed.
+ 
+@@ -163,8 +179,10 @@ private:
+     String::CharPointerType input { nullptr };
+     bool outOfData = false, errorOccurred = false;
+     String lastError, dtdText;
+-    StringArray tokenisedDTD;
+-    bool needToLoadDTD = false, ignoreEmptyTextElements = true;
++    StringArray tokenisedDTD, entitiesBeingExpanded;
++    bool needToLoadDTD = false, ignoreEmptyTextElements = true, externalEntitiesAllowed = false;
++    int elementNestingDepth = 0;
++    int64 inputLength = 0, expandedEntityLength = 0;
+     std::unique_ptr<InputSource> inputSource;
+ 
+     std::unique_ptr<XmlElement> parseDocumentElement (String::CharPointerType, bool outer);
+@@ -176,11 +194,12 @@ private:
+     XmlElement* readNextElement (bool alsoParseSubElements);
+     void readChildElements (XmlElement&);
+     void readQuotedString (String&);
+-    void readEntity (String&);
++    String readEntity (String&);
+ 
+     String getFileContents (const String&) const;
+     String expandEntity (const String&);
+     String expandExternalEntity (const String&);
++    void checkEntityExpansionLimit (const String&);
+     String getParameterEntity (const String&);
+ 
+     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (XmlDocument)
