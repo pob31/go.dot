@@ -91,6 +91,14 @@ else()
     endif()
     add_library(wfg_fuzz_juce_core STATIC "${WFG_FUZZ_JUCE_CORE}"
                                           "${WFG_JUCE_MODULES}/juce_core/juce_core_CompilationTime.cpp")
+    # JUCE 9 compiles its bundled zlib as a C translation unit of its own, where
+    # JUCE 8 had it inside juce_core.cpp: without it the GZIP and zip readers
+    # (AlsReader's .als, the QLab bundle) leave inflate, deflate and crc32
+    # undefined at the link.
+    if(EXISTS "${WFG_JUCE_MODULES}/juce_core/juce_core_zlib.c")
+        enable_language(C)
+        target_sources(wfg_fuzz_juce_core PRIVATE "${WFG_JUCE_MODULES}/juce_core/juce_core_zlib.c")
+    endif()
     target_compile_features(wfg_fuzz_juce_core PRIVATE cxx_std_20)
     target_compile_definitions(wfg_fuzz_juce_core PUBLIC
         NDEBUG=1 JUCE_GLOBAL_MODULE_SETTINGS_INCLUDED=1 JUCE_STANDALONE_APPLICATION=1

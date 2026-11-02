@@ -93,6 +93,7 @@ $SUDO apt-get install -y --no-install-recommends \
     libxcursor-dev \
     libxext-dev \
     libxinerama-dev \
+    libxi-dev \
     libxrandr-dev \
     libxrender-dev \
     libgl-dev \
@@ -139,6 +140,8 @@ $SUDO apt-get install -y --no-install-recommends \
 #   libxcursor-dev       juce_gui_basics
 #   libxext-dev          juce_gui_basics
 #   libxinerama-dev      juce_gui_basics
+#   libxi-dev            juce_gui_basics since JUCE 9: X11/extensions/XInput2.h, for its
+#                        multitouch (libXi.so.6 itself is loaded at run time, as Xinerama is)
 #   libxrandr-dev        juce_gui_basics
 #   libxrender-dev       juce_gui_basics
 #   libgl-dev            juce_opengl (Phase 8a): the video renderer's windows,
