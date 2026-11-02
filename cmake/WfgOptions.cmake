@@ -110,8 +110,12 @@ unset(_wfg_locale_fr_default)
 # while a stale ccache entry or an un-rebuilt wfg_thirdparty.lib can still be
 # linking the PREVIOUS JUCE. Only asking the linked binary what version it is will
 # catch that.
+# FORCE: a pin follows the checkout. Without it a build tree configured before
+# a pin move keeps the old string in its cache, and the runtime check above
+# reports the right JUCE as the wrong one - both ways round, on the NUC farm's
+# trees, 2026-11-02 (a JUCE 9 trial, then main again).
 set(WFG_PIN_JUCE "8.0.13" CACHE STRING
-    "JUCE version pinned by ThirdParty/JUCE; asserted at runtime against SystemStats::getJUCEVersion()")
+    "JUCE version pinned by ThirdParty/JUCE; asserted at runtime against SystemStats::getJUCEVersion()" FORCE)
 
 # Documentation only — there is no runtime counterpart to the check above, and
 # there must not be one. MEASURED THIS PASS: at the v3.2.0 tag,
@@ -121,7 +125,7 @@ set(WFG_PIN_JUCE "8.0.13" CACHE STRING
 # moment they fix it. ToolchainTests.cpp checks the "Tracktion Engine" PREFIX and
 # non-emptiness only.
 set(WFG_PIN_TE "3.5.0-develop" CACHE STRING
-    "Tracktion Engine version pinned by ThirdParty/tracktion_engine (documentation only — see comment)")
+    "Tracktion Engine version pinned by ThirdParty/tracktion_engine (documentation only — see comment)" FORCE)
 
 # ---------------------------------------------------------------------------
 # Packaging
