@@ -76,6 +76,41 @@ if [ ! -t 2 ]; then
     exec >>"$logs/go.dot-$(date +%Y%m%d-%H%M%S).log" 2>&1
 fi
 
+# GNOME'S TOUCHSCREEN GESTURES HELD WHILE GO.DOT IS OPEN. GNOME Shell takes a
+# three-finger swipe or an edge drag away from the window, fingers and all, and
+# no application can say no. spatcore's extension, shared with WFS-DIY, holds
+# those gestures while a registered application has a window open and gives
+# them back after (gnome-shell/gesture-hold.sh). Go.dot registers itself ONCE,
+# on a machine with GNOME Shell and a touchscreen - a desk without one is left
+# as it is - and GNOME loads the extension at the next login, which the
+# notification says. Never a reason not to start: any failure here is ignored.
+# A user who would rather keep the gestures: `gesture-hold.sh unregister Go.dot`
+# and a file named gesture-hold-off in $data, which stops this asking again.
+has_touchscreen() {
+    command -v udevadm >/dev/null 2>&1 || return 1
+    local dev props
+    for dev in /dev/input/event*; do
+        [ -e "$dev" ] || continue
+        # Read whole, then searched: through a pipe, grep -q leaving early would
+        # be udevadm's SIGPIPE, which pipefail reports as a failure.
+        props="$(udevadm info --query=property --name="$dev" 2>/dev/null)" || continue
+        grep -qx 'ID_INPUT_TOUCHSCREEN=1' <<<"$props" && return 0
+    done
+    return 1
+}
+hold="$here/gnome-shell/gesture-hold.sh"
+held="${XDG_CONFIG_HOME:-$HOME/.config}/spatcore/touch/gnome-gesture-hold/Go.dot"
+if [ -x "$hold" ] && [ ! -e "$held" ] && [ ! -e "$data/gesture-hold-off" ] \
+   && command -v gnome-shell >/dev/null 2>&1 && has_touchscreen; then
+    said="$("$hold" register Go.dot 2>&1)" || said=""
+    if [ -n "$said" ]; then
+        echo "go.dot: $said" >&2
+        if command -v notify-send >/dev/null 2>&1; then
+            notify-send --app-name=Go.dot "Go.dot and your touchscreen" "$said" >/dev/null 2>&1 || true
+        fi
+    fi
+fi
+
 # NO --device, deliberately. A bare --device means "the system default" and
 # overrides the interface a show has saved for itself, and the window's New and
 # Open pass every flag on to the show they start - so it would pin every show to

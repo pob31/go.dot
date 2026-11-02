@@ -734,7 +734,10 @@ uninstaller and the `.wfg` file type, so a double-clicked show opens in Go.dot;
 the workflow installs it, checks it and uninstalls it before uploading. Linux
 likewise gets a **.deb** (`scripts/package-linux-deb.sh`): the folder in
 `/opt/go.dot`, `/usr/bin/go.dot`, the menu entry, the icons and the `.wfg` type,
-installed, checked and removed by the workflow the same way. Windows and Linux
+installed, checked and removed by the workflow the same way. On Linux the folder
+also carries `gnome-shell/`, spatcore's GNOME gesture hold: `go.dot.sh` registers
+Go.dot with it once on a machine with a touch screen, and the .deb's `prerm`
+unregisters it for each user on removal. Windows and Linux
 are not signed. `cmake/WfgInstall.cmake` is the list; the extra files
 live in `packaging/`.
 

@@ -109,6 +109,18 @@ tick back into the template, for the performances still to come.
             run it again if you move the folder, and ./wfg associate
             --remove to take it away. The package does this for you.
 
+            A touch screen under GNOME: the desktop's own gestures - a
+            three-finger swipe, a drag from the screen's edge - take your
+            fingers away from any window. On a machine with a touch screen,
+            the first launch registers Go.dot with a small GNOME extension,
+            shared with WFS-DIY, that holds those gestures while Go.dot is
+            open and gives them back after; log out and back in once for
+            GNOME to load it. To keep the gestures instead:
+                gnome-shell/gesture-hold.sh unregister Go.dot
+            and create an empty file ~/.local/share/Go.dot/gesture-hold-off
+            so the launcher does not register it again. Removing the
+            package unregisters Go.dot for everyone who had it.
+
 The web client is served beside the window: the log (or the terminal)
 prints its address (http://localhost:<port>/ui). A tablet on the same network can open it with
 this machine's address in place of localhost.

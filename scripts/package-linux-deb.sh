@@ -30,14 +30,17 @@
 #   /usr/share/applications/go.dot.desktop
 #   /usr/share/mime/packages/go.dot.xml   *.wfg is application/x-go.dot-show
 #   /usr/share/icons/hicolor/NxN/{apps,mimetypes}/   the app and the .wfg page
+#   /opt/go.dot/gnome-shell/              spatcore's GNOME gesture hold, registered per user
 #
 # ONE FOLDER IN /opt, not bin/ lib/ share/: wfg finds console/ and the empty
 # show beside itself, as it does in the tarball, and the package stays the
 # tarball plus what tells the desktop about it. go.dot.sh copies the empty show
 # out to the user's own folder, since /opt is not theirs to save in.
 #
-# NO MAINTAINER SCRIPTS. The desktop, MIME and icon databases are refreshed by
-# the triggers their own packages (desktop-file-utils, shared-mime-info,
+# ONE MAINTAINER SCRIPT, prerm, and only for what no trigger can do: on removal
+# it unregisters Go.dot from spatcore's GNOME gesture hold for each user who
+# had it (below). The desktop, MIME and icon databases are refreshed by the
+# triggers their own packages (desktop-file-utils, shared-mime-info,
 # hicolor-icon-theme) put on those folders, on install and on removal alike.
 #
 # THE SAME FILE TYPE AND ENTRY `wfg associate` writes for one user from a
@@ -157,6 +160,28 @@ Description: cross-platform show control
  with GO, in a window and from a web page beside it. Ready to try, not yet
  ready to run a show - see /opt/go.dot/README.txt.
 EOF
+
+#  --- GNOME's touch gestures given back when Go.dot goes ---------------------
+# The launcher registers Go.dot, per user, with spatcore's shared gesture hold
+# (go.dot.sh). Removing the package unregisters it for every user who has it,
+# as that user - the helper refuses root, as everything it touches is theirs -
+# and the extension itself goes only when no other spatcore app (WFS-DIY) is
+# still registered. Before the files go, so the helper is still there; never on
+# an upgrade, which keeps what each user had. A failure is never the package's.
+cat > "$root/DEBIAN/prerm" <<'EOF'
+#!/bin/sh
+set -e
+[ "$1" = remove ] || exit 0
+hold=/opt/go.dot/gnome-shell/gesture-hold.sh
+[ -x "$hold" ] || exit 0
+getent passwd | while IFS=: read -r user _ uid _ _ home _; do
+    [ "$uid" -ge 1000 ] 2>/dev/null || continue
+    [ -e "$home/.config/spatcore/touch/gnome-gesture-hold/Go.dot" ] || continue
+    runuser -u "$user" -- env HOME="$home" XDG_RUNTIME_DIR="/run/user/$uid" "$hold" unregister Go.dot || true
+done
+exit 0
+EOF
+chmod 755 "$root/DEBIAN/prerm"
 
 dpkg-deb --root-owner-group --build "$root" "$out" >/dev/null
 echo "package-linux-deb: wrote $out"

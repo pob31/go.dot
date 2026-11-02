@@ -157,6 +157,8 @@ jobs:
           ./wfg validate Untitled
           ./wfg validate "Examples/Process examples"
           test -x go.dot.sh
+          test -x gnome-shell/gesture-hold.sh
+          test -f gnome-shell/spatcore-touch@spatcore/extension.js
           test -f console/index.html
           test -f pd/go.avg.pd
           test -f js/godot-help.js
@@ -193,7 +195,8 @@ jobs:
           fi
           /opt/go.dot/wfg --version
           /opt/go.dot/wfg validate /opt/go.dot/Untitled
-          sudo apt-get remove -y go.dot
+          test -x /opt/go.dot/gnome-shell/gesture-hold.sh
+          sudo apt-get remove -y go.dot   # its prerm unregisters nobody here, and must not fail
           test ! -e /opt/go.dot
           test ! -e /usr/share/applications/go.dot.desktop
           test ! -e /usr/bin/go.dot

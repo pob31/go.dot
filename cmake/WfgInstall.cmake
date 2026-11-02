@@ -95,6 +95,15 @@ install(DIRECTORY "${_wfg_packaging}/Untitled/" DESTINATION "${_wfg_res_prefix}U
 # ready-made Pd patches (namespace draft §51, PC.9).
 install(DIRECTORY "${_wfg_packaging}/Examples/" DESTINATION "${_wfg_res_prefix}Examples" COMPONENT wfg)
 
+# GNOME Shell's touchscreen gestures held while Go.dot is open, on Linux: the
+# extension every spatcore app shares and the helper that registers an app
+# with it (spatcore PR #34). go.dot.sh registers Go.dot on a machine with a
+# touchscreen; the .deb's prerm unregisters it. The helper keeps its exec bit.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    install(DIRECTORY "${PROJECT_SOURCE_DIR}/ThirdParty/spatcore/controllers/touch/linux/gnome-shell/"
+            DESTINATION "gnome-shell" USE_SOURCE_PERMISSIONS COMPONENT wfg)
+endif()
+
 # Beside the app on macOS (the DMG's window), beside the binary elsewhere. The
 # two Try it out guides are the author's for testers, in English and in French;
 # README.txt points to them.
