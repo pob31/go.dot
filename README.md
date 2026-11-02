@@ -774,8 +774,8 @@ live in `packaging/`.
 
 | Dependency | Version | Commit |
 |---|---|---|
-| JUCE | 8.0.13+7 (on `develop`), carrying five fixes from 8.0.16 and 8.0.17 (below) | `37c894f83d379179b2070d437ccd0f1cd9af9576` |
-| Tracktion Engine | develop (3.5.0) | `13b51326693e3227ddef91b224114d12af6433ce` |
+| JUCE | 9.0.4+26 (on `develop`; it reports itself 9.0.5), carrying four fixes from 9.0.5 (below) | `7ff644f65d7daa1428c34b9738ebb5c449dc9172` |
+| Tracktion Engine | develop (3.5.0), 2026-10-24 | `a5e44996f5f08dfa6af5f5d02d900fb3cfa37422` |
 | juce_simpleweb (the OSCQuery server's HTTP and WebSocket; the author's fork) | `pob31/juce_simpleweb` | `b72ec947548654cdd0a7e72b71ab5826fe574847` |
 | spatcore (the author's shared control-plane code; on the Mac its touch panel reader too) | main, after PR #34 | `002fc8b7d94cc6975c7bd8a2d2b4a4a8682307b3` |
 | hidapi (the SpaceMouse, the Stream Decks) | 0.15.0 | `d6b2a974608dec3b76fb1e36c189f22b9cf3650c` |
@@ -823,12 +823,11 @@ JUCE is built the same way, with a series in `patches/JUCE/` applied by every
 configure before JUCE is added (`cmake/WfgJucePatches.cmake`; both share
 `cmake/WfgSubmodulePatches.cmake`). It differs in what it may hold: **only fixes
 JUCE has already made** in a later release, taken from JUCE's history as JUCE
-wrote them, carried because the pin stays where Tracktion's is. Today five:
-JUCE's own fix for a `String` built from malformed UTF-8 overrunning its
-allocation (in 8.0.16 and 9.0.4; the author's decision of 2026-10-14 to carry it
-rather than move ahead of Tracktion), and four from 8.0.17-security, for the
-readers of malformed WAV and AIFF files, XML documents, zip archives and PNG and
-GIF pictures (in 8.0.17 and 9.0.5; the same decision again, 2026-11-02). `git status` shows `ThirdParty/JUCE` as
+wrote them, carried because the pin stays where Tracktion's is. Today four,
+JUCE develop's own commits after the pin, for the readers of malformed WAV and
+AIFF files, XML documents, zip archives and PNG and GIF pictures (in 8.0.17 and
+9.0.5; the author's decision of 2026-11-02 to carry them rather than move ahead
+of Tracktion). `git status` shows `ThirdParty/JUCE` as
 modified, `python3 scripts/patches.py JUCE ...` works on it by hand, check (g)
 covers it, and `patches/JUCE/README.md` lists each fix with the release that has
 it. JUCE keeps its sources in CRLF, so its patches do too, byte for byte - see

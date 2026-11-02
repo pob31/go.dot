@@ -1,12 +1,12 @@
 Go.dot patch 0003 for JUCE: an XML document cannot read other files, nest without end, or expand without end.
 
-JUCE's own fixes, in 8.0.17-security (and 9.0.5), taken verbatim from that tag:
+JUCE's own fixes, in 8.0.17-security and 9.0.5, cherry-picked from JUCE's develop:
   d383026706fc "XmlDocument: Only load external entities through a
                caller-supplied InputSource" (f8a5c5d80f3b on develop, Tom Poole, 2026-10-20)
   9985d048df0b "XmlDocument: Limit entity expansion and element nesting depth"
                (3342d409111e on develop, Tom Poole, 2026-10-20)
-These two files are the same at this pin as at 8.0.16-security, so each is
-8.0.17-security's own, with Go.dot's notice after JUCE's licence block.
+Each develop commit applies cleanly to this pin (9.0.4+26, which they follow),
+with Go.dot's notice after JUCE's licence block.
 
 The faults: a document parsed from a File could name any file on the machine as
 its external DTD subset, and the parser read it - so a show file someone sends

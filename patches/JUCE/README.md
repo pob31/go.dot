@@ -10,7 +10,8 @@ and carried here instead. The author's decision of 2026-10-14, for the first of
 them: rather than move to JUCE 9.0.4 ahead of Tracktion, or to 8.0.16 and its two
 releases' worth of other changes, carry the one fix. The same again on 2026-11-02 for
 8.0.17-security's fixes Go.dot reaches (0002-0005): carried, rather than moving
-the pin ahead of Tracktion's.
+the pin ahead of Tracktion's. 0001 went when the pin moved to 9.0.4+26 with
+Tracktion's develop, which has it; 0002-0005 are now JUCE develop's own commits.
 
 **What belongs here, and what does not.** A JUCE patch is JUCE's own commit, taken
 as JUCE wrote it, plus Go.dot's notice. A change of Go.dot's own to JUCE is not
@@ -57,7 +58,6 @@ the same commit.
 
 | Patch | Since | JUCE has it from | What |
 |---|---|---|---|
-| `0001-string-malformed-utf8.patch` | 2026-10-14 | 8.0.16, 9.0.4 | JUCE's `330ef16fa0d0`, "String: Fix allocation sizes for malformed data": a `String` built from malformed UTF-8 was filled with more bytes than it was allocated. Go.dot builds such strings from every WebSocket message the OSCQuery server receives, from show files, and from text cue words an OSC message can set. |
 | `0002-wav-aiff-malformed.patch` | 2026-11-02 | 8.0.17, 9.0.5 | JUCE's `8c0c0d9b25ca` and `8493b2c3caae`: a WAV or AIFF with a malformed channel count made a reader with billions of channels, a wide frame read past a stack buffer, and metadata chunks were read with lengths taken from the file. Every sound Go.dot is given goes through these readers. A WAV or AIFF that is not 8, 16, 24 or 32 bits is now refused as not audio. |
 | `0003-xml-entities-depth.patch` | 2026-11-02 | 8.0.17, 9.0.5 | JUCE's `f8a5c5d80f3b` and `3342d409111e`: a document parsed from a file could read any other file as its external DTD, and nesting or entity expansion had no limit. Show files, Ableton sets and settings are parsed this way. |
 | `0004-zip-links-sizes.patch` | 2026-11-02 | 8.0.17, 9.0.5 | JUCE's `31b3b680639c` and `2303b551cf51`: unzipping followed links out of the target folder and trusted entries' sizes. Go.dot unzips Pd patch archives and the ffmpeg it downloads. |

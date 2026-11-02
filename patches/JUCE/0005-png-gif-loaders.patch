@@ -1,12 +1,12 @@
 Go.dot patch 0005 for JUCE: a PNG or GIF with impossible numbers is refused before it is decoded.
 
-JUCE's own fixes, in 8.0.17-security (and 9.0.5), taken verbatim from that tag:
+JUCE's own fixes, in 8.0.17-security and 9.0.5, cherry-picked from JUCE's develop:
   ceb1b3f0717f "PNGLoader: Validate image dimensions before allocating the decode
                buffer" (ab9047fb26f2 on develop, Tom Poole, 2026-10-27)
   3d969a1e0fc3 "GIFLoader: Validate the LZW minimum code size and first code"
                (b90de9702124 on develop, Tom Poole, 2026-10-26)
-These two files are the same at this pin as at 8.0.16-security, so each is
-8.0.17-security's own, with Go.dot's notice after JUCE's licence block.
+Each develop commit applies cleanly to this pin (9.0.4+26, which they follow),
+with Go.dot's notice after JUCE's licence block.
 
 The faults: a PNG's width and height sized the decode buffer unchecked, so the
 size could wrap and the decode write past it, and a failed allocation was not

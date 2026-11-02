@@ -1,12 +1,12 @@
 Go.dot patch 0004 for JUCE: unzipping cannot write outside its folder or past an entry's declared size.
 
-JUCE's own fixes, in 8.0.17-security (and 9.0.5), taken verbatim from that tag:
+JUCE's own fixes, in 8.0.17-security and 9.0.5, cherry-picked from JUCE's develop:
   d670f9a09734 "ZipFile: Confine symbolic links to the target directory and
                reject oversized entries" (31b3b680639c on develop, Tom Poole, 2026-10-20)
   a5c72f1ed8c4 "ZipFile: Check for a symbolic parent before deleting an existing
                target file" (2303b551cf51 on develop, Tom Poole, 2026-11-02)
-These two files are the same at this pin as at 8.0.16-security, so each is
-8.0.17-security's own, with Go.dot's notice after JUCE's licence block.
+Each develop commit applies cleanly to this pin (9.0.4+26, which they follow),
+with Go.dot's notice after JUCE's licence block.
 
 The faults: an archive could hold a symbolic link pointing anywhere on the
 machine, and a later entry written through it landed there; an entry could hold

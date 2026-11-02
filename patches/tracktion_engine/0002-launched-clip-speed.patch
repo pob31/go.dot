@@ -16,14 +16,15 @@ rebuilt in the middle of a change of speed needs nothing carried across it.
 
 - WaveNodeRealTime reads the stretch of source the speed says; Tracktion's own
   per-block ratio then drives its resampler or its time-stretcher.
-- SlotControlNode ends a clip where its SOURCE has played the clip's length,
-  and a slot rebuilt while its clip plays carries on playing it: a fresh slot
-  told its reader the playhead had jumped, which at any ratio but one is a
-  jump of a fraction of a sample - a faint tick at every arm of another cue.
-  It carries the offset the clip was launched at too (2026-10-14): carrying
-  only that it played, its first block still found the offset changed and took
-  it for a retrigger, and the wave node faded that block in from its last
-  sample over 40 samples - a ramp in every cue playing at every arm.
+- SlotControlNode ends a clip where its SOURCE has played the clip's length.
+  Until 2026-11-02 it also carried a playing slot across a graph rebuild -
+  that it played, and the offset it was launched at - against a tick and a
+  40-sample ramp at every arm of another cue; Tracktion's own e42d82f now
+  shares that state with the node it replaces, so that hunk went.
+- EditNodeBuilder keeps a launched clip's content range open when its handle
+  has a speed source (2026-11-02): Tracktion's e42d82f bounds a one-shot to its
+  length in the Edit's beats, which at half the speed cut a cue off half way
+  through its file. Its SlotControlNode ends it where its source does.
 - A resampled read is faded to silence as its speed nears nought (full at 0.05,
   silent at 0.01, Tracktion's own tape-stop and slowest-clip numbers) and not
   read at all below 0.01; a stretched read at nought is fed nothing and keeps
@@ -121,7 +122,7 @@ section 5(a)).
 Applied by Go.dot's build, cmake/WfgTracktionPatches.cmake, in the order
 patches/tracktion_engine/series gives; refreshed from the working tree with
 scripts/te-patches.py refresh, which keeps this header. Against Tracktion
-Engine 13b5132 (2026-09-23). Namespace draft section 22.3, decisions DQ-DX.
+Engine a5e44996f5f (develop, 2026-10-24); first made against 13b5132 (2026-09-23). Namespace draft section 22.3, decisions DQ-DX.
 
 diff --git a/modules/tracktion_engine/3rd_party/signalsmith-stretch/signalsmith-stretch.h b/modules/tracktion_engine/3rd_party/signalsmith-stretch/signalsmith-stretch.h
 index cd13f2e98b8..c175ff9e5c7 100644

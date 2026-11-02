@@ -1,12 +1,12 @@
 Go.dot patch 0002 for JUCE: a malformed WAV or AIFF file is refused, not read past its buffers.
 
-JUCE's own fixes, in 8.0.17-security (and 9.0.5), taken verbatim from that tag:
+JUCE's own fixes, in 8.0.17-security and 9.0.5, cherry-picked from JUCE's develop:
   62ee628181a5 "AIFF/WAV Audio Format: Fix a crash when reading files with
                malformed channel counts" (8c0c0d9b25ca on develop, Tom Poole, 2026-10-19)
   f8121f670878 "WAV and AIFF files: Harden metadata parsing"
                (8493b2c3caae on develop, Tom Poole, 2026-10-20)
-These four files are the same at this pin as at 8.0.16-security, so each is
-8.0.17-security's own, with Go.dot's notice after JUCE's licence block.
+Each develop commit applies cleanly to this pin (9.0.4+26, which they follow),
+with Go.dot's notice after JUCE's licence block.
 
 The faults: a channel count read from the file was sign-extended, so a header
 saying 32768 channels or more made a reader with four billion of them, and a
