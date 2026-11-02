@@ -922,13 +922,13 @@ namespace wfg::client::ui
                                         .withMessage ("Everything changed since then is thrown away, "
                                                       "and undo cannot bring it back: reverting "
                                                       "clears the undo history as well.")
-                                        .withButton ("Revert")
-                                        .withButton ("Keep editing")
+                                        .withButton ("Revert", 1)
+                                        .withButton ("Keep editing", 0)
                                         .withAssociatedComponent (this),
                                       [safe = juce::Component::SafePointer<TransportComponent> (this)]
                                       (int result)
                                       {
-                                          // Two buttons: the first answers 1 (AlertWindow::show's table).
+                                          // The first button answers 1, the code it is given above.
                                           if (result == 1 && safe != nullptr && safe->actions.revert)
                                               safe->actions.revert();
                                       });

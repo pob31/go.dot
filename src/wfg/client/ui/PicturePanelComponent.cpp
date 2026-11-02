@@ -847,8 +847,8 @@ namespace wfg::client::ui
                                                 .withMessage ("Its files are deleted from the show's fonts folder. Its text cues"
                                                               " then draw in the font of that name each machine has, or in the"
                                                               " system's sans-serif where there is none.")
-                                                .withButton ("Take it out")
-                                                .withButton ("Keep it")
+                                                .withButton ("Take it out", 1)
+                                                .withButton ("Keep it", 0)
                                                 .withAssociatedComponent (this),
                                               [safe = juce::Component::SafePointer<PicturePanelComponent> (this), family] (int result)
                                               {
@@ -1311,8 +1311,8 @@ namespace wfg::client::ui
                                             .withMessage (juce::String::fromUTF8 (job.detail.c_str())
                                                           + ": the font's licence restricts carrying it in a show. A show given"
                                                             " to somebody else takes its fonts with it.")
-                                            .withButton ("Carry it")
-                                            .withButton ("Leave it")
+                                            .withButton ("Carry it", 1)
+                                            .withButton ("Leave it", 0)
                                             .withAssociatedComponent (this),
                                           [safe = juce::Component::SafePointer<PicturePanelComponent> (this), verb, subject] (int result)
                                           {

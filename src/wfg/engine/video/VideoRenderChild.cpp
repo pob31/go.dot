@@ -1135,7 +1135,7 @@ namespace wfg::video
                 covering = display;
 
                 context.setRenderer (this);
-                context.setOpenGLVersionRequired (juce::OpenGLContext::openGL3_2);
+                context.setPreferredVersion ({ 3, 2 });   // 3.2 Core profile
                 context.setComponentPaintingEnabled (false);
                 context.setContinuousRepainting (true);
                 context.setSwapInterval (1);

@@ -3930,8 +3930,8 @@ namespace wfg::client::ui
                             .withMessage ("Elgato's Stream Deck app holds every deck while it runs, so Go.dot"
                                           " cannot drive this one. Close the app? Its own profiles come back"
                                           " when it is started again.")
-                            .withButton ("Close the app")
-                            .withButton ("Leave it")
+                            .withButton ("Close the app", 1)
+                            .withButton ("Leave it", 0)
                             .withAssociatedComponent (this),
                         [safe = juce::Component::SafePointer<DeckPanel> (this)] (int result)
                         {
@@ -4316,8 +4316,8 @@ namespace wfg::client::ui
                             .withMessage ("3Dconnexion's driver is holding the SpaceMouse, so Go.dot cannot read"
                                           " it. Close the driver? Other programs that use the puck through it"
                                           " will lose it until it is started again.")
-                            .withButton ("Close the driver")
-                            .withButton ("Leave it")
+                            .withButton ("Close the driver", 1)
+                            .withButton ("Leave it", 0)
                             .withAssociatedComponent (this),
                         [safe = juce::Component::SafePointer<SurfacesPage> (this)] (int result)
                         {
@@ -8353,17 +8353,20 @@ namespace wfg::client::ui
 
                 if (! chosen.empty() && chosen == displayUnderThisWindow())
                 {
-                    juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::WarningIcon,
-                                                        "This display shows Go.dot",
-                                                        juce::String ("An output on ") + juce::String (chosen)
-                                                          + " covers this window - the GO button with it - for as"
-                                                            " long as the output is switched on. Choose it anyway?",
-                                                        "Choose it", "Cancel", this,
-                                                        juce::ModalCallbackFunction::create ([choose] (int result)
-                                                        {
-                                                            if (result != 0)
-                                                                choose();
-                                                        }));
+                    juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                                    .withIconType (juce::MessageBoxIconType::WarningIcon)
+                                                    .withTitle ("This display shows Go.dot")
+                                                    .withMessage (juce::String ("An output on ") + juce::String (chosen)
+                                                                    + " covers this window - the GO button with it - for as"
+                                                                      " long as the output is switched on. Choose it anyway?")
+                                                    .withButton ("Choose it", 1)
+                                                    .withButton ("Cancel", 0)
+                                                    .withAssociatedComponent (this),
+                                                  [choose] (int result)
+                                                  {
+                                                      if (result != 0)
+                                                          choose();
+                                                  });
                     return;
                 }
 

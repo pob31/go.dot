@@ -362,8 +362,34 @@ index 42bf5780a19..911e5380afc 100644
  };
  
  } // namespace tracktion::inline engine
+diff --git a/modules/tracktion_engine/playback/graph/tracktion_EditNodeBuilder.cpp b/modules/tracktion_engine/playback/graph/tracktion_EditNodeBuilder.cpp
+index e46f6c79169..07dc0de2b17 100644
+--- a/modules/tracktion_engine/playback/graph/tracktion_EditNodeBuilder.cpp
++++ b/modules/tracktion_engine/playback/graph/tracktion_EditNodeBuilder.cpp
+@@ -32,9 +32,18 @@ namespace
+         puts the clip's start. A one-shot's ends at its length, so when it carries on to
+         a queued relaunch, nothing past its end plays.
+     */
+-    BeatRange getLauncherContentRange (const Clip& clip)
+-    {
+-        if (clip.isLooping())
++    // MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-11-02, by
++    // patches/tracktion_engine/0002-launched-clip-speed.patch: a clip given a speed plays
++    // its content over as many of the Edit's beats as its speed takes, which no range set
++    // here can know - a speed changes while it plays, down to nought, where it takes for
++    // ever. Its SlotControlNode ends it where its source has played the clip's length, so
++    // its range stays open, as a looping clip's does. (Taken as Tracktion has it, half the
++    // speed cut a one-shot off half way through its file.)
++    BeatRange getLauncherContentRange (Clip& clip)
++    {
++        const auto launchHandle = clip.getLaunchHandle();
++
++        if (clip.isLooping() || (launchHandle != nullptr && launchHandle->getSpeedSource() != nullptr))
+             return { 0_bp, BeatPosition::fromBeats (std::numeric_limits<double>::max()) };
+ 
+         return { 0_bp, clip.getLengthInBeats() };
 diff --git a/modules/tracktion_engine/playback/graph/tracktion_SlotControlNode.cpp b/modules/tracktion_engine/playback/graph/tracktion_SlotControlNode.cpp
-index 5beb171f4cc..f98f8632aab 100644
+index 5beb171f4cc..97b9a36f5b2 100644
 --- a/modules/tracktion_engine/playback/graph/tracktion_SlotControlNode.cpp
 +++ b/modules/tracktion_engine/playback/graph/tracktion_SlotControlNode.cpp
 @@ -12,6 +12,23 @@
@@ -402,50 +428,7 @@ index 5beb171f4cc..f98f8632aab 100644
          if (auto mn = dynamic_cast<LoopingMidiNode*> (n))
              midiNode = mn;
      }
-@@ -98,10 +120,42 @@ void SlotControlNode::prepareToPlay (const tracktion::graph::PlaybackInitialisat
-         return;
- 
-     if (auto oldGraph = info.nodeGraphToReplace)
-+    {
-         if (auto oldNode = findNodeWithID<SlotControlNode> (*oldGraph, (size_t) slotID.getRawID()))
-+        {
-             if (oldNode->lastSamples && oldNode->lastSamples->size() == numChans)
-                 lastSamples = oldNode->lastSamples;
- 
-+            // MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-09-28, by
-+            // patches/tracktion_engine/0002-launched-clip-speed.patch: a slot rebuilt while
-+            // its clip plays carries on playing it. Starting from `wasPlaying = false`, its
-+            // first block told the clip's nodes the playhead had jumped, and the reader reset:
-+            // exact at a ratio of one, where the prime re-reads the same samples, but at any
-+            // other ratio a jump of a fraction of a sample - a faint tick in a sped cue every
-+            // time any other cue is armed, since arming rebuilds the graph.
-+            wasPlaying = oldNode->wasPlaying;
-+
-+            // MODIFIED BY GO.DOT, 2026-10-14 (patch 0002): and it carries on from the offset
-+            // its clip was launched at. Carrying `wasPlaying` alone left `lastOffset` at
-+            // nought, so the first block of every rebuild still found the offset changed and
-+            // took it for a retrigger: it told the clip's nodes the playhead had jumped, and
-+            // the wave node, seeing a jump that was not the start of a loop, held its last
-+            // sample and faded the block in from it over 40 samples - a ramp in every cue
-+            // playing whenever any other cue was armed, a cycle and a half of a 1 kHz tone
-+            // bent out of shape (blackbox.timegroup, TG.12's CI run, part 2). The clip's nodes
-+            // are told the offset here, before they play: a wave node that kept its state
-+            // already has it and is not touched, and one built anew learns it as it would
-+            // have on that first block, fading in as a new reader should.
-+            if (wasPlaying)
-+            {
-+                lastOffset = oldNode->lastOffset;
-+
-+                for (auto n : offsetNodes)
-+                    n->setDynamicOffsetBeats (lastOffset);
-+            }
-+        }
-+    }
-+
-     if (lastSamples)
-         return;
- 
-@@ -142,11 +196,18 @@ void SlotControlNode::process (ProcessContext& pc)
+@@ -142,11 +164,18 @@ void SlotControlNode::process (ProcessContext& pc)
              if (auto playedMonotonicRange = launchHandle->getPlayedMonotonicRange())
              {
                  const auto blockRange = MonotonicBeatRange { { syncRange.start.monotonicBeat.v, syncRange.end.monotonicBeat.v } };
@@ -468,7 +451,7 @@ index 5beb171f4cc..f98f8632aab 100644
              }
          }
  
-@@ -161,9 +222,11 @@ void SlotControlNode::process (ProcessContext& pc)
+@@ -161,9 +190,11 @@ void SlotControlNode::process (ProcessContext& pc)
                  && ! splitStatus.playing1 && splitStatus.playing2)
              {
                  const auto blockRange = MonotonicBeatRange { { syncRange.start.monotonicBeat.v, syncRange.end.monotonicBeat.v } };

@@ -3144,17 +3144,18 @@ namespace wfg::client
                     return;
                 }
 
-                juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::WarningIcon,
-                                                    "Remove the " + juce::String (cart ? "cart" : "cue list"),
-                                                    "Remove the " + what + " and the " + juce::String (static_cast<int> (members))
-                                                      + (members == 1 ? " cue" : " cues") + " in it? Undo brings them back.",
-                                                    "Remove", "Cancel", nullptr,
-                                                    juce::ModalCallbackFunction::create (
-                                                        [remove, safe = juce::Component::SafePointer<ui::MainWindow> (window.get())] (int result)
-                                                        {
-                                                            if (safe != nullptr && result != 0)
-                                                                remove();
-                                                        }));
+                juce::AlertWindow::showAsync (juce::MessageBoxOptions()
+                                                .withIconType (juce::MessageBoxIconType::WarningIcon)
+                                                .withTitle ("Remove the " + juce::String (cart ? "cart" : "cue list"))
+                                                .withMessage ("Remove the " + what + " and the " + juce::String (static_cast<int> (members))
+                                                                + (members == 1 ? " cue" : " cues") + " in it? Undo brings them back.")
+                                                .withButton ("Remove", 1)
+                                                .withButton ("Cancel", 0),
+                                              [remove, safe = juce::Component::SafePointer<ui::MainWindow> (window.get())] (int result)
+                                              {
+                                                  if (safe != nullptr && result != 0)
+                                                      remove();
+                                              });
             }
 
             bool cueNeedsStale = true;
@@ -4094,8 +4095,8 @@ namespace wfg::client
                                                 .withIconType (juce::MessageBoxIconType::QuestionIcon)
                                                 .withTitle ("Use " + source.getFileName() + "?")
                                                 .withMessage ("This cue plays " + juce::String (already) + ".")
-                                                .withButton ("Replace")
-                                                .withButton ("Leave it")
+                                                .withButton ("Replace", 1)
+                                                .withButton ("Leave it", 0)
                                                 .withAssociatedComponent (window.get()),
                                               [safe = juce::Component::SafePointer<ui::MainWindow> (window.get()),
                                                this, cueId, source] (int result)
@@ -5056,8 +5057,8 @@ namespace wfg::client
                                                 .withMessage ("Close " + named + ". Their running cues stop. A show with "
                                                               "changes not saved asks in its own window first, and a "
                                                               "locked show stays open.")
-                                                .withButton (others.size() == 1 ? "Close it" : "Close them")
-                                                .withButton ("Cancel")
+                                                .withButton (others.size() == 1 ? "Close it" : "Close them", 1)
+                                                .withButton ("Cancel", 0)
                                                 .withAssociatedComponent (window.get()),
                                               [this, safe = juce::Component::SafePointer<ui::MainWindow> (window.get())] (int answer)
                                               {
@@ -5159,9 +5160,9 @@ namespace wfg::client
                                                 .withTitle ("Save this performance first?")
                                                 .withMessage ("What goes back into the show's template is read from what is "
                                                               "saved, and this performance has changes that are not.")
-                                                .withButton ("Save, then review")
-                                                .withButton ("Review what is saved")
-                                                .withButton ("Cancel")
+                                                .withButton ("Save, then review", 1)
+                                                .withButton ("Review what is saved", 2)
+                                                .withButton ("Cancel", 0)
                                                 .withAssociatedComponent (window.get()),
                                               [this, afterwards, safe = juce::Component::SafePointer<ui::MainWindow> (window.get())] (int answer)
                                               {
@@ -5250,9 +5251,9 @@ namespace wfg::client
                                                     .withMessage ("Only this performance has " + named
                                                                   + ". Copy them into the show's media, so every performance "
                                                                     "made from the template has them - or bring the cues without them.")
-                                                    .withButton ("Copy them")
-                                                    .withButton ("Without them")
-                                                    .withButton ("Cancel")
+                                                    .withButton ("Copy them", 1)
+                                                    .withButton ("Without them", 2)
+                                                    .withButton ("Cancel", 0)
                                                     .withAssociatedComponent (templateReview.get()),
                                                   [this, picks, afterwards] (int answer)
                                                   {
@@ -6517,9 +6518,9 @@ namespace wfg::client
                                                                     : "This performance differs from " + showAroundThisDocument()
                                                                       + "'s template in " + juce::String (static_cast<int> (comparison.changes.size()))
                                                                       + (comparison.changes.size() == 1 ? " place." : " places."))
-                                                .withButton (dirty ? "Save, then review..." : "Review the changes...")
-                                                .withButton ("Close without")
-                                                .withButton ("Cancel")
+                                                .withButton (dirty ? "Save, then review..." : "Review the changes...", 1)
+                                                .withButton ("Close without", 2)
+                                                .withButton ("Cancel", 0)
                                                 .withAssociatedComponent (window.get()),
                                               [this, ask, safe = juce::Component::SafePointer<ui::MainWindow> (window.get())] (int answer)
                                               {
@@ -6548,7 +6549,7 @@ namespace wfg::client
                                                     .withIconType (juce::MessageBoxIconType::InfoIcon)
                                                     .withTitle ("The show is locked")
                                                     .withMessage ("Unlock it before closing the window.")
-                                                    .withButton ("OK")
+                                                    .withButton ("OK", 0)
                                                     .withAssociatedComponent (window.get()),
                                                   [] (int) {});
                     return;
@@ -6574,9 +6575,9 @@ namespace wfg::client
                                                     .withTitle ("Save the changes to " + juce::String (last.show) + " before closing?")
                                                     .withMessage ("Running cues will stop. Closing without saving throws away "
                                                                   "every change since the show was last saved.")
-                                                    .withButton ("Save and close")
-                                                    .withButton ("Close without saving")
-                                                    .withButton ("Cancel")
+                                                    .withButton ("Save and close", 1)
+                                                    .withButton ("Close without saving", 2)
+                                                    .withButton ("Cancel", 0)
                                                     .withAssociatedComponent (window.get()),
                                                   [this, safe = juce::Component::SafePointer<ui::MainWindow> (window.get())] (int answer)
                                                   {
@@ -6605,13 +6606,13 @@ namespace wfg::client
                                                 .withTitle ("Close the window and stop the engine?")
                                                 .withMessage ("Running cues will stop. The page and the "
                                                               "terminal stay the other ways out.")
-                                                .withButton ("Stop the engine")
-                                                .withButton ("Keep running")
+                                                .withButton ("Stop the engine", 1)
+                                                .withButton ("Keep running", 0)
                                                 .withAssociatedComponent (window.get()),
                                               [safe = juce::Component::SafePointer<ui::MainWindow> (window.get()),
                                                quit = host.quit] (int result)
                                               {
-                                                  // Two buttons: the first answers 1 (AlertWindow::show's table).
+                                                  // The first button answers 1, the code it is given above.
                                                   if (result == 1 && safe != nullptr && quit)
                                                       quit();
                                               });
