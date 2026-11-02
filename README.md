@@ -774,7 +774,7 @@ live in `packaging/`.
 | JUCE | 8.0.13+7 (on `develop`), carrying five fixes from 8.0.16 and 8.0.17 (below) | `37c894f83d379179b2070d437ccd0f1cd9af9576` |
 | Tracktion Engine | develop (3.5.0) | `13b51326693e3227ddef91b224114d12af6433ce` |
 | juce_simpleweb (the OSCQuery server's HTTP and WebSocket; the author's fork) | `pob31/juce_simpleweb` | `b72ec947548654cdd0a7e72b71ab5826fe574847` |
-| spatcore (the author's shared control-plane code; on the Mac its touch panel reader too) | main, after PR #33 | `97f5fd038e0a25b10362432ec123b071ef6bcbad` |
+| spatcore (the author's shared control-plane code; on the Mac its touch panel reader too) | main, after PR #34 | `002fc8b7d94cc6975c7bd8a2d2b4a4a8682307b3` |
 | hidapi (the SpaceMouse, the Stream Decks) | 0.15.0 | `d6b2a974608dec3b76fb1e36c189f22b9cf3650c` |
 | Mbed TLS (HTTPS to a radio-mic base station; Apache-2.0; its `framework` submodule is not fetched) | 3.6.7 LTS | `068ff080b369adfac81509f9b57b2afabaf82dc5` |
 | sokol (the video renderer's graphics) | master, 2026-10-06 | `401f21f8b7039258c35fef75c11d9a8a0e616771` |
