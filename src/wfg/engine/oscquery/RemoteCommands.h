@@ -19,11 +19,17 @@
 /*
     THE REMOTES' OWN COMMAND (namespace draft §68, ANP, ANT).
 
-    `remote.find <id> [seconds]` asks a tablet to show itself - its screen
-    flashing, an alarm, a vibration - as WFS-DIY's remote is found from its
-    desk: the author's request of 2026-10-15. `<id>` is what the tablet said in
-    its HELLO, read back at `/godot/network/remotes`; thirty seconds when no
+    `remote.find <id> [seconds] [password]` asks a tablet to show itself - its
+    screen flashing, an alarm, a vibration - as WFS-DIY's remote is found from
+    its desk: the author's request of 2026-10-15. `<id>` is what the tablet said
+    in its HELLO, read back at `/godot/network/remotes`; thirty seconds when no
     time is given, and never past five minutes.
+
+    THE PASSWORD (§126, BFJ), WFS-DIY's `/findDevice <password>`: carried to
+    the tablet, which shows itself when it has no find password of its own or
+    when the two are the same. NEVER IN THE LOG: the line records the remote
+    and the seconds, as applied, so a log sent with a report gives nobody the
+    tablet's password; a replay, which has no server, needs none.
 
     THIS MACHINE'S ALONE (AGC): the tablet's connection is to this computer, and
     a backup told the same would ask the same tablet twice. Never the show's and

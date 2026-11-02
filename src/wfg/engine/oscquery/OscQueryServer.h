@@ -355,9 +355,11 @@ namespace wfg::oscquery
 
         /*  FIND (ANT, ANP): the text frame `{"COMMAND": "FIND", "DATA":
             "<seconds>"}` to every connection whose HELLO carried `remoteId`, so
-            the tablet shows itself. How many were told; nought for an id nobody
+            the tablet shows itself - `"<seconds>\t<password>"` when a password
+            is given, which a tablet with a find password of its own compares
+            with it (§126, BFJ). How many were told; nought for an id nobody
             said, or no server. Any thread, and never waits on the network. */
-        int find (const std::string& remoteId, int seconds);
+        int find (const std::string& remoteId, int seconds, const std::string& password = {});
 
         //======================================================================
         //  Diagnostics, for tests and for /godot/engine.

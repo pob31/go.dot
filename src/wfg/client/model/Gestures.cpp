@@ -837,9 +837,13 @@ namespace wfg::client::gesture
         return { origin::window, "videoOutput.grid", { osc::Value::string (outputId), osc::Value::boolean (on) } };
     }
 
-    Event findRemote (const std::string& remoteId)
+    Event findRemote (const std::string& remoteId, const std::string& password)
     {
-        return { origin::window, "remote.find", { osc::Value::string (remoteId) } };
+        if (password.empty())
+            return { origin::window, "remote.find", { osc::Value::string (remoteId) } };
+
+        return { origin::window, "remote.find",
+                 { osc::Value::string (remoteId), osc::Value::int32 (30), osc::Value::string (password) } };
     }
 
     Event hideProjectors (bool on)

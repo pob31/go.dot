@@ -1264,6 +1264,15 @@ TEST_CASE ("remotes: HELLO names a connection, FIND reaches only its remote, and
         CHECK (tablet.text[0].contains ("\"45\""));
     }
 
+    //  With a password (§126, BFJ): after the seconds and a tab, quoted as JSON.
+    CHECK (rig.server.find ("T4BLET01", 30, "le \"chou\"") == 1);
+    REQUIRE (waitUntil ([&tablet] { return tablet.textCount() == 2; }));
+    {
+        const std::lock_guard<std::mutex> lock { tablet.mutex };
+        INFO (tablet.text[1]);
+        CHECK (tablet.text[1].contains ("\"DATA\": \"30\\tle \\\"chou\\\"\""));
+    }
+
     CHECK (rig.server.find ("NOBODY00", 30) == 0);
     std::this_thread::sleep_for (std::chrono::milliseconds { 200 });
     CHECK (phone.textCount() == 0);
@@ -1294,6 +1303,12 @@ TEST_CASE ("remotes: remote.find is this machine's, clamps its time, and with no
 
     const auto longest = command->handler (context, { osc::Value::string ("T4BLET01"), osc::Value::int32 (100000) });
     CHECK (longest.appliedArgs[1] == osc::Value::int32 (300));
+
+    //  A password is taken and never handed back for the log (§126, BFJ).
+    const auto guarded = command->handler (context, { osc::Value::string ("T4BLET01"), osc::Value::int32 (30),
+                                                      osc::Value::string ("secret") });
+    CHECK (guarded.applied);
+    CHECK (guarded.appliedArgs.size() == 2);
 
     const auto empty = command->handler (context, { osc::Value::string ("") });
     CHECK_FALSE (empty.applied);

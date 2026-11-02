@@ -30575,7 +30575,7 @@ the mapping at the wall.
 | `{"COMMAND": "UNSTREAM", "DATA": "<prefix>"}` | text frame: stop |
 | `{"COMMAND": "HELLO", "DATA": "<id>\t<name>"}` | text frame: who this connection is (ANT) |
 | `{"COMMAND": "FIND", "DATA": "<seconds>"}` | text frame from the server to a remote |
-| `remote.find <id> [seconds]` | machine-local: FIND to every connection of that remote |
+| `remote.find <id> [seconds] [password]` | machine-local: FIND to every connection of that remote (the password since §126, BFJ) |
 | `videoOutput.grid <output:s> <on:T>` | machine-local, under the lock, never saved: the output's alignment grid on or off (ANX); beside `videoOutput.identify` |
 
 `HOST_INFO` says `STREAM: true` and now `PATH_CHANGED: false` - it had said true, and nothing has ever
@@ -35377,3 +35377,36 @@ picture, and the Undo panel after a two-handed ride; the ILITEK panel on the Mac
 prompt, the circles with two displays, WFS-DIY and Go.dot open together (PR #30 merged, Go.dot's pin moved in MT.11;
 WFS-DIY's own pin still to move); `WFG_TEST_TOUCH_INJECT`, which opens a window on the Mac's screen; and M85. The
 words, and BFE-BFH, are owed the author's look.
+
+## 126. A find password for the remote
+
+**Asked 2026-11-02** by the author: *"We forgot to add 'Find my device' like on WFS-DIY so the main app can
+send an OSC message to the remote so it flashes (screen and camera module), rings and vibrates. This can
+take a password."*
+
+What was there: the find itself, since RM.2 (§68, ANP, ANT) - `remote.find <id> [seconds]`, a FIND frame
+down the tablet's WebSocket, Show settings > Network's *Find* beside each connected remote, and the app's
+find screen (screen and camera light flashing, the alarm turned up from nothing, a vibration, over the lock
+screen). What was not: WFS-DIY's password. There, *Find My Remote* asks for one and sends `/findDevice
+<password>` to every remote; a remote with no password of its own answers any, one with a password only the
+same.
+
+- **BFJ** **The password is the tablet's, and Go.dot asks for it.** `remote.find <id> [seconds] [password]`;
+  the FIND frame's DATA becomes `<seconds>\t<password>` when one is given - everything after the first tab,
+  as typed. The app keeps a find password on the Connections tab, under *Test find* (hidden as typed, *Show*
+  to read it, *Save*); empty, it answers every FIND, as before; set, only one carrying the same. *Find* on
+  the Network tab opens a small window asking for it, the last typed offered again while Go.dot runs and
+  kept nowhere else - not the show's, a password being nobody's decision about the show. Sent empty all the
+  same, as WFS-DIY does: a tablet without one answers. **Never in the log**: the command's line records the
+  remote and the seconds, as applied, so a log sent with a report carries no password; a replay has no
+  server to send one to. An app before 0.1.9 reads `30` from a frame with a password and answers it.
+  Still one tablet at a time, by the id it said in HELLO - Go.dot knows which tablets are linked, where
+  WFS-DIY sends to every remote target it has.
+
+Built 2026-11-02: `OscQueryServer::find` with the password, quoted as JSON; `RemoteCommands` taking it and
+leaving it off `appliedArgs`; `gesture::findRemote (id, password)` saying the thirty seconds before it; the
+Network page's `askFindPassword`. The app 0.1.9 (code 11): `FindRequest.password`, `FindMePlan.answers`,
+`FindMe.password`/`savePassword` in the app's preferences, the field on the Connections tab, en and fr.
+Tests: the server's frame with a quoted password, the command leaving it off the log, the gesture, the
+black-box FIND; the app's parse and answer rule. **Owed**: the tablet try, and the words - "Find password",
+the Network tab's window, the Connections tab's two sentences - to the author.

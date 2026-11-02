@@ -297,7 +297,7 @@ Go.dot a une application Android pour tablette ou téléphone. Elle reste relié
 
 **Régler les niveaux d'un spectacle verrouillé.** Le niveau d'une cue fait partie du spectacle, le verrou le protège. On règle le trim du son qui joue, ou un DCA : l'un comme l'autre valent pour ce soir et ne sont jamais enregistrés. Un DCA revient à 0 dB dès que toutes ses cues sont terminées, prêt pour la suivante, sauf si votre doigt est sur son fader à ce moment-là ; réglé de nouveau avant le GO suivant, ce GO le garde. L'EQ et les envois se règlent en direct, comme sur la D700.
 
-**Retrouver la tablette.** Dans Go.dot, *Show settings > Network* liste les tablettes reliées avec un bouton **Find** : la tablette fait clignoter son écran et la lumière de son appareil photo, sonne son alarme et vibre jusqu'à ce qu'on la touche.
+**Retrouver la tablette.** Dans Go.dot, *Show settings > Network* liste les tablettes reliées avec un bouton **Find** : la tablette fait clignoter son écran et la lumière de son appareil photo, sonne son alarme et vibre jusqu'à ce qu'on la touche. Comme la télécommande de WFS-DIY, la tablette peut garder un mot de passe (*Connexions*, sous *Tester*) : Find le demande alors, et une tablette qui reçoit le mauvais reste muette. Sans mot de passe sur la tablette, laissez le champ vide.
 
 **Choufleur sur la tablette.** Dans *Connexions*, tapez l'adresse d'opérateur que donne Choufleur, ou scannez son code. L'onglet *Script* montre alors le texte qui suit la représentation, sous le GO. Un vibreur de poignet Choufleur se relie dans le même onglet et vous touche le poignet avant vos cues.
 

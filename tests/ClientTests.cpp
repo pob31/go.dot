@@ -16462,6 +16462,12 @@ TEST_CASE ("client: the remotes connected are read one a line, each once, and Fi
     CHECK (find.command == "remote.find");
     REQUIRE (find.args.size() == 1);
     CHECK (find.args[0].getString() == "T4BLET01");
+
+    //  A find password (§126, BFJ) comes after the thirty seconds it needs said.
+    const auto guarded = gesture::findRemote ("T4BLET01", "secret");
+    REQUIRE (guarded.args.size() == 3);
+    CHECK (guarded.args[1] == osc::Value::int32 (30));
+    CHECK (guarded.args[2].getString() == "secret");
 }
 
 //==============================================================================

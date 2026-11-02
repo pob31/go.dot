@@ -3520,11 +3520,10 @@ namespace wfg::client::ui
                     auto* button = findButtons.add (new juce::TextButton ("Find " + juce::String (named)));
                     button->setTooltip (juce::String (named) + ", at " + juce::String (remote.address())
                                         + ": its screen flashes and it sounds until somebody touches it,"
-                                          " or for thirty seconds.");
-                    button->onClick = [this, id = remote.id]
+                                          " or for thirty seconds. Asks for its find password first.");
+                    button->onClick = [this, id = remote.id, named]
                     {
-                        if (send)
-                            send (gesture::findRemote (id));
+                        askFindPassword (id, named);
                     };
                     addAndMakeVisible (button);
                 }
@@ -3535,6 +3534,43 @@ namespace wfg::client::ui
             }
 
         private:
+            /*  THE FIND PASSWORD, asked as WFS-DIY's Find My Remote asks it
+                (namespace draft §126, BFJ): the tablet shows itself when it
+                has none of its own or when this is the same. Sent empty all
+                the same - a tablet without one answers, one with one does
+                not. The last typed is offered again while Go.dot runs, and
+                kept nowhere else: not the show's, and never in the log. */
+            void askFindPassword (const std::string& id, const std::string& named)
+            {
+                auto* ask = new juce::AlertWindow ("Find " + juce::String (named),
+                                                   "Its screen and camera light flash, it sounds its alarm and"
+                                                   " vibrates until somebody touches it, or for thirty seconds."
+                                                   " A tablet with a find password - set on its Connections tab -"
+                                                   " answers only to it; leave this empty for one without.",
+                                                   juce::MessageBoxIconType::NoIcon);
+                ask->addTextEditor ("password", lastFindPassword(), "Find password", true);
+                ask->addButton ("Find", 1, juce::KeyPress (juce::KeyPress::returnKey));
+                ask->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+                ask->enterModalState (true, juce::ModalCallbackFunction::create (
+                    [this, ask, id, safe = juce::Component::SafePointer<NetworkPage> (this)] (int result)
+                    {
+                        const auto password = ask->getTextEditorContents ("password");
+
+                        if (safe == nullptr || result != 1 || ! send)
+                            return;
+
+                        lastFindPassword() = password;
+                        send (gesture::findRemote (id, password.toStdString()));
+                    }), true);
+            }
+
+            static juce::String& lastFindPassword()
+            {
+                static juce::String password;
+                return password;
+            }
+
             std::vector<model::SerialRow> serials;
             std::vector<model::PortRow> midiPorts;
             std::vector<model::RemoteRow> remotes;

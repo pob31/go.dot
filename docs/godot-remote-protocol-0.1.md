@@ -98,6 +98,7 @@ argument: `{"MIN": …, "MAX": …}` or `{"VALS": […]}` for a closed set), `UN
 ```
 {"COMMAND": "HELLO", "DATA": "<id>\t<name>"}     the app says who it is
 {"COMMAND": "FIND",  "DATA": "<seconds>"}        Go.dot asks it to show itself
+{"COMMAND": "FIND",  "DATA": "<seconds>\t<password>"}   ... with a find password
 ```
 
 - **`HELLO`** names the connection: `<id>` is the app's own, drawn once at install and kept, so a
@@ -107,11 +108,16 @@ argument: `{"MIN": …, "MAX": …}` or `{"VALS": […]}` for a closed set), `UN
   `<origin>\t<id>\t<name>`, the origin as the event log spells it (`ws:<ip>:<port>`; the server
   listens on both address families, so an IPv4 tablet reads `ws:::ffff:192.168.1.20:57069`). The app
   finds its own line by its `<id>`, which is how it learns its origin (§6).
-- **`remote.find <id> [seconds]`** - machine-local, as `videoOutput.identify` is - sends `FIND` to
-  every connection whose HELLO carried that `<id>`; 30 seconds when none is given, never more than 300.
-  `<seconds>` in the FIND frame is a whole number. The app flashes its screen, sounds an alarm and
-  vibrates until the time is up or the screen is touched. Show settings >
-  Network lists the remotes with a button for it.
+- **`remote.find <id> [seconds] [password]`** - machine-local, as `videoOutput.identify` is - sends
+  `FIND` to every connection whose HELLO carried that `<id>`; 30 seconds when none is given, never more
+  than 300. `<seconds>` in the FIND frame is a whole number. The app flashes its screen, sounds an
+  alarm and vibrates until the time is up or the screen is touched. Show settings > Network lists the
+  remotes with a button for it, which asks for the password first.
+- **The find password** (namespace draft §126), WFS-DIY's `/findDevice <password>`: given, it follows
+  the seconds after a tab, everything after the first tab, as typed. A tablet that keeps no find
+  password answers every FIND; one that keeps one answers only a FIND carrying the same. An app that
+  predates it reads `30` from the frame and answers. The password is never written to Go.dot's log:
+  the command's line records the remote and the seconds.
 
 ## 6. Writing
 

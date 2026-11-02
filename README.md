@@ -249,7 +249,8 @@ has stood in front of the thing.
   (the show's surfaces, or a fader per DCA), the video mapping (warps, zones,
   Identify and a projected grid), Choufleur's script page and its wrist buzzer,
   and the connections - a main and its backup together. Go.dot's Network tab
-  finds a tablet: its screen and camera light flash and it sounds its alarm.
+  finds a tablet: its screen and camera light flash and it sounds its alarm -
+  given the tablet's find password, when it keeps one.
   English and French. The contract is `docs/godot-remote-protocol-0.1.md`.
 
 ### Not built yet

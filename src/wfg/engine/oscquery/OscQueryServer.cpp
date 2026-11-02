@@ -20,6 +20,7 @@
 #include <wfg/engine/oscquery/Subscriptions.h>
 
 #include <wfg/engine/json/JsonValue.h>
+#include <wfg/engine/json/JsonWrite.h>
 #include <wfg/engine/osc/OscAddress.h>
 
 #include <juce_simpleweb/juce_simpleweb.h>
@@ -1095,7 +1096,7 @@ namespace wfg::oscquery
         return text;
     }
 
-    int OscQueryServer::find (const std::string& remoteId, int seconds)
+    int OscQueryServer::find (const std::string& remoteId, int seconds, const std::string& password)
     {
         if (! running.load (std::memory_order_relaxed) || remoteId.empty())
             return 0;
@@ -1110,7 +1111,8 @@ namespace wfg::oscquery
                     found.push_back (connection);
         }
 
-        const auto frame = "{\"COMMAND\": \"FIND\", \"DATA\": \"" + std::to_string (seconds) + "\"}";
+        const auto data = password.empty() ? std::to_string (seconds) : std::to_string (seconds) + '\t' + password;
+        const auto frame = "{\"COMMAND\": \"FIND\", \"DATA\": " + json::quote (data) + "}";
         int told = 0;
 
         for (const auto& connection : found)

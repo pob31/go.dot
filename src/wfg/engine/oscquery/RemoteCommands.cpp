@@ -38,8 +38,9 @@ namespace wfg::oscquery
                         "Asks a remote - a tablet running Go.dot's app - to show itself: its screen flashes, it"
                         " sounds and vibrates until touched or for the seconds given (thirty when none, five"
                         " minutes at most). The remote by the identifier it said when it connected, as"
-                        " /godot/network/remotes lists it. Tonight's, never saved.",
-                        { { "remote", 's', false }, { "seconds", 'i', true } },
+                        " /godot/network/remotes lists it; the password, when the tablet has a find password,"
+                        " is its own - never written to the log. Tonight's, never saved.",
+                        { { "remote", 's', false }, { "seconds", 'i', true }, { "password", 's', true } },
                         false,
                         [server] (CommandContext&, const std::vector<osc::Value>& args)
                         {
@@ -54,13 +55,17 @@ namespace wfg::oscquery
                                 seconds = std::clamp<std::int64_t> (static_cast<std::int64_t> (args[1].asDouble()),
                                                                     1, longestSeconds);
 
+                            const auto password = args.size() > 2 && args[2].isString() ? args[2].getString()
+                                                                                         : std::string {};
+
                             /*  A remote not connected now is told nothing, and the
                                 command still applies: it asked for a tablet that is
                                 not there, which is a fact about tonight rather than
                                 a fault in the asking - the Network tab says who is. */
                             if (server != nullptr)
-                                server->find (remote, static_cast<int> (seconds));
+                                server->find (remote, static_cast<int> (seconds), password);
 
+                            //  The remote and the seconds: the password stays off the log (BFJ).
                             return Outcome::ok ({ osc::Value::string (remote),
                                                   osc::Value::int32 (static_cast<std::int32_t> (seconds)) });
                         } }));

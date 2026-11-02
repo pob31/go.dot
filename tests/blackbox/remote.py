@@ -294,6 +294,13 @@ def session(report: Report, server: Server) -> None:
             quiet_finds = [e for e in quiet.events if e[0] == "text" and '"FIND"' in e[1]]
         report.check(not quiet_finds, "and nobody else")
 
+        # A find password (§126, BFJ) reaches the tablet after the seconds.
+        before_find = len(remote.snapshot_events())
+        common.send_udp(server.osc_port, common.osc_encode("/godot/cmd/remote/find", ["T4BLET01", 20, "chou"]))
+        report.check(wait_for(lambda: bool(found())), "remote.find with a password reaches the tablet")
+        report.check(bool(found()) and json.loads(found()[0]).get("DATA") == "20\tchou",
+                     "carrying the password after the seconds and a tab", str(found()[:1]))
+
         remote.unstream()
         time.sleep(0.3)
         count = len(remote.bundles())

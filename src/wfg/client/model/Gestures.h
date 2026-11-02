@@ -554,8 +554,9 @@ namespace wfg::client::gesture
 
     /*  `remote.find <id>` (namespace draft §68, ANT): a tablet connected to
         this machine asked to show itself - its screen flashing, an alarm - the
-        Network tab's Find beside each remote. */
-    Event findRemote (const std::string& remoteId);
+        Network tab's Find beside each remote. With a password (§126, BFJ) the
+        thirty seconds are said, the password coming after them. */
+    Event findRemote (const std::string& remoteId, const std::string& password = {});
 
     /** The projectors' windows put away while the show is unlocked, or brought back: tonight's (§39). */
     Event hideProjectors (bool on);
