@@ -4841,7 +4841,7 @@ TEST_CASE ("stop levels: killing a stop cue and the cue it is fading in the same
     REQUIRE (rig.engine.submit ("cli", "run.kill", { osc::Value::string (mediaRun) }));
     rig.tickOnce();
 
-    CHECK (rig.tickUntil ([&rig, track] { return ! rig.audio.kills.empty(); }, 5));
+    CHECK (rig.tickUntil ([&rig] { return ! rig.audio.kills.empty(); }, 5));
     CHECK (rig.audio.kills == std::vector<int> { track });
     CHECK (rig.audio.playing.count (track) == 0u);
     CHECK (rig.tickUntil ([&] { return rig.runs.find (mediaRun)->isFinished(); }, 5));

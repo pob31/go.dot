@@ -94,7 +94,7 @@ namespace wfg::audio
         bool producesAudioWhenNoAudioInput() override    { return true; }
         double getLatencySeconds() override              { return 0.0; }
         bool canSidechain() override                     { return false; }
-        bool shouldMeasureCpuUsage() const noexcept      { return false; }
+        bool shouldMeasureCpuUsage() const noexcept override { return false; }
         bool canBeAddedToClip() override                 { return false; }
         bool canBeAddedToRack() override                 { return false; }
         void restorePluginStateFromValueTree (const juce::ValueTree&) override {}
@@ -171,7 +171,7 @@ namespace wfg::audio
         bool producesAudioWhenNoAudioInput() override    { return true; }
         double getLatencySeconds() override              { return 0.0; }
         bool canSidechain() override                     { return false; }
-        bool shouldMeasureCpuUsage() const noexcept      { return false; }
+        bool shouldMeasureCpuUsage() const noexcept override { return false; }
         bool canBeAddedToClip() override                 { return false; }
         bool canBeAddedToRack() override                 { return false; }
         void restorePluginStateFromValueTree (const juce::ValueTree&) override {}
@@ -186,7 +186,7 @@ namespace wfg::audio
         std::atomic<bool> wantOpen { true };
         std::atomic<double> rampLength { rampSeconds };
         std::atomic<float> gain { 1.0f };
-        double sampleRate = 48000.0;
+        double sampleRateInUse = 48000.0;   // not `sampleRate`, which would hide te::Plugin's own
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AuxInputPlugin)
     };

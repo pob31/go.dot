@@ -24,19 +24,14 @@
 #import <AppKit/AppKit.h>
 #import <CoreGraphics/CoreGraphics.h>
 
+#include <wfg/engine/video/MacScreens.h>
+
 #include <cmath>
 #include <string>
 #include <vector>
 
 namespace wfg::video
 {
-    struct MacScreen
-    {
-        std::string name;
-        std::string id;
-        int x = 0, y = 0, width = 0, height = 0;
-    };
-
     std::vector<MacScreen> macScreens()
     {
         std::vector<MacScreen> out;

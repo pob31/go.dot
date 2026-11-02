@@ -448,10 +448,10 @@ TEST_CASE ("looper: at a wrap on a sine it steps no further than the sine does, 
 TEST_CASE ("looper: Undo takes the top layer off, and what is left is what was heard before it, bit for bit")
 {
     Rig rig (1.0, 2);
-    const std::int64_t period = 6000;
+    static constexpr std::int64_t period = 6000;   // static: no lambda need capture it, on any compiler
 
     //  The take from one source, a layer from another, and nothing else heard (through is off).
-    const auto source = [period] (std::int64_t s, int channel) -> float
+    const auto source = [] (std::int64_t s, int channel) -> float
     {
         if (s < period + 480)
             return 0.3f * static_cast<float> (std::sin (0.013 * static_cast<double> (s))) * (channel == 0 ? 1.0f : 0.5f);

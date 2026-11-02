@@ -26,6 +26,8 @@
 
 #include <wfg/engine/video/Displays.h>
 
+#include <wfg/engine/video/MacScreens.h>   // the Mac's half, answered in Displays_mac.mm
+
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <cmath>
@@ -35,20 +37,6 @@
 
 namespace wfg::video
 {
-   #if JUCE_MAC
-    /*  The Mac's half, in Displays_mac.mm: each screen's localised name and
-        display identifier, with its frame turned into JUCE's top-left
-        coordinates so it can be matched to JUCE's list. */
-    struct MacScreen
-    {
-        std::string name;
-        std::string id;
-        int x = 0, y = 0, width = 0, height = 0;
-    };
-
-    std::vector<MacScreen> macScreens();
-   #endif
-
     namespace
     {
        #if defined (_WIN32)

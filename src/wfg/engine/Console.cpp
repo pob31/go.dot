@@ -2616,7 +2616,7 @@ namespace
         work. The handler sets this; the message loop notices. */
     volatile std::sig_atomic_t interrupted = 0;
 
-    extern "C" void onInterrupt (int) { interrupted = 1; }
+    extern "C" { static void onInterrupt (int) { interrupted = 1; } }   // C linkage for std::signal, private to the console
 
 #if JUCE_MAC
     /*  DECLARED HERE because JUCE does not declare it in a header.
@@ -2649,7 +2649,7 @@ namespace
         sets the flag, an ordinary thread notices it and calls stopDispatchLoop
         - which is thread-safe, and posts the quit message the loop is waiting
         for. */
-    void runMessageLoopUntilInterrupted()
+    static void runMessageLoopUntilInterrupted()
     {
         /*  initialiseNSApplication() used to be called here. It is called at
             the top of runServe now, so that it precedes a window rather than
@@ -2699,7 +2699,7 @@ namespace
         Tracktion's settings, and the silent placeholder WAV that every resident
         clip sits on until a cue is armed onto it. Per user, shared between
         runs, and outside every bundle. */
-    juce::File& engineFolderOverride()
+    static juce::File& engineFolderOverride()
     {
         static juce::File folder;
         return folder;
@@ -2720,7 +2720,7 @@ namespace
         developer's real list, and for a second installation on one machine.
         `serve` and `plugins` take it; everything under the engine folder
         follows it, and so does the sibling audio-defaults file. */
-    void useEngineFolderOption (const juce::ArgumentList& args)
+    static void useEngineFolderOption (const juce::ArgumentList& args)
     {
         if (args.containsOption ("--engine-folder"))
             engineFolderOverride() = juce::File::getCurrentWorkingDirectory()
@@ -2734,13 +2734,13 @@ namespace
         window started with `--remember`, which only the launchers pass, so a
         driver opening a fixture in a window never becomes the show the
         author's next launch opens. */
-    juce::File lastShowFile()
+    static juce::File lastShowFile()
     {
         return engineCacheFolder().getSiblingFile ("last-show.txt");
     }
 
     //  And the ten before it, newest first, for File > Open recent (app/RecentShows.h).
-    juce::File recentShowsFile()
+    static juce::File recentShowsFile()
     {
         return engineCacheFolder().getSiblingFile ("recent-shows.txt");
     }
@@ -2750,7 +2750,7 @@ namespace
         show to reopen and following `--engine-folder` as it does - a fact
         about this computer, so never in a show a folder copy would carry to
         the other one (pair/PairSettings.h). */
-    juce::File pairingFile()
+    static juce::File pairingFile()
     {
         return engineCacheFolder().getSiblingFile ("pairing.xml");
     }
@@ -2760,7 +2760,7 @@ namespace
         it, so a show that has gone bad sends the launch to the empty show
         rather than to an alert and an exit, which the next launch would meet
         again. Empty otherwise, said in the log. */
-    juce::File lastShowToReopen()
+    static juce::File lastShowToReopen()
     {
         const auto said = lastShowFile().loadFileAsString().trim();
 
@@ -2807,7 +2807,7 @@ namespace
         value text in front of the person editing. The child talks JSON on
         its stdout, and this is the one child that is given a pipe: there is
         no audio and no socket in this verb for it to inherit. */
-    int runPluginCatalogue (const std::string& identifier, const std::string& storage)
+    static int runPluginCatalogue (const std::string& identifier, const std::string& storage)
     {
         wfg::plugin::CatalogueStore store {
             juce::File (juce::String (storage)).getChildFile ("plugins").getChildFile ("catalogue")
@@ -2877,7 +2877,7 @@ namespace
         return 0;
     }
 
-    int runPlugins (const juce::ArgumentList& args)
+    static int runPlugins (const juce::ArgumentList& args)
     {
         useEngineFolderOption (args);
         const auto storage = engineCacheFolder().getFullPathName().toStdString();
@@ -3023,7 +3023,7 @@ namespace
         fact ABOUT the ranges, and a second copy of it in <Audio> would be one
         more thing to keep in step with a list somebody edits. The walk happens
         once, at load, on the thread that opens the show. */
-    int widestRangeCount (const juce::ValueTree& node)
+    static int widestRangeCount (const juce::ValueTree& node)
     {
         int widest = 0;
 
@@ -3048,7 +3048,7 @@ namespace
         same way at start and after every show edit. */
     /*  THE SERIAL PORTS AS THE SHOW DECLARES THEM (namespace draft §51, ACR):
         what SerialTable::reconcile opens, closes and opens again. */
-    std::vector<wfg::serial::Wanted> serialWantedOf (const wfg::doc::ShowDocument& document)
+    static std::vector<wfg::serial::Wanted> serialWantedOf (const wfg::doc::ShowDocument& document)
     {
         std::vector<wfg::serial::Wanted> wanted;
         const auto ports = document.root().getChildWithName ("SerialPorts");
@@ -3081,7 +3081,7 @@ namespace
         its host and port, cut by its framing - what the links table opens,
         keeps and opens again. A device with no port yet has no path, which
         the table reads as nothing to open. */
-    std::vector<wfg::serial::Wanted> linkWantedOf (const wfg::doc::ShowDocument& document)
+    static std::vector<wfg::serial::Wanted> linkWantedOf (const wfg::doc::ShowDocument& document)
     {
         std::vector<wfg::serial::Wanted> wanted;
 
@@ -3135,7 +3135,7 @@ namespace
         its first datagram is the file's subscription (the root's SUBSCRIBE,
         a JSON message whole), which the cadence renews before its ten
         seconds run out. */
-    std::vector<wfg::serial::Wanted> datagramWantedOf (const wfg::doc::ShowDocument& document,
+    static std::vector<wfg::serial::Wanted> datagramWantedOf (const wfg::doc::ShowDocument& document,
                                                        const wfg::tree::MountTable& mounts)
     {
         std::vector<wfg::serial::Wanted> wanted;
@@ -3176,7 +3176,7 @@ namespace
         when the port says nothing - its login the user and the password,
         space-separated, its pin the certificate trusted, and what it watches
         the file's SUBSCRIBE, a JSON array of resource paths. */
-    std::vector<wfg::net::SscV2Wanted> sscV2WantedOf (const wfg::doc::ShowDocument& document,
+    static std::vector<wfg::net::SscV2Wanted> sscV2WantedOf (const wfg::doc::ShowDocument& document,
                                                       const wfg::tree::MountTable& mounts)
     {
         std::vector<wfg::net::SscV2Wanted> wanted;
@@ -3226,7 +3226,7 @@ namespace
         The session word carries the login and the client id, so a change
         of either opens the connection again - the only way a CONNECT can
         carry it. */
-    std::vector<std::pair<wfg::serial::Wanted, wfg::mqtt::SessionWanted>> mqttWantedOf (const wfg::doc::ShowDocument& document,
+    static std::vector<std::pair<wfg::serial::Wanted, wfg::mqtt::SessionWanted>> mqttWantedOf (const wfg::doc::ShowDocument& document,
                                                                                          const std::string& machine)
     {
         std::vector<std::pair<wfg::serial::Wanted, wfg::mqtt::SessionWanted>> wanted;
@@ -3271,7 +3271,7 @@ namespace
         return wanted;
     }
 
-    std::vector<wfg::midi::PortWish> portWishesOf (const wfg::doc::ShowDocument& document)
+    static std::vector<wfg::midi::PortWish> portWishesOf (const wfg::doc::ShowDocument& document)
     {
         std::vector<wfg::midi::PortWish> wishes;
 
@@ -3305,7 +3305,7 @@ namespace
         return wishes;
     }
 
-    AudioShape audioShapeOf (const wfg::doc::ShowDocument& document)
+    static AudioShape audioShapeOf (const wfg::doc::ShowDocument& document)
     {
         AudioShape shape;
 
@@ -3415,7 +3415,7 @@ namespace
         --proxy-deadline-us; the hosted path left the show's channels per
         track at two. A preset is a file under the bundle's plugins/ folder,
         by name (§17.7); the child gets the whole path. */
-    wfg::audio::EditSpec editSpecOf (const AudioShape& shape, const juce::File& bundle,
+    static wfg::audio::EditSpec editSpecOf (const AudioShape& shape, const juce::File& bundle,
                                      std::int64_t proxyDeadlineMicroseconds)
     {
         wfg::audio::EditSpec spec;
@@ -3444,7 +3444,7 @@ namespace
         return spec;
     }
 
-    wfg::audio::DeviceAudioDriver::Request deviceRequestFor (
+    static wfg::audio::DeviceAudioDriver::Request deviceRequestFor (
         const wfg::audio::AudioSettings& settings, const AudioShape& shape,
         const juce::File& bundle, std::int64_t proxyDeadlineMicroseconds)
     {
@@ -3506,7 +3506,7 @@ namespace
         work - and standing it up now means Phase 2 does not restructure this
         verb. The model belongs to the tick thread; this one waits.
     */
-    int runServe (const juce::ArgumentList& args, const wfg::ClientFactory& makeClient)
+    static int runServe (const juce::ArgumentList& args, const wfg::ClientFactory& makeClient)
     {
         /*  JUCE FIRST, so that it is the last thing to go. Two reasons, and
             the window brought both.

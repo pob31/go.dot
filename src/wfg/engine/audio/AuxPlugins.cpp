@@ -199,7 +199,7 @@ namespace wfg::audio
 
     void AuxInputPlugin::initialise (const te::PluginInitialisationInfo& info)
     {
-        sampleRate = info.sampleRate > 0.0 ? info.sampleRate : 48000.0;
+        sampleRateInUse = info.sampleRate > 0.0 ? info.sampleRate : 48000.0;
     }
 
     void AuxInputPlugin::deinitialise()
@@ -239,7 +239,7 @@ namespace wfg::audio
             return;
 
         const auto step = static_cast<float> (1.0 / std::max (1.0, rampLength.load (std::memory_order_relaxed)
-                                                                      * sampleRate));
+                                                                      * sampleRateInUse));
         const auto target = open ? 1.0f : 0.0f;
 
         for (int n = 0; n < frames; ++n)

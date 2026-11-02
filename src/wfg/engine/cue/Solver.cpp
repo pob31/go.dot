@@ -711,7 +711,7 @@ namespace wfg::cue
             has decided it has fired. `planTarget`, below, is this and then
             every looping scene it placed with nothing under it given its round
             (K9's review). */
-        void planTargetOnce (const Reader& read, const doc::ShowDocument& document,
+        static void planTargetOnce (const Reader& read, const doc::ShowDocument& document,
                              const std::map<std::string, double>* durations,
                              const Walk& walk, const Placed& target, double offset,
                              const std::vector<std::string>& stopped, Plan& plan)

@@ -105,7 +105,7 @@ namespace wfg::audio
             arm's rebuild stays open; this runs at the first build and at a
             change of rate or block, and a gate open through it brings its
             input back over the de-click ramp - never its cue's fade-in again. */
-        sampleRate = info.sampleRate > 0.0 ? info.sampleRate : 48000.0;
+        sampleRateInUse = info.sampleRate > 0.0 ? info.sampleRate : 48000.0;
         recovery = gain.load (std::memory_order_relaxed) > 0.0f ? 0.0f : 1.0f;
         lastBlockEnd = -1;
     }
@@ -152,8 +152,8 @@ namespace wfg::audio
         const auto open = wantOpen.load (std::memory_order_relaxed);
         const auto at = openSample.load (std::memory_order_relaxed);
         const auto step = static_cast<float> (1.0 / std::max (1.0, rampLength.load (std::memory_order_relaxed)
-                                                                      * sampleRate));
-        const auto recoveryStep = static_cast<float> (1.0 / std::max (1.0, rampSeconds * sampleRate));
+                                                                      * sampleRateInUse));
+        const auto recoveryStep = static_cast<float> (1.0 / std::max (1.0, rampSeconds * sampleRateInUse));
 
         const float* source[maxTaken] { nullptr, nullptr };
 

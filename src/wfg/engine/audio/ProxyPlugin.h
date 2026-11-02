@@ -96,7 +96,7 @@ namespace wfg::audio
         bool producesAudioWhenNoAudioInput() override    { return false; }
         double getLatencySeconds() override              { return 0.0; }
         bool canSidechain() override                     { return false; }
-        bool shouldMeasureCpuUsage() const noexcept      { return false; }
+        bool shouldMeasureCpuUsage() const noexcept override { return false; }
         bool canBeAddedToClip() override                 { return false; }
         bool canBeAddedToRack() override                 { return false; }
         void restorePluginStateFromValueTree (const juce::ValueTree&) override {}

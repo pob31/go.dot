@@ -56,7 +56,12 @@ namespace wfg::video::render
                     return false;
                 }
 
-                server = [[GoDotSyphonServer alloc] initWithName: [NSString stringWithUTF8String: name.c_str()]
+                NSString* named = [NSString stringWithUTF8String: name.c_str()];   // nil for bytes that are not UTF-8
+
+                if (named == nil)
+                    named = @"Go.dot";
+
+                server = [[GoDotSyphonServer alloc] initWithName: named
                                                           device: device];
 
                 if (server == nil)

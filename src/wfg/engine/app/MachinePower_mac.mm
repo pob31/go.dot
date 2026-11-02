@@ -29,9 +29,14 @@ namespace wfg::app
             /*  USER-INITIATED CARRIES IDLE-SYSTEM-SLEEP-DISABLED: a show that
                 is waiting for its next GO is not a computer that is idle. The
                 display may still sleep; the show does not need it. */
+            NSString* said = [NSString stringWithUTF8String: reason.c_str()];   // nil for bytes that are not UTF-8
+
+            if (said == nil)
+                said = @"Go.dot show";
+
             id<NSObject> activity = [[NSProcessInfo processInfo]
                                         beginActivityWithOptions: NSActivityLatencyCritical | NSActivityUserInitiated
-                                                          reason: [NSString stringWithUTF8String: reason.c_str()]];
+                                                          reason: said];
 
            #if __has_feature(objc_arc)
             token = (__bridge_retained void*) activity;

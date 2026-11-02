@@ -141,16 +141,16 @@ namespace wfg::cue
 
     doc::LiveWrite eitherOf (doc::LiveWrite first, doc::LiveWrite second)
     {
-        return [first = std::move (first), second = std::move (second)]
+        return [one = std::move (first), other = std::move (second)]
                (const std::string& address, const std::string& text,
                 const std::vector<osc::Value>& args) -> std::optional<Outcome>
         {
-            if (first)
-                if (auto outcome = first (address, text, args))
+            if (one)
+                if (auto outcome = one (address, text, args))
                     return outcome;
 
-            if (second)
-                return second (address, text, args);
+            if (other)
+                return other (address, text, args);
 
             return std::nullopt;
         };

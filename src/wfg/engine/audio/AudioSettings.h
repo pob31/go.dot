@@ -20,7 +20,13 @@ namespace wfg::audio
         int channel = -1, frequency = 1000;
         double level = -40.0;
         bool hold = false;
-        bool operator== (const OutputTestSettings&) const = default;
+        /*  Exact, and said without `==` on a double: clang's -Wfloat-equal
+            trips on a defaulted comparison, as the strict build's would. */
+        bool operator== (const OutputTestSettings& other) const noexcept
+        {
+            return type == other.type && channel == other.channel && frequency == other.frequency
+                && ! (level < other.level) && ! (other.level < level) && hold == other.hold;
+        }
     };
 
     // One hardware channel per logical channel, zero based; -1 disconnects.

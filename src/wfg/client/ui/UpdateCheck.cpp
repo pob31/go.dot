@@ -105,17 +105,17 @@ namespace wfg::client::ui
 
     void UpdateCheck::ask (Done done)
     {
-        std::thread ([token = alive, urlToAsk = url, running = version, done = std::move (done)]
+        std::thread ([token = alive, urlToAsk = url, running = version, whenDone = std::move (done)]
         {
             auto answer = askNow (urlToAsk, running);
 
             if (! token->load())
                 return;
 
-            juce::MessageManager::callAsync ([token, answer = std::move (answer), done]
+            juce::MessageManager::callAsync ([token, said = std::move (answer), whenDone]
             {
-                if (token->load() && done)
-                    done (answer);
+                if (token->load() && whenDone)
+                    whenDone (said);
             });
         }).detach();
     }

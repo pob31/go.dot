@@ -137,7 +137,7 @@ namespace wfg::audio
 
         /*  Two high-resolution clock reads and an atomic store per block, for a
             meter nothing displays. VolumeAndPanPlugin declines it too. */
-        bool shouldMeasureCpuUsage() const noexcept      { return false; }
+        bool shouldMeasureCpuUsage() const noexcept override { return false; }
 
         bool canBeAddedToClip() override                 { return false; }
         bool canBeAddedToRack() override                 { return false; }

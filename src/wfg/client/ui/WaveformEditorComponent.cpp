@@ -1513,7 +1513,7 @@ namespace wfg::client::ui
                 g.fillRect (x - thickness / 2, bar.getY(), thickness, bar.getHeight());
             };
 
-            const auto hot = [this] (const model::Hit& h, const std::string& id, model::Handle kind)
+            const auto hot = [] (const model::Hit& h, const std::string& id, model::Handle kind)
             {
                 return h.handle == kind && h.rangeId == id;
             };

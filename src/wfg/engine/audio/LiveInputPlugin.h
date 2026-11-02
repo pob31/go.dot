@@ -129,7 +129,7 @@ namespace wfg::audio
         bool producesAudioWhenNoAudioInput() override    { return true; }
         double getLatencySeconds() override              { return 0.0; }
         bool canSidechain() override                     { return false; }
-        bool shouldMeasureCpuUsage() const noexcept      { return false; }
+        bool shouldMeasureCpuUsage() const noexcept override { return false; }
         bool canBeAddedToClip() override                 { return false; }
         bool canBeAddedToRack() override                 { return false; }
         void restorePluginStateFromValueTree (const juce::ValueTree&) override {}
@@ -146,7 +146,7 @@ namespace wfg::audio
             open or the shut that asks for it, read by the audio thread at each
             block against the rate it was initialised at. */
         std::atomic<double> rampLength { rampSeconds };
-        double sampleRate = 48000.0;
+        double sampleRateInUse = 48000.0;   // not `sampleRate`, which would hide te::Plugin's own
 
         /*  The audio thread's own: how far along the ramp the gate is, nought
             shut and one open - the gain is its sine - and where the last block

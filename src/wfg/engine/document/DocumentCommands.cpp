@@ -298,14 +298,14 @@ namespace wfg::doc
                         { { "cue", 's', false }, { "bus", 's', false },
                           { "id", 's', true }, { "level", 's', true } },
                         true,
-                        [&document, liveSend = std::move (liveSend)]
+                        [&document, sendLive = std::move (liveSend)]
                         (CommandContext&, const std::vector<osc::Value>& args)
                         {
                             /*  A SEND UNDER THE LOCK rides live (2026-09-25),
                                 answered in front of the document, which would
                                 refuse it. */
-                            if (liveSend)
-                                if (auto outcome = liveSend (args))
+                            if (sendLive)
+                                if (auto outcome = sendLive (args))
                                     return std::move (*outcome);
 
                             const auto id = args.size() > 2 ? args[2].getString() : std::string {};
@@ -1438,7 +1438,7 @@ namespace wfg::doc
         using WriteOne = std::function<Outcome (const std::vector<osc::Value>&)>;
 
         const auto writeOne = std::make_shared<const WriteOne> (
-            [&document, foreign = std::move (foreign), live = std::move (live)]
+            [&document, toForeign = std::move (foreign), toLive = std::move (live)]
             (const std::vector<osc::Value>& args) -> Outcome
             {
                 const auto address = args[0].getString();
@@ -1447,8 +1447,8 @@ namespace wfg::doc
                     mount prefix may not be `/`, so the two can never both
                     claim an address - but asking the show first means a mount
                     could never shadow it even if that rule were ever relaxed. */
-                if (foreign && address.rfind ("/godot", 0) != 0)
-                    return foreign (address, osc::Values (args.begin() + 1, args.end()));
+                if (toForeign && address.rfind ("/godot", 0) != 0)
+                    return toForeign (address, osc::Values (args.begin() + 1, args.end()));
 
                 /*  ONE VALUE FOR A ROW OF THE SHOW: the tail `node.set` takes is
                     a device's (namespace draft §45), and a row given three
@@ -1466,8 +1466,8 @@ namespace wfg::doc
                     `persist=none`. Asked after the text is canonical, so the
                     live door and the document parse a value from the same
                     spelling. */
-                if (live)
-                    if (auto outcome = live (address, *text, args))
+                if (toLive)
+                    if (auto outcome = toLive (address, *text, args))
                         return std::move (*outcome);
 
                 return fromEdit (document.setAttribute (address, *text), args);
@@ -1528,7 +1528,7 @@ namespace wfg::doc
                         " all of them or none, one record and one step to undo.",
                         { { "address", 's', false }, { "value", '*', false }, { "more", '*', true, true } },
                         true,
-                        [&document, writeOne, many = std::move (many)] (CommandContext&, const std::vector<osc::Value>& args)
+                        [&document, writeOne, several = std::move (many)] (CommandContext&, const std::vector<osc::Value>& args)
                         {
                             const auto refusedAt = [] (std::string why, std::string where)
                             {
@@ -1555,7 +1555,7 @@ namespace wfg::doc
                                     back (TG), and not a hand's ride, which is
                                     no decision and opens no step (TH): both are
                                     `node.set`'s alone. */
-                                if (address.rfind ("/godot", 0) != 0 || (many.isRide && many.isRide (address)))
+                                if (address.rfind ("/godot", 0) != 0 || (several.isRide && several.isRide (address)))
                                     return refusedAt (reason::badAddress, address);
 
                                 //  Twice in one set is two answers to one question.
@@ -1576,7 +1576,7 @@ namespace wfg::doc
                                 and nothing reads the show before the tick ends.
                                 Recorded, it is the write, put back only if a
                                 door refuses. */
-                            const auto pass = [&document, &writeOne, &many, &args, &refusedAt]
+                            const auto pass = [&document, &writeOne, &several, &args, &refusedAt]
                                               (bool recorded) -> std::optional<Outcome>
                             {
                                 std::optional<ShowDocument::ScopedUndoSuppression> unrecorded;
@@ -1585,7 +1585,7 @@ namespace wfg::doc
                                     unrecorded.emplace (document);
 
                                 ShowDocument::ScopedKeep kept { document };
-                                const auto putBackLive = many.keep ? many.keep() : std::function<void()> {};
+                                const auto putBackLive = several.keep ? several.keep() : std::function<void()> {};
 
                                 std::optional<Outcome> refusal;
 

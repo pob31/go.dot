@@ -5427,10 +5427,10 @@ namespace wfg::client
                                         (const std::vector<std::string>& folders,
                                          std::function<void (const wfg::ImportFiles&)> answer)
                     {
-                        std::thread ([find, workspace, folders, answer = std::move (answer)]
+                        std::thread ([find, workspace, folders, reply = std::move (answer)]
                         {
                             auto files = find (workspace, folders);
-                            juce::MessageManager::callAsync ([answer, files = std::move (files)] { answer (files); });
+                            juce::MessageManager::callAsync ([reply, found = std::move (files)] { reply (found); });
                         }).detach();
                     };
 
@@ -5475,10 +5475,10 @@ namespace wfg::client
 
                 chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
                                       [safe = juce::Component::SafePointer<ui::MainWindow> (window.get()), this,
-                                       media, missing = std::move (missing)] (const juce::FileChooser& answered)
+                                       media, wanted = std::move (missing)] (const juce::FileChooser& answered)
                                       {
                                           if (safe != nullptr && answered.getResult() != juce::File())
-                                              findMissingIn (answered.getResult(), media, missing);
+                                              findMissingIn (answered.getResult(), media, wanted);
                                       });
             }
 

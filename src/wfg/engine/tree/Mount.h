@@ -331,7 +331,14 @@ namespace wfg::tree
             after-tick refresh tells a document edit that touched this device
             from one that touched the cue next to it. Defaulted rather than
             written out, so a field added later cannot be forgotten here. */
+       #if defined (__clang__)
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Wfloat-equal"   // rateCap, exactly: what was declared, not arithmetic
+       #endif
         bool operator== (const MountDeclaration&) const = default;
+       #if defined (__clang__)
+        #pragma clang diagnostic pop
+       #endif
     };
 
     struct MountResult
