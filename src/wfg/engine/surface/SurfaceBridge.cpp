@@ -107,6 +107,8 @@ namespace wfg::surface
         }
         constexpr int fxButtonNote = 0x2b;      // FX (Mackie's Plug-In), lit while its page is up
         constexpr int eqButtonNote = 0x2c;      // EQ, lit while its page is up
+        constexpr int bankLeftNote = 0x2e;      // BANK left and right: lit where there is a bank to go to, blinking towards a clip waiting (§127)
+        constexpr int bankRightNote = 0x2f;
         constexpr int recordButtonNote = 0x5f;  // the transport's Rec: the aimed take records, or lays a layer
         constexpr int masterDialNote = 0x38;    // the D700's master dial: its colour, as its press (McuCodec)
         constexpr int masterDialFader = 8;      // and its turn, as the master fader's pitch bend E8
@@ -723,16 +725,55 @@ namespace wfg::surface
             Rgb dialColourLevel;
             std::int64_t dialColourTick = std::numeric_limits<std::int64_t>::min() / 2;
 
+            /*  THE FADER BANK ON VIEW (namespace draft §127): which run of
+                `faders()` strips the faders show, from nought. What the
+                machine is doing, never the show's (PRD §4.10), so it starts
+                at the first at every open, and a surface whose shape changes
+                starts there again. `rebank` asks the next afterTick to send
+                every strip on view whole; `digits` and the arrows' lights are
+                what the assignment display and BANK left and right were last
+                sent, nothing and -1 for nobody knows. */
+            std::size_t view = 0;
+            bool rebank = false;
+            std::string digits;
+            int bankLeftLed = -1;
+            int bankRightLed = -1;
+
             bool isMackie() const noexcept
             {
                 return profile == Profile::mcu || profile == Profile::d700;
             }
 
+            //  How many faders the surface has: eight a declared port.
+            std::size_t faders() const noexcept
+            {
+                return banks.size() * stripsPerBank;
+            }
+
+            /*  HOW MANY FADER BANKS ITS STRIPS MAKE: a plain Mackie's strips, as
+                many at a time as it has faders, the last bank perhaps short. A
+                D700 is never banked - its arrows move the standby (§17.17) -
+                and nor is a surface without faders. */
+            std::size_t bankCount() const noexcept
+            {
+                if (profile != Profile::mcu || faders() == 0 || strips.size() <= faders())
+                    return 1;
+
+                return (strips.size() + faders() - 1) / faders();
+            }
+
+            //  The strip under the first fader.
+            std::size_t firstShown() const noexcept
+            {
+                return std::min (view * faders(), strips.size());
+            }
+
             /*  How many rotaries a page has: every strip a declared port
-                carries - a D700 with one of its two ports named has eight. */
+                carries - a D700 with one of its two ports named has eight - of
+                the bank on view, which on a short last bank is fewer. */
             int rotaries() const noexcept
             {
-                return static_cast<int> (std::min (strips.size(), banks.size() * stripsPerBank));
+                return static_cast<int> (std::min (strips.size() - firstShown(), faders()));
             }
         };
 
@@ -1109,7 +1150,7 @@ namespace wfg::surface
                     if (index >= static_cast<int> (channels.size()))
                         break;
 
-                    auto& strip = box.strips[static_cast<std::size_t> (position)];
+                    auto& strip = box.strips[box.firstShown() + static_cast<std::size_t> (position)];
                     strip.control = index;
                     strip.busId = channels[static_cast<std::size_t> (index)];
                     strip.busNameAt = "/godot/bus/" + strip.busId + "/name";
@@ -1175,7 +1216,7 @@ namespace wfg::surface
                 for (int position = 0; position < page.count && position < rotaries; ++position)
                 {
                     const auto parameter = page.first + position;
-                    auto& strip = box.strips[static_cast<std::size_t> (position)];
+                    auto& strip = box.strips[box.firstShown() + static_cast<std::size_t> (position)];
                     strip.control = parameter;
                     strip.controlAt = "/godot/fx/" + page.fxId + "/p" + std::to_string (parameter);
                     strip.fxTextAt = "/godot/fx/" + page.fxId + "/t" + std::to_string (parameter);
@@ -1209,7 +1250,7 @@ namespace wfg::surface
 
                 for (int position = 0; position < loopControlCount && position < rotaries; ++position)
                 {
-                    auto& strip = box.strips[static_cast<std::size_t> (position)];
+                    auto& strip = box.strips[box.firstShown() + static_cast<std::size_t> (position)];
                     strip.control = position;
                     strip.controlAt = position == 0 ? paging.loopInAt
                                     : position == 1 ? paging.loopOutAt
@@ -1231,7 +1272,7 @@ namespace wfg::surface
                     break;
 
                 const auto& control = eqControls[static_cast<std::size_t> (index)];
-                auto& strip = box.strips[static_cast<std::size_t> (position)];
+                auto& strip = box.strips[box.firstShown() + static_cast<std::size_t> (position)];
                 strip.control = index;
                 strip.controlAt = base + std::string (control.row);
                 strip.switchAt = base + std::string (control.switchRow);
@@ -1456,7 +1497,8 @@ namespace wfg::surface
             if (element < 0 || element >= static_cast<int> (stripsPerBank))
                 return nullptr;
 
-            const auto index = bank * stripsPerBank + static_cast<std::size_t> (element);
+            //  On the bank on view (§127): a fader's message is the strip it shows.
+            const auto index = box.firstShown() + bank * stripsPerBank + static_cast<std::size_t> (element);
             return index < box.strips.size() ? &box.strips[index] : nullptr;
         }
 
@@ -1896,8 +1938,54 @@ namespace wfg::surface
                         submit (commandFrom (box.origin, "standby.next"));
                     break;
 
+                case Action::bankDown:
+                case Action::bankUp:
+                    if (event.down)
+                        moveBank (box, action == Action::bankUp);
+                    break;
+
                 case Action::none:
                     break;
+            }
+        }
+
+        /*  BANK LEFT OR RIGHT (namespace draft §127): the faders show the bank
+            before or after, and nothing past the first or the last. NEVER UNDER
+            A HAND: with a fader touched or a V-Pot held on the bank on view the
+            press does nothing (BFN) - a fader that went on to another strip
+            beneath the fingers would write the level it was at to a sound that
+            never asked for it. The strips that come into view are sent whole;
+            a rotary page stays up, on the rotaries of the bank now shown, at the
+            same page when it has as many rotaries as before and its first when
+            the bank is a short one. Nothing is a command: the bank is what the
+            surface shows, as a page is. */
+        void moveBank (Surface& box, bool up)
+        {
+            const auto count = box.bankCount();
+
+            if (count <= 1 || (up && box.view + 1 >= count) || (! up && box.view == 0))
+                return;
+
+            const auto first = box.firstShown();
+
+            for (std::size_t index = first; index < std::min (first + box.faders(), box.strips.size()); ++index)
+            {
+                const auto& strip = box.strips[index];
+
+                if (strip.handDown || strip.gateDown || ! strip.touched.empty())
+                    return;
+            }
+
+            const auto rotariesBefore = box.rotaries();
+
+            box.view = up ? box.view + 1 : box.view - 1;
+            box.rebank = true;
+
+            if (box.paging.page != Page::show)
+            {
+                box.paging.madeForIndex = -1;       // the controls go on the strips now shown
+                showPage (box, box.paging.page, box.rotaries() == rotariesBefore ? box.paging.index : 0,
+                          box.paging.bank);
             }
         }
 
@@ -2816,6 +2904,27 @@ namespace wfg::surface
                 box.dialColourKnown = false;
                 box.dialAt = -1;
                 box.dialPart = 0;
+                box.digits.clear();
+                box.bankLeftLed = -1;
+                box.bankRightLed = -1;
+                box.rebank = false;
+            }
+
+            /*  ANOTHER FADER BANK ON VIEW (§127): what the faders, screens and
+                lights show now belongs to other strips, so all of it is sent
+                again - the strips that left the view are drawn again whole
+                when they come back. Nobody asks who the unit is: it has not
+                changed. */
+            if (box.rebank)
+            {
+                box.rebank = false;
+
+                for (auto& bank : box.banks)
+                    for (auto& spot : bank.vacant)
+                        forgetShown (spot);
+
+                for (auto& strip : box.strips)
+                    forgetShown (strip);
             }
 
             /*  A PAGE WITH NOTHING TO SHOW - its cue let go of, or gone - is
@@ -2847,7 +2956,7 @@ namespace wfg::surface
 
                 for (std::size_t element = 0; element < stripsPerBank; ++element)
                 {
-                    const auto index = bank * stripsPerBank + element;
+                    const auto index = box.firstShown() + bank * stripsPerBank + element;
                     numbers[element] = static_cast<int> (index) + 1;
 
                     if (index < box.strips.size())
@@ -2876,6 +2985,9 @@ namespace wfg::surface
             if (! box.banks.empty())
                 paintRecButton (box, tick);
 
+            if (! box.banks.empty() && box.bankCount() > 1)
+                paintBanks (box, tick);
+
             if (box.topology.hasRgb && ! box.banks.empty())
                 paintDial (box, tick);
 
@@ -2890,6 +3002,97 @@ namespace wfg::surface
             }
 
             releaseScreens();
+        }
+
+        /*  WHICH FADER BANK IS UP, AND WHERE SOMETHING WAITS (namespace draft
+            §127). On the first port, where a Mackie's assignment display and
+            its BANK arrows are, and only on a surface with banks to move
+            between - one whose strips fit its faders is sent none of it.
+
+            THE DISPLAY SAYS THE BANK ON VIEW, "b1", "b2" ... "10": a number,
+            never a colour (§4.8). THE ARROWS ARE LIT where there is a bank to
+            move to, and dark at the end.
+
+            AND WHILE A CLIP WAITS ON A BANK NOBODY IS LOOKING AT - a strip
+            there `armed` for its fader, or `pending` for one - THE SURFACE
+            STAYS WHERE IT IS AND POINTS (BFL, the author's): the arrow towards
+            that bank blinks, and the display blinks its number, the nearest
+            such bank's, until the faders are moved there. Nothing moves under
+            the hands. */
+        void paintBanks (Surface& box, std::int64_t tick)
+        {
+            const auto* at = published.get();
+            const auto count = box.bankCount();
+            const auto faders = box.faders();
+
+            std::optional<std::size_t> waitingBelow, waitingAbove;
+
+            for (std::size_t index = 0; index < box.strips.size(); ++index)
+            {
+                const auto bank = index / faders;
+
+                if (bank == box.view)
+                    continue;
+
+                const auto& word = textAt (at, box.strips[index].wordAt);
+
+                if (word != "armed" && word != "pending")
+                    continue;
+
+                if (bank < box.view)
+                    waitingBelow = bank;                            // the last one below is the nearest
+                else if (! waitingAbove.has_value())
+                    waitingAbove = bank;
+            }
+
+            const auto& port = box.banks.front().port;
+
+            const auto arrow = [tick] (bool waits, bool more)
+            {
+                return waits ? blinked (Led::flash, tick) : more ? Led::on : Led::off;
+            };
+
+            const auto leftLight = arrow (waitingBelow.has_value(), box.view > 0);
+            const auto rightLight = arrow (waitingAbove.has_value(), box.view + 1 < count);
+
+            if (static_cast<int> (leftLight) != box.bankLeftLed)
+            {
+                send (port, led (bankLeftNote, leftLight));
+                box.bankLeftLed = static_cast<int> (leftLight);
+            }
+
+            if (static_cast<int> (rightLight) != box.bankRightLed)
+            {
+                send (port, led (bankRightNote, rightLight));
+                box.bankRightLed = static_cast<int> (rightLight);
+            }
+
+            /*  The number: the waiting bank's, blinking, the nearer of two
+                - the one above when they are as near. */
+            std::optional<std::size_t> waiting;
+
+            if (waitingAbove.has_value() && waitingBelow.has_value())
+                waiting = *waitingAbove - box.view <= box.view - *waitingBelow ? waitingAbove : waitingBelow;
+            else
+                waiting = waitingAbove.has_value() ? waitingAbove : waitingBelow;
+
+            const auto shownBank = waiting.value_or (box.view);
+            const auto dark = waiting.has_value() && blinked (Led::flash, tick) == Led::off;
+
+            std::string wanted = dark            ? std::string ("  ")
+                             : shownBank < 9   ? "b" + std::to_string (shownBank + 1)
+                                               : std::to_string (std::min<std::size_t> (shownBank + 1, 99));
+
+            if (wanted == box.digits)
+                return;
+
+            for (int position = 0; position < 2; ++position)
+                if (box.digits.size() != 2 || box.digits[static_cast<std::size_t> (position)]
+                                                != wanted[static_cast<std::size_t> (position)])
+                    if (const auto message = assignmentDigit (position, wanted[static_cast<std::size_t> (position)]))
+                        send (port, *message);
+
+            box.digits = std::move (wanted);
         }
 
         /*  A POSITION WITH NO STRIP IS DARK, AND SAYS SO (namespace draft
@@ -4160,6 +4363,13 @@ namespace wfg::surface
                         edit to the show, which declares again - a page that
                         did not carry over would close at the first detent. */
                     box.paging = std::move (previous->paging);
+
+                    //  AND ITS FADER BANK (§127), which the same shape still has.
+                    box.view = previous->view;
+                    box.rebank = previous->rebank;
+                    box.digits = std::move (previous->digits);
+                    box.bankLeftLed = previous->bankLeftLed;
+                    box.bankRightLed = previous->bankRightLed;
                 }
                 else
                 {

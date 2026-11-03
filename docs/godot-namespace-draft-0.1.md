@@ -35410,3 +35410,52 @@ Network page's `askFindPassword`. The app 0.1.9 (code 11): `FindRequest.password
 Tests: the server's frame with a quoted password, the command leaving it off the log, the gesture, the
 black-box FIND; the app's parse and answer rule. **Owed**: the tablet try, and the words - "Find password",
 the Network tab's window, the Connections tab's two sentences - to the author.
+
+## 127. Fader banks on a Mackie with few faders
+
+**Asked 2026-11-03** by the author, with a Behringer X-Touch on the desk: *"Can I use the banks on the X-Touch
+to have more faders than the physical ones?"* - and then: *"having an extender is quite a lot of space. Having
+a bunch of faders for the sampler, some for cue DCA and some for the output DCA won't fit on 8 faders. So maybe
+a fader bank extension would be good when there are few faders."* PRD §3.9d had left banking to be decided with
+the hardware in hand; this is that decision, for a plain Mackie surface.
+
+What was there: a surface could already hold more strips than it has faders (`strip.create`, made for an
+extender), and the strips past the last port were never shown. BANK left and right did nothing on a Mackie.
+
+- **BFK** **Banks are the surface's strips in their order, as many at a time as it has faders.** Eight a port:
+  a one-port X-Touch with twenty strips has three banks, 1-8, 9-16 and 17-20, the last one short and its four
+  spare faders dark (§30.5's vacant positions). BANK left and right move a bank, and do nothing past the first
+  or the last. The operator lays the banks out by ordering the strips - samplers, then cue DCAs, then output
+  DCAs, or any other way. A fader, its touch, its buttons and its rotary are the strip on view; a rotary page
+  (EQ, Send, FX, Pan, Loop) stays up across a bank change, on the rotaries of the bank now shown - at the same
+  page when the bank has as many rotaries, at its first when it is the short one. A surface whose strips fit
+  its faders has one bank and is sent nothing of this. *(Implementer's call.)*
+- **BFL** **The bank on view never moves by itself; it points.** When a clip waits on a bank nobody is looking
+  at - a strip there `armed` for its fader, or `pending` - the BANK arrow towards that bank blinks and the
+  assignment display blinks its number (the nearest such bank's), until the operator goes there. Nothing moves
+  under the hands. *The author's choice, 2026-11-03, over the PRD's lean (the bank following the GO).*
+- **BFM** **A clip takes the first free sampler strip in the surface's order, wherever it is.** Strict strip
+  order, as before banks: the bank on view is not preferred. *The author's choice, 2026-11-03.*
+- **BFN** **Never under a hand.** With a fader touched or a V-Pot held on the bank on view, a BANK press does
+  nothing: a fader that went on to another strip beneath the fingers would write its level to a sound that
+  never asked for it. *(Implementer's call.)*
+- **BFO** **What the surface says.** The two-digit assignment display shows the bank on view, `b1` ... `b9`,
+  then `10` - a number, never a colour (§4.8). The BANK arrows are lit where there is a bank to go to, dark at
+  the end, and blink towards a clip waiting (BFL). On the first port, where a Mackie has both. *(Implementer's
+  call.)*
+- **BFP** **The bank on view is the machine's, not the show's** (PRD §4.10): it starts at the first at every
+  open and when the surface's shape changes, is kept through a show edit that leaves the shape alone, and is
+  not a command - it is what the surface shows, as a page is (§17). Not published in the tree yet. *(Implementer's
+  call.)*
+- **BFQ** **The D700 is not banked.** Its bank notes are its standby arrows (§17.17), and it has sixteen faders.
+  *(Implementer's call.)*
+
+Built 2026-11-03: `Surface::view`, `bankCount`, `firstShown` in the bridge - the strip a fader message reaches,
+the strips painted and the rotaries a page lays out all count from the bank on view; `moveBank` on
+`Action::bankDown`/`bankUp` (the Mackie profile's BANK left and right); `paintBanks` for the display and the
+arrows; `McuCodec::assignmentDigit` (B0 4B / 4A, Mackie's character code, as Tracktion's MackieMCU writes it).
+Tests: three banks shown in turn, a fader reaching the strip it shows, a press refused under a hand, the ends;
+a clip waiting two banks away pointed at and the faders left where they were; a surface with no banks sent
+nothing of them; the profile table. **Owed**: the X-Touch try (the assignment display's characters and the BANK
+lights are the protocol's, never seen on this unit), the bank in the window and the tree, and the words - `b1`,
+the guide lines - to the author.

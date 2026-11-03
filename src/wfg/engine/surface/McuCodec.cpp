@@ -824,6 +824,24 @@ namespace wfg::surface
         return out;
     }
 
+    std::optional<Bytes> assignmentDigit (int position, char character)
+    {
+        if (position != 0 && position != 1)
+            return std::nullopt;
+
+        auto code = 0x20;
+
+        if (character >= 'a' && character <= 'z')
+            code = character - 'a' + 1;
+        else if (character >= 'A' && character <= 'Z')
+            code = character - 'A' + 1;
+        else if (character >= '0' && character <= '9')
+            code = character - '0' + 0x30;
+
+        return Bytes { 0xb0, static_cast<std::uint8_t> (position == 0 ? 0x4b : 0x4a),
+                       static_cast<std::uint8_t> (code) };
+    }
+
     //==========================================================================
     Bytes d700Ring (int strip, int value, int mode)
     {

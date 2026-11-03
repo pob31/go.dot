@@ -168,12 +168,18 @@ namespace wfg::surface
             up(-left) and down(-right) arrows on the D700 be used to move the
             standby cursor?"). They send the Mackie bank notes, and the D700 has
             no rewind or forward, so without this nothing on it moved the
-            pointer but GO. A Mackie keeps its bank arrows for banking (§3.9d);
-            it has the transport's own pair. */
+            pointer but GO. A Mackie keeps its bank arrows for banking, and
+            has the transport's own pair: they move its fader banks (namespace
+            draft §127, PRD §3.9d decided 2026-11-03). */
         if (profile == Profile::d700)
         {
             if (button.button == Button::bankLeft)  return Action::rewind;
             if (button.button == Button::bankRight) return Action::forward;
+        }
+        else
+        {
+            if (button.button == Button::bankLeft)  return Action::bankDown;
+            if (button.button == Button::bankRight) return Action::bankUp;
         }
 
         return Action::none;

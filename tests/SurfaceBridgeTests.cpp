@@ -740,8 +740,10 @@ TEST_CASE ("surface bridge: the profiles say what each surface has and what its 
     CHECK (surface::actionFor (mcu, surface::buttonForNote (0x36)) == surface::Action::leavePage);
     CHECK (surface::actionFor (mcu, surface::buttonForNote (0x37)) == surface::Action::leavePage);
     CHECK (surface::actionFor (mcu, surface::buttonForNote (0x38)) == surface::Action::none);
-    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x2e)) == surface::Action::none);
-    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x2f)) == surface::Action::none);
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x2e)) == surface::Action::bankDown);    // §127
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x2f)) == surface::Action::bankUp);
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x30)) == surface::Action::none);       // the channel arrows
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x31)) == surface::Action::none);
 
     /*  THE D700'S TWO ARROWS ARE THE BANK NOTES, and it has no rewind or
         forward: on it they move the standby (author, 2026-09-26). */
@@ -2695,6 +2697,242 @@ TEST_CASE ("surface bridge: a port put on another device starts its surface agai
     desk.ticks (2);
     CHECK (desk.submitted.empty());
     CHECK (desk.sink.sent.empty());
+}
+
+namespace
+{
+    /*  A MACKIE OF EIGHT FADERS WITH TWENTY STRIPS (namespace draft §127): strip
+        k on cue "Clip k", sounding, its fader riding its run's trim. */
+    struct BankedDesk
+    {
+        BankedDesk()
+        {
+            spec.id = "SURF0001";
+            spec.profile = "mcu";
+            spec.ports = { "PORTMCU1" };
+
+            for (int k = 1; k <= 20; ++k)
+            {
+                const auto two = (k < 10 ? "0" : "") + std::to_string (k);
+                const auto strip = "STRIP0" + two;
+                const auto slot = "/godot/slot/" + strip + "/";
+                const auto run = "RUN000" + two;
+
+                spec.strips.push_back (strip);
+                fake.text (slot + "role", "sampler");
+                fake.text (slot + "word", "playing");
+                fake.text (slot + "target", "/godot/run/" + run + "/trim");
+                fake.text (slot + "cue", "CUE000" + two);
+                fake.text (slot + "holder", run);
+                fake.number ("/godot/run/" + run + "/trim", -6.0);
+                fake.text ("/godot/cue/CUE000" + two + "/name", "Clip " + two);
+            }
+
+            bridge.declare ({ spec }, [] (const std::string&) { return plugged ("X-Touch"); });
+            after();
+        }
+
+        void after()
+        {
+            bridge.afterTick (fake.publish (tick), touches, tick);
+            ++tick;
+        }
+
+        void press (int note)
+        {
+            REQUIRE (bridge.arrived ("PORTMCU1", { 0x90, static_cast<std::uint8_t> (note), 0x7f }));
+            REQUIRE (bridge.arrived ("PORTMCU1", { 0x90, static_cast<std::uint8_t> (note), 0x00 }));
+            bridge.beforeTick (collect, tick);
+        }
+
+        bool shows (int element, const std::string& name) const
+        {
+            return contains (sentOn (sink, "PORTMCU1"), surface::lcdCell (0x14, 0, element, name));
+        }
+
+        //  Nothing sent but the meters, which a Mackie is sent again and again as they fall.
+        bool quiet() const
+        {
+            return std::all_of (sink.sent.begin(), sink.sent.end(), [] (const RecordingSink::Message& message)
+                                { return ! message.bytes.empty() && (message.bytes[0] & 0xf0) == 0xd0; });
+        }
+
+        bool says (char left, char right) const
+        {
+            const auto sent = sentOn (sink, "PORTMCU1");
+            return contains (sent, *surface::assignmentDigit (0, left))
+                && contains (sent, *surface::assignmentDigit (1, right));
+        }
+
+        RecordingSink sink;
+        surface::SurfaceTable table;
+        surface::SurfaceBridge bridge { sink, table };
+        tree::TouchTable touches;
+        FakeTree fake;
+        surface::SurfaceSpec spec;
+        std::vector<Event> submitted;
+        std::int64_t tick = 1;
+
+        surface::SurfaceBridge::Submit collect = [this] (Event event)
+        {
+            submitted.push_back (std::move (event));
+            return true;
+        };
+    };
+}
+
+TEST_CASE ("surface bridge: a Mackie with more strips than faders shows them a bank at a time")
+{
+    /*  The author, 2026-11-03, with an X-Touch in hand: "having a bunch of
+        faders for the sampler, some for cue DCA and some for the output DCA
+        won't fit on 8 faders" - PRD §3.9d decided. The strips in their order,
+        eight at a time; BANK left and right move between them. */
+    BankedDesk desk;
+
+    //  BANK ONE: the first eight, "b1" on the display, only the right arrow lit.
+    CHECK (desk.shows (0, "Clip 01"));
+    CHECK (desk.shows (7, "Clip 08"));
+    CHECK_FALSE (desk.shows (0, "Clip 09"));
+    CHECK (desk.says ('b', '1'));
+    CHECK (contains (sentOn (desk.sink, "PORTMCU1"), surface::led (0x2e, surface::Led::off)));
+    CHECK (contains (sentOn (desk.sink, "PORTMCU1"), surface::led (0x2f, surface::Led::on)));
+
+    //  LEFT AT THE FIRST does nothing - once the motors have got where they were going.
+    for (int n = 0; n < 20; ++n)
+        desk.after();
+
+    desk.sink.sent.clear();
+    desk.press (0x2e);
+    desk.after();
+    CHECK (desk.quiet());
+
+    //  BANK RIGHT: strips nine to sixteen, sent whole - the names and the motors.
+    desk.press (0x2f);
+    desk.after();
+
+    CHECK (desk.shows (0, "Clip 09"));
+    CHECK (desk.shows (7, "Clip 16"));
+    CHECK_FALSE (motorMoves (desk.sink, "PORTMCU1", 0).empty());
+    CHECK (contains (sentOn (desk.sink, "PORTMCU1"), *surface::assignmentDigit (1, '2')));
+    CHECK (contains (sentOn (desk.sink, "PORTMCU1"), surface::led (0x2e, surface::Led::on)));
+
+    //  A FADER IS THE STRIP IT SHOWS: the first one's touch takes strip nine's trim.
+    REQUIRE (desk.bridge.arrived ("PORTMCU1", { 0x90, 0x68, 0x7f }));
+    REQUIRE (desk.bridge.arrived ("PORTMCU1", { 0xe0, 0x00, 0x40 }));
+    desk.bridge.beforeTick (desk.collect, desk.tick);
+
+    const auto touches = named (desk.submitted, "node.touch");
+    REQUIRE (touches.size() == 1u);
+    CHECK (touches[0].args[0].getString() == "/godot/run/RUN00009/trim");
+
+    //  NEVER UNDER A HAND (BFN): the bank stays while the fader is held.
+    desk.after();
+    desk.sink.sent.clear();
+    desk.press (0x2f);
+    desk.after();
+    CHECK_FALSE (desk.shows (0, "Clip 17"));
+
+    //  Let go, and it moves: the short last bank, four strips and four dark, the right arrow out.
+    REQUIRE (desk.bridge.arrived ("PORTMCU1", { 0x90, 0x68, 0x00 }));
+    desk.bridge.beforeTick (desk.collect, desk.tick);
+    desk.after();
+    desk.press (0x2f);
+    desk.after();
+
+    CHECK (desk.shows (0, "Clip 17"));
+    CHECK (desk.shows (3, "Clip 20"));
+    CHECK (desk.shows (4, ""));
+    CHECK (contains (sentOn (desk.sink, "PORTMCU1"), *surface::assignmentDigit (1, '3')));
+    CHECK (contains (sentOn (desk.sink, "PORTMCU1"), surface::led (0x2f, surface::Led::off)));
+
+    //  Right at the last does nothing.
+    for (int n = 0; n < 20; ++n)
+        desk.after();
+
+    desk.sink.sent.clear();
+    desk.press (0x2f);
+    desk.after();
+    CHECK (desk.quiet());
+}
+
+TEST_CASE ("surface bridge: a clip waiting on a bank nobody is looking at is pointed at, and the faders stay")
+{
+    /*  BFL, the author's: the surface stays where it is; the arrow towards the
+        bank holding a clip armed for its fader blinks, and the display blinks
+        that bank's number, until the faders go there. */
+    BankedDesk desk;
+
+    desk.press (0x2f);
+    desk.after();
+    desk.press (0x2f);
+    desk.after();
+    REQUIRE (desk.shows (0, "Clip 17"));
+
+    //  A clip armed on strip two, on bank one.
+    desk.fake.text ("/godot/slot/STRIP002/word", "armed");
+    desk.sink.sent.clear();
+
+    for (int n = 0; n < 40; ++n)
+        desk.after();
+
+    const auto sent = sentOn (desk.sink, "PORTMCU1");
+    CHECK (contains (sent, surface::led (0x2e, surface::Led::on)));
+    CHECK (contains (sent, surface::led (0x2e, surface::Led::off)));     // blinking
+    CHECK (contains (sent, *surface::assignmentDigit (1, '1')));        // its number ...
+    CHECK (contains (sent, *surface::assignmentDigit (1, ' ')));        // ... blinking
+    CHECK_FALSE (desk.shows (0, "Clip 01"));                            // and the faders stayed
+
+    //  Gone there, the pointing stops: "b1" steady, the left arrow dark.
+    desk.press (0x2e);
+    desk.after();
+    desk.press (0x2e);
+    desk.after();
+    desk.sink.sent.clear();
+
+    for (int n = 0; n < 40; ++n)
+        desk.after();
+
+    CHECK_FALSE (contains (sentOn (desk.sink, "PORTMCU1"), *surface::assignmentDigit (1, ' ')));
+    CHECK_FALSE (contains (sentOn (desk.sink, "PORTMCU1"), surface::led (0x2e, surface::Led::on)));
+}
+
+TEST_CASE ("surface bridge: a Mackie whose strips fit its faders has no banks and is sent nothing of them")
+{
+    RecordingSink sink;
+    surface::SurfaceTable table;
+    surface::SurfaceBridge bridge { sink, table };
+    tree::TouchTable touches;
+    FakeTree fake;
+
+    surface::SurfaceSpec spec;
+    spec.id = "SURF0001";
+    spec.profile = "mcu";
+    spec.ports = { "PORTMCU1" };
+    spec.strips = { "STRIP001", "STRIP002" };
+    bridge.declare ({ spec }, [] (const std::string&) { return plugged ("X-Touch"); });
+
+    std::int64_t tick = 1;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+
+    const auto noBanks = [&sink]
+    {
+        for (const auto& message : sentOn (sink, "PORTMCU1"))
+            if (message.size() == 3 && ((message[0] == 0xb0 && (message[1] == 0x4a || message[1] == 0x4b))
+                                        || (message[0] == 0x90 && (message[1] == 0x2e || message[1] == 0x2f))))
+                return false;
+
+        return true;
+    };
+
+    CHECK (noBanks());
+
+    std::vector<Event> submitted;
+    bridge.arrived ("PORTMCU1", { 0x90, 0x2f, 0x7f });
+    bridge.beforeTick ([&submitted] (Event event) { submitted.push_back (std::move (event)); return true; }, ++tick);
+    bridge.afterTick (fake.publish (tick), touches, tick);
+
+    CHECK (submitted.empty());
+    CHECK (noBanks());
 }
 
 TEST_CASE ("surface bridge: the handshake's serial is recorded, and never answered")

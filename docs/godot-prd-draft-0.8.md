@@ -879,6 +879,19 @@ adding controller commands over the equivalent of QLab audio cues — and is
 probably the most UX-critical part of the system. Expect it to be adjusted in
 practice.
 
+**Decided for a plain Mackie Control surface** *(amended in 0.8, at the author's
+direction, 2026-11-03, with a Behringer X-Touch in hand — an extender takes too much
+room, and sampler strips, cue DCAs and output DCAs do not fit on eight faders)*: a
+surface with more strips than faders shows them **as many at a time as it has
+faders, in the strips' order**, and BANK left and right move between those banks.
+**The bank on view never changes by itself**: when a clip waits for its fader on a
+bank nobody is looking at, the arrow towards it blinks and the assignment display
+blinks its number until the operator goes there — nothing moves under the hands. A
+clip takes **the first free sampler strip in the surface's order**, wherever it is.
+The bank never moves while a hand is on a fader. The bank on view is what the
+machine is doing, not the show (§4.10). The D700 is not banked: its arrows move the
+standby. Namespace draft §127.
+
 Fader bindings are **show state** and live in the document, so the document has
 a hardware dependency. Loading a 16-fader show on 8 faders, or none, must
 **degrade rather than fail** — the show should run from a laptop in an
@@ -4284,6 +4297,8 @@ Restart-vs-second-instance is **settled** per kind — §3.8's table, decision N
 plus the 2026-09-07 sampler additions. Banking policy is still decided with the
 hardware, and a sampler group's *refresh* (§3.27) does not change it: a refresh
 re-claims strips lost to eviction and cannot conjure strips the layout lacks.
+Decided for a plain Mackie surface on 2026-11-03 (§3.9d): banks in strip order,
+the bank on view never moves by itself and points at a clip waiting elsewhere.
 
 ### 6.7 Modifier vocabulary (§3.17) — after the needs are collected
 

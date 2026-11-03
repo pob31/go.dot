@@ -112,10 +112,14 @@ namespace wfg::surface
         THE TRANSPORT (§16.6): PLAY is `go`; STOP is `run.stopAll` and STOP
         again inside `doubleStopTicks` is `run.killAll` - PRD §4.4's first two
         levels under the hand already on the surface; rewind and forward move
-        the standby. On a Mackie the bank and channel arrows do nothing,
-        because banking is §3.9d's decision to take with the hardware in hand;
-        on the D700, which has no rewind or forward, its two arrows (the bank
-        notes) are rewind and forward (2026-09-26).
+        the standby. On the D700, which has no rewind or forward, its two
+        arrows (the bank notes) are rewind and forward (2026-09-26).
+
+        A MACKIE'S BANK ARROWS MOVE ITS FADER BANKS (namespace draft §127,
+        the author 2026-11-03, PRD §3.9d decided with an X-Touch in hand): a
+        surface with more strips than faders shows them as many at a time as
+        it has, in its strips' order, and BANK left and right move from one
+        such bank to the next. The channel arrows still do nothing.
 
         THE TRANSPORT'S REC PRESSES A TAKE (Phase 9c, decision CS): `take.record`
         on the rack channel the aimed mic cue plays through - record, then
@@ -153,7 +157,8 @@ namespace wfg::surface
         `initialLevel` - an edit to the show and one undo step. */
     enum class Action { none, gate, go, stop, rewind, forward, kill, solo, startLevel,
                         record, loop, dialLetGo, dialRest,
-                        aim, eqPage, sendPage, fxPage, loopPage, panPage, leavePage };
+                        aim, eqPage, sendPage, fxPage, loopPage, panPage, leavePage,
+                        bankDown, bankUp };
 
     /*  AND IT SAYS SO: the red MUTE light is on for half a second after a
         kill it sent (author, 2026-09-25: "Can you flash for 0.5s the red mute

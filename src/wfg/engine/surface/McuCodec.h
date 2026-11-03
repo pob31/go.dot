@@ -305,6 +305,14 @@ namespace wfg::surface
         Safe on the D700 (protocol §6). */
     Bytes deviceQuery (std::uint8_t deviceId);
 
+    /*  ONE CHARACTER OF THE TWO-DIGIT ASSIGNMENT DISPLAY, the seven segments
+        above the encoder-assign keys: B0 4B for the left, B0 4A for the
+        right (`position` 0 or 1). Mackie's code: a letter 1..26 whatever its
+        case, a digit 0x30..0x39, and a space for anything else - what
+        Tracktion's MackieMCU writes there. Nothing for a position that is
+        neither. The D700 has no such display. */
+    std::optional<Bytes> assignmentDigit (int position, char character);
+
     //==========================================================================
     /*  THE D700'S OWN EXTENSIONS (control guide §4), each read from Asparion's
         published Bitwig script and confirmed on the unit. */
