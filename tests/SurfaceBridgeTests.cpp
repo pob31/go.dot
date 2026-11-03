@@ -5135,6 +5135,99 @@ TEST_CASE ("surface bridge: a DCA's ring shows what it rides - its sounds by tim
     CHECK (lights.count ("DCA00004") == 0);
 }
 
+TEST_CASE ("surface bridge: a DCA strip's meter shows what it rides - its loudest sound, else its pictures' brightness, never under one step")
+{
+    /*  Namespace draft §128, the author 2026-11-03, reading an X-Touch's
+        meters: "could the DCA also show signal (audio)?" - and with pictures
+        only, "the plain brightness with a minimum of 1 lit segment". */
+    RecordingSink sink;
+    surface::SurfaceTable table;
+    surface::SurfaceBridge bridge { sink, table };
+    tree::TouchTable touches;
+    FakeTree fake;
+
+    surface::SurfaceSpec spec;
+    spec.id = "SURF0001";
+    spec.profile = "mcu";
+    spec.ports = { "PORTMCU1" };
+
+    fake.text ("/godot/dca/order", "DCA00001 DCA00002 DCA00003 DCA00004");
+    fake.text ("/godot/run/order", "RUN00001 RUN00002 RUN00003 RUN00004");
+
+    for (int k = 1; k <= 4; ++k)
+    {
+        const auto strip = "STRIP00" + std::to_string (k);
+        const auto dca = "DCA0000" + std::to_string (k);
+        spec.strips.push_back (strip);
+        fake.text ("/godot/slot/" + strip + "/role", "dca");
+        fake.text ("/godot/slot/" + strip + "/dca", dca);
+        fake.text ("/godot/slot/" + strip + "/word", "dca");
+        fake.text ("/godot/slot/" + strip + "/target", "/godot/dca/" + dca + "/trim");
+        fake.number ("/godot/dca/" + dca + "/trim", 0.0);
+    }
+
+    //  1: a sound at -6 dB and a quieter one; 2: a white picture fully up; 3: a picture up but see-through; 4: nothing.
+    const auto run = [&fake] (const std::string& id, const std::string& cue, const std::string& kind,
+                              const std::string& dca)
+    {
+        fake.text ("/godot/run/" + id + "/state", "playing");
+        fake.text ("/godot/run/" + id + "/cue", cue);
+        fake.text ("/godot/cue/" + cue + "/kind", kind);
+        fake.text ("/godot/cue/" + cue + "/dca", dca);
+    };
+
+    run ("RUN00001", "CUE00001", "media", "DCA00001");
+    fake.text ("/godot/run/RUN00001/timbre", "0 1 0.5");
+    fake.number ("/godot/run/RUN00001/meter", -6.0);
+    run ("RUN00002", "CUE00002", "media", "DCA00001");
+    fake.text ("/godot/run/RUN00002/timbre", "120 1 0.5");
+    fake.number ("/godot/run/RUN00002/meter", -30.0);
+    run ("RUN00003", "CUE00003", "video", "DCA00002");
+    fake.text ("/godot/run/RUN00003/tint", "#FFFFFF");
+    run ("RUN00004", "CUE00004", "video", "DCA00003");
+    fake.text ("/godot/run/RUN00004/tint", "#000000");
+
+    bridge.declare ({ spec }, [] (const std::string&) { return plugged ("X-Touch"); });
+
+    for (std::int64_t tick = 1; tick <= 6; ++tick)
+        bridge.afterTick (fake.publish (tick), touches, tick);
+
+    const auto sent = sentOn (sink, "PORTMCU1");
+    CHECK (contains (sent, surface::meter (0, surface::meterStepFor (-6.0))));       // the loudest sound
+    CHECK_FALSE (contains (sent, surface::meter (0, surface::meterStepFor (-30.0))));
+    CHECK (contains (sent, surface::meter (1, static_cast<int> (surface::meterStepsDb.size()))));   // white, full
+    CHECK (contains (sent, surface::meter (2, 1)));                                   // see-through: one step
+    CHECK_FALSE (contains (sent, surface::meter (3, 1)));                             // nothing up: dark
+
+    //  ITS SOUND ENDS: dark once, the peak hold cleared.
+    fake.text ("/godot/run/RUN00001/state", "done");
+    fake.text ("/godot/run/RUN00002/state", "done");
+    sink.sent.clear();
+
+    for (std::int64_t tick = 7; tick <= 12; ++tick)
+        bridge.afterTick (fake.publish (tick), touches, tick);
+
+    CHECK (contains (sentOn (sink, "PORTMCU1"), surface::meter (0, 0)));
+    CHECK (contains (sentOn (sink, "PORTMCU1"), surface::meterClearPeak (0)));
+
+    /*  "When nothing is assigned or when all is quiet, then no minimal LED"
+        (the author): a sound under the DCA that is silent, beside a picture
+        that is up, reads nought - the step a picture keeps lit is for
+        pictures alone. */
+    fake.text ("/godot/run/RUN00001/state", "playing");
+    fake.number ("/godot/run/RUN00001/meter", -120.0);
+    run ("RUN00005", "CUE00005", "video", "DCA00001");
+    fake.text ("/godot/run/order", "RUN00001 RUN00002 RUN00003 RUN00004 RUN00005");
+    fake.text ("/godot/run/RUN00005/tint", "#FFFFFF");
+    sink.sent.clear();
+
+    for (std::int64_t tick = 13; tick <= 18; ++tick)
+        bridge.afterTick (fake.publish (tick), touches, tick);
+
+    CHECK (contains (sentOn (sink, "PORTMCU1"), surface::meter (0, 0)));
+    CHECK_FALSE (contains (sentOn (sink, "PORTMCU1"), surface::meter (0, 1)));
+}
+
 //==============================================================================
 /*  THE KNOB ABOVE A DCA STRIP (namespace draft §50): what it reaches, the value
     it shows, what a turn writes, and what its screen and ring say. */

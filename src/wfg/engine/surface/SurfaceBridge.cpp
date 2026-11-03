@@ -3390,7 +3390,9 @@ namespace wfg::surface
             }
 
             //------------------------------------------------------------------
-            if (box.topology.hasMeters && ! isDca)
+            if (box.topology.hasMeters && isDca)
+                paintDcaMeter (port, element, strip, tick);
+            else if (box.topology.hasMeters)
                 paintMeter (port, element, strip, word, tick);
         }
 
@@ -3995,16 +3997,7 @@ namespace wfg::surface
 
             if (! sounding)
             {
-                strip.meterPeak = meterSilentDb;
-                strip.meterFor.clear();
-
-                if (strip.meterStep != 0)
-                {
-                    send (port, meter (element, 0));
-                    send (port, meterClearPeak (element));
-                    strip.meterStep = 0;
-                }
-
+                darkMeter (port, element, strip);
                 return;
             }
 
@@ -4021,6 +4014,71 @@ namespace wfg::surface
                 return;
 
             const auto step = meterStepFor (strip.meterPeak);
+            send (port, meter (element, step));
+
+            strip.meterStep = step;
+            strip.meterSentAt = tick;
+            strip.meterPeak = meterSilentDb;
+        }
+
+        //  Dark once, its peak hold cleared, when nothing is there to meter.
+        void darkMeter (const std::string& port, int element, Strip& strip)
+        {
+            strip.meterPeak = meterSilentDb;
+            strip.meterFor.clear();
+
+            if (strip.meterStep != 0)
+            {
+                send (port, meter (element, 0));
+                send (port, meterClearPeak (element));
+                strip.meterStep = 0;
+            }
+        }
+
+        /*  A DCA STRIP'S METER (namespace draft §128, the author 2026-11-03,
+            reading the X-Touch's: "could the DCA also show signal?"). What its
+            ring is made of (§38, DcaColour.h), as a level:
+              * WHILE ANYTHING UNDER IT SOUNDS, the loudest sounding member's
+                meter, after its fader - the run its ring moves with - by the
+                sampler strips' law (`meterStepsDb`);
+              * WITH PICTURES ONLY, how bright the brightest of them is, as the
+                share of the steps it fills, and NEVER UNDER ONE LIT STEP: a
+                picture up but see-through still says it is up (the author's);
+              * with nothing up, dark.
+            Sent every `meterEveryTicks` as the sampler strips' are, since a
+            Mackie meter falls by itself; one peak hold for the DCA, cleared
+            when it starts to show something. */
+        void paintDcaMeter (const std::string& port, int element, Strip& strip, std::int64_t tick)
+        {
+            const auto& lights = dcaLightsNow();
+            const auto found = strip.dcaId.empty() ? lights.end() : lights.find (strip.dcaId);
+
+            if (found == lights.end())
+            {
+                darkMeter (port, element, strip);
+                return;
+            }
+
+            if (strip.meterFor != strip.dcaId)
+            {
+                strip.meterFor = strip.dcaId;
+                send (port, meterClearPeak (element));
+            }
+
+            const auto& light = found->second;
+
+            if (! light.loudestRun.empty())
+                if (const auto db = numberAt (published.get(), "/godot/run/" + light.loudestRun + "/meter"); db.has_value())
+                    strip.meterPeak = std::max (strip.meterPeak, *db);
+
+            if (tick - strip.meterSentAt < meterEveryTicks)
+                return;
+
+            const auto steps = static_cast<double> (meterStepsDb.size());
+            const auto step = ! light.loudestRun.empty()
+                                ? meterStepFor (strip.meterPeak)
+                                : std::max (1, static_cast<int> (std::lround (std::clamp (light.pictureLight, 0.0, 1.0) * steps)));
+
             send (port, meter (element, step));
 
             strip.meterStep = step;

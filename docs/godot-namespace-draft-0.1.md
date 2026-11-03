@@ -35459,3 +35459,31 @@ a clip waiting two banks away pointed at and the faders left where they were; a 
 nothing of them; the profile table. **Owed**: the X-Touch try (the assignment display's characters and the BANK
 lights are the protocol's, never seen on this unit), the bank in the window and the tree, and the words - `b1`,
 the guide lines - to the author.
+
+## 128. A DCA strip's meter
+
+**Asked 2026-11-03** by the author, reading the X-Touch's meters: *"The samplers are working, but could the DCA
+also show signal (audio) on the Mackie mode?"* - and for a DCA with pictures only, *"the plain brightness with a
+minimum of 1 lit segment"*; then *"When nothing is assigned or when all is quiet, then no minimal LED on the
+level meter."*
+
+What was there: a sampler strip's meter, the held run's level after its fader (2026-09-25, `meterStepsDb`); a
+DCA strip had none. Its ring already showed what it rides (§38): its sounds by timbre and loudness, its pictures
+by their tint, moving with the loudest sounding member.
+
+- **BFR** **A DCA strip's meter is its ring's members as a level.** While anything under the DCA sounds, the
+  loudest sounding member's meter, after its fader - the run the ring moves with - by the sampler strips' law.
+  With pictures only, how bright the brightest is, as the share of the steps it fills, never under one step: a
+  picture up but see-through still says it is up. Nothing assigned, nothing up, or a sound that is silent:
+  dark - the step a picture keeps lit is for pictures alone. Every Mackie surface, the D700 included. *The
+  author's, 2026-11-03.*
+- **BFS** **What it reads.** The members are §38's (`dcaLights`), so an output DCA meters the loudest run
+  through its outputs, before the output's own trim - Go.dot has no meter on an output yet. One peak hold for
+  the DCA, cleared when it starts to show something; sent every `meterEveryTicks`, as a sampler strip's.
+  *(Implementer's call.)*
+
+Built 2026-11-03: `paintDcaMeter` beside `paintMeter`, `darkMeter` shared by both. Test: a DCA's loudest sound,
+a white picture full, a see-through one at one step, an empty DCA dark, a silent sound beside a picture dark.
+**Owed**: the try on the X-Touch, whose meter has eight segments where the D700 shows eleven steps - which
+channel-pressure value lights its first segment is not known (BFT, open); if a see-through picture lights
+nothing there, the lowest step is raised for the `mcu` profile.
