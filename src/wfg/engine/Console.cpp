@@ -9092,14 +9092,27 @@ namespace
                                     One relaxed atomic on every other tick. */
                                 if (auto rebound = portBinder.take(); ! rebound.empty())
                                 {
+                                    /*  A PORT OPENED AGAIN IS A NEW UNIT to the
+                                        surface on it (2026-11-03): another device
+                                        put behind it, or its own back after it
+                                        went. Told before the declaration, which
+                                        would otherwise see the same port, as
+                                        connected as before, and keep what the
+                                        last unit was sent. */
+                                    std::vector<std::string> reopened;
+
                                     for (auto& port : rebound)
                                     {
                                         if (port.gone)
                                             midiPorts.forget (port.id);
                                         else
+                                        {
+                                            reopened.push_back (port.id);
                                             midiPorts.setBinding (port.id, std::move (port.binding));
+                                        }
                                     }
 
+                                    surfaceBridge->portsRebound (reopened);
                                     declareSurfaces();
                                     parameters.markStale();
                                 }

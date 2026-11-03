@@ -4012,6 +4012,33 @@ namespace wfg::surface
 
     SurfaceBridge::~SurfaceBridge() = default;
 
+    void SurfaceBridge::portsRebound (const std::vector<std::string>& portIds)
+    {
+        auto& s = *impl;
+
+        for (auto& box : s.surfaces)
+        {
+            const auto onOne = std::any_of (box.banks.begin(), box.banks.end(),
+                                            [&portIds] (const State::Bank& bank)
+                                            {
+                                                return std::find (portIds.begin(), portIds.end(), bank.port)
+                                                         != portIds.end();
+                                            });
+
+            if (! onOne)
+                continue;
+
+            /*  WHAT WAS BEHIND THE PORT HAS GONE, whatever comes now: its hands
+                are let go of, its serial forgotten, and a surface connected
+                after the declaration that follows is asked who it is and
+                painted whole - which `declare` carries over from here when the
+                shape is the same. */
+            s.owe (box);
+            box.serial.clear();
+            box.repaint = true;
+        }
+    }
+
     bool SurfaceBridge::declare (std::vector<SurfaceSpec> specs, const PortStates& portState)
     {
         auto& s = *impl;

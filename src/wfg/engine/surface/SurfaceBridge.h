@@ -175,6 +175,17 @@ namespace wfg::surface
             to rebuild. */
         bool declare (std::vector<SurfaceSpec> surfaces, const PortStates& portState);
 
+        /*  Tick thread, just before the `declare` that follows a rebind: these
+            ports were opened again - put on another device, or found their
+            device again after it went. A unit arrives knowing nothing (PRD
+            §4.9), and the same port name, connected before and after, kept
+            what the bridge had sent the one before it (the author, 2026-11-03:
+            a Mackie put where the D700 had been was sent no fader until a
+            value moved). So every surface on one of them lets go of what its
+            hands held, forgets its serial, and is asked who it is and painted
+            whole once it is connected. A port no surface is on is nothing. */
+        void portsRebound (const std::vector<std::string>& portIds);
+
         /*  MIDI callback thread: one complete message arrived on a port.
 
             True when a declared, enabled hardware surface owns that port - so

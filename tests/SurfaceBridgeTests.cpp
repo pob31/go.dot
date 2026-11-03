@@ -2640,6 +2640,63 @@ TEST_CASE ("surface bridge: a surface that goes lets go of what its hands held")
     CHECK_FALSE (desk.touches.isHeld (origin, trim));
 }
 
+TEST_CASE ("surface bridge: a port put on another device starts its surface again")
+{
+    /*  The author, 2026-11-03, putting a Mackie where the D700 had been: the
+        port is the same, connected before and after, and the surface the same
+        shape - so the bridge kept what it had sent the unit that left, and the
+        one that came was sent nothing until a value moved. A port bound again
+        is a unit that knows nothing (§4.9): let go of its hands, asked who it
+        is, and painted whole. */
+    Desk desk;
+    const auto mcu = desk.makeSurface ("mcu", "Desk");
+    const auto band = desk.makeDca ("Band");
+    desk.pin (desk.strips[mcu][0], band);
+
+    const auto spec = desk.spec (mcu, "mcu", { "PORTMCU1" });
+    const auto trim = "/godot/dca/" + band + "/trim";
+    const auto origin = "surface:" + mcu;
+
+    desk.declare ({ spec }, { { "PORTMCU1", plugged ("Desk port") } });
+    desk.ticks (3);
+
+    //  A hand on the first fader, on the unit about to leave.
+    desk.arrive ("PORTMCU1", { 0x90, 0x68, 0x7f });
+    desk.tickOnce();
+    REQUIRE (desk.touches.isHeld (origin, trim));
+
+    //  The same declaration again repaints nothing (the rule a rotary's edit needs).
+    CHECK_FALSE (desk.declare ({ spec }, { { "PORTMCU1", plugged ("Desk port") } }));
+    desk.clear();
+    desk.ticks (2);
+    CHECK (desk.sink.sent.empty());
+
+    //  BOUND AGAIN, to whatever is behind it now - and only then declared.
+    desk.bridge.portsRebound ({ "PORTMCU1" });
+    desk.declare ({ spec }, { { "PORTMCU1", plugged ("Desk port") } });
+    desk.clear();
+    desk.tickOnce();
+
+    REQUIRE (desk.submitted.size() == 1u);
+    CHECK (desk.submitted[0].command == "node.releaseAll");
+    CHECK_FALSE (desk.touches.isHeld (origin, trim));
+
+    const auto sent = sentOn (desk.sink, "PORTMCU1");
+    REQUIRE_FALSE (sent.empty());
+    CHECK (sent.front() == surface::deviceQuery (0x14));
+    CHECK_FALSE (motorMoves (desk.sink, "PORTMCU1", 0).empty());
+    CHECK (contains (sent, surface::lcdCell (0x14, 0, 0, "Band")));
+
+    //  A port no surface is on starts nothing - once the motors have got where they were going.
+    desk.ticks (20);
+    desk.clear();
+    desk.bridge.portsRebound ({ "PORTOTHER" });
+    desk.declare ({ spec }, { { "PORTMCU1", plugged ("Desk port") } });
+    desk.ticks (2);
+    CHECK (desk.submitted.empty());
+    CHECK (desk.sink.sent.empty());
+}
+
 TEST_CASE ("surface bridge: the handshake's serial is recorded, and never answered")
 {
     Desk desk;
