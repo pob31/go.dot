@@ -58,9 +58,12 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 /*
@@ -310,4 +313,106 @@ TEST_CASE ("simpleweb: a WebSocket message goes out and a reply comes back, on t
     const std::lock_guard<std::mutex> lock { client.mutex };
     REQUIRE (client.received.size() == 1);
     CHECK (client.received[0] == "echo:/godot/cmd/standby/next");
+}
+
+namespace
+{
+    /*  A server that answers the first request with `answer` and then holds
+        the connection until the test is done: the handshake reply is the whole
+        of what it is for. */
+    struct OneHandshake
+    {
+        explicit OneHandshake (std::string answerToSend) : answer (std::move (answerToSend))
+        {
+            REQUIRE (listener.createListener (0, "127.0.0.1"));
+            thread = std::thread ([this] { run(); });
+        }
+
+        ~OneHandshake()
+        {
+            stopping.store (true);
+            listener.close();
+            thread.join();
+        }
+
+        void run()
+        {
+            std::unique_ptr<juce::StreamingSocket> client (listener.waitForNextConnection());
+
+            if (client == nullptr)
+                return;
+
+            std::string request;
+
+            while (request.find ("\r\n\r\n") == std::string::npos && client->waitUntilReady (true, 1000) == 1)
+            {
+                char buffer[1024];
+                const auto got = client->read (buffer, static_cast<int> (sizeof (buffer)), false);
+
+                if (got <= 0)
+                    return;
+
+                request.append (buffer, static_cast<std::size_t> (got));
+            }
+
+            client->write (answer.data(), static_cast<int> (answer.size()));
+
+            while (! stopping.load())
+                std::this_thread::sleep_for (std::chrono::milliseconds (10));
+
+            client->close();
+        }
+
+        std::string answer;
+        juce::StreamingSocket listener;
+        std::atomic<bool> stopping { false };
+        std::thread thread;
+    };
+
+    struct ErrorRecordingClient final : public SimpleWebSocketClient::Listener
+    {
+        SimpleWebSocketClient client;
+        std::atomic<bool> open { false };
+        std::atomic<bool> failed { false };
+
+        ErrorRecordingClient() { client.addWebSocketListener (this); }
+        ~ErrorRecordingClient() override { client.removeWebSocketListener (this); client.stop(); }
+
+        void connectionOpened() override { open = true; }
+        void connectionError (int, const juce::String&) override { failed = true; }
+    };
+}
+
+TEST_CASE ("simpleweb: a handshake answered without a right Sec-WebSocket-Accept is refused, not crashed on")
+{
+    /*  Namespace draft §130, BGC: Ben Kuper's upstream 73f6499 (James
+        Walton's), taken into the fork. The client read the header before
+        asking whether it was there - a server answering 101 without it had the
+        client read past the end of its header map - and compared the key it
+        expected as text ending at a zero byte, reading past a 20-byte hash on
+        most handshakes. Go.dot's client is what listens to a mounted device's
+        OSCQuery stream, and what a backup dials its main with. */
+    const std::string upgrade = "HTTP/1.1 101 Switching Protocols\r\n"
+                                "Upgrade: websocket\r\n"
+                                "Connection: Upgrade\r\n";
+
+    SUBCASE ("no Sec-WebSocket-Accept at all")
+    {
+        OneHandshake server (upgrade + "\r\n");
+        ErrorRecordingClient client;
+        client.client.start ("127.0.0.1:" + juce::String (server.listener.getBoundPort()));
+
+        CHECK (waitUntil ([&client] { return client.failed.load(); }, std::chrono::milliseconds { 5000 }));
+        CHECK_FALSE (client.open.load());
+    }
+
+    SUBCASE ("a Sec-WebSocket-Accept that is not the key's")
+    {
+        OneHandshake server (upgrade + "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n\r\n");
+        ErrorRecordingClient client;
+        client.client.start ("127.0.0.1:" + juce::String (server.listener.getBoundPort()));
+
+        CHECK (waitUntil ([&client] { return client.failed.load(); }, std::chrono::milliseconds { 5000 }));
+        CHECK_FALSE (client.open.load());
+    }
 }

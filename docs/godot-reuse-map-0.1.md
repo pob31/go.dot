@@ -80,7 +80,7 @@ over is the drift.
 
 | Need | Reuse | Status |
 |---|---|---|
-| HTTP + WebSocket transport for OSCQuery | `juce_simpleweb` (`SimpleWebSocketServer`, `SimpleWebSocketClient`) | **pinned at `338035e`** (at `b72ec94` from PR 1.10 to 2026-11-11), and proven on all three platforms by `SimpleWebToolchainTests.cpp`. Two defects found and fixed in the fork: `start(0)` could not report its bound port — see below — and a frame's length could wrap (namespace draft §130, BGB) |
+| HTTP + WebSocket transport for OSCQuery | `juce_simpleweb` (`SimpleWebSocketServer`, `SimpleWebSocketClient`) | **pinned at `a793281`** (at `b72ec94` from PR 1.10 to 2026-11-11), and proven on all three platforms by `SimpleWebToolchainTests.cpp`. Two defects found and fixed in the fork: `start(0)` could not report its bound port — see below — and a frame's length could wrap (namespace draft §130, BGB); one taken from upstream, the client's handshake check (BGC) |
 | OSCQuery server shape | `WFS_DIY_v1/Source/Network/OSCQueryServer.{h,cpp}`: HOST_INFO, full tree, attribute queries, LISTEN/IGNORE, 30 ms coalesced binary pushes, PATH_CHANGED, per-IP echo suppression | **pattern only** — the transport shell is generic, the namespace builders are WFS-specific, and its HTTP handler walks the live ValueTree from a worker thread (a race Go.dot's snapshot removes). Go.dot's server is written in-tree behind a namespace-provider seam |
 | OSC codec | `spatcore/control/osc/{OSCParser,OSCSerializer}.h` | **not usable**: it drops bundle time tags, cannot serialise `T`/`F`, decodes them as an int32 `1`/`0`, and throws on an unknown tag. Go.dot writes its own full OSC 1.1 codec, shaped so it can be lifted into spatcore. *(Draft 0.1 also called it JUCE-9-only. That was wrong — see the correction below.)* |
 | UDP/TCP receivers with sender IP | `spatcore/control/osc/{OSCReceiverWithSenderIP,OSCTCPReceiver}` (raw-data callback path) | **shape reused** (raw datagram + sender IP:port), code not: their legacy path pulls `OSCParser.h` in |
@@ -221,12 +221,17 @@ get the fix by moving to `b72ec94` whenever they next re-pin.
 
 ### Which juce_simpleweb to pin — settled 2026-09-05
 
-**Pin `pob31/juce_simpleweb` master at `338035e` or later.** It is upstream master plus
-four commits: the TLS-off guard, the Windows fixes, the ephemeral-port fix below, and
+**Pin `pob31/juce_simpleweb` master at `a793281` or later.** It is upstream master (as of
+`af01ca4`) plus five commits: the TLS-off guard, the Windows fixes, the ephemeral-port fix below, and
 `338035e` (2026-11-11, namespace draft §130, BGB): a WebSocket frame claiming a 64-bit
 length with its top bit set is refused - before, one of 2^64 - 4 bytes, fourteen bytes on
-the wire, held a server thread for ever while memory filled. Go.dot is on `338035e`; the
-other three apps hold `b953ada` until they next re-pin, and inherit both fixes when they do.
+the wire, held a server thread for ever while memory filled; and `a793281`, upstream's
+`73f6499` taken alone (§130, BGC): the client read `Sec-WebSocket-Accept` before asking
+whether it was there, so a server answering 101 without it crashed the client. Upstream's
+other four commits since `af01ca4` were left out - an asio bump touching only TLS, which the
+family builds without, two getters and a streaming-response close nothing uses. Go.dot is
+on `a793281`; the other three apps hold `b953ada` until they next re-pin, and inherit all
+three fixes when they do.
 **WFS-DIY's OSCQuery server is open to that frame until it does.**
 
 **The fork is the answer, not a stopgap, and it is the answer FOR EVERY APP IN THE FAMILY**

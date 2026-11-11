@@ -35560,9 +35560,23 @@ fuzzed (`tests/fuzz` covers OSC, bplist, QLab and Live).
   apps vendors (reuse map, *Which juce_simpleweb to pin*) - `pob31/juce_simpleweb` `338035e` - and Go.dot's
   pin moves to it. WFS-DIY, XOA and Tight-WFS have it when they next re-pin; WFS-DIY's OSCQuery server is
   open to the same fourteen bytes until then.)*
+- **BGC** **A handshake answered without the right `Sec-WebSocket-Accept` is refused, not crashed on.** The
+  WebSocket client read that header before asking whether it was there, so a server answering 101 without it
+  had the client read past the end of its header map - in a Debug build, an assertion and the process gone;
+  and it compared the key it expected as text ending at a zero byte, reading past a 20-byte hash on about nine
+  handshakes in ten. Go.dot's client is what listens to a mounted device's OSCQuery stream, and what a backup
+  dials its main with. Ben Kuper's upstream had the fix (`73f6499`, James Walton's, 2026-11-06); asked by the
+  author whether anything there was worth taking, it is the one that was. *(The author's, 2026-11-11: "Yes,
+  pull 73f6499 into our fork." Taken alone, as `a793281`, and Go.dot's pin moved to it. Upstream's other four
+  commits past the fork's base were left: an asio update that changes only its TLS certificate check, which
+  Go.dot compiles out; a getter for a connection by id and one for a connection's send queue, which Go.dot
+  does its own way - and the second reads the queue without its lock; and a close for streaming HTTP replies,
+  which Go.dot does not send.)*
 
 Built 2026-11-11. Tests: a chunk decoder refuses sizes of 2^63 - 1 and of twenty hex digits; the GET of a
 reply chunked under `Transfer-Encoding:chunked`, and of one with an impossible chunk size, answered in well
 under its timeout; a path with a quote and a backslash in it announced, added and removed, as JSON whose
-`DATA` is the path; a frame of 2^64 - 4 bytes answered with a close, and the next connection served. Each
-seen red without its fix.
+`DATA` is the path; a frame of 2^64 - 4 bytes answered with a close, and the next connection served (without
+the fix, on Linux, memory grew 85 MB a second until the test was killed); a client answered 101 with no
+`Sec-WebSocket-Accept`, or a wrong one, reports an error and never opens (without the fix, a Debug build
+asserts on the end iterator and the process ends). Each seen red without its fix.
