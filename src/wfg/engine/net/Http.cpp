@@ -17,6 +17,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <limits>
 
 namespace wfg::net
 {
@@ -184,7 +185,11 @@ namespace wfg::net
             char* stop = nullptr;
             const auto size = std::strtoll (sizeText.c_str(), &stop, 16);
 
-            if (stop == sizeText.c_str() || size < 0)
+            /*  A size past what `left` can hold with its CRLF is refused too
+                (namespace draft §130, BFY): strtoll answers the largest it has
+                for any longer run of digits, and two more than that is no
+                number. */
+            if (stop == sizeText.c_str() || size < 0 || size > std::numeric_limits<long long>::max() - 2)
             {
                 problem = "a chunk size that is not one: " + sizeText;
                 return out;

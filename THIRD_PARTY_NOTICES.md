@@ -259,7 +259,7 @@ is compatible with GPL-3.0. Full text in `ThirdParty/JUCE/LICENSE.md`.
 
 - **Website**: https://github.com/benkuper/juce_simpleweb
   (Go.dot pins the fork https://github.com/pob31/juce_simpleweb)
-- **Version**: commit `b72ec947548654cdd0a7e72b71ab5826fe574847`
+- **Version**: commit `338035e7377e8be831365d0e22c550ffa511a3c8`
 - **Licence**: GPLv3
 - **Copyright**: Ben Kuper
 

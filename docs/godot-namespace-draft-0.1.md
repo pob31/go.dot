@@ -35527,3 +35527,42 @@ the line in `TestMain.cpp`, the suite ends with status 141 and prints nothing); 
 plugin, two hundred responders asked at once answering once among them; a browser started again lists nothing
 from before; a GET from a server that keeps its connection open, by length, chunked and 204. Two serves on one
 Windows machine still find each other through the group.
+
+## 130. A second look at the OSCQuery code, before a release
+
+**Asked 2026-11-11** by the author, after §129: *"Should we inspect a little more the OSCQuery before we cut a
+new release?"* Read again: everything a network peer's bytes reach - the mDNS reader, the HTTP head and chunk
+readers, the OSCQuery server's HTTP and WebSocket handling, the OSCQuery client, the timbre route, the MQTT
+length. The mDNS reader, the routes and the MQTT length held; four faults did not. None of these readers is
+fuzzed (`tests/fuzz` covers OSC, bplist, QLab and Live).
+
+- **BFY** **A chunk size no chunk can have is refused.** `net::ChunkDecoder` keeps the bytes left of a chunk
+  with its CRLF, `size + 2`; for a size of 2^63 - 1 or more - `strtoll` answers its largest for any longer run
+  of hex digits - that addition overflowed. Refused now, as a size that is not one is. The OSCQuery GET and the
+  Spectera's REST and events (§124) read chunks with it.
+- **BFZ** **The OSCQuery GET has one chunk decoder.** `ReplyEnd` (BFX) decided where a chunked reply ends with
+  `net::takeHead`; the body was then de-chunked by an older reader of its own, which looked for
+  `transfer-encoding: chunked` with its space and so took `Transfer-Encoding:chunked` for a plain body (its size
+  lines then reached the JSON reader, and a device was said to answer nonsense), and on Linux and macOS a size
+  near 2^64 wrapped its arithmetic round. The body is now what the one decoder put back together; broken chunks
+  are said to be broken, at once, instead of waited out to the timeout.
+- **BGA** **PATH_ADDED and PATH_REMOVED are quoted.** `"` and `\` are printable and allowed in an OSC address,
+  and a mounted device names its own; they went into the frame as they were, a frame no client could parse, and
+  that client's tree then went stale with nothing said. `json::quote`, as FIND already is.
+- **BGB** **A WebSocket frame claiming a length no frame may have ends its connection, and nothing else.**
+  RFC 6455 §5.2: a 64-bit length has its top bit clear. juce_simpleweb's server did not check, and read a
+  frame's mask and payload as `4 + length` bytes: for a length of 2^64 - 4 that is none, and it then copied
+  2^64 - 4 bytes one at a time out of an empty buffer. Fourteen bytes from anybody who can reach the port -
+  every surface, tablet and browser comes in on it - held one of the server's threads for good while the
+  process's memory filled, until the machine ran out. The server now closes such a connection (1002) and goes
+  on; its size limit is compared so that neither side can wrap. The WebSocket client reads a frame
+  differently and is not open to it. *(The author's, 2026-11-11: the fix goes in the fork every one of his
+  apps vendors (reuse map, *Which juce_simpleweb to pin*) - `pob31/juce_simpleweb` `338035e` - and Go.dot's
+  pin moves to it. WFS-DIY, XOA and Tight-WFS have it when they next re-pin; WFS-DIY's OSCQuery server is
+  open to the same fourteen bytes until then.)*
+
+Built 2026-11-11. Tests: a chunk decoder refuses sizes of 2^63 - 1 and of twenty hex digits; the GET of a
+reply chunked under `Transfer-Encoding:chunked`, and of one with an impossible chunk size, answered in well
+under its timeout; a path with a quote and a backslash in it announced, added and removed, as JSON whose
+`DATA` is the path; a frame of 2^64 - 4 bytes answered with a close, and the next connection served. Each
+seen red without its fix.

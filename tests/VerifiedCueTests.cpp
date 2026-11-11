@@ -389,6 +389,26 @@ TEST_CASE ("oscquery client: a reply ends where its length or its last chunk say
         CHECK (took < std::chrono::seconds (4));
     }
 
+    SUBCASE ("chunked, its header written without a space - one decoder decides (BFZ)")
+    {
+        HeldOpenHttp server ("HTTP/1.1 200 OK\r\nTransfer-Encoding:chunked\r\n\r\n"
+                             "a\r\n{\"VALUE\": \r\n6\r\n[0.5]}\r\n0\r\n\r\n");
+        const auto [reply, took] = timed (server.port());
+        REQUIRE_MESSAGE (reply.ok, reply.error);
+        CHECK (reply.body == "{\"VALUE\": [0.5]}");
+        CHECK (took < std::chrono::seconds (4));
+    }
+
+    SUBCASE ("a chunk size no chunk can have: refused at once, not waited out (BFY)")
+    {
+        HeldOpenHttp server ("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+                             "5\r\n{\"VAL\r\nFFFFFFFFFFFFFFE0\r\nUE\": [0.5]}\r\n0\r\n\r\n");
+        const auto [reply, took] = timed (server.port());
+        CHECK_FALSE (reply.ok);
+        CHECK (reply.error == "the reply's chunked body was broken");
+        CHECK (took < std::chrono::seconds (4));
+    }
+
     SUBCASE ("204, which has no body to wait for")
     {
         HeldOpenHttp server ("HTTP/1.1 204 No Content\r\n\r\n");

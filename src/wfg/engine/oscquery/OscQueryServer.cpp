@@ -886,11 +886,15 @@ namespace wfg::oscquery
         /*  Structure first, then values. A client told that a node's value
             changed before it has been told the node exists has to guess; told
             in this order it never does. */
+        /*  QUOTED, as JSON says (namespace draft §130, BGA): `"` and `\` are
+            printable and allowed in an OSC address, and a mounted device's
+            address with one in it went out as a frame no client could parse -
+            its tree then went stale with nothing said. */
         for (const auto& address : diff.added)
-            broadcastText ("{\"COMMAND\": \"PATH_ADDED\", \"DATA\": \"" + address + "\"}");
+            broadcastText ("{\"COMMAND\": \"PATH_ADDED\", \"DATA\": " + json::quote (address) + "}");
 
         for (const auto& address : diff.removed)
-            broadcastText ("{\"COMMAND\": \"PATH_REMOVED\", \"DATA\": \"" + address + "\"}");
+            broadcastText ("{\"COMMAND\": \"PATH_REMOVED\", \"DATA\": " + json::quote (address) + "}");
 
         for (const auto& address : diff.valueChanged)
         {

@@ -65,6 +65,7 @@
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/json/JsonValue.h>
 #include <wfg/engine/cue/Run.h>
+#include <wfg/engine/osc/OscAddress.h>
 #include <wfg/engine/osc/OscCodec.h>
 #include <wfg/engine/osc/UdpEndpoint.h>
 #include <wfg/engine/tree/Mount.h>
@@ -968,6 +969,42 @@ TEST_CASE ("oscquery: a structural change is announced before values follow")
     CHECK (client.text[1].contains ("PATH_REMOVED"));
 }
 
+TEST_CASE ("oscquery: a path with a quote or a backslash in it is announced as JSON a client can read")
+{
+    /*  BGA: both are printable and allowed in an OSC address - a mounted
+        device's names are its own - and they went out unescaped. */
+    Rig rig;
+    REQUIRE (rig.started);
+
+    Client client;
+    client.connect (rig.port());
+    REQUIRE (waitUntil ([&client] { return client.open.load(); }));
+
+    const std::string odd = "/desk/ch\"1\\a";
+    REQUIRE (osc::isValidAddress (odd));
+
+    tree::TreeDiff diff;
+    diff.added.push_back (odd);
+    diff.removed.push_back (odd);
+
+    rig.server.publishChanges (diff, *rig.nameSpace.tree, "cli");
+    REQUIRE (waitUntil ([&client] { return client.textCount() >= 2; }));
+
+    const std::lock_guard<std::mutex> lock { client.mutex };
+
+    for (std::size_t i = 0; i < 2; ++i)
+    {
+        const auto parsed = json::parse (client.text[i].toStdString());
+        INFO (client.text[i]);
+        REQUIRE (parsed.value.has_value());
+
+        const auto* data = parsed.value->find ("DATA");
+        REQUIRE (data != nullptr);
+        REQUIRE (data->isString());
+        CHECK (data->asString() == odd);
+    }
+}
+
 //==============================================================================
 //  THE STREAM (namespace draft §68, ANQ, ANR): a bundle a tick of everything
 //  that changed under a prefix, for a remote that holds the whole state.
@@ -1207,6 +1244,84 @@ TEST_CASE ("stream: a connection that stops reading is let go, and the tick neve
     CHECK (std::chrono::duration_cast<std::chrono::milliseconds> (slowest).count() < 100);
 
     stalled.close();
+}
+
+TEST_CASE ("websocket: a frame claiming a length no frame may have is refused, and the server goes on")
+{
+    /*  BGB. RFC 6455 §5.2: a 64-bit payload length has its top bit clear. One of
+        2^64 - 4 made juce_simpleweb read "4 + length" bytes - none - and then
+        copy 2^64 - 4 out of an empty buffer one at a time: fourteen bytes from
+        anybody who can reach the port held a server thread for ever while the
+        process's memory filled. The server now refuses the frame and hangs up,
+        and the next connection is served as before. */
+    Rig rig;
+    REQUIRE (rig.started);
+
+    const auto upgraded = [&rig] (juce::StreamingSocket& socket)
+    {
+        if (! socket.connect ("127.0.0.1", rig.port(), 2000))
+            return false;
+
+        const std::string handshake = "GET / HTTP/1.1\r\n"
+                                      "Host: 127.0.0.1:" + std::to_string (rig.port()) + "\r\n"
+                                      "Upgrade: websocket\r\n"
+                                      "Connection: Upgrade\r\n"
+                                      "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+                                      "Sec-WebSocket-Version: 13\r\n\r\n";
+
+        if (socket.write (handshake.data(), static_cast<int> (handshake.size())) != static_cast<int> (handshake.size()))
+            return false;
+
+        std::string reply;
+
+        if (! waitUntil ([&socket, &reply]
+        {
+            char chunk[512];
+
+            if (socket.waitUntilReady (true, 10) == 1)
+            {
+                const auto got = socket.read (chunk, sizeof (chunk), false);
+
+                if (got > 0)
+                    reply.append (chunk, static_cast<std::size_t> (got));
+            }
+
+            return reply.find ("\r\n\r\n") != std::string::npos;
+        }))
+            return false;
+
+        return reply.find (" 101 ") != std::string::npos;
+    };
+
+    juce::StreamingSocket hostile;
+    REQUIRE (upgraded (hostile));
+
+    std::string frame;
+    frame += static_cast<char> (0x82);                    // FIN, binary
+    frame += static_cast<char> (0xFF);                    // masked, a 64-bit length follows
+    frame += std::string (7, static_cast<char> (0xFF));
+    frame += static_cast<char> (0xFC);                    // 2^64 - 4
+    frame += std::string (4, '\0');                       // the mask
+    REQUIRE (hostile.write (frame.data(), static_cast<int> (frame.size())) == static_cast<int> (frame.size()));
+
+    //  Its close frame, if any, then the end of the connection.
+    const auto hungUp = waitUntil ([&hostile]
+    {
+        const auto ready = hostile.waitUntilReady (true, 10);
+
+        if (ready != 1)
+            return ready < 0;
+
+        char chunk[64];
+        return hostile.read (chunk, sizeof (chunk), false) <= 0;
+    }, std::chrono::milliseconds { 3000 });
+
+    CHECK (hungUp);
+    hostile.close();
+
+    juce::StreamingSocket next;
+    CHECK (upgraded (next));
+    next.close();
 }
 
 TEST_CASE ("remotes: HELLO names a connection, FIND reaches only its remote, and a close forgets it")

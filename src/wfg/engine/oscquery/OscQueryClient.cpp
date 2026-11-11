@@ -45,42 +45,6 @@ namespace wfg::oscquery
             return static_cast<int> (std::clamp<std::int64_t> (left, 0, 600000));
         }
 
-        /*  A chunked body, put back together.
-
-            Rare against an OSCQuery server and not hypothetical: the framing is
-            the server's choice, not the client's, and a reply that arrived with
-            its size markers still in it would parse as broken JSON and be
-            reported as a device that answered nonsense. De-chunking is fifteen
-            lines and the alternative is a wrong diagnosis. */
-        std::string deChunk (const std::string& body)
-        {
-            std::string out;
-            std::size_t at = 0;
-
-            while (at < body.size())
-            {
-                const auto lineEnd = body.find ("\r\n", at);
-
-                if (lineEnd == std::string::npos)
-                    break;
-
-                const auto size = std::strtoul (body.substr (at, lineEnd - at).c_str(), nullptr, 16);
-
-                if (size == 0)
-                    break;
-
-                const auto start = lineEnd + 2;
-
-                if (start + size > body.size())
-                    break;
-
-                out.append (body, start, size);
-                at = start + size + 2;                  // past the chunk's own CRLF
-            }
-
-            return out;
-        }
-
         /*  WHERE A REPLY ENDS, when the server says so itself (namespace draft
             §129, BFX; RFC 9112 §6.3):
             at its Content-Length, or at its last chunk. The request says
@@ -91,7 +55,16 @@ namespace wfg::oscquery
             Bayle's retest of the OSCQuery Automation Plugin, item 2.9). A
             reply with neither still ends at the close, as before; so does one
             that is not HTTP, which the reading after the loop names.
-            Incremental: each read is looked at once. */
+            Incremental: each read is looked at once.
+
+            A CHUNKED BODY IS PUT BACK TOGETHER HERE, and nowhere else (§130,
+            BFZ). Rare against an OSCQuery server and not hypothetical: the
+            framing is the server's choice, and a reply with its size markers
+            still in it would parse as broken JSON and be reported as a device
+            that answered nonsense. One decoder decides both where the reply
+            ends and what its body is - a second one, reading the header its
+            own way, once took `Transfer-Encoding:chunked` without its space
+            for a plain body, and wrapped round on a size near 2^64. */
         struct ReplyEnd
         {
             std::size_t searchedTo = 0;    ///< where the blank line was last looked for
@@ -102,6 +75,7 @@ namespace wfg::oscquery
             std::size_t bodyStart = 0;
             std::size_t fed = 0;
             net::ChunkDecoder chunks;
+            std::string dechunked;         ///< a chunked reply's body, so far
 
             bool reached (const std::string& response)
             {
@@ -149,9 +123,9 @@ namespace wfg::oscquery
 
                 if (chunked)
                 {
-                    (void) chunks.feed (std::string_view (response).substr (fed));
+                    dechunked += chunks.feed (std::string_view (response).substr (fed));
                     fed = response.size();
-                    return chunks.finished;
+                    return chunks.finished || ! chunks.problem.empty();
                 }
 
                 return static_cast<long long> (response.size() - bodyStart) >= length;
@@ -274,20 +248,23 @@ namespace wfg::oscquery
             return reply;
         }
 
-        const auto headers = response.substr (0, headerEnd);
         auto body = response.substr (headerEnd + 4);
 
-        /*  Case-insensitively, because a header name is and a device that
-            writes `Transfer-Encoding` differently from the last one is not
-            wrong. */
-        auto lowered = headers;
-        std::transform (lowered.begin(), lowered.end(), lowered.begin(),
-                        [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
+        if (end.chunked)
+        {
+            //  Fixed text: the decoder's own quotes the server's bytes, as many as there were.
+            if (! end.chunks.problem.empty())
+            {
+                reply.error = "the reply's chunked body was broken";
+                return reply;
+            }
 
-        if (lowered.find ("transfer-encoding: chunked") != std::string::npos)
-            body = deChunk (body);
+            body = std::move (end.dechunked);
+        }
         else if (end.length >= 0 && body.size() > static_cast<std::size_t> (end.length))
+        {
             body.resize (static_cast<std::size_t> (end.length));      // what the server said is the body, and no more
+        }
 
         reply.body = std::move (body);
         reply.ok = true;

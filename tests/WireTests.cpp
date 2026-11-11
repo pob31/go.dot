@@ -824,6 +824,15 @@ TEST_CASE ("net: a response's head once it is all there, and a chunked body howe
     net::ChunkDecoder bad;
     bad.feed ("zz\r\n");
     CHECK_FALSE (bad.problem.empty());
+
+    //  A size no chunk can have (BFY): refused, and nothing taken as its bytes.
+    for (const auto* const size : { "7FFFFFFFFFFFFFFF\r\n", "FFFFFFFFFFFFFFFFFFFF\r\nabc" })
+    {
+        net::ChunkDecoder huge;
+        CHECK (huge.feed (size).empty());
+        CHECK_FALSE (huge.problem.empty());
+        CHECK_FALSE (huge.finished);
+    }
 }
 
 TEST_CASE ("net: Server-Sent Events - named or not, data lines joined, comments nothing, any line end")
