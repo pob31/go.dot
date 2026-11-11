@@ -35511,7 +35511,8 @@ it with the fixes."*
   by a validator in two hundred processes, sent 11,600 datagrams in a second and took a phone's hotspot down;
   Go.dot is one process per machine and cannot flood that way, but answered the same way. `AnswerPacer.h` comes
   from the plugin as it was written there, its notice naming both of that project's authors. *(The handoff's
-  fix; the notice is the author's to change.)*
+  fix. The notice keeps Julien Bayle beside the author: the author's, 2026-11-11 - "We can leave the nod to
+  Julien there. He's very supportive of Go.dot.")*
 - **BFW** **Discovery started again starts fresh**: what an earlier start heard is dropped, so a record kept
   from before is not listed for its whole time to live by a browser that can no longer hear it withdrawn.
   Go.dot starts discovery once, at the serve; this is for whoever first starts it again. *(The handoff's fix.)*
@@ -35525,5 +35526,4 @@ Built 2026-11-11. Tests: a write to a peer that has hung up fails and the progra
 the line in `TestMain.cpp`, the suite ends with status 141 and prints nothing); the pacer's seven cases from the
 plugin, two hundred responders asked at once answering once among them; a browser started again lists nothing
 from before; a GET from a server that keeps its connection open, by length, chunked and 204. Two serves on one
-Windows machine still find each other through the group. **Owed**: the author's word on `AnswerPacer.h`'s
-notice.
+Windows machine still find each other through the group.
