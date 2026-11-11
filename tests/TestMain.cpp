@@ -42,6 +42,7 @@
 #include <juce_events/juce_events.h>
 
 #include <clocale>
+#include <csignal>
 #include <cstring>
 #include <iostream>
 #include <string>
@@ -64,7 +65,15 @@ namespace wfgtest
 //==============================================================================
 int main (int argc, char** argv)
 {
-    /*  As the console does first: on Windows a set LV2_PATH crashes JUCE's
+    /*  As the console does first (wfg::runConsole): a write to a peer that has
+        hung up fails with EPIPE instead of ending the suite with SIGPIPE - on
+        Linux, exit status 141 and not a word printed, which is how a suite
+        that restarts its mock devices loses a run. */
+#ifdef SIGPIPE
+    std::signal (SIGPIPE, SIG_IGN);
+#endif
+
+    /*  As the console does next: on Windows a set LV2_PATH crashes JUCE's
         LV2 host (plugin/PluginScan.h), in this process and its children. */
     wfg::plugin::setAsideLv2PathOnWindows();
 

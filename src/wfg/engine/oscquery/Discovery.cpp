@@ -21,6 +21,8 @@
 #include <juce_core/juce_core.h>
 
 #include <algorithm>
+#include <cstdint>
+#include <random>
 
 namespace wfg::oscquery
 {
@@ -39,6 +41,15 @@ namespace wfg::oscquery
                     c = static_cast<char> (c - 'A' + 'a');
 
             return key;
+        }
+
+        /*  One record as the pacer knows it (AnswerPacer.h): the same text for
+            the same record whoever sends it. The port is part of an SRV's, so
+            two servers under one name are two records. */
+        std::string pacerKey (const mdns::Record& record)
+        {
+            return keyOf (record.name) + "|" + std::to_string (record.type) + "|" + keyOf (record.target)
+                 + (record.type == mdns::type::srv ? "|" + std::to_string (record.port) : std::string());
         }
 
         std::chrono::seconds secondsOf (std::uint32_t ttl)
@@ -185,6 +196,26 @@ namespace wfg::oscquery
         interfaces.clear();
         openInterfaces();
 
+        /*  A FRESH BROWSE (namespace draft §129, BFW): what an earlier
+            start() heard is dropped, and what an earlier one paced. The
+            options may name other peers or another
+            service, and a record kept from before would be listed for its
+            whole time to live (75 minutes for a PTR) by a browser that can no
+            longer hear it withdrawn. What is still out there answers the first
+            question, a moment from now. Go.dot starts discovery once, at the
+            serve; this is for whoever first starts it again (the OSCQuery
+            Automation Plugin, which does, found the trap on 2026-11-10). */
+        instances.clear();
+        hosts.clear();
+        pacer = {};
+
+        {
+            const std::lock_guard<std::mutex> lock { guard };
+            list.clear();
+        }
+
+        stamp.fetch_add (1, std::memory_order_acq_rel);
+
         say (onGroup ? "browsing" : "unicast", problemNow);
 
         if (announcing())
@@ -308,7 +339,8 @@ namespace wfg::oscquery
     {
         const auto size = static_cast<int> (bytes.size());
 
-        if (onGroup)
+        //  Within the budget of datagrams to the group, or not at all (AnswerPacer.h).
+        if (onGroup && pacer.spend (Clock::now()))
         {
             if (interfaces.empty())
                 socket->write (mdns::group, mdns::port, bytes.data(), size);
@@ -385,6 +417,12 @@ namespace wfg::oscquery
         }
 
         sendToGroup (mdns::encodeResponse (answers, addressRecords (unique, false)));
+
+        //  Just said: not said again to a question arriving within the second.
+        const auto now = Clock::now();
+
+        for (const auto& each : answers)
+            pacer.heard (pacerKey (each), now);
     }
 
     /*  A QUESTION ABOUT GO.DOT, ANSWERED (ARU, ASA): the PTR of a service it
@@ -485,7 +523,23 @@ namespace wfg::oscquery
             return;
         }
 
-        sendToGroup (mdns::encodeResponse (answers, additionals));
+        /*  To the group: after a short wait chosen at random, unless another
+            responder says the same meanwhile, and never the same record twice
+            within a second (RFC 6762 §6, §7.4; AnswerPacer.h). */
+        std::vector<std::string> keys;
+
+        for (const auto& each : answers)
+            keys.push_back (pacerKey (each));
+
+        const auto wait = std::uniform_int_distribution<int> (20, 120) (delays);
+        (void) pacer.want (std::move (keys), mdns::encodeResponse (answers, additionals), Clock::now(),
+                           std::chrono::milliseconds (wait));
+    }
+
+    void Discovery::sendDueAnswers (Clock::time_point now)
+    {
+        for (const auto& bytes : pacer.due (now))
+            sendToGroup (bytes);
     }
 
     std::string Discovery::preferred (const std::vector<std::string>& addresses) const
@@ -514,7 +568,7 @@ namespace wfg::oscquery
         const auto bytes = mdns::encodeQuery (asked);
         const auto size = static_cast<int> (bytes.size());
 
-        if (toGroup && options.port == mdns::port)
+        if (toGroup && options.port == mdns::port && pacer.spend (Clock::now()))
         {
             if (onGroup && ! interfaces.empty())
             {
@@ -563,6 +617,7 @@ namespace wfg::oscquery
             }
 
             followUp (now);
+            sendDueAnswers (now);
 
             //  ANNOUNCED TWICE AT THE START, a second apart (RFC 6762 §8.3).
             if (announcing() && onGroup && announcementsLeft > 0 && now >= nextAnnouncement)
@@ -584,7 +639,14 @@ namespace wfg::oscquery
                 lastInterfaces = now;
             }
 
-            if (socket->waitUntilReady (true, 100) != 1)
+            //  Not past the moment a waiting answer is due.
+            int waitMs = 100;
+
+            if (const auto due = pacer.next())
+                waitMs = static_cast<int> (std::clamp<std::int64_t> (
+                    std::chrono::duration_cast<std::chrono::milliseconds> (*due - Clock::now()).count() + 1, 1, 100));
+
+            if (socket->waitUntilReady (true, waitMs) != 1)
                 continue;
 
             juce::String fromIp;
@@ -614,6 +676,12 @@ namespace wfg::oscquery
 
         const auto now = Clock::now();
         const auto records = message->records();
+
+        //  What a responder just said to the group, ours looped back included, is said (§7.4).
+        if (announcing() && fromPort == mdns::port)
+            for (const auto& record : message->answers)
+                if (record.ttl > 0)
+                    pacer.heard (pacerKey (record), now);
 
         //  The instances first, so an SRV in the same message finds its own.
         for (const auto& record : records)

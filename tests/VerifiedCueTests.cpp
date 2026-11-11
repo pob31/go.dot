@@ -67,6 +67,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using namespace wfg;
@@ -288,6 +289,114 @@ TEST_CASE ("oscquery client: the four answers are four different things")
         CHECK_FALSE (reply.ok);
         CHECK (reply.status == 0);
         CHECK_FALSE (reply.error.empty());
+    }
+}
+
+namespace
+{
+    /*  A server that answers one request with `reply`, in two writes - the
+        head and a little, then the rest - and then keeps the connection open
+        until the test is done, whatever `Connection: close` asked. At fault
+        under HTTP/1.1, and such servers exist (Julien Bayle's retest of the
+        OSCQuery Automation Plugin, item 2.9). */
+    struct HeldOpenHttp
+    {
+        explicit HeldOpenHttp (std::string replyToSend) : reply (std::move (replyToSend))
+        {
+            REQUIRE (listener.createListener (0, "127.0.0.1"));
+            thread = std::thread ([this] { run(); });
+        }
+
+        ~HeldOpenHttp()
+        {
+            stopping.store (true);
+            listener.close();
+            thread.join();
+        }
+
+        int port() const { return listener.getBoundPort(); }
+
+        void run()
+        {
+            std::unique_ptr<juce::StreamingSocket> client (listener.waitForNextConnection());
+
+            if (client == nullptr)
+                return;
+
+            std::string request;
+
+            while (request.find ("\r\n\r\n") == std::string::npos && client->waitUntilReady (true, 1000) == 1)
+            {
+                char buffer[1024];
+                const auto got = client->read (buffer, static_cast<int> (sizeof (buffer)), false);
+
+                if (got <= 0)
+                    return;
+
+                request.append (buffer, static_cast<std::size_t> (got));
+            }
+
+            const auto split = std::min (reply.size(), reply.find ("\r\n\r\n") + 6);
+            client->write (reply.data(), static_cast<int> (split));
+            std::this_thread::sleep_for (std::chrono::milliseconds (30));
+            client->write (reply.data() + split, static_cast<int> (reply.size() - split));
+
+            while (! stopping.load())
+                std::this_thread::sleep_for (std::chrono::milliseconds (10));
+
+            client->close();
+        }
+
+        std::string reply;
+        juce::StreamingSocket listener;
+        std::atomic<bool> stopping { false };
+        std::thread thread;
+    };
+}
+
+TEST_CASE ("oscquery client: a reply ends where its length or its last chunk says, though the server keeps the connection")
+{
+    /*  The client asks with `Connection: close` and used to read until the
+        close alone, so every request to such a server waited out its whole
+        timeout and failed (2026-11-11). The timeout here is long, and the
+        reply is asked to be whole well before it. */
+    const auto timed = [] (int port)
+    {
+        const auto started = std::chrono::steady_clock::now();
+        const auto reply = oscquery::OscQueryClient::get ("127.0.0.1", port, "/desk/fader", "VALUE", 8000);
+        const auto took = std::chrono::steady_clock::now() - started;
+        return std::make_pair (reply, took);
+    };
+
+    SUBCASE ("Content-Length")
+    {
+        HeldOpenHttp server ("HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 16\r\n\r\n"
+                             "{\"VALUE\": [0.5]}");
+        const auto [reply, took] = timed (server.port());
+        REQUIRE_MESSAGE (reply.ok, reply.error);
+        CHECK (reply.status == 200);
+        CHECK (reply.body == "{\"VALUE\": [0.5]}");
+        CHECK (took < std::chrono::seconds (4));
+    }
+
+    SUBCASE ("chunked, put back together")
+    {
+        HeldOpenHttp server ("HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+                             "a\r\n{\"VALUE\": \r\n6\r\n[0.5]}\r\n0\r\n\r\n");
+        const auto [reply, took] = timed (server.port());
+        REQUIRE_MESSAGE (reply.ok, reply.error);
+        CHECK (reply.body == "{\"VALUE\": [0.5]}");
+        CHECK (took < std::chrono::seconds (4));
+    }
+
+    SUBCASE ("204, which has no body to wait for")
+    {
+        HeldOpenHttp server ("HTTP/1.1 204 No Content\r\n\r\n");
+        const auto [reply, took] = timed (server.port());
+        REQUIRE_MESSAGE (reply.ok, reply.error);
+        CHECK (reply.status == 204);
+        CHECK (reply.body.empty());
+        CHECK (took < std::chrono::seconds (4));
     }
 }
 

@@ -18,12 +18,16 @@
 
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/json/JsonValue.h>
+#include <wfg/engine/net/Http.h>
 
 #include <juce_core/juce_core.h>
 
 #include <algorithm>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <cstdlib>
+#include <string_view>
 
 namespace wfg::oscquery
 {
@@ -76,6 +80,83 @@ namespace wfg::oscquery
 
             return out;
         }
+
+        /*  WHERE A REPLY ENDS, when the server says so itself (namespace draft
+            §129, BFX; RFC 9112 §6.3):
+            at its Content-Length, or at its last chunk. The request says
+            `Connection: close`, and a server that honours it ends the reply
+            by closing; one that answers with a length and then keeps the
+            connection open is at fault under HTTP/1.1, and exists - every
+            request to it used to wait out its whole timeout and fail (Julien
+            Bayle's retest of the OSCQuery Automation Plugin, item 2.9). A
+            reply with neither still ends at the close, as before; so does one
+            that is not HTTP, which the reading after the loop names.
+            Incremental: each read is looked at once. */
+        struct ReplyEnd
+        {
+            std::size_t searchedTo = 0;    ///< where the blank line was last looked for
+            bool headRead = false;
+            bool untilClose = false;
+            bool chunked = false;
+            long long length = -1;
+            std::size_t bodyStart = 0;
+            std::size_t fed = 0;
+            net::ChunkDecoder chunks;
+
+            bool reached (const std::string& response)
+            {
+                if (untilClose)
+                    return false;
+
+                if (! headRead)
+                {
+                    const auto blank = response.find ("\r\n\r\n", searchedTo);
+
+                    if (blank == std::string::npos)
+                    {
+                        searchedTo = response.size() > 3 ? response.size() - 3 : 0;
+                        return false;
+                    }
+
+                    headRead = true;
+                    bodyStart = blank + 4;
+                    fed = bodyStart;
+
+                    auto headText = response.substr (0, bodyStart);
+                    std::string problem;
+                    const auto head = net::takeHead (headText, problem);
+
+                    //  Not HTTP, or an interim 1xx before the real answer: the close is the end.
+                    if (! head.has_value() || head->status < 200)
+                    {
+                        untilClose = true;
+                        return false;
+                    }
+
+                    //  These never carry a body, whatever else they say.
+                    if (head->status == 204 || head->status == 304)
+                        return true;
+
+                    chunked = head->chunked;
+                    length = chunked ? -1 : head->contentLength;
+
+                    if (! chunked && length < 0)
+                    {
+                        untilClose = true;
+                        return false;
+                    }
+                }
+
+                if (chunked)
+                {
+                    (void) chunks.feed (std::string_view (response).substr (fed));
+                    fed = response.size();
+                    return chunks.finished;
+                }
+
+                return static_cast<long long> (response.size() - bodyStart) >= length;
+            }
+        };
     }
 
     //==============================================================================
@@ -122,6 +203,7 @@ namespace wfg::oscquery
 
         std::string response;
         char buffer[4096];
+        ReplyEnd end;
 
         for (;;)
         {
@@ -151,7 +233,8 @@ namespace wfg::oscquery
 
             /*  Zero is the far end closing, which with `Connection: close` is
                 how a complete reply ends. It is the ordinary exit from this
-                loop and not a failure. */
+                loop and not a failure; the other is the end the reply's own
+                framing gives (ReplyEnd, above). */
             if (read <= 0)
                 break;
 
@@ -165,6 +248,9 @@ namespace wfg::oscquery
                 reply.error = "the target sent more than this is willing to read";
                 return reply;
             }
+
+            if (end.reached (response))
+                break;
         }
 
         socket.close();
@@ -200,6 +286,8 @@ namespace wfg::oscquery
 
         if (lowered.find ("transfer-encoding: chunked") != std::string::npos)
             body = deChunk (body);
+        else if (end.length >= 0 && body.size() > static_cast<std::size_t> (end.length))
+            body.resize (static_cast<std::size_t> (end.length));      // what the server said is the body, and no more
 
         reply.body = std::move (body);
         reply.ok = true;

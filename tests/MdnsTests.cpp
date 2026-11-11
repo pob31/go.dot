@@ -824,3 +824,201 @@ TEST_CASE ("mdns: a browser leaves out the Go.dot on its own HTTP port at its ow
     CHECK (oscquery::Discovery::instanceName ("STAGE-PC", 5010) == "Go.dot on STAGE-PC");
     CHECK (oscquery::Discovery::instanceName ("STAGE-PC", 5011) == "Go.dot on STAGE-PC, port 5011");
 }
+
+TEST_CASE ("mdns: a browser started again forgets what it heard before, and hears afresh")
+{
+    /*  Found in the OSCQuery Automation Plugin (2026-11-10), whose finder
+        restarts its browser: what the first run heard stayed listed for its
+        whole time to live - two minutes here, 75 for a PTR on a real network -
+        and could no longer be heard withdrawn. Go.dot starts discovery once;
+        this is for whoever first starts it again. */
+    FakeResponder responder ([] (const mdns::Message& asked, int)
+                             {
+                                 for (const auto& question : asked.questions)
+                                     if (question.type == mdns::type::ptr && mdns::sameName (question.name, service))
+                                         return wholeAnswer (120);
+
+                                 return std::vector<std::uint8_t> {};
+                             });
+
+    FakeResponder silent ([] (const mdns::Message&, int) { return std::vector<std::uint8_t> {}; });
+
+    oscquery::Discovery browser;
+    REQUIRE (browser.start (askingOnly (responder.port())));
+    REQUIRE (within (3000, [&browser] { return ! browser.found().empty(); }));
+    browser.stop();
+
+    //  Started again, asking somebody with nothing to say: nothing is listed, now or later.
+    const auto before = browser.revision();
+    REQUIRE (browser.start (askingOnly (silent.port())));
+    CHECK (browser.found().empty());
+    CHECK (browser.foundText().empty());
+    CHECK (browser.revision() > before);
+    std::this_thread::sleep_for (std::chrono::milliseconds (1300));     // past a sweep, which publishes what it holds
+    CHECK (browser.found().empty());
+    browser.stop();
+
+    //  And again, asking the first: found as at the first start.
+    REQUIRE (browser.start (askingOnly (responder.port())));
+    CHECK (within (3000, [&browser] { return browser.foundText() == "Chataigne\t127.0.0.1\t42000"; }));
+    browser.stop();
+}
+
+//==============================================================================
+/*  WHEN A MULTICAST ANSWER MAY GO OUT (oscquery/AnswerPacer.h; RFC 6762 §6,
+    §7.4), driven with times of the test's choosing: no socket, no network.
+    From the OSCQuery Automation Plugin's AnswerPacerTests.cpp at e100521. The
+    last case is the plugin's flood of 2026-11-10 in small: two hundred
+    responders with the same thing to say, asked at once. */
+#include <wfg/engine/oscquery/AnswerPacer.h>
+
+namespace
+{
+    using mdns::AnswerPacer;
+    using namespace std::chrono_literals;
+
+    const AnswerPacer::Clock::time_point pacedFrom { 1000s };
+    const std::vector<std::uint8_t> pacedBytes { 1, 2, 3 };
+    const std::string pacedPtr = "_oscjson._tcp.local|12|go.dot on test-box._oscjson._tcp.local";
+}
+
+TEST_CASE ("mdns pacer: an answer waits its delay, then goes out once")
+{
+    AnswerPacer pacer;
+
+    CHECK (pacer.want ({ pacedPtr }, pacedBytes, pacedFrom, 50ms));
+    CHECK (pacer.waiting() == 1u);
+    REQUIRE (pacer.next().has_value());
+    CHECK (*pacer.next() == pacedFrom + 50ms);
+
+    CHECK (pacer.due (pacedFrom + 49ms).empty());
+
+    const auto out = pacer.due (pacedFrom + 50ms);
+    REQUIRE (out.size() == 1u);
+    CHECK (out.front() == pacedBytes);
+    CHECK (pacer.waiting() == 0u);
+    CHECK_FALSE (pacer.next().has_value());
+    CHECK (pacer.due (pacedFrom + 60ms).empty());
+}
+
+TEST_CASE ("mdns pacer: a record is not multicast twice within a second, and is again after it")
+{
+    AnswerPacer pacer;
+
+    REQUIRE (pacer.want ({ pacedPtr }, pacedBytes, pacedFrom, 20ms));
+    REQUIRE (pacer.due (pacedFrom + 20ms).size() == 1u);
+
+    //  Asked again and again within the second: nothing more to say.
+    CHECK_FALSE (pacer.want ({ pacedPtr }, pacedBytes, pacedFrom + 100ms, 20ms));
+    CHECK_FALSE (pacer.want ({ pacedPtr }, pacedBytes, pacedFrom + 900ms, 20ms));
+    CHECK (pacer.waiting() == 0u);
+
+    //  A second after it went out, it may go out again.
+    CHECK (pacer.want ({ pacedPtr }, pacedBytes, pacedFrom + 1020ms, 20ms));
+    CHECK (pacer.due (pacedFrom + 1040ms).size() == 1u);
+}
+
+TEST_CASE ("mdns pacer: the same answer wanted while it waits is one answer")
+{
+    AnswerPacer pacer;
+
+    CHECK (pacer.want ({ "a", "b" }, pacedBytes, pacedFrom, 100ms));
+    CHECK_FALSE (pacer.want ({ "b", "a" }, pacedBytes, pacedFrom + 10ms, 100ms));    // the same records, in any order
+    CHECK (pacer.want ({ "a" }, pacedBytes, pacedFrom + 10ms, 100ms));                // another answer
+    CHECK (pacer.waiting() == 2u);
+    CHECK_FALSE (pacer.want ({}, pacedBytes, pacedFrom, 0ms));                        // nothing to say is nothing to send
+}
+
+TEST_CASE ("mdns pacer: what another responder said while ours waited is not said again")
+{
+    AnswerPacer pacer;
+
+    REQUIRE (pacer.want ({ pacedPtr }, pacedBytes, pacedFrom, 100ms));
+    pacer.heard (pacedPtr, pacedFrom + 40ms);                   // somebody was quicker
+    CHECK (pacer.due (pacedFrom + 100ms).empty());
+    CHECK (pacer.waiting() == 0u);
+
+    //  And for the rest of that second it is not wanted at all.
+    CHECK_FALSE (pacer.want ({ pacedPtr }, pacedBytes, pacedFrom + 500ms, 20ms));
+
+    //  An answer of two records, one of them heard: the other still has to be said.
+    REQUIRE (pacer.want ({ pacedPtr, "godot-test-box.local|1|" }, pacedBytes, pacedFrom + 600ms, 50ms));
+    CHECK (pacer.due (pacedFrom + 650ms).size() == 1u);
+}
+
+TEST_CASE ("mdns pacer: no more answers wait than sixteen")
+{
+    AnswerPacer pacer;
+
+    for (int i = 0; i < 40; ++i)
+        (void) pacer.want ({ "record " + std::to_string (i) }, pacedBytes, pacedFrom, 50ms);
+
+    CHECK (pacer.waiting() == AnswerPacer::maxPending);
+}
+
+TEST_CASE ("mdns pacer: the budget lets a burst of twenty through, then ten a second")
+{
+    AnswerPacer pacer;
+    int sent = 0;
+
+    for (int i = 0; i < 1000; ++i)
+        sent += pacer.spend (pacedFrom) ? 1 : 0;
+
+    CHECK (sent == 20);
+    CHECK (pacer.dropped() == 980u);
+
+    //  Half a second later, five more; a long silence later, twenty and no more.
+    sent = 0;
+
+    for (int i = 0; i < 100; ++i)
+        sent += pacer.spend (pacedFrom + 500ms) ? 1 : 0;
+
+    CHECK (sent == 5);
+
+    sent = 0;
+
+    for (int i = 0; i < 100; ++i)
+        sent += pacer.spend (pacedFrom + 60s) ? 1 : 0;
+
+    CHECK (sent == 20);
+}
+
+TEST_CASE ("mdns pacer: two hundred responders asked at once say it once, not two hundred times")
+{
+    /*  Every responder hears the question at once and picks a delay between
+        20 and 120 ms; every datagram sent is heard by all of them at once (one
+        machine, the multicast looped back). What the plugin measured on
+        2026-11-10 without this: every one of them answering every question. */
+    constexpr int responders = 200;
+    std::vector<AnswerPacer> pacers (responders);
+
+    for (int i = 0; i < responders; ++i)
+        REQUIRE (pacers[static_cast<std::size_t> (i)].want ({ pacedPtr }, pacedBytes, pacedFrom,
+                                                            std::chrono::milliseconds (20 + (i * 37) % 101)));
+
+    int datagrams = 0;
+
+    for (int ms = 0; ms <= 200; ++ms)
+    {
+        const auto now = pacedFrom + std::chrono::milliseconds (ms);
+
+        for (auto& pacer : pacers)
+        {
+            const auto out = pacer.due (now);
+
+            if (out.empty())
+                continue;
+
+            ++datagrams;
+
+            for (auto& listener : pacers)
+                listener.heard (pacedPtr, now);
+        }
+    }
+
+    CHECK (datagrams == 1);
+
+    //  Asked again within the second, by another newcomer: silence.
+    for (auto& pacer : pacers)
+        CHECK_FALSE (pacer.want ({ pacedPtr }, pacedBytes, pacedFrom + 400ms, 50ms));
+}

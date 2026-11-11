@@ -10621,6 +10621,23 @@ namespace
 //==============================================================================
 int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
 {
+    /*  A PEER THAT HANGS UP DOES NOT END THE SHOW (namespace draft §129, BFU;
+        found in the OSCQuery Automation Plugin, 2026-11-11).
+        On macOS and Linux, a write to a TCP connection the other end has
+        closed raises SIGPIPE, and SIGPIPE ends a process that has not said
+        otherwise: at once, with no crash report and nothing in the log.
+        juce::StreamingSocket::write is a plain send() with no flag against it,
+        and the MQTT broker, a TCP serial link, every TLS stream, the OSCQuery
+        GET and the Pd editor's question all write that way - a phone leaving
+        the broker while a message was queued for it would have stopped the
+        show dead. Ignored, the write fails with EPIPE, which each of them
+        already takes as the connection gone. Process-wide and first, so every
+        child dispatched below is covered too, and anything written later.
+        Windows has no such signal. */
+#ifdef SIGPIPE
+    std::signal (SIGPIPE, SIG_IGN);
+#endif
+
     /*  BEFORE ANYTHING MAKES AN LV2 FORMAT (plugin/PluginScan.h): on Windows
         a set LV2_PATH crashes JUCE's LV2 host, so it is forgotten here - and
         by every child launched from here - and said so once, on stderr. */

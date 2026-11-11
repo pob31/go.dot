@@ -35487,3 +35487,43 @@ a white picture full, a see-through one at one step, an empty DCA dark, a silent
 **Owed**: the try on the X-Touch, whose meter has eight segments where the D700 shows eleven steps - which
 channel-pressure value lights its first segment is not known (BFT, open); if a see-through picture lights
 nothing there, the lowest step is raised for the `mcu` profile.
+
+## 129. Four fixes from the OSCQuery Automation Plugin
+
+**Brought 2026-11-11** by a session in the OSCQuery Automation Plugin, whose `lib/oscquery/` holds copies of
+Go.dot's mDNS, OSC and HTTP code taken at `1c8aaa0a`: four faults found there that are Go.dot's too
+(`docs/handoffs/2026-11-11-fixes-from-the-oscquery-plugin.md`). The author: *"You can add the file and commit
+it with the fixes."*
+
+- **BFU** **A peer that hangs up does not end the show.** On macOS and Linux a write to a TCP connection the
+  other end has closed raises SIGPIPE, which ends a process at once, with no crash report and nothing logged;
+  `juce::StreamingSocket::write` sends with no flag against it. The MQTT broker, a TCP serial link, every TLS
+  stream, the OSCQuery GET and the Pd editor's question all write that way, so a phone leaving the broker while a
+  message was queued for it could have stopped a show. `wfg::runConsole` ignores SIGPIPE first, before any child
+  it dispatches, and the test program's `main` does the same: the write fails with EPIPE, which each site
+  already takes as the connection gone. A `wfg` verb whose output is piped into something that quits early
+  now runs to its end instead of dying; every verb but `serve` ends by itself. *(The handoff's fix; placed in
+  `runConsole` rather than `main` as the console's other signals are.)*
+- **BFV** **An answer to the group is paced** (RFC 6762 §6, §7.4). It waits 20 to 120 ms, is not sent when
+  another responder says the same meanwhile, and no record goes to the group twice within a second; questions
+  and answers to the group spend a budget of ten datagrams a second, with a burst of twenty, and what is over it
+  is dropped - mDNS repeats everything. An answer straight back to one querier is not paced. The plugin, loaded
+  by a validator in two hundred processes, sent 11,600 datagrams in a second and took a phone's hotspot down;
+  Go.dot is one process per machine and cannot flood that way, but answered the same way. `AnswerPacer.h` comes
+  from the plugin as it was written there, its notice naming both of that project's authors. *(The handoff's
+  fix; the notice is the author's to change.)*
+- **BFW** **Discovery started again starts fresh**: what an earlier start heard is dropped, so a record kept
+  from before is not listed for its whole time to live by a browser that can no longer hear it withdrawn.
+  Go.dot starts discovery once, at the serve; this is for whoever first starts it again. *(The handoff's fix.)*
+- **BFX** **The OSCQuery GET ends where the reply says it ends**: at its `Content-Length` or its last chunk, or
+  at once for 204 and 304, as well as at the server's close. A server that answers with a length and keeps the
+  connection open, though asked to close it, made every request wait out its timeout and fail. Bytes past the
+  length are not the body. *(The handoff's fourth point, which it called optional; the plugin has not fixed it.
+  `net::takeHead` and `net::ChunkDecoder` from §124 read the head and the chunks.)*
+
+Built 2026-11-11. Tests: a write to a peer that has hung up fails and the program goes on (on Linux, without
+the line in `TestMain.cpp`, the suite ends with status 141 and prints nothing); the pacer's seven cases from the
+plugin, two hundred responders asked at once answering once among them; a browser started again lists nothing
+from before; a GET from a server that keeps its connection open, by length, chunked and 204. Two serves on one
+Windows machine still find each other through the group. **Owed**: the author's word on `AnswerPacer.h`'s
+notice.

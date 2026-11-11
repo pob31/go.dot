@@ -48,7 +48,14 @@
     Sent twice at the start, a second apart; answered whenever asked - to the
     group, or straight back to a querier asking from another port or asking
     so (RFC 6762 §5.4, §6.7); withdrawn at the stop with a time to live of
-    nought. It does not probe for a name already in use (§8.1): a second
+    nought.
+
+    AN ANSWER TO THE GROUP IS PACED (namespace draft §129, BFV; RFC 6762 §6,
+    §7.4; AnswerPacer.h, from the OSCQuery Automation Plugin): it waits 20 to 120 ms, is
+    not sent when another responder says the same meanwhile, and no record
+    goes to the group twice within a second; everything sent to the group,
+    questions included, spends a budget of ten datagrams a second. An answer
+    straight back to one querier is not paced. It does not probe for a name already in use (§8.1): a second
     Go.dot on one machine announces under its port, and two machines of one
     name are a rig nobody can tell apart anyway.
 
@@ -58,6 +65,7 @@
     moved.
 */
 
+#include <wfg/engine/oscquery/AnswerPacer.h>
 #include <wfg/engine/oscquery/Mdns.h>
 
 #include <atomic>
@@ -66,6 +74,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <random>
 #include <string>
 #include <thread>
 #include <utility>
@@ -177,6 +186,7 @@ namespace wfg::oscquery
         bool announcing() const noexcept { return ! options.announceAs.empty(); }
         std::vector<mdns::Record> addressRecords (std::uint32_t ttl, bool withLoopback) const;
         void answer (const mdns::Message& asked, const std::string& fromIp, int fromPort);
+        void sendDueAnswers (Clock::time_point now);
         void announce (std::uint32_t ttl);
         void sendToGroup (const std::vector<std::uint8_t>& bytes);
         std::string preferred (const std::vector<std::string>& addresses) const;
@@ -187,6 +197,11 @@ namespace wfg::oscquery
         std::vector<std::string> interfaces;
         std::vector<std::string> ownAddresses;
         bool onGroup = false;
+
+        /*  When a multicast answer may go out, and the budget of datagrams to
+            the group (AnswerPacer.h). The thread's alone, as the socket is. */
+        mdns::AnswerPacer pacer;
+        std::minstd_rand delays { std::random_device {}() };
 
         std::map<std::string, Instance> instances;     ///< by the instance's name, lower case
         std::map<std::string, Host> hosts;             ///< by the host's name, lower case

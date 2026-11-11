@@ -999,3 +999,40 @@ TEST_CASE ("mqtt broker: a link with no socket speaks to the broker in this proc
     CHECK_FALSE (link->write (bytesOf (Packet::plain (Type::pingreq))));
     link.reset();
 }
+
+//==============================================================================
+#include <memory>
+
+TEST_CASE ("net: a write to a peer that has hung up fails, and the program goes on")
+{
+    /*  The broker's danger without the broker's timing (2026-11-11, found in
+        the OSCQuery Automation Plugin). On macOS and Linux a write to a TCP
+        connection whose other end has closed raises SIGPIPE, which ends the
+        program: a subscriber leaving while a message was queued for it would
+        have stopped the show, and this suite, with status 141 and not a word.
+        The console and this suite's main ignore the signal (wfg::runConsole,
+        TestMain.cpp), so the write fails and says so, as the broker, the TCP
+        serial link, TLS, the OSCQuery GET and the Pd editor all expect.
+        Windows has no such signal; the write fails there too. */
+    juce::StreamingSocket listener;
+    REQUIRE (listener.createListener (0, "127.0.0.1"));
+
+    juce::StreamingSocket writer;
+    REQUIRE (writer.connect ("127.0.0.1", listener.getBoundPort(), 2000));
+
+    std::unique_ptr<juce::StreamingSocket> accepted (listener.waitForNextConnection());
+    REQUIRE (accepted != nullptr);
+    accepted->close();
+
+    //  The first write after the close is taken; the peer's reset comes back; the next is refused.
+    const std::string bytes (1024, 'x');
+    int written = 0;
+
+    for (int attempt = 0; attempt < 100 && written >= 0; ++attempt)
+    {
+        written = writer.write (bytes.data(), static_cast<int> (bytes.size()));
+        std::this_thread::sleep_for (std::chrono::milliseconds (10));
+    }
+
+    CHECK (written < 0);
+}
