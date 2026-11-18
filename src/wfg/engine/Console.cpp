@@ -6966,10 +6966,14 @@ namespace
             for (std::size_t slot = 0; slot < spec.plugins.size(); ++slot)
             {
                 const auto& plugin = spec.plugins[slot];
-                const auto* proxy = driver->host().proxy (static_cast<int> (slot));
+                /*  POOLED (namespace draft 133, stage 3): the entry's plugin has
+                    a few copies in a child, lent to the voices as cues need
+                    them, and no longer one a voice. */
+                const auto* proxy = driver->host().proxyOfSlot (static_cast<int> (slot));
 
                 std::cout << "wfg: plugin " << plugin.name << " (" << plugin.id << ") hosted as "
-                          << plugin.identifier << " on " << shape.tracks << " voices, child pid "
+                          << plugin.identifier << ", " << driver->host().pooledCopies (static_cast<int> (slot))
+                          << " copies for " << shape.tracks << " voices, child pid "
                           << (proxy != nullptr ? proxy->childPid() : 0) << std::endl;
             }
 

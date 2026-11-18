@@ -911,8 +911,20 @@ namespace wfg::audio
         /** How many entries the graph was built with. */
         int proxyCount() const noexcept;
 
-        /** The entry's host, or null for an index no entry answers to. */
-        plugin::ProxyHost* proxy (int slot) noexcept;
+        /*  A host by its place in the list, or null past the end: the set's
+            first, one for each distinct plugin and preset among its entries
+            (namespace draft §133, stage 3), then the rack's, then whatever
+            more copies were made since, in the order they were. */
+        plugin::ProxyHost* proxy (int index) noexcept;
+
+        /** The host an entry of the set is played through - its plugin's first - or null. */
+        plugin::ProxyHost* proxyOfSlot (int slot) noexcept;
+
+        /*  THE POOL, counted (namespace draft §133, stage 3), for the console's
+            line and the tests: how many copies of that slot's plugin there are
+            in all, and how many of them a voice holds now. Message thread. */
+        int pooledCopies (int slot) const noexcept;
+        int pooledCopiesLent (int slot) const noexcept;
 
         /** A voice's lane for an entry, or null. Any thread. */
         plugin::ProxyLane* proxyLane (int trackIndex, int slot) noexcept;
@@ -952,7 +964,7 @@ namespace wfg::audio
             snapTrackEq. */
         void snapTrackFx (int trackIndex, int slot, bool enabled,
                           const std::vector<std::pair<int, float>>& values,
-                          const std::string& statePath = {});
+                          const std::string& statePath = {}, bool held = true);
 
         /*  The tick thread, at every launch: every entry this voice has
             switched in holds the state its cue asked for - two atomics a

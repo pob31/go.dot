@@ -26127,6 +26127,15 @@ namespace wfg::cue
                 if (next.sameAs (last))
                     continue;
 
+                /*  THE INSERT ITSELF CAME OR WENT (namespace draft §133, stage
+                    3): the voice has a copy only for an insert its cue has, so
+                    it is lent one now, whole, or gives its copy back. */
+                if (next.fxId.empty() != last.fxId.empty())
+                {
+                    audio->holdFx (run->track, next);
+                    continue;
+                }
+
                 if (next.enabled != last.enabled)
                     audio->setFxEnabled (run->track, next.slot, next.enabled);
 

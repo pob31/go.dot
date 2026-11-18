@@ -49,6 +49,7 @@
 #include <juce_events/juce_events.h>
 
 #include <mutex>
+#include <atomic>
 #include <variant>
 #include <vector>
 
@@ -112,6 +113,7 @@ namespace wfg::audio
         void setBeatClock (const cue::BeatClockState& state) override;
         void setFxShape (int track, int slot, int feed, int back) override;
         void requestFxState (int track, int slot, const std::string& path) override;
+        void holdFx (int track, const cue::FxSetting& fx) override;
 
         /*  THE LIVE RACK (Phase 9b): a rack channel's track is played through
             its gate - opened at the launch's sample over the cue's fade-in,
@@ -179,6 +181,13 @@ namespace wfg::audio
             thread: the lane was already told one is coming. */
         struct StateWanted { int track = 0, slot = 0; std::string path; };
 
+        /*  An insert its cue came to have or lost after the arm (namespace
+            draft §133, stage 3), and how many of them the message thread has
+            yet to see to: no arm is ready while one is outstanding, so a
+            launch due in those ten milliseconds does not go out dry. */
+        struct FxHeld { int track = 0; cue::FxSetting fx; };
+        std::atomic<int> holdsQueued { 0 };
+
         /*  EVERYTHING THE MESSAGE THREAD IS ASKED FOR, IN ONE QUEUE, in the
             order the tick thread asked it. An arm snaps its cue's whole states
             onto the voice, and a state asked for after it - an undo in
@@ -186,7 +195,7 @@ namespace wfg::audio
             first, let an arm and a newer state in one ten-millisecond batch end
             on the arm's older state (handoff 2026-09-26, finding 3). */
         std::mutex queueMutex;
-        std::vector<std::variant<cue::ArmRequest, StateWanted>> queued;
+        std::vector<std::variant<cue::ArmRequest, StateWanted, FxHeld>> queued;
 
         /** One arm, on the message thread: the file, the routing, the EQ, the inserts. */
         void serviceArm (const cue::ArmRequest& request);

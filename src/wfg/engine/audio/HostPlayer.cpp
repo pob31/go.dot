@@ -70,7 +70,7 @@ namespace wfg::audio
 
     void HostPlayer::serviceArms()
     {
-        std::vector<std::variant<cue::ArmRequest, StateWanted>> work;
+        std::vector<std::variant<cue::ArmRequest, StateWanted, FxHeld>> work;
 
         {
             const std::lock_guard<std::mutex> lock { queueMutex };
@@ -85,6 +85,13 @@ namespace wfg::audio
             {
                 if (auto* lane = audioHost.proxyLane (wanted->track, wanted->slot))
                     lane->wantState (wanted->path);
+            }
+            else if (const auto* held = std::get_if<FxHeld> (&item))
+            {
+                audioHost.snapTrackFx (held->track, held->fx.slot, held->fx.enabled, held->fx.values,
+                                       held->fx.statePath, ! held->fx.fxId.empty());
+                audioHost.setTrackFxShape (held->track, held->fx.slot, held->fx.feed, held->fx.back);
+                holdsQueued.fetch_sub (1, std::memory_order_release);
             }
             else
             {
@@ -180,7 +187,8 @@ namespace wfg::audio
             9a, PR 9a.8). */
         for (const auto& fx : request.fx)
         {
-            audioHost.snapTrackFx (request.track, fx.slot, fx.enabled, fx.values, fx.statePath);
+            audioHost.snapTrackFx (request.track, fx.slot, fx.enabled, fx.values, fx.statePath,
+                                   ! fx.fxId.empty());
             audioHost.setTrackFxShape (request.track, fx.slot, fx.feed, fx.back);
         }
 
@@ -616,7 +624,17 @@ namespace wfg::audio
             (the author's decision of 2026-09-25) - so it waits, and is late
             by the load rather than wrong, and `run.late` says by how much. */
         return (audioHost.isRackTrack (track) || audioHost.isTrackSourceReady (track))
+                 && holdsQueued.load (std::memory_order_acquire) == 0
                  && audioHost.isTrackFxSettled (track);
+    }
+
+    void HostPlayer::holdFx (int track, const cue::FxSetting& fx)
+    {
+        //  The tick thread: counted NOW, so a launch due this tick waits; the work is the message thread's.
+        holdsQueued.fetch_add (1, std::memory_order_release);
+
+        const std::lock_guard<std::mutex> lock { queueMutex };
+        queued.emplace_back (FxHeld { track, fx });
     }
 
     void HostPlayer::requestFxState (int track, int slot, const std::string& path)

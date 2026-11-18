@@ -106,8 +106,8 @@ namespace wfg::plugin
 
             /*  Named by the entry and by this process, so two engines on one
                 machine - a show and a test - never share a file. */
-            regionFile = folder.getChildFile ("proxy-" + juce::String (spec.pluginId) + "-"
-                                              + juce::String (process::currentId()) + ".shm");
+            regionFile = folder.getChildFile ("proxy-" + juce::String (spec.pluginId) + juce::String (spec.regionTag)
+                                              + "-" + juce::String (process::currentId()) + ".shm");
 
             const auto bytes = region::regionBytes (spec.channels, spec.maxSamples, spec.lanes);
 

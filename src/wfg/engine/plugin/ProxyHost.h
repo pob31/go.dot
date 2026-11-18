@@ -121,6 +121,13 @@ namespace wfg::plugin
         /** Where the region file goes: the engine's own folder. */
         std::string regionFolder;
 
+        /*  A SECOND CHILD FOR THE SAME ENTRY (namespace draft §133, stage 3):
+            the pool makes more copies of a plugin in another child, never in
+            one that may be sounding, and the two regions must not share a
+            file. Added to the file's name after the entry's id; empty for the
+            first, so its name is what it always was. */
+        std::string regionTag;
+
         ProxyLaunch launch;
     };
 

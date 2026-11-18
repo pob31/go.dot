@@ -563,6 +563,15 @@ namespace wfg::cue
             player that hosts no plugin has nothing to do. */
         virtual void requestFxState (int, int, const std::string&) {}
 
+        /*  AN INSERT A CUE CAME TO HAVE, OR LOST, UNDER ITS RUN (namespace
+            draft §133, stage 3): made on a cue already armed or sounding, or
+            taken off it. A voice holds a copy of a plugin only for an insert
+            its cue has, so this is the arm's own work for that one insert,
+            asked again - a copy lent with the cue's switch, values and state,
+            or given back - and a launch waits for it as it waits for an arm.
+            The tick thread; nothing by default. */
+        virtual void holdFx (int, const FxSetting&) {}
+
         /*  Whether that track's cue is sounding, out of any of its slots.
             Tick thread. Track-wide for the reason `stop` is: the question is
             about the cue. */

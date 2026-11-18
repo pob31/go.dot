@@ -35733,9 +35733,51 @@ at none, at a lane that is nobody's, and back, between blocks of a running graph
 allocating, and a track or slot that is no voice's place answering none. Green in C and fr_FR with the proxy
 and rack cases and the plugin drivers as they were; the real-time sanitizer's word is in the commit.
 
-### 133.5 Owed
+### 133.5 As built: stage 3, the copies pooled by plugin
 
-The stages after these: the pooled host (copies by plugin, more copies another child); the switch - K places
-a voice, a cue's inserts lent at arm in its own order, its state in at standby, `fx.move`, no Load now for an
-add; the loader and the GO rule (BGG-BGI); the windows by insert, the Plugins tab, PRD §3.18 and the tester
-guides. The author's look at stage 1.
+Built 2026-11-18. The first stage that changes what a machine carries: it was a copy of every entry of the
+set on every voice, and is a few copies of each plugin, lent.
+
+- **A kind is a plugin and its preset.** Entries of the set that are the same plugin with the same preset -
+  which is every `cue.plugin` of one plugin, each making its own entry (§105) - are one kind, served by one
+  child that stands for all of them (`alsoIds`, the rack's way). **Two copies to begin with**, one for a
+  single voice.
+- **A voice is lent a copy at its cue's arm** (`snapTrackFx`, now told whether the cue *has* the insert): the
+  place keeps the copy it holds or takes a free one, a loaded one first, and the copy takes the cue's switch,
+  values and whole state as a lane always did. **A cue without the insert gives the place's copy back**, and
+  the copy waits out the block that may still be in it (the fence, 133.4) before it is lent again. A voice
+  nobody arms again keeps what it has.
+- **One to spare**: when the last free copy of a kind is lent another is made, **in a child of its own** -
+  never beside a copy that may be sounding (the spike) - up to one for every place that could hold one. Only a
+  kind's first child writes the entry's state; a later child's failure is heard by the same handler, and
+  `plugin.restart` restarts every child that stands for the entry.
+- **A cue armed while no copy is free waits**: its place plays through the place's own lane, which no child
+  answers - silent there, never dry (CU) - its arm is not ready, and the pool's poll lends it the copy when
+  it comes. A cue is lent a copy of a plugin that failed or is not on this machine only when nothing better
+  can come, and is silent through it in the entry's own words, as before.
+- **An insert made on a cue already armed or sounding, or taken off it** (`Player::holdFx`, from `applyFx`):
+  the arm's work for that one insert, asked again, and a launch waits for it. Before, every voice had the lane
+  and a switch was enough; found by `phase9a_fx.py`, which makes its insert after the standby is armed and
+  played dry until this was there.
+- `AudioHost::proxy (index)` is a host by its place in the list - the kinds' first, then the rack's, then the
+  children made since; `proxyOfSlot`, `pooledCopies`, `pooledCopiesLent` for the console's line (*2 copies for
+  16 voices*) and the tests. `ProxySpec::regionTag` names a second child's region. A failure's sentence says
+  *copy 2* where it said *voice 2*.
+
+Not yet: the chain's order is still the set's and a voice still has a place for every entry of the set, so
+an add still wants Load now. A rack channel's and an aux's plugins are as they were, a copy a channel.
+
+Tests (ProxyTests): three entries of one plugin are one child and two copies at one, eight and sixteen
+voices; a voice lent a copy with its value, keeping it at its next arm, a second voice taking the last and a
+third copy made in a second child with its own region, a third cue waiting for that child - not ready, enabled
+on its own lane - and lent the copy when it loads, a place given back, and no more made than every voice
+could hold; nothing of ours allocating through it all. The drivers that listen: `phase9a_fx.py` (the insert
+heard, the child killed mid-cue and back, a state per cue), `phase9b_width.py`, `phase9b_mic.py`,
+`phase9b_plugins.py`, `aux_served.py`.
+
+### 133.6 Owed
+
+The stages after these: the switch - K places a voice in place of one an entry, a cue's inserts lent in its
+own order, `fx.move`, no Load now for an add; a voice's copies given back when its run ends; the loader and
+the GO rule (BGG-BGI); the windows by insert, the Plugins tab, PRD §3.18 and the tester guides. On the Mac
+with Seventh Heaven: a show's memory before and after stage 3. The author's look at stage 1.

@@ -465,7 +465,7 @@ namespace wfg::audio
 
             /*  THE PROXIES FIRST, before the Edit whose plugins hold the lanes
                 they are bound to: a host unbinds its lanes as it goes. */
-            proxies.clear();
+            dropProxies();
             trackLanes.clear();
             voiceInserts.clear();
             proxySlots = 0;
@@ -922,7 +922,7 @@ namespace wfg::audio
 
         void startProxies (const EditSpec& spec)
         {
-            proxies.clear();
+            dropProxies();
 
             /*  WHICH ENTRY IS WHICH SLOT, for as long as this graph stands
                 (2026-09-26): the runner sends a cue's inserts by it, and the
@@ -990,39 +990,360 @@ namespace wfg::audio
                 return;
             }
 
+            /*  THE SET'S COPIES, POOLED BY PLUGIN (namespace draft §133, stage
+                3; the spike of 2026-11-18). It was a copy of every entry on
+                every voice: sixteen voices, sixteen Seventh Heavens, 3.9 GB.
+                Entries that are the same plugin with the same preset are one
+                kind, served by one child with a few copies, and a voice is
+                LENT one for as long as a cue that has the insert holds it -
+                the cue's values and whole state go in at its arm, which the
+                spike timed at milliseconds. More copies are another child
+                (`growIfNeeded`), never made in one that may be sounding. */
+            poolDeadline = spec.proxyDeadlineMicroseconds;
+            poolChannels = editChannels;
+            classOfSlot.assign (static_cast<std::size_t> (proxySlots), -1);
+
             for (int slot = 0; slot < proxySlots; ++slot)
             {
                 const auto& entry = spec.plugins[static_cast<std::size_t> (slot)];
+                auto found = -1;
 
-                auto proxySpec = proxySpecFor (entry, spec, voices, editChannels);
+                for (std::size_t k = 0; k < pool.size(); ++k)
+                    if (pool[k].plugin.identifier == entry.identifier && pool[k].plugin.presetPath == entry.presetPath)
+                        found = static_cast<int> (k);
 
-                std::vector<plugin::ProxyLane*> slotLanes;
-                slotLanes.reserve (static_cast<std::size_t> (voices));
-
-                for (int track = 0; track < voices; ++track)
-                    slotLanes.push_back (trackLanes[static_cast<std::size_t> (track)][static_cast<std::size_t> (slot)]);
-
-                auto host = std::make_unique<plugin::ProxyHost> (std::move (proxySpec), std::move (slotLanes),
-                                                                 services.table);
-
-                if (services.onFailed)
-                    host->onFailed (services.onFailed);
-
-                if (services.onChanged)
-                    host->onChanged (services.onChanged);
-
-                /*  Started only when somebody gave the host a table to write:
-                    a test rig with no services builds the graph and no child. */
-                if (services.table != nullptr)
+                if (found < 0)
                 {
-                    std::string problem;
-                    host->start (problem);
+                    found = static_cast<int> (pool.size());
+                    pool.emplace_back();
+                    pool.back().plugin = entry;
                 }
 
-                proxies.push_back (std::move (host));
+                pool[static_cast<std::size_t> (found)].ids.push_back (entry.id);
+                classOfSlot[static_cast<std::size_t> (slot)] = found;
             }
 
+            for (int k = 0; k < static_cast<int> (pool.size()); ++k)
+                addCopies (k, std::min (voices, copiesAtStart), true);
+
             startRackProxies (spec);
+        }
+
+        //======================================================================
+        /*  THE POOL (namespace draft §133, stage 3). Message thread, all of
+            it; the audio thread sees only which lane a place points at, and
+            the tick thread only that lane's atomics. */
+        static constexpr int copiesAtStart = 2;     // one to play and one to spare
+
+        struct PooledCopy
+        {
+            plugin::ProxyLane lane;
+            plugin::ProxyHost* host = nullptr;
+            int kind = 0;
+
+            //  The voice's place it is lent to, or none.
+            int track = -1;
+            int slot = -1;
+
+            /*  TAKEN OFF A PLACE, and maybe still in use for the block in
+                flight: not to be lent again until the fence has passed. */
+            bool cooling = false;
+            std::uint64_t stamp = 0;
+        };
+
+        struct PoolKind
+        {
+            PluginSpec plugin;                  // the first entry's: what the child is made from
+            std::vector<std::string> ids;       // every entry of the set that is this plugin and preset
+            std::vector<PooledCopy*> copies;
+            int children = 0;
+        };
+
+        /*  A CUE ARMED WITH NO COPY FREE: its place plays through the place's
+            own lane - which no child answers, so the cue is silent there and
+            never dry (CU) - its arm is not ready, and the pool's poll lends
+            it the first copy that comes. */
+        struct WaitingClaim
+        {
+            int track = 0;
+            int slot = 0;
+            bool enabled = false;
+            std::vector<std::pair<int, float>> values;
+            std::string statePath;
+        };
+
+        std::vector<std::unique_ptr<PooledCopy>> pooledCopies;
+        std::vector<PoolKind> pool;
+        std::vector<int> classOfSlot;
+        std::vector<WaitingClaim> waitingClaims;
+        std::int64_t poolDeadline = 0;
+        int poolChannels = 2;
+
+        /*  EVERY HOST LET GO OF, the pool's copies with them. First no place
+            points at a copy any more and the block that might be inside one
+            has ended - a host unmaps its region as it stops - waited for a
+            fifth of a second at most, which is for a device that has stopped
+            calling and will not end a block it never began. */
+        void dropProxies()
+        {
+            for (auto& places : voiceInserts)
+                for (auto* place : places)
+                    place->setTarget (nullptr);
+
+            const auto stamped = fence.stamp();
+
+            for (int waited = 0; ! fence.passed (stamped) && waited < 200; ++waited)
+                juce::Thread::sleep (1);
+
+            proxies.clear();
+            pooledCopies.clear();
+            pool.clear();
+            classOfSlot.clear();
+            waitingClaims.clear();
+        }
+
+        void addCopies (int kindIndex, int count, bool first)
+        {
+            auto& kind = pool[static_cast<std::size_t> (kindIndex)];
+
+            EditSpec asked;
+            asked.proxyDeadlineMicroseconds = poolDeadline;
+
+            auto proxySpec = proxySpecFor (kind.plugin, asked, count, poolChannels);
+            proxySpec.alsoIds.assign (kind.ids.begin() + 1, kind.ids.end());
+
+            if (! first)
+                proxySpec.regionTag = "-more" + std::to_string (kind.children);
+
+            std::vector<plugin::ProxyLane*> lanes;
+            std::vector<PooledCopy*> made;
+
+            for (int i = 0; i < count; ++i)
+            {
+                proxySpec.laneWords.push_back ("copy " + std::to_string (kind.copies.size() + made.size() + 1));
+
+                auto copy = std::make_unique<PooledCopy>();
+                copy->kind = kindIndex;
+                lanes.push_back (&copy->lane);
+                made.push_back (copy.get());
+                pooledCopies.push_back (std::move (copy));
+            }
+
+            /*  ONLY THE FIRST CHILD WRITES THE TABLE: an entry has one state
+                to show, and a second child still loading must not overwrite
+                `loaded` with `loading`. A later child's failure is heard all
+                the same, by the same handler. */
+            auto host = std::make_unique<plugin::ProxyHost> (std::move (proxySpec), std::move (lanes),
+                                                             first ? services.table : nullptr);
+
+            for (auto* copy : made)
+            {
+                copy->host = host.get();
+                kind.copies.push_back (copy);
+            }
+
+            if (services.onFailed)
+                host->onFailed (services.onFailed);
+
+            if (first && services.onChanged)
+                host->onChanged (services.onChanged);
+
+            /*  Started only when somebody gave the host a table to write:
+                a test rig with no services builds the graph and no child. */
+            if (services.table != nullptr)
+            {
+                std::string problem;
+                host->start (problem);
+            }
+
+            ++kind.children;
+            proxies.push_back (std::move (host));
+        }
+
+        ProxyPlugin* placeAt (int track, int slot) noexcept
+        {
+            if (track < 0 || slot < 0 || track >= static_cast<int> (voiceInserts.size()))
+                return nullptr;
+
+            auto& places = voiceInserts[static_cast<std::size_t> (track)];
+            return slot < static_cast<int> (places.size()) ? places[static_cast<std::size_t> (slot)] : nullptr;
+        }
+
+        PooledCopy* copyOf (const plugin::ProxyLane* lane) noexcept
+        {
+            if (lane != nullptr)
+                for (auto& copy : pooledCopies)
+                    if (&copy->lane == lane)
+                        return copy.get();
+
+            return nullptr;
+        }
+
+        void forgetWaiting (int track, int slot)
+        {
+            waitingClaims.erase (std::remove_if (waitingClaims.begin(), waitingClaims.end(),
+                                                 [track, slot] (const WaitingClaim& w) { return w.track == track && w.slot == slot; }),
+                                 waitingClaims.end());
+        }
+
+        /*  A place given back: nothing in it, and its copy cooling until the
+            block that may be in it has ended. */
+        void releasePlace (int track, int slot)
+        {
+            auto* place = placeAt (track, slot);
+
+            if (place == nullptr)
+                return;
+
+            auto* copy = copyOf (place->target());
+            place->setTarget (nullptr);
+            place->lane().setEnabled (false);
+            forgetWaiting (track, slot);
+
+            if (copy != nullptr)
+            {
+                copy->lane.setEnabled (false);
+                copy->track = -1;
+                copy->slot = -1;
+                copy->cooling = true;
+                copy->stamp = fence.stamp();
+            }
+        }
+
+        /*  A copy nobody holds, a loaded one before any other. `mayCome` when
+            there is none but one is on its way - cooling, or its child still
+            loading - and the cue should wait for it and be late, not be lent
+            a copy of a plugin that failed or is not on this machine, which is
+            what it gets when nothing better can come: silent, said in the
+            entry's own words, as it always was. */
+        PooledCopy* freeCopyOf (int kindIndex, bool& mayCome)
+        {
+            PooledCopy* other = nullptr;
+            mayCome = false;
+
+            for (auto* copy : pool[static_cast<std::size_t> (kindIndex)].copies)
+            {
+                if (copy->track >= 0)
+                    continue;
+
+                if (copy->cooling)
+                {
+                    if (! fence.passed (copy->stamp))
+                    {
+                        mayCome = true;
+                        continue;
+                    }
+
+                    copy->cooling = false;
+                }
+
+                const auto state = copy->host->status().state;
+
+                if (state == "loaded")
+                    return copy;
+
+                if (state == "loading")
+                    mayCome = true;
+                else if (other == nullptr)
+                    other = copy;
+            }
+
+            return mayCome ? nullptr : other;
+        }
+
+        int slotsOfKind (int kindIndex) const noexcept
+        {
+            return static_cast<int> (std::count (classOfSlot.begin(), classOfSlot.end(), kindIndex));
+        }
+
+        /*  ONE TO SPARE: when the last free copy of a plugin has been lent,
+            another is made - in a child of its own, since making one beside a
+            sounding one drops the sounding one's blocks (the spike) - so the
+            next cue with that plugin finds it waiting. Never more than every
+            place that could hold one. */
+        void growIfNeeded (int kindIndex)
+        {
+            auto& kind = pool[static_cast<std::size_t> (kindIndex)];
+
+            for (const auto* copy : kind.copies)
+                if (copy->track < 0)
+                    return;
+
+            if (static_cast<int> (kind.copies.size()) < voices * slotsOfKind (kindIndex))
+                addCopies (kindIndex, 1, false);
+        }
+
+        /*  A CUE'S INSERT ON A VOICE'S PLACE, at its arm: the place keeps the
+            copy it has, or is lent a free one, and the copy takes the cue's
+            switch, values and whole state. */
+        void claimPlace (int track, int slot, bool enabled,
+                         const std::vector<std::pair<int, float>>& values, const std::string& statePath)
+        {
+            auto* place = placeAt (track, slot);
+
+            if (place == nullptr || slot >= static_cast<int> (classOfSlot.size()))
+                return;
+
+            const auto kindIndex = classOfSlot[static_cast<std::size_t> (slot)];
+            auto* copy = copyOf (place->target());
+
+            if (copy == nullptr)
+            {
+                auto mayCome = false;
+                copy = freeCopyOf (kindIndex, mayCome);
+
+                if (copy == nullptr)
+                {
+                    forgetWaiting (track, slot);
+                    waitingClaims.push_back ({ track, slot, enabled, values, statePath });
+                    place->lane().setEnabled (enabled);
+                    place->setTarget (&place->lane());
+                    growIfNeeded (kindIndex);
+                    return;
+                }
+
+                copy->track = track;
+                copy->slot = slot;
+            }
+
+            forgetWaiting (track, slot);
+
+            //  The copy made ready first, and only then heard through.
+            copy->lane.setValues (values);
+            copy->lane.setEnabled (enabled);
+            copy->lane.requestReset();
+
+            /*  AND ITS WHOLE STATE, when the cue switches it in: loaded before
+                the launch, the values above set again on top of it. A cue
+                with none asks for the preset's own - no state is a state, or
+                the last cue's would be heard under this one. */
+            if (enabled)
+                copy->lane.wantState (statePath);
+
+            place->lane().setEnabled (false);
+            place->setTarget (&copy->lane);
+            growIfNeeded (kindIndex);
+        }
+
+        /** Every ten milliseconds, after the hosts': the cues that wait for a copy. */
+        void pollPool()
+        {
+            if (waitingClaims.empty())
+                return;
+
+            const auto waiting = waitingClaims;
+
+            for (const auto& claim : waiting)
+                claimPlace (claim.track, claim.slot, claim.enabled, claim.values, claim.statePath);
+        }
+
+        bool isWaiting (int track) const noexcept
+        {
+            for (const auto& claim : waitingClaims)
+                if (claim.track == track)
+                    return true;
+
+            return false;
         }
 
         /*  WHAT A CHILD IS STARTED FROM, for an entry of the set or of the
@@ -1556,7 +1877,7 @@ namespace wfg::audio
 
         void stop()
         {
-            proxies.clear();
+            dropProxies();
             trackLanes.clear();
             voiceInserts.clear();
             liveInputs.clear();
@@ -3286,8 +3607,8 @@ namespace wfg::audio
             nothing would have: nothing of their inserts can be heard, and the
             next arm resets them before anything plays through them again. */
         if (! alreadySilent)
-            for (auto* lane : impl->trackLanes[static_cast<std::size_t> (trackIndex)])
-                if (lane != nullptr)
+            for (auto* place : impl->voiceInserts[static_cast<std::size_t> (trackIndex)])
+                if (auto* lane = place->target())
                     lane->requestReset();
 
         return stopped;
@@ -3515,16 +3836,56 @@ namespace wfg::audio
         return impl->proxySlots;
     }
 
-    plugin::ProxyHost* AudioHost::proxy (int slot) noexcept
+    plugin::ProxyHost* AudioHost::proxy (int index) noexcept
     {
-        if (slot < 0 || slot >= static_cast<int> (impl->proxies.size()))
+        if (index < 0 || index >= static_cast<int> (impl->proxies.size()))
             return nullptr;
 
-        return impl->proxies[static_cast<std::size_t> (slot)].get();
+        return impl->proxies[static_cast<std::size_t> (index)].get();
+    }
+
+    plugin::ProxyHost* AudioHost::proxyOfSlot (int slot) noexcept
+    {
+        if (slot < 0 || slot >= static_cast<int> (impl->classOfSlot.size()))
+            return nullptr;
+
+        const auto& kind = impl->pool[static_cast<std::size_t> (impl->classOfSlot[static_cast<std::size_t> (slot)])];
+        return kind.copies.empty() ? nullptr : kind.copies.front()->host;
+    }
+
+    int AudioHost::pooledCopies (int slot) const noexcept
+    {
+        if (slot < 0 || slot >= static_cast<int> (impl->classOfSlot.size()))
+            return 0;
+
+        return static_cast<int> (impl->pool[static_cast<std::size_t> (impl->classOfSlot[static_cast<std::size_t> (slot)])].copies.size());
+    }
+
+    int AudioHost::pooledCopiesLent (int slot) const noexcept
+    {
+        if (slot < 0 || slot >= static_cast<int> (impl->classOfSlot.size()))
+            return 0;
+
+        auto lent = 0;
+
+        for (const auto* copy : impl->pool[static_cast<std::size_t> (impl->classOfSlot[static_cast<std::size_t> (slot)])].copies)
+            if (copy->track >= 0)
+                ++lent;
+
+        return lent;
     }
 
     plugin::ProxyLane* AudioHost::proxyLane (int trackIndex, int slot) noexcept
     {
+        /*  A VOICE'S: the lane its place plays through - a pooled copy lent
+            to it - and the place's own where it has none, so a write to an
+            insert no cue holds lands somewhere harmless (§133, stage 3). */
+        if (auto* place = impl->placeAt (trackIndex, slot))
+        {
+            auto* lent = place->target();
+            return lent != nullptr ? lent : &place->lane();
+        }
+
         if (trackIndex < 0 || slot < 0 || trackIndex >= static_cast<int> (impl->trackLanes.size()))
             return nullptr;
 
@@ -3586,8 +3947,20 @@ namespace wfg::audio
 
     void AudioHost::snapTrackFx (int trackIndex, int slot, bool enabled,
                                  const std::vector<std::pair<int, float>>& values,
-                                 const std::string& statePath)
+                                 const std::string& statePath, bool held)
     {
+        /*  A VOICE'S INSERT IS LENT A COPY, or gives its copy back when the
+            cue has no such insert (namespace draft §133, stage 3). */
+        if (impl->placeAt (trackIndex, slot) != nullptr)
+        {
+            if (held)
+                impl->claimPlace (trackIndex, slot, enabled, values, statePath);
+            else
+                impl->releasePlace (trackIndex, slot);
+
+            return;
+        }
+
         if (auto* lane = proxyLane (trackIndex, slot))
         {
             lane->setValues (values);
@@ -3608,6 +3981,20 @@ namespace wfg::audio
         if (trackIndex < 0 || trackIndex >= static_cast<int> (impl->trackLanes.size()))
             return true;
 
+        /*  A VOICE: every copy its places hold has the state its cue asked
+            for, and none of its inserts still waits for a copy (§133). */
+        if (trackIndex < static_cast<int> (impl->voiceInserts.size()))
+        {
+            if (impl->isWaiting (trackIndex))
+                return false;
+
+            for (auto* place : impl->voiceInserts[static_cast<std::size_t> (trackIndex)])
+                if (auto* lane = place->target(); lane != nullptr && ! lane->stateSettled())
+                    return false;
+
+            return true;
+        }
+
         for (auto* lane : impl->trackLanes[static_cast<std::size_t> (trackIndex)])
             if (lane != nullptr && ! lane->stateSettled())
                 return false;
@@ -3617,15 +4004,29 @@ namespace wfg::audio
 
     void AudioHost::pollProxies()
     {
-        for (auto& proxy : impl->proxies)
-            proxy->poll();
+        /*  BY INDEX: the pool's poll may make a child, which adds a host. */
+        for (std::size_t i = 0; i < impl->proxies.size(); ++i)
+            impl->proxies[i]->poll();
+
+        impl->pollPool();
     }
 
     bool AudioHost::restartProxy (const std::string& pluginId, std::string& problem)
     {
+        /*  EVERY CHILD THAT STANDS FOR IT: a plugin of the set may have more
+            than one since its copies are pooled (§133). */
+        auto found = false;
+        auto ok = true;
+
         for (auto& proxy : impl->proxies)
             if (proxy->serves (pluginId))
-                return proxy->restart (problem);
+            {
+                found = true;
+                ok = proxy->restart (problem) && ok;
+            }
+
+        if (found)
+            return ok;
 
         problem = "no plugin of the set or the rack has the id " + pluginId + " in this graph";
         return false;

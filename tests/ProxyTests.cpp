@@ -2418,10 +2418,12 @@ TEST_CASE ("block fence: what was taken away is free once the block that could b
 
 TEST_CASE ("proxy: a voice's insert place is pointed at another lane, or at none, while the graph runs")
 {
-    /*  Namespace draft 133, stage 2: nothing uses it yet. Every place starts
-        on its own lane, which is what the graph played through before; the
-        host points one elsewhere and hands back the fence's stamp; a rack
-        channel's place is not a voice's and is never re-pointed. */
+    /*  Namespace draft 133, stage 2, and stage 3's start: every place starts
+        on NONE - a voice no cue has armed plays through no plugin - and
+        `proxyLane` answers the place's own lane there, so a write lands
+        somewhere harmless. The host points a place elsewhere and hands back
+        the fence's stamp; a rack channel's place is not a voice's and is
+        never re-pointed. */
     ScopedStorage storage;
     audio::AudioHost host { storage.path() };
 
@@ -2443,15 +2445,18 @@ TEST_CASE ("proxy: a voice's insert place is pointed at another lane, or at none
         for (int slot = 0; slot < 2; ++slot)
         {
             REQUIRE (host.proxyLane (track, slot) != nullptr);
-            CHECK (host.trackInsertTarget (track, slot) == host.proxyLane (track, slot));
+            CHECK (host.trackInsertTarget (track, slot) == nullptr);
         }
 
-    //  At none: nothing in that place. With no block in flight the old lane is free at once.
-    auto stamped = host.setTrackInsertTarget (1, 0, nullptr);
+    //  At its own lane, and back at none. With no block in flight the old lane is free at once.
+    auto* const own = host.proxyLane (1, 0);
+    auto stamped = host.setTrackInsertTarget (1, 0, own);
+    CHECK (host.trackInsertTarget (1, 0) == own);
+    CHECK (host.insertFencePassed (stamped));
+    stamped = host.setTrackInsertTarget (1, 0, nullptr);
     CHECK (host.trackInsertTarget (1, 0) == nullptr);
     CHECK (host.insertFencePassed (stamped));
-    CHECK (host.trackInsertTarget (0, 0) == host.proxyLane (0, 0));
-    CHECK (host.trackInsertTarget (1, 1) == host.proxyLane (1, 1));
+    CHECK (host.proxyLane (1, 0) == own);
 
     //  At a lane that is nobody's place: a pooled copy's, later.
     plugin::ProxyLane lent;
@@ -2477,10 +2482,10 @@ TEST_CASE ("proxy: a voice's insert place is pointed at another lane, or at none
     if (rt::isCounting())
         CHECK (rt::violations() == 0);
 
-    //  Back on its own before `lent` goes: a place never outlives what it points at.
-    stamped = host.setTrackInsertTarget (1, 0, host.proxyLane (1, 0));
+    //  Off it before `lent` goes: a place never outlives what it points at.
+    stamped = host.setTrackInsertTarget (1, 0, nullptr);
     CHECK (host.insertFencePassed (stamped));
-    CHECK (host.trackInsertTarget (1, 0) == host.proxyLane (1, 0));
+    CHECK (host.trackInsertTarget (1, 0) == nullptr);
 
     //  What is not a voice's place changes nothing and answers none.
     stamped = host.setTrackInsertTarget (9, 0, &lent);
@@ -2493,8 +2498,13 @@ TEST_CASE ("proxy: a voice's insert place is pointed at another lane, or at none
     CHECK (host.trackInsertTarget (0, 0) == nullptr);
 }
 
-TEST_CASE ("proxy: the graph carries one proxy per set entry on every voice, its ids stay unique, and stop removes every region")
+TEST_CASE ("proxy: the set's plugins are pooled - one child a plugin, a few copies, its ids stay unique, and stop removes every region")
 {
+    /*  Namespace draft 133, stage 3. It was one proxy per set entry on every
+        voice (decision AE): three entries on sixteen voices, forty-eight
+        instances. Entries that are the same plugin with the same preset are
+        one kind now, with one child and two copies to begin with, whatever
+        the voices - one alone for a single voice. */
     ScopedStorage storage;
     audio::AudioHost host { storage.path() };
 
@@ -2519,14 +2529,24 @@ TEST_CASE ("proxy: the graph carries one proxy per set entry on every voice, its
         CHECK (host.proxyCount() == 3);
         CHECK (host.inspectNodeIds().ok());
 
+        //  Three entries, one plugin: one child, which stands for all three.
+        REQUIRE (host.proxy (0) != nullptr);
+        CHECK (host.proxy (1) == nullptr);
+        CHECK (juce::File (host.proxy (0)->regionPath()).existsAsFile());
+
         for (int slot = 0; slot < 3; ++slot)
         {
-            REQUIRE (host.proxy (slot) != nullptr);
-            CHECK (juce::File (host.proxy (slot)->regionPath()).existsAsFile());
+            CHECK (host.proxyOfSlot (slot) == host.proxy (0));
+            CHECK (host.proxy (0)->serves ("PG7N000" + std::to_string (slot + 1)));
+            CHECK (host.pooledCopies (slot) == std::min (tracks, 2));
+            CHECK (host.pooledCopiesLent (slot) == 0);
         }
+
+        CHECK (host.proxyOfSlot (3) == nullptr);
+        CHECK (host.pooledCopies (3) == 0);
     }
 
-    /*  Every child up, on all three. */
+    /*  The child up, and every entry it stands for reads loaded. */
     const auto until = std::chrono::steady_clock::now() + std::chrono::seconds (10);
 
     for (;;)
@@ -2536,7 +2556,7 @@ TEST_CASE ("proxy: the graph carries one proxy per set entry on every voice, its
         auto loaded = 0;
 
         for (int slot = 0; slot < 3; ++slot)
-            if (table.statusOf (host.proxy (slot)->pluginId()).state == "loaded")
+            if (table.statusOf ("PG7N000" + std::to_string (slot + 1)).state == "loaded")
                 ++loaded;
 
         if (loaded == 3 || std::chrono::steady_clock::now() > until)
@@ -2548,8 +2568,9 @@ TEST_CASE ("proxy: the graph carries one proxy per set entry on every voice, its
         std::this_thread::sleep_for (std::chrono::milliseconds (10));
     }
 
-    /*  The tick thread's setters reach the lanes; a block through a graph
-        with nothing switched in allocates nothing of ours. */
+    /*  The tick thread's setters reach a lane whether or not a cue holds the
+        place - its own, where nothing is lent; a block through a graph with
+        nothing switched in allocates nothing of ours. */
     host.setTrackFxEnabled (3, 1, true);
     host.setTrackFxParameter (3, 1, 0, 0.25f);
     CHECK (host.proxyLane (3, 1) != nullptr);
@@ -2557,9 +2578,7 @@ TEST_CASE ("proxy: the graph carries one proxy per set entry on every voice, its
     CHECK (host.proxyLane (3, 1)->parameter (0) == doctest::Approx (0.25f));
     CHECK (host.proxyLane (99, 1) == nullptr);
     CHECK (host.proxyLane (3, 9) == nullptr);
-
-    host.snapTrackFx (3, 1, false, {});
-    CHECK_FALSE (host.proxyLane (3, 1)->isEnabled());
+    host.setTrackFxEnabled (3, 1, false);
 
     rt::resetCounts();
 
@@ -2569,17 +2588,128 @@ TEST_CASE ("proxy: the graph carries one proxy per set entry on every voice, its
     if (rt::isCounting())
         CHECK (rt::violations() == 0);
 
-    std::vector<std::string> regions;
+    const auto region = host.proxy (0)->regionPath();
+    host.stop();
+    CHECK_FALSE (juce::File (region).existsAsFile());
+    CHECK (failures == 0);
+}
 
-    for (int slot = 0; slot < 3; ++slot)
-        regions.push_back (host.proxy (slot)->regionPath());
+TEST_CASE ("proxy: a voice is lent a copy for the cue that has the insert, gives it back, and one more is made when the last is taken")
+{
+    /*  Namespace draft 133, stage 3. `snapTrackFx` is the arm: held, the
+        voice's place is lent a free copy, which takes the cue's switch and
+        values; not held, the place gives its copy back. When the last free
+        copy goes another is made in a child of its own - one to spare - and
+        a cue armed while none is free waits for it, its arm not ready, and
+        is lent it when it comes. */
+    ScopedStorage storage;
+    audio::AudioHost host { storage.path() };
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 64;
+    settings.outputChannels = 2;
+    REQUIRE (host.start (settings));
+
+    plugin::PluginTable table;
+    audio::ProxyServices services;
+    services.table = &table;
+    services.launch = launchOfThisBinary();
+    host.setProxyServices (services);
+
+    REQUIRE (host.buildEdit (specWithPlugins (4, 1)));
+    REQUIRE (host.pooledCopies (0) == 2);
+
+    const auto poll = [&host] (auto done, int milliseconds = 10000)
+    {
+        const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds (milliseconds);
+
+        while (std::chrono::steady_clock::now() < end)
+        {
+            host.pollProxies();
+
+            if (done())
+                return true;
+
+            std::this_thread::sleep_for (std::chrono::milliseconds (10));
+        }
+
+        return done();
+    };
+
+    REQUIRE (poll ([&] { return table.statusOf ("PG7N0001").state == "loaded"; }));
+
+    //  THE FIRST CUE: lent a copy, switched in, with its value.
+    host.snapTrackFx (0, 0, true, { { 0, 0.25f } }, {}, true);
+    auto* const first = host.trackInsertTarget (0, 0);
+    REQUIRE (first != nullptr);
+    CHECK (first == host.proxyLane (0, 0));
+    CHECK (first->isEnabled());
+    CHECK (first->parameter (0) == doctest::Approx (0.25f));
+    CHECK (host.pooledCopiesLent (0) == 1);
+    CHECK (host.pooledCopies (0) == 2);
+    CHECK (poll ([&] { return host.isTrackFxSettled (0); }));
+
+    //  The same voice armed again keeps the copy it has.
+    host.snapTrackFx (0, 0, false, {}, {}, true);
+    CHECK (host.trackInsertTarget (0, 0) == first);
+    CHECK_FALSE (first->isEnabled());
+    CHECK (host.pooledCopiesLent (0) == 1);
+
+    //  A SECOND VOICE takes the last free copy, and one more is made to spare.
+    host.snapTrackFx (1, 0, true, {}, {}, true);
+    auto* const second = host.trackInsertTarget (1, 0);
+    REQUIRE (second != nullptr);
+    CHECK (second != first);
+    CHECK (host.pooledCopiesLent (0) == 2);
+    CHECK (host.pooledCopies (0) == 3);
+    REQUIRE (host.proxy (1) != nullptr);
+    CHECK (host.proxy (1)->serves ("PG7N0001"));
+    CHECK (host.proxy (1)->regionPath() != host.proxy (0)->regionPath());
+
+    /*  A THIRD, AT ONCE: the spare's child is still coming up, so the cue
+        waits - silent through its place's own lane, its arm not ready -
+        and is lent the copy when it is there. */
+    host.snapTrackFx (2, 0, true, { { 0, 0.5f } }, {}, true);
+    CHECK_FALSE (host.isTrackFxSettled (2));
+    CHECK (host.pooledCopiesLent (0) == 2);
+    REQUIRE (host.trackInsertTarget (2, 0) != nullptr);
+    CHECK (host.trackInsertTarget (2, 0)->isEnabled());
+
+    REQUIRE (poll ([&] { return host.isTrackFxSettled (2); }));
+    auto* const third = host.trackInsertTarget (2, 0);
+    CHECK (third != first);
+    CHECK (third != second);
+    CHECK (third->isEnabled());
+    CHECK (third->parameter (0) == doctest::Approx (0.5f));
+    CHECK (host.pooledCopiesLent (0) == 3);
+    CHECK (host.pooledCopies (0) == 4);
+
+    //  A CUE WITHOUT THE INSERT on the first voice: the place gives its copy back.
+    host.snapTrackFx (0, 0, false, {}, {}, false);
+    CHECK (host.trackInsertTarget (0, 0) == nullptr);
+    CHECK_FALSE (first->isEnabled());
+    CHECK (host.pooledCopiesLent (0) == 2);
+
+    //  And the last voice finds one free: nothing more is made than every voice could hold.
+    host.snapTrackFx (3, 0, true, {}, {}, true);
+    CHECK (poll ([&] { return host.isTrackFxSettled (3); }));
+    CHECK (host.trackInsertTarget (3, 0) != nullptr);
+    CHECK (host.pooledCopiesLent (0) == 3);
+    CHECK (host.pooledCopies (0) == 4);
+
+    //  The graph runs through it all with nothing of ours allocating.
+    rt::resetCounts();
+
+    for (int i = 0; i < 50; ++i)
+        host.processBlock();
+
+    if (rt::isCounting())
+        CHECK (rt::violations() == 0);
 
     host.stop();
-
-    for (const auto& region : regions)
-        CHECK_FALSE (juce::File (region).existsAsFile());
-
-    CHECK (failures == 0);
+    CHECK (host.trackInsertTarget (1, 0) == nullptr);
+    CHECK (host.pooledCopies (0) == 0);
 }
 
 //==============================================================================
@@ -2899,6 +3029,13 @@ TEST_CASE ("kill: a voice's kill empties its EQ and inserts and no other track's
 
     host.processBlock();
     host.processBlock();
+
+    /*  A CUE ON EACH VOICE WITH BOTH INSERTS, so each place holds a copy
+        (namespace draft 133, stage 3): a voice's inserts are the copies it
+        was lent, and one no cue has armed has none to empty. */
+    for (int track = 0; track < 2; ++track)
+        for (int slot = 0; slot < 2; ++slot)
+            host.snapTrackFx (track, slot, false, {}, {}, true);
 
     const std::array<std::pair<int, int>, 5> slots { { { 0, 0 }, { 0, 1 }, { 1, 0 }, { 1, 1 }, { rack, 0 } } };
 

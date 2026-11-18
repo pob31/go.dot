@@ -5783,8 +5783,7 @@ TEST_CASE ("host player: an arm and a state asked for the same insert land in th
 
     REQUIRE (rig.host.buildEdit (spec));
 
-    auto* lane = rig.host.proxyLane (0, 0);
-    REQUIRE (lane != nullptr);
+    REQUIRE (rig.host.proxyLane (0, 0) != nullptr);
 
     Engine engine;
     audio::HostPlayer player { rig.host, engine };
@@ -5809,7 +5808,9 @@ TEST_CASE ("host player: an arm and a state asked for the same insert land in th
         player.requestFxState (0, 0, "newer.state");
         player.serviceArms();
 
-        CHECK (lane->wantedState() == "newer.state");
+        //  The copy the arm lent the voice (namespace draft 133, stage 3) is what holds it.
+        REQUIRE (rig.host.trackInsertTarget (0, 0) != nullptr);
+        CHECK (rig.host.trackInsertTarget (0, 0)->wantedState() == "newer.state");
     }
 
     SUBCASE ("a state, then an arm: the arm's")
@@ -5818,7 +5819,8 @@ TEST_CASE ("host player: an arm and a state asked for the same insert land in th
         player.requestArm (arm);
         player.serviceArms();
 
-        CHECK (lane->wantedState() == "older.state");
+        REQUIRE (rig.host.trackInsertTarget (0, 0) != nullptr);
+        CHECK (rig.host.trackInsertTarget (0, 0)->wantedState() == "older.state");
     }
 }
 
