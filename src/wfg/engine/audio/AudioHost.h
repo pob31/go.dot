@@ -917,6 +917,22 @@ namespace wfg::audio
         /** A voice's lane for an entry, or null. Any thread. */
         plugin::ProxyLane* proxyLane (int trackIndex, int slot) noexcept;
 
+        /*  A VOICE'S INSERT PLACE RE-POINTED (namespace draft §133, stage 2):
+            which lane that place plays through - the voice's own for that
+            slot (`proxyLane`), a pooled copy's, or null for nothing there.
+            Message thread, while audio runs or not. The answer is the fence's
+            stamp: the lane that was there may be in use for the block in
+            flight, and is free - to lend elsewhere, to stop its child - once
+            `insertFencePassed` says so. A track or slot that is not a voice's
+            changes nothing; the stamp is good all the same. */
+        std::uint64_t setTrackInsertTarget (int trackIndex, int slot, plugin::ProxyLane* lane) noexcept;
+
+        /** What that place plays through now, or null: none, or no such place. */
+        plugin::ProxyLane* trackInsertTarget (int trackIndex, int slot) const noexcept;
+
+        /** Whether every block that could have read the place's old lane has ended. */
+        bool insertFencePassed (std::uint64_t stamp) const noexcept;
+
         /*  The tick thread, on an edit to a sounding cue: the cue's switch
             for one entry, and one value. Atomics, nothing else. */
         void setTrackFxEnabled (int trackIndex, int slot, bool enabled) noexcept;

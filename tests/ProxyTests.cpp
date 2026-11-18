@@ -37,6 +37,7 @@
 #include <wfg/engine/audio/EqSettings.h>
 #include <wfg/engine/audio/HostPlayer.h>
 #include <wfg/engine/audio/Looper.h>
+#include <wfg/engine/plugin/BlockFence.h>
 #include <wfg/engine/plugin/Catalogue.h>
 #include <wfg/engine/plugin/GridPlayHead.h>
 #include <wfg/engine/command/CommandRegistry.h>
@@ -2332,6 +2333,164 @@ TEST_CASE ("M35: a cue's whole state loaded onto a voice - how long it takes, an
                  << bytes << " | " << loads.front() << " | " << loads[loads.size() / 2] << " | " << loads.back()
                  << " | " << missesLoading << " | " << missesIdle);
     }
+}
+
+TEST_CASE ("block fence: what was taken away is free once the block that could be in it has ended")
+{
+    /*  Namespace draft 133, stage 2. A voice's insert place is pointed at
+        another lane while audio runs; the lane it pointed at may be in use
+        for the block in flight, and the fence says when it no longer can be. */
+    plugin::BlockFence fence;
+
+    SUBCASE ("with no audio it has passed at once")
+    {
+        CHECK (fence.passed (fence.stamp()));
+    }
+
+    SUBCASE ("a change inside a block waits for that block's end")
+    {
+        fence.begin();
+        const auto stamped = fence.stamp();
+        CHECK_FALSE (fence.passed (stamped));
+        fence.end();
+        CHECK (fence.passed (stamped));
+
+        //  And one between two blocks waits for nothing.
+        const auto between = fence.stamp();
+        CHECK (fence.passed (between));
+        fence.begin();
+        CHECK (fence.passed (between));
+        fence.end();
+    }
+
+    SUBCASE ("under a running audio thread, nothing is ever in what the fence called free")
+    {
+        /*  The audio thread reads the pointer once a block and stays in what
+            it found for a while; the other thread swaps the pointer, waits
+            for the fence, and then looks at the one it took away. */
+        std::atomic<int> inUse[2] { { 0 }, { 0 } };
+        std::atomic<int> pointed { 0 };
+        std::atomic<bool> stop { false };
+        std::atomic<std::uint64_t> blocks { 0 };
+
+        std::thread audio ([&]
+        {
+            while (! stop.load())
+            {
+                fence.begin();
+                const auto at = pointed.load (std::memory_order_seq_cst);
+                inUse[at].store (1, std::memory_order_seq_cst);
+
+                for (int spin = 0; spin < 200; ++spin)
+                    (void) blocks.load (std::memory_order_relaxed);
+
+                inUse[at].store (0, std::memory_order_seq_cst);
+                fence.end();
+                blocks.fetch_add (1, std::memory_order_relaxed);
+            }
+        });
+
+        auto found = 0;
+        auto swaps = 0;
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds (400);
+
+        while (std::chrono::steady_clock::now() < until)
+        {
+            const auto old = pointed.load();
+            pointed.store (1 - old, std::memory_order_seq_cst);
+            const auto stamped = fence.stamp();
+
+            while (! fence.passed (stamped))
+                std::this_thread::yield();
+
+            found += inUse[old].load (std::memory_order_seq_cst);
+            ++swaps;
+        }
+
+        stop.store (true);
+        audio.join();
+
+        CHECK (found == 0);
+        CHECK (swaps > 100);
+        CHECK (blocks.load() > 100);
+    }
+}
+
+TEST_CASE ("proxy: a voice's insert place is pointed at another lane, or at none, while the graph runs")
+{
+    /*  Namespace draft 133, stage 2: nothing uses it yet. Every place starts
+        on its own lane, which is what the graph played through before; the
+        host points one elsewhere and hands back the fence's stamp; a rack
+        channel's place is not a voice's and is never re-pointed. */
+    ScopedStorage storage;
+    audio::AudioHost host { storage.path() };
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 64;
+    settings.outputChannels = 2;
+    REQUIRE (host.start (settings));
+
+    plugin::PluginTable table;
+    audio::ProxyServices services;
+    services.table = &table;
+    services.launch = launchOfThisBinary();
+    host.setProxyServices (services);
+
+    REQUIRE (host.buildEdit (specWithPlugins (2, 2)));
+
+    for (int track = 0; track < 2; ++track)
+        for (int slot = 0; slot < 2; ++slot)
+        {
+            REQUIRE (host.proxyLane (track, slot) != nullptr);
+            CHECK (host.trackInsertTarget (track, slot) == host.proxyLane (track, slot));
+        }
+
+    //  At none: nothing in that place. With no block in flight the old lane is free at once.
+    auto stamped = host.setTrackInsertTarget (1, 0, nullptr);
+    CHECK (host.trackInsertTarget (1, 0) == nullptr);
+    CHECK (host.insertFencePassed (stamped));
+    CHECK (host.trackInsertTarget (0, 0) == host.proxyLane (0, 0));
+    CHECK (host.trackInsertTarget (1, 1) == host.proxyLane (1, 1));
+
+    //  At a lane that is nobody's place: a pooled copy's, later.
+    plugin::ProxyLane lent;
+    stamped = host.setTrackInsertTarget (1, 0, &lent);
+    CHECK (host.trackInsertTarget (1, 0) == &lent);
+
+    /*  Switched in, and the graph run through it, re-pointed between blocks:
+        nothing of ours allocates, whatever the place points at - a lane no
+        child answers silences its block, which is the lane's own doing. */
+    lent.setEnabled (true);
+    rt::resetCounts();
+
+    for (int i = 0; i < 60; ++i)
+    {
+        host.processBlock();
+
+        if (i % 3 == 0)
+            stamped = host.setTrackInsertTarget (1, 0, i % 2 == 0 ? &lent : nullptr);
+
+        CHECK (host.insertFencePassed (stamped));
+    }
+
+    if (rt::isCounting())
+        CHECK (rt::violations() == 0);
+
+    //  Back on its own before `lent` goes: a place never outlives what it points at.
+    stamped = host.setTrackInsertTarget (1, 0, host.proxyLane (1, 0));
+    CHECK (host.insertFencePassed (stamped));
+    CHECK (host.trackInsertTarget (1, 0) == host.proxyLane (1, 0));
+
+    //  What is not a voice's place changes nothing and answers none.
+    stamped = host.setTrackInsertTarget (9, 0, &lent);
+    CHECK (host.insertFencePassed (stamped));
+    CHECK (host.trackInsertTarget (9, 0) == nullptr);
+    CHECK (host.trackInsertTarget (0, 9) == nullptr);
+    CHECK (host.trackInsertTarget (-1, 0) == nullptr);
+
+    host.stop();
+    CHECK (host.trackInsertTarget (0, 0) == nullptr);
 }
 
 TEST_CASE ("proxy: the graph carries one proxy per set entry on every voice, its ids stay unique, and stop removes every region")

@@ -25,6 +25,7 @@
 #include <juce_events/juce_events.h>
 #include <tracktion_engine/tracktion_engine.h>
 
+#include <atomic>
 #include <vector>
 
 /*
@@ -76,6 +77,17 @@ namespace wfg::audio
         plugin::ProxyLane& lane() noexcept              { return proxyLane; }
         const plugin::ProxyLane& lane() const noexcept  { return proxyLane; }
 
+        /*  WHICH LANE THIS PLACE PLAYS THROUGH (namespace draft §133, stage
+            2): its own, as it always was and as a rack channel's stays; or
+            another - a pooled copy lent to this voice for a cue; or none,
+            and the place then passes the voice through untouched. Changed on
+            the message thread while audio runs; the audio thread reads it
+            once a block. THE LANE TAKEN AWAY may still be in use for the
+            block in flight: whoever changes this asks the host's BlockFence
+            when it is free (plugin/BlockFence.h). */
+        void setTarget (plugin::ProxyLane* lane) noexcept   { targetLane.store (lane, std::memory_order_seq_cst); }
+        plugin::ProxyLane* target() const noexcept          { return targetLane.load (std::memory_order_seq_cst); }
+
         int numChannels() const noexcept  { return channels; }
 
         /** Which plugin of the set this is, in `plugins/order`. */
@@ -105,6 +117,7 @@ namespace wfg::audio
         int channels = 2;
         int setSlot = 0;
         plugin::ProxyLane proxyLane;
+        std::atomic<plugin::ProxyLane*> targetLane { &proxyLane };
         const plugin::BlockClock* boundClock = nullptr;
 
         /*  The channel pointers for one call, sized in initialise() and never

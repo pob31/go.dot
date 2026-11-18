@@ -26,6 +26,7 @@
 #include <wfg/engine/audio/LooperPlugin.h>
 #include <wfg/engine/audio/TakeReaderPlugin.h>
 #include <wfg/engine/audio/ProxyPlugin.h>
+#include <wfg/engine/plugin/BlockFence.h>
 #include <wfg/engine/audio/LoopVoice.h>
 #include <wfg/engine/audio/RateVoice.h>
 #include <wfg/engine/clock/AudioClockSource.h>
@@ -466,6 +467,7 @@ namespace wfg::audio
                 they are bound to: a host unbinds its lanes as it goes. */
             proxies.clear();
             trackLanes.clear();
+            voiceInserts.clear();
             proxySlots = 0;
 
             edit.reset();
@@ -657,6 +659,7 @@ namespace wfg::audio
                     edit.reset();
                     matrices.clear();
                     trackLanes.clear();
+                    voiceInserts.clear();
                     eqs.clear();
                     return false;
                 }
@@ -677,12 +680,14 @@ namespace wfg::audio
                     edit.reset();
                     matrices.clear();
                     trackLanes.clear();
+                    voiceInserts.clear();
                     eqs.clear();
                     return false;
                 }
 
                 eqs.push_back (&eqStage->eq());
                 trackLanes.emplace_back();
+                voiceInserts.emplace_back();
 
                 /*  THE SET'S PROXIES, between the EQ and the output stage, in
                     plugins/order (Phase 9a, decisions AE and AF): one per entry
@@ -699,6 +704,7 @@ namespace wfg::audio
                     {
                         error = "the plugin proxy would not insert";
                         trackLanes.clear();
+                        voiceInserts.clear();
                         edit.reset();
                         matrices.clear();
                         eqs.clear();
@@ -707,12 +713,14 @@ namespace wfg::audio
 
                     proxy->bindClock (&blockClock);
                     trackLanes.back().push_back (&proxy->lane());
+                    voiceInserts.back().push_back (proxy);
                 }
 
                 if (! insertAuxTap (*track, spec.channelsPerTrack, index, 0))
                 {
                     error = "the aux tap would not insert";
                     trackLanes.clear();
+                    voiceInserts.clear();
                     edit.reset();
                     matrices.clear();
                     eqs.clear();
@@ -730,6 +738,7 @@ namespace wfg::audio
                     edit.reset();
                     matrices.clear();
                     trackLanes.clear();
+                    voiceInserts.clear();
                     eqs.clear();
                     return false;
                 }
@@ -773,6 +782,7 @@ namespace wfg::audio
                 edit.reset();
                 matrices.clear();
                 trackLanes.clear();
+                voiceInserts.clear();
                 eqs.clear();
                 return false;
             }
@@ -807,6 +817,7 @@ namespace wfg::audio
                     error = "the Edit's tempo does not make one beat one second, so every"
                             " launch would be placed at the wrong distance";
                     trackLanes.clear();
+                    voiceInserts.clear();
                     edit.reset();
                     matrices.clear();
                     plugins.clear();
@@ -1076,6 +1087,7 @@ namespace wfg::audio
                 edit.reset();
                 matrices.clear();
                 trackLanes.clear();
+                voiceInserts.clear();
                 eqs.clear();
                 liveInputs.clear();
                 clearAuxes();
@@ -1546,6 +1558,7 @@ namespace wfg::audio
         {
             proxies.clear();
             trackLanes.clear();
+            voiceInserts.clear();
             liveInputs.clear();
             rackTracks.clear();
             rackShutAt.clear();
@@ -1707,11 +1720,18 @@ namespace wfg::audio
                     voice->drain (blockStartBeat);
             }
 
+            /*  THE FENCE round the graph (namespace draft §133, stage 2): the
+                insert places read which lane they play through inside this
+                call and nowhere else. Ours, and two atomics. */
+            fence.begin();
+
             {
                 const rt::ScopedRealtimeCheck tracktionsBlock { rt::Region::foreign };
 
                 engine->getDeviceManager().getHostedAudioDeviceInterface().processBlock (scratch, midi);
             }
+
+            fence.end();
 
             /*  EACH OUTPUT'S GAIN (namespace draft §38): its trim and its DCA's,
                 on what the graph mixed onto its channels, before it leaves. A
@@ -2807,6 +2827,14 @@ namespace wfg::audio
             chain (Phase 9b) - and the hosts, destroyed before the Edit because
             the lanes live in it. `proxySlots` is the SET's size. */
         std::vector<std::vector<plugin::ProxyLane*>> trackLanes;
+
+        /*  THE VOICES' INSERT PLACES THEMSELVES (namespace draft §133, stage
+            2), by voice and slot, for what re-points one; the rack's are not
+            here, and are never re-pointed. Emptied wherever `trackLanes` is,
+            by `forgetInserts`. And the fence that says when a lane taken off
+            a place is free. */
+        std::vector<std::vector<ProxyPlugin*>> voiceInserts;
+        plugin::BlockFence fence;
         int proxySlots = 0;
 
         /*  THE LIVE RACK (Phase 9b): how many of the tracks are voices, every
@@ -3509,6 +3537,34 @@ namespace wfg::audio
     {
         if (auto* lane = proxyLane (trackIndex, slot))
             lane->setShape (feed, back);
+    }
+
+    std::uint64_t AudioHost::setTrackInsertTarget (int trackIndex, int slot, plugin::ProxyLane* lane) noexcept
+    {
+        if (trackIndex >= 0 && slot >= 0 && trackIndex < static_cast<int> (impl->voiceInserts.size()))
+        {
+            auto& places = impl->voiceInserts[static_cast<std::size_t> (trackIndex)];
+
+            if (slot < static_cast<int> (places.size()))
+                places[static_cast<std::size_t> (slot)]->setTarget (lane);
+        }
+
+        //  AFTER the change, which is what makes the stamp mean anything.
+        return impl->fence.stamp();
+    }
+
+    plugin::ProxyLane* AudioHost::trackInsertTarget (int trackIndex, int slot) const noexcept
+    {
+        if (trackIndex < 0 || slot < 0 || trackIndex >= static_cast<int> (impl->voiceInserts.size()))
+            return nullptr;
+
+        const auto& places = impl->voiceInserts[static_cast<std::size_t> (trackIndex)];
+        return slot < static_cast<int> (places.size()) ? places[static_cast<std::size_t> (slot)]->target() : nullptr;
+    }
+
+    bool AudioHost::insertFencePassed (std::uint64_t stamp) const noexcept
+    {
+        return impl->fence.passed (stamp);
     }
 
     void AudioHost::setTrackFxEnabled (int trackIndex, int slot, bool enabled) noexcept

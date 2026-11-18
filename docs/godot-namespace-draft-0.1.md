@@ -35712,10 +35712,30 @@ lock, on a fade and on a channel's chain (RunPaneUiTests); the picture of the pa
 (`fx-panel.png` under `WFG_SNAPSHOT_DIR`) is a media cue's own chain now. Green in C and fr_FR, with the
 replays of `fx.wfglog`, `plugins.wfglog` and `mic.wfglog` and the plugin drivers as they were.
 
-### 133.4 Owed
+### 133.4 As built: stage 2, an insert place that can be pointed elsewhere
 
-The stages after this one: the spike on the Mac with Seventh Heaven and Oxford Envolution (a copy made while a
-sibling sounds; load time and memory a copy); the re-pointable insert place; the region's instance protocol
-and the pooled host; the switch - own order, `fx.move`, no Load now for an add; the loader and the GO rule
-(BGG-BGI); the windows by insert, the Plugins tab, PRD §3.18 and the tester guides. The author's look at
-stage 1.
+Built 2026-11-18, after the spike (133.1). Nothing uses it yet and nothing sounds different.
+
+- **`plugin/BlockFence.h`**: two counts the audio callback moves round the graph's block. Whoever changes
+  something the audio thread reads once a block changes it first, takes a stamp, and what it took away is
+  free once the fence has passed that stamp - at once when no audio runs. Sequentially consistent on both
+  sides, because the argument orders a store on one thread against a load on the other.
+- **`ProxyPlugin`** plays through a `target` lane read once a block: its own, as before and as a rack
+  channel's stays for good; another, for a pooled copy lent to the voice; or none, and the voice passes.
+  `ProxyLane::bind` and `unbind` are not touched, and are still not to be called while audio runs.
+- **`AudioHost`**: `setTrackInsertTarget (track, slot, lane)` answers the fence's stamp,
+  `insertFencePassed (stamp)` says when the old lane is free, `trackInsertTarget` reads the place. Voices
+  only: a rack channel's places are not listed and cannot be re-pointed.
+
+Tests (ProxyTests): the fence alone - passed at once with no audio, a change inside a block waits for its
+end, and under a running thread nothing is ever found in what the fence called free; a voice's place pointed
+at none, at a lane that is nobody's, and back, between blocks of a running graph with nothing of ours
+allocating, and a track or slot that is no voice's place answering none. Green in C and fr_FR with the proxy
+and rack cases and the plugin drivers as they were; the real-time sanitizer's word is in the commit.
+
+### 133.5 Owed
+
+The stages after these: the pooled host (copies by plugin, more copies another child); the switch - K places
+a voice, a cue's inserts lent at arm in its own order, its state in at standby, `fx.move`, no Load now for an
+add; the loader and the GO rule (BGG-BGI); the windows by insert, the Plugins tab, PRD §3.18 and the tester
+guides. The author's look at stage 1.

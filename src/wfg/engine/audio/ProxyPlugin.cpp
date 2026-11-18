@@ -106,7 +106,11 @@ namespace wfg::audio
             taking a state, it is the lane that silences the block, never dry
             (the author's decision of 2026-09-26, CU), which a return here
             would have left dry. */
-        if (! proxyLane.isEnabled())
+        /*  THE LANE THIS PLACE PLAYS THROUGH, read once for the block (§133,
+            stage 2): none is nothing in this place, and the voice passes. */
+        auto* const lane = targetLane.load (std::memory_order_seq_cst);
+
+        if (lane == nullptr || ! lane->isEnabled())
             return;
 
         const juce::ScopedNoDenormals noDenormals;
@@ -123,7 +127,7 @@ namespace wfg::audio
                 = destination.getWritePointer (channel, context.bufferStartSample);
 
         //  ON THE CLOCK (§123, BEI): this block's first sample, the buffer's offset in.
-        proxyLane.process (pointers.data(), usable, context.bufferNumSamples, boundClock,
-                           boundClock != nullptr ? boundClock->blockStart + context.bufferStartSample : 0);
+        lane->process (pointers.data(), usable, context.bufferNumSamples, boundClock,
+                       boundClock != nullptr ? boundClock->blockStart + context.bufferStartSample : 0);
     }
 }
