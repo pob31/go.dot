@@ -212,6 +212,10 @@ namespace wfg::client::gesture
         a replay needs; and a fresh child for an entry that failed. */
     Event createFx (const std::string& cueId, const std::string& pluginId);
 
+    /*  AN INSERT TAKEN OFF ITS CUE (namespace draft 133): `fx.remove`, from
+        the Remove button of a plugin's box in the cue's chain. */
+    Event removeFx (const std::string& fxId);
+
     /*  A plugin's whole state kept with a cue (author, 2026-09-25): the file
         its editing helper wrote under the bundle's plugins/, and every
         parameter's value, in one step. */

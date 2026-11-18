@@ -89,6 +89,9 @@ namespace wfg::client::ui
             /** `fx.create` on this cue for that entry of the set: the first switch-in. */
             std::function<void (const std::string& cueId, const std::string& pluginId)> createFx;
 
+            /** `fx.remove`: a plugin taken off this cue, and no other (namespace draft 133). */
+            std::function<void (const std::string& fxId)> removeFx;
+
             /** Show this cue's EQ in the foot instead of the chain. */
             std::function<void (const std::string& cueId)> openEq;
 
@@ -156,6 +159,14 @@ namespace wfg::client::ui
 
         /** Whether the chain ends in the box a plugin is added from (§105). */
         bool offersAdd() const noexcept  { return reading.fx.present && reading.fx.canAdd && ! onFade(); }
+
+        /*  Whether a plugin's box carries Remove (namespace draft 133): on a
+            media cue, whose chain is its own. Not on a fade, which shows its
+            target's chain, nor under the lock. */
+        bool offersRemove() const noexcept
+        {
+            return reading.fx.ownChain && ! onFade() && ! reading.fx.locked;
+        }
 
         /** The add box's menu, under its button. */
         void chooseToAdd (juce::Component& under);

@@ -160,6 +160,13 @@ namespace wfg::client::model
         bool canHide = false;
         bool hideUnused = false;
 
+        /*  A MEDIA CUE'S CHAIN IS ITS OWN (namespace draft 133, the author,
+            2026-11-18): its strips are the inserts it has, in the set's order
+            and numbered as its own, and never the rest of the set. A plugin
+            comes off it by Remove. A mic cue's and an aux's are their
+            channel's chain, drawn whole as before. */
+        bool ownChain = false;
+
         /*  A PLUGIN ADDED FROM THE PANEL (namespace draft §105): whether this
             chain can take one - not a mic cue through no channel - what this
             machine's scan found to offer, and what Load now needs to know:

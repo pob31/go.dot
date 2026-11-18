@@ -1499,7 +1499,7 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 50.0, false, "park",
           "",
-          "Whether the cue-s FX panel leaves out every plugin the cue has not switched in (namespace draft 105; the author-s words, Hide unused plugins). A matter of what the panel shows, never of the sound: a plugin switched out on the cue stays shown, since the cue keeps what was set on it, and the panel says how many it left out." },
+          "Whether a MIC cue-s FX panel leaves out every plugin of its channel-s chain the cue has no insert for (namespace draft 105; the author-s words, Hide unused plugins). Read for a mic cue only since namespace draft 133: a media cue-s chain is its own - the inserts it has and no other entry of the set - so it has nothing to hide and the row is read by nothing there. A matter of what the panel shows, never of the sound: a plugin switched out on the cue stays shown, since the cue keeps what was set on it, and the panel says how many it left out." },
         { "sound", "eqHpf",
           ValueType::boolean, 'T', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           true, "false",

@@ -35621,3 +35621,95 @@ into a stereo aux whose own out is the pair after - heard on the aux's pair, and
 red without the fix (the aux's pair silent), green with, in C and fr_FR. The mic cue's driver
 (`phase9b_mic.py`), whose channel is exclusive, as before. Owed: the author's ear on an aux with a real
 reverb, and on an imported Live set's returns.
+
+## 133. A cue's chain is its own
+
+**Asked 2026-11-18** by the author, trying the plugins at length for the first time: *"I find that getting the
+whole effect chain shared across all media cues is a bit cumbersome. Is there a way to make this chain per cue
+instead? I think there was a misunderstanding about this while we built this in."* And: *"after a few cues you
+get a whole chain to scroll through."* Decision AE (§17) had the show declare one plugin set, every voice
+carry all of it, and a cue switch entries in. The sound was a cue's own all along - a copy on each voice,
+the cue's values and whole state on it (§17.13) - but the list was the show's: a plugin added on one cue was a
+box on every cue, in one order, and no cue could be rid of one it had ever touched. Asked how the plugins
+should then be loaded, the author: *"Can't we load and park plugins with no definite order at start up for the
+ones closest to the cursor and then the rest progressively so we don't slow down the initialisation and get the
+preloading of the effects? Engaging the show mode preloads all plugins and only allows to fire once it's done
+with this."*
+
+The plan is `can-t-we-load-and-functional-sun.md` (approved 2026-11-18), in stages; this section grows with
+them.
+
+### 133.1 Decisions
+
+The author's:
+
+- **BGF** **A media cue's chain is its own**: the plugins it has and no other, in its own order, a plugin off
+  one cue without touching another, the same plugin twice if wanted.
+- **BGG** **Plugins are loaded and parked in the background**, those nearest the standby first, then the
+  rest, so opening a show waits for none of them.
+- **BGH** **Engaging show mode - the lock (§14.11) - loads every one.**
+- **BGI** **In show mode GO is accepted once the standby's plugins are ready** (offered beside "everything
+  first" and "everything, except after a crash"; the lock is remembered across a restart, so a show come back
+  from a crash must not wait for the whole load). A cue fired from elsewhere is refused until its own are
+  ready, with the reason said. Unlocked, as before: the launch waits and the run says how late.
+
+Mine *(proposed)*, the author's to overrule:
+
+- **BGJ** **The show file keeps its shape.** `<Plugins>` stays, an unseen list of what each insert is, and an
+  `Fx` still names its entry: the fade keys (`fx/<entry>/<n>`, §26), `/godot/fx/<id>/p<n>`, the catalogue rows,
+  the surfaces' FX pages, the state files and every log written before go on working. The chain's order
+  becomes the order of the cue's `Fx` children when the engine can play it (133.4); a show written before is
+  read into the set's order, so it sounds as it did.
+- **BGK** **`fx.remove` takes the entry of the set with its last insert**, in the same step, so one undo
+  brings both back and the set keeps nothing nobody plays through. `object.delete` prunes nothing, as before:
+  a log written before deletes a cue and switches its entry in again on another.
+- **BGL** **What a fade moves stays drawn**: a fade's chain is its target's own, and with it any entry the
+  fade's list names that the target has no insert for, so a move can always be seen and taken back.
+- **BGM** **Hide unused plugins is a mic cue's only** (§105, AZM): a media cue has nothing of another's to
+  hide. `fxHideUnused` stays in the show, read by nothing on a media cue.
+- **BGN** **A mic cue's and an aux's chain stay their channel's** (§18, §93), drawn whole and wired as before.
+
+To build, drawn in the plan: every voice carries a fixed row of empty insert places (eight unless the show
+says otherwise, more for a longer chain); the copies are pooled, a child process per plugin as now, a parked
+copy per plugin and state in use, lent to one voice at a time and never re-pointed by `ProxyLane::bind`, which
+is not safe while audio runs; a copy taken by a run gets a spare loaded behind it.
+
+### 133.2 Rows and commands
+
+`fx.remove <fx>` - an insert off its cue, with what was set on it; a media cue's takes its entry of the set
+with it when no other `Fx` names that entry (BGK). `unknown-id` for no such object, `type-mismatch` for one
+that is not an `Fx`, `locked` first.
+
+| Address | Type | Access | Notes |
+|---|---|---|---|
+| `/godot/cue/<id>/fxHideUnused` | `T`, false | rw, show | read for a mic cue only (BGM) |
+
+### 133.3 As built: stage 1, the chain as the cue's own, on the engine as it is
+
+Built 2026-11-18.
+
+- **The document**: `ShowDocument::removeFx`, and the command beside `fx.create`.
+- **The model**: `readFx` gives a media cue a strip per insert it has - in the set's order still, numbered as
+  the cue's own - and sets `ownChain`; an empty chain says nothing and offers the add box (it said *the show
+  declares no plugins yet: Show settings, Plugins*). `readFadeFx` keeps what the fade moves (BGL).
+- **The panel**: Remove on each plugin's box of a media cue's chain, not under the lock and not on a fade; the
+  add box's tooltip says *at the end of this cue's chain ... No other cue gets it*; the Hide switch's says
+  *never switched in*, which is what it always meant.
+- **Not yet**: the order is still the set's, an add still wants Load now, and every voice still carries a copy
+  of every plugin of the show - a plugin added on a cue makes an entry of its own each time (`cue.plugin`, as
+  §105 built it), so until the copies are pooled a show pays a copy per voice for every insert made.
+
+Tests: `fx.remove` - the entry stays while another cue names it and goes with the last, one undo for both,
+what was set comes back, a mic cue's leaves its channel's chain, the three refusals (PluginSetTests); a media
+cue reads its own inserts and Remove moves the next one up (ClientTests); Remove pressed, and absent under the
+lock, on a fade and on a channel's chain (RunPaneUiTests); the picture of the panel
+(`fx-panel.png` under `WFG_SNAPSHOT_DIR`) is a media cue's own chain now. Green in C and fr_FR, with the
+replays of `fx.wfglog`, `plugins.wfglog` and `mic.wfglog` and the plugin drivers as they were.
+
+### 133.4 Owed
+
+The stages after this one: the spike on the Mac with Seventh Heaven and Oxford Envolution (a copy made while a
+sibling sounds; load time and memory a copy); the re-pointable insert place; the region's instance protocol
+and the pooled host; the switch - own order, `fx.move`, no Load now for an add; the loader and the GO rule
+(BGG-BGI); the windows by insert, the Plugins tab, PRD §3.18 and the tester guides. The author's look at
+stage 1.

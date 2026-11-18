@@ -168,6 +168,17 @@ namespace wfg::client::ui
                     if (owner.actions.edit)
                         owner.actions.edit (owner.reading.subject.objectId, strip.pluginId);
                 };
+
+                /*  OFF THIS CUE, AND NO OTHER (namespace draft 133, the author,
+                    2026-11-18). One undo brings it back with what was set. */
+                remove.setButtonText ("Remove");
+                remove.setWantsKeyboardFocus (false);
+                remove.onClick = [this]
+                {
+                    if (owner.actions.removeFx && owner.offersRemove() && strip.present())
+                        owner.actions.removeFx (strip.fxId);
+                };
+                addChildComponent (remove);
             }
         }
 
@@ -194,8 +205,8 @@ namespace wfg::client::ui
                                            : fx.live || owner.reading.cueKind == "aux"
                                                ? juce::String ("Add a plugin at the end of this channel's chain,"
                                                                " switched in on this cue")
-                                               : juce::String ("Add a plugin to the show's set, switched in on"
-                                                               " this cue"));
+                                               : juce::String ("Add a plugin at the end of this cue's chain,"
+                                                               " switched in. No other cue gets it."));
 
                 //  LOAD NOW WHILE THE GRAPH LAGS THE SHOW, lit only when it can be (the Rack tab's rule).
                 load.setVisible (fx.graphChanged);
@@ -219,6 +230,10 @@ namespace wfg::client::ui
                                          "- the first switch-in makes the insert");
                 door.setTooltip (isIn() ? "Open " + juce::String (strip.name) + "'s own window for this cue"
                                         : "Switch " + juce::String (strip.name) + " in on this cue and open its own window");
+
+                remove.setVisible (owner.offersRemove() && strip.present());
+                remove.setTooltip ("Take " + juce::String (strip.name) + " off this cue, with what was set on it."
+                                   " No other cue is touched; Undo brings it back.");
             }
 
             /*  ON A FADE the switch is the target's, shown and not thrown, and
@@ -254,7 +269,10 @@ namespace wfg::client::ui
                 return;
             }
             inSwitch.setBounds (area.removeFromTop (owner.scaled (22)).withWidth (owner.scaled (70)));
-            door.setBounds (area.removeFromBottom (owner.scaled (24)).withWidth (owner.scaled (90)));
+
+            auto foot = area.removeFromBottom (owner.scaled (24));
+            door.setBounds (foot.removeFromLeft (owner.scaled (90)));
+            remove.setBounds (foot.removeFromRight (owner.scaled (70)));
         }
 
         void paint (juce::Graphics& g) override
@@ -403,6 +421,7 @@ namespace wfg::client::ui
         juce::ToggleButton inSwitch;
         juce::TextButton door;
         juce::TextButton load;      // the add box's Load now (§105)
+        juce::TextButton remove;    // a plugin's, on a media cue: off this cue (§133)
     };
 
     //==============================================================================
@@ -498,7 +517,7 @@ namespace wfg::client::ui
         canvas = std::make_unique<Canvas> (*this);
 
         hideUnused.setButtonText ("Hide unused plugins");
-        hideUnused.setTooltip ("Leave out of this cue's chain every plugin it has not switched in."
+        hideUnused.setTooltip ("Leave out of this cue's chain every plugin of its channel it has never switched in."
                                " Kept with the cue.");
         hideUnused.setWantsKeyboardFocus (false);
         hideUnused.onClick = [this]

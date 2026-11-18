@@ -421,6 +421,16 @@ namespace wfg::doc
         EditResult createFx (const std::string& cueId, const std::string& pluginId,
                              const std::string& id);
 
+        /*  AN INSERT TAKEN OFF ONE CUE (namespace draft 133, the author,
+            2026-11-18: a cue's chain is its own). The Fx goes, with what was
+            set on it; and for a media cue the entry of the set it named goes
+            with it once no other Fx names it, in the same step, so one undo
+            brings both back and the set keeps nothing nobody plays through. A
+            mic cue's or an aux's entry is its channel's chain's and stays.
+            Refuses `unknownId` for no such object and `typeMismatch` for one
+            that is not an Fx; a locked show refuses first. */
+        EditResult removeFx (const std::string& fxId);
+
         /*  `level` empty is the row's default; otherwise the send is born at
             it, checked like any written value (2026-09-25). */
         EditResult createSend (const std::string& cueId, const std::string& busId,

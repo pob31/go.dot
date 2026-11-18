@@ -3412,6 +3412,54 @@ namespace wfg::doc
                              { { "plugin", pluginId } });
     }
 
+    EditResult ShowDocument::removeFx (const std::string& fxId)
+    {
+        if (auto refusal = refuseIfLocked())
+            return *refusal;
+
+        const auto fx = findById (fxId);
+
+        if (! fx.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        if (! fx.hasType ("Fx"))
+            return EditResult::failed (reason::typeMismatch);
+
+        const auto pluginId = fx.getProperty ("plugin").toString().toStdString();
+        const auto ofTheSet = fx.getParent().hasType ("Media");
+
+        const auto gone = remove (fxId);
+
+        if (! gone.ok || ! ofTheSet)
+            return gone;
+
+        /*  THE ENTRY GOES WITH ITS LAST INSERT. Only an entry of the set: a
+            dangling name, or one that turned out to be a channel's, is left
+            for `wfg validate` to say. */
+        const auto entry = findById (pluginId);
+
+        if (! entry.isValid() || ! entry.hasType ("Plugin") || ! entry.getParent().hasType ("Plugins"))
+            return gone;
+
+        const auto named = [&pluginId] (const juce::ValueTree& at, auto&& recurse) -> bool
+        {
+            for (const auto& child : at)
+                if ((child.hasType ("Fx") && child.getProperty ("plugin").toString().toStdString() == pluginId)
+                      || recurse (child, recurse))
+                    return true;
+
+            return false;
+        };
+
+        if (named (showNode, named))
+            return gone;
+
+        if (const auto entryGone = remove (pluginId); ! entryGone.ok)
+            return entryGone;
+
+        return gone;
+    }
+
     EditResult ShowDocument::createRange (const std::string& cueId, double in, double out,
                                           const std::string& id, bool toEnd)
     {

@@ -896,7 +896,7 @@
       </optional>
       <optional>
         <attribute name="fxHideUnused">
-          <a:documentation>Whether the cue-s FX panel leaves out every plugin the cue has not switched in (namespace draft 105; the author-s words, Hide unused plugins). A matter of what the panel shows, never of the sound: a plugin switched out on the cue stays shown, since the cue keeps what was set on it, and the panel says how many it left out.</a:documentation>
+          <a:documentation>Whether a MIC cue-s FX panel leaves out every plugin of its channel-s chain the cue has no insert for (namespace draft 105; the author-s words, Hide unused plugins). Read for a mic cue only since namespace draft 133: a media cue-s chain is its own - the inserts it has and no other entry of the set - so it has nothing to hide and the row is read by nothing there. A matter of what the panel shows, never of the sound: a plugin switched out on the cue stays shown, since the cue keeps what was set on it, and the panel says how many it left out.</a:documentation>
           <choice>
             <value>true</value>
             <value>false</value>
@@ -1412,7 +1412,7 @@
       </optional>
       <optional>
         <attribute name="fxHideUnused">
-          <a:documentation>Whether the cue-s FX panel leaves out every plugin the cue has not switched in (namespace draft 105; the author-s words, Hide unused plugins). A matter of what the panel shows, never of the sound: a plugin switched out on the cue stays shown, since the cue keeps what was set on it, and the panel says how many it left out.</a:documentation>
+          <a:documentation>Whether a MIC cue-s FX panel leaves out every plugin of its channel-s chain the cue has no insert for (namespace draft 105; the author-s words, Hide unused plugins). Read for a mic cue only since namespace draft 133: a media cue-s chain is its own - the inserts it has and no other entry of the set - so it has nothing to hide and the row is read by nothing there. A matter of what the panel shows, never of the sound: a plugin switched out on the cue stays shown, since the cue keeps what was set on it, and the panel says how many it left out.</a:documentation>
           <choice>
             <value>true</value>
             <value>false</value>
@@ -4535,7 +4535,7 @@
       </optional>
       <optional>
         <attribute name="fxHideUnused">
-          <a:documentation>Whether the cue-s FX panel leaves out every plugin the cue has not switched in (namespace draft 105; the author-s words, Hide unused plugins). A matter of what the panel shows, never of the sound: a plugin switched out on the cue stays shown, since the cue keeps what was set on it, and the panel says how many it left out.</a:documentation>
+          <a:documentation>Whether a MIC cue-s FX panel leaves out every plugin of its channel-s chain the cue has no insert for (namespace draft 105; the author-s words, Hide unused plugins). Read for a mic cue only since namespace draft 133: a media cue-s chain is its own - the inserts it has and no other entry of the set - so it has nothing to hide and the row is read by nothing there. A matter of what the panel shows, never of the sound: a plugin switched out on the cue stays shown, since the cue keeps what was set on it, and the panel says how many it left out.</a:documentation>
           <choice>
             <value>true</value>
             <value>false</value>

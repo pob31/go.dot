@@ -766,6 +766,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::createSend ("B3N8R5TW", "J3MT5XYA", -18.5),
         gesture::eqReset ("B3N8R5TW"),
         gesture::createFx ("B3N8R5TW", "PG7N0001"),
+        gesture::removeFx ("FX7N0001"),
         gesture::captureFx ("FX7N0001", "state/PG7N0001-0123456789abcdef.state", "0:0.5 1:0"),
         gesture::createPlugin ("Verb", "VST3-0badf00d-verb", "VST3", "C:/plugins/verb.vst3"),
         gesture::restartPlugin ("PG7N0001"),
@@ -9610,13 +9611,14 @@ TEST_CASE ("client: a time group asks the engine's questions - no icon of a sequ
     and drawn from the maths the voice plays. The rows are the document's; the
     reader turns nineteen of them into `audio::EqSettings`; the curve asks
     `audio/EqMath.h`, which CueEqTests pins to the sound. */
-TEST_CASE ("client: a cue's inserts are one strip per entry of the set, read and never worked out")
+TEST_CASE ("client: a media cue's inserts are its own, a strip per insert it has, read and never worked out")
 {
-    /*  Decision AE, read from the client's side (PR 9a.9): the strips come
-        from the set in chain order, whether or not the cue has an Fx for
-        them; where it has, the value and the plugin's own text are the cue's
-        nodes; where it has not, the value shown is the catalogue's default
-        and the text is empty. The Plugins tab's two lists read beside it. */
+    /*  A CUE'S CHAIN IS ITS OWN (namespace draft 133, the author, 2026-11-18;
+        it was decision AE's one strip per entry of the set, PR 9a.9): the
+        strips are the inserts the cue has, in the set's order and numbered
+        as the cue's own; an entry it has no insert for is another cue's and
+        is not read. The value and the plugin's own text are the cue's nodes.
+        The Plugins tab's two lists read beside it. */
     Rig rig ("first-sound");
     const std::string cue = "B3N8R5TW";
 
@@ -9638,40 +9640,63 @@ TEST_CASE ("client: a cue's inserts are one strip per entry of the set, read and
     const auto gainId = set[0].id;
     const auto verbId = set[1].id;
 
-    //  Nothing switched in yet: two strips, neither present.
+    //  Nothing of its own yet: a chain, and no strip - the set's two are not this cue's.
     auto reading = model::readFx (*snapshot, cue);
     REQUIRE (reading.present);
+    CHECK (reading.ownChain);
+    CHECK_FALSE (reading.canHide);
     CHECK (reading.notice.empty());
+    CHECK (reading.strips.empty());
+
+    //  The second of the set, on this cue: its first, and numbered so.
+    rig.apply (4, "window", "fx.create", { osc::Value::string (cue), osc::Value::string (verbId) });
+    snapshot = rig.publish (5);
+    reading = model::readFx (*snapshot, cue);
+    REQUIRE (reading.strips.size() == 1u);
+    CHECK (reading.strips[0].pluginId == verbId);
+    CHECK (reading.strips[0].index == 0);
+
+    //  The catalogue is the tree's business; a rig with no store sees no parameters, honestly.
+    CHECK (reading.strips[0].params.empty());
+
+    //  And the first of the set after it: drawn before, in the set's order.
+    rig.apply (40, "window", "fx.create", { osc::Value::string (cue), osc::Value::string (gainId) });
+    snapshot = rig.publish (41);
+    reading = model::readFx (*snapshot, cue);
     REQUIRE (reading.strips.size() == 2u);
     CHECK (reading.strips[0].pluginId == gainId);
     CHECK (reading.strips[0].index == 0);
-    CHECK_FALSE (reading.strips[0].present());
-    CHECK_FALSE (reading.strips[0].enabled);
-    CHECK (reading.strips[1].pluginId == verbId);
-    CHECK (reading.strips[1].index == 1);
-
-    //  The catalogue is the tree's business; a rig with no store sees no parameters, honestly.
-    CHECK (reading.strips[1].params.empty());
-
-    rig.apply (4, "window", "fx.create", { osc::Value::string (cue), osc::Value::string (gainId) });
-    snapshot = rig.publish (5);
-    reading = model::readFx (*snapshot, cue);
-    REQUIRE (reading.strips.size() == 2u);
     CHECK (reading.strips[0].present());
     CHECK (reading.strips[0].enabled);
     CHECK_FALSE (reading.strips[0].fxId.empty());
-    CHECK_FALSE (reading.strips[1].present());
+    CHECK (reading.strips[1].pluginId == verbId);
+    CHECK (reading.strips[1].index == 1);
 
     const auto fxId = reading.strips[0].fxId;
     CHECK (model::fxAddress (fxId, "enabled") == "/godot/fx/" + fxId + "/enabled");
     CHECK (model::fxParameterAddress (fxId, 3) == "/godot/fx/" + fxId + "/p3");
 
-    rig.apply (6, "window", "node.set", { osc::Value::string ("/godot/fx/" + fxId + "/enabled"),
-                                          osc::Value::boolean (false) });
-    snapshot = rig.publish (7);
+    //  Switched out, it stays the cue's and stays drawn.
+    rig.apply (42, "window", "node.set", { osc::Value::string ("/godot/fx/" + fxId + "/enabled"),
+                                           osc::Value::boolean (false) });
+    snapshot = rig.publish (43);
     reading = model::readFx (*snapshot, cue);
+    REQUIRE (reading.strips.size() == 2u);
     CHECK (reading.strips[0].present());
     CHECK_FALSE (reading.strips[0].enabled);
+
+    SUBCASE ("and Remove takes one off this cue: the other moves up, and its entry leaves the set")
+    {
+        const auto removal = gesture::removeFx (fxId);
+        CHECK (removal.command == "fx.remove");
+        rig.apply (44, "window", removal.command, removal.args);
+        snapshot = rig.publish (45);
+        reading = model::readFx (*snapshot, cue);
+        REQUIRE (reading.strips.size() == 1u);
+        CHECK (reading.strips[0].pluginId == verbId);
+        CHECK (reading.strips[0].index == 0);
+        CHECK (model::readPluginSet (*snapshot).size() == 1u);
+    }
 
     SUBCASE ("and the machine's known list reads beside the set, empty when no scan was run")
     {
@@ -9686,6 +9711,7 @@ TEST_CASE ("client: a cue's inserts are one strip per entry of the set, read and
             does. An unloaded entry adds no latency - nothing is known yet. */
         const auto foot = model::readFoot (*snapshot, { model::Subject::Kind::fx, cue });
         CHECK (foot.fx.present);
+        CHECK (foot.fx.ownChain);
         CHECK (foot.fx.strips.size() == 2u);
         CHECK (foot.eq.present);
         CHECK (foot.eq.settings.on);
@@ -9703,14 +9729,18 @@ TEST_CASE ("client: a cue's inserts are one strip per entry of the set, read and
         CHECK (none.notice.find ("audio") != std::string::npos);
     }
 
-    SUBCASE ("and a show with no set says so, with the strips empty")
+    SUBCASE ("and a cue with no plugin has a chain all the same: its EQ, and where the first one goes")
     {
+        /*  It said "the show declares no plugins yet: Show settings, Plugins"
+            while the set was the show's; a plugin is added at the chain's end
+            now, and an empty chain needs no sentence to send anyone away. */
         Rig bare ("first-sound");
         const auto plain = bare.publish (1);
         const auto none = model::readFx (*plain, cue);
         CHECK (none.present);
+        CHECK (none.canAdd);
         CHECK (none.strips.empty());
-        CHECK (none.notice.find ("Plugins") != std::string::npos);
+        CHECK (none.notice.empty());
     }
 }
 
@@ -17026,6 +17056,8 @@ TEST_CASE ("client: a fade has its target's panels - a sound's EQ and chain, a p
         { "/godot/plugin/PLG1/name", "Reverb" },   { "/godot/plugin/PLG2/name", "Delay" },
         { "/godot/cue/MED1/kind", "media" },       { "/godot/cue/MED1/parent", "LIST" },
         { "/godot/cue/MED1/eqOn", "true" },
+        { "/godot/fx/FXD1/cue", "MED1" },          { "/godot/fx/FXD1/plugin", "PLG2" },
+        { "/godot/fx/FXD1/enabled", "true" },
         { "/godot/cue/MOV1/kind", "video" },       { "/godot/cue/MOV1/source", "movie" },
         { "/godot/cue/MOV1/opacity", "80" },       { "/godot/cue/MOV1/parent", "LIST" },
         { "/godot/cue/BLR1/kind", "video" },       { "/godot/cue/BLR1/source", "blur" },
@@ -17136,7 +17168,10 @@ TEST_CASE ("client: a fade has its target's panels - a sound's EQ and chain, a p
     CHECK (model::readFadePicture (snapshot, "FAD1", notice).cueId.empty());
     CHECK_FALSE (notice.empty());
 
-    //  THE CHAIN ON A FADE: each plugin says what the fade moves on it.
+    /*  THE CHAIN ON A FADE: its target's own (namespace draft 133) - the
+        Delay the target has an insert for - and with it what the fade moves
+        on an entry the target has none for, the Reverb, so the move can be
+        seen. Each plugin says what the fade moves on it. */
     const auto chain = model::readFadeFx (snapshot, "FAD1");
     REQUIRE (chain.present);
     CHECK (chain.fadeId == "FAD1");

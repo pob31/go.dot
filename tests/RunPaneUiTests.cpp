@@ -6102,6 +6102,72 @@ TEST_CASE ("fx panel: the chain runs file, EQ, the set, out, and a first switch-
     }
 }
 
+TEST_CASE ("fx panel: on a media cue's own chain a plugin's box carries Remove, which takes it off that cue")
+{
+    /*  Namespace draft 133, the author, 2026-11-18: a cue's chain is its own.
+        The model hands a media cue the inserts it has and no other entry of
+        the set; each of their boxes carries Remove, which is `fx.remove` on
+        that insert. Not under the lock, not on a fade - whose chain is its
+        target's, shown - and not on a chain that is a channel's. */
+    std::vector<std::string> removed;
+
+    ui::FxPanelComponent::Actions actions;
+    actions.removeFx = [&] (const std::string& fx) { removed.push_back (fx); };
+
+    ui::FxPanelComponent panel (model::Theme {}, actions);
+    panel.setSize (1400, 230);
+
+    auto own = chainReading ("CUE00001");
+    own.fx.ownChain = true;
+    own.fx.strips.erase (own.fx.strips.begin());         // Test gain: no insert on this cue, so not read
+
+    const auto shown = [&panel]
+    {
+        std::vector<juce::Button*> out;
+
+        for (auto* button : buttonsNamed (panel, "Remove"))
+            if (button->isVisible())
+                out.push_back (button);
+
+        return out;
+    };
+
+    panel.show (own);
+    REQUIRE (shown().size() == 3);
+    CHECK (buttonsNamed (panel, "Edit...").size() == 3);
+
+    for (auto* button : shown())
+        CHECK_FALSE (button->getWantsKeyboardFocus());
+
+    SUBCASE ("the one pressed, and no other")
+    {
+        press (*shown()[1], false);
+        REQUIRE (removed.size() == 1);
+        CHECK (removed[0] == "FX7N0002");                // Delay's insert, switched out as it was
+    }
+
+    SUBCASE ("not under the lock")
+    {
+        own.fx.locked = true;
+        panel.show (own);
+        CHECK (shown().empty());
+    }
+
+    SUBCASE ("not on a fade, which shows its target's chain")
+    {
+        own.fx.fadeId = "FADE0001";
+        panel.show (own);
+        CHECK (shown().empty());
+    }
+
+    SUBCASE ("not on a chain that is a channel's: a mic cue's")
+    {
+        own.fx.ownChain = false;
+        panel.show (own);
+        CHECK (shown().empty());
+    }
+}
+
 TEST_CASE ("fx panel: a picture of it, when somebody asks for one")
 {
     //  The EQ picture case's shape: with WFG_SNAPSHOT_DIR set, fx-panel.png; skipped otherwise.
@@ -6114,9 +6180,18 @@ TEST_CASE ("fx panel: a picture of it, when somebody asks for one")
     ui::FxPanelComponent panel (model::Theme {}, actions);
     panel.setSize (1650, 250);
 
+    /*  A MEDIA CUE'S OWN CHAIN, as the app draws one (namespace draft 133):
+        the inserts it has, numbered as its own, Remove on each, and the box
+        the next plugin is added from. */
     auto reading = chainReading ("CUE00001");
     reading.eq.settings.hpf = true;
     reading.eq.settings.band[1].gain = -4.0f;
+    reading.fx.ownChain = true;
+    reading.fx.canAdd = true;
+    reading.fx.strips.erase (reading.fx.strips.begin());
+
+    for (std::size_t i = 0; i < reading.fx.strips.size(); ++i)
+        reading.fx.strips[i].index = static_cast<int> (i);
 
     panel.setEditorWords ({ { "PG7N0002", "its window is open" } });
     panel.show (reading);

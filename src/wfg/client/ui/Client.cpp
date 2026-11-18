@@ -814,6 +814,7 @@ namespace wfg::client
                     the EQ box shows the same cue's EQ in this same foot. */
                 footActions.createFx = [this] (const std::string& cueId, const std::string& pluginId)
                                        { send (gesture::createFx (cueId, pluginId)); };
+                footActions.removeFx = [this] (const std::string& fxId) { send (gesture::removeFx (fxId)); };
                 footActions.addPlugin = [this] (const std::string& cueId, const model::KnownPluginRow& plugin)
                                         { send (gesture::createCuePlugin (cueId, plugin.name, plugin.identifier,
                                                                           plugin.format, plugin.path)); };

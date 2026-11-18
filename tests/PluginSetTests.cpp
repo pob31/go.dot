@@ -498,6 +498,99 @@ TEST_CASE ("plugin set: cue.plugin adds where the cue's chain lives and switches
     }
 }
 
+//==============================================================================
+TEST_CASE ("plugin set: fx.remove takes an insert off one cue, and its entry with the last (§133)")
+{
+    /*  The author, 2026-11-18: a cue's chain is its own, and a plugin comes
+        off one cue without touching another. The entry of the set goes with
+        its last insert, in the same step; a mic cue's stays on its channel. */
+    Rig rig;
+
+    REQUIRE (rig.apply ("list.create", { osc::Value::string ("Main") }).applied == 1);
+    const auto listId = rig.lastApplied().back();
+    REQUIRE (rig.apply ("cue.create", { osc::Value::string (listId), osc::Value::int32 (0),
+                                        osc::Value::string ("media"), osc::Value::string ("One") }).applied == 1);
+    const auto oneId = rig.lastApplied().back();
+    REQUIRE (rig.apply ("cue.create", { osc::Value::string (listId), osc::Value::int32 (1),
+                                        osc::Value::string ("media"), osc::Value::string ("Two") }).applied == 1);
+    const auto twoId = rig.lastApplied().back();
+
+    const auto added = [] (const std::string& cueId)
+    {
+        std::vector<osc::Value> args { osc::Value::string (cueId) };
+
+        for (auto& word : entry ("Test gain", "godot:test-gain", "VST3", ""))
+            args.push_back (word);
+
+        return args;
+    };
+
+    REQUIRE (rig.apply ("cue.plugin", added (oneId)).applied == 1);
+    const auto pluginId = rig.lastApplied()[5];
+    const auto oneFx = rig.lastApplied()[6];
+
+    SUBCASE ("the entry stays while another cue plays through it")
+    {
+        REQUIRE (rig.apply ("fx.create", { osc::Value::string (twoId), osc::Value::string (pluginId) }).applied == 1);
+        const auto twoFx = rig.lastApplied().back();
+
+        REQUIRE (rig.apply ("fx.remove", { osc::Value::string (oneFx) }).applied == 1);
+        CHECK_FALSE (rig.exists ("/godot/fx/" + oneFx + "/plugin"));
+        CHECK (rig.at ("/godot/fx/" + twoFx + "/plugin") == pluginId);
+        CHECK (rig.at ("/godot/plugin/order") == pluginId);
+
+        //  And goes with the last, in that step: one undo brings both back.
+        REQUIRE (rig.apply ("fx.remove", { osc::Value::string (twoFx) }).applied == 1);
+        CHECK (rig.at ("/godot/plugin/order").empty());
+        CHECK_FALSE (rig.exists ("/godot/plugin/" + pluginId + "/name"));
+
+        REQUIRE (rig.apply ("undo").applied == 1);
+        CHECK (rig.at ("/godot/plugin/order") == pluginId);
+        CHECK (rig.at ("/godot/fx/" + twoFx + "/cue") == twoId);
+        CHECK_FALSE (rig.exists ("/godot/fx/" + oneFx + "/plugin"));
+    }
+
+    SUBCASE ("what was set on it comes back with an undo")
+    {
+        REQUIRE (rig.apply ("node.set", { osc::Value::string ("/godot/fx/" + oneFx + "/enabled"),
+                                          osc::Value::boolean (false) }).applied == 1);
+        REQUIRE (rig.apply ("fx.remove", { osc::Value::string (oneFx) }).applied == 1);
+        CHECK (rig.at ("/godot/plugin/order").empty());
+
+        REQUIRE (rig.apply ("undo").applied == 1);
+        CHECK (rig.at ("/godot/plugin/order") == pluginId);
+        CHECK (rig.at ("/godot/fx/" + oneFx + "/enabled") == "false");
+    }
+
+    SUBCASE ("a mic cue's leaves its channel's chain as it was")
+    {
+        REQUIRE (rig.apply ("cue.create", { osc::Value::string (listId), osc::Value::int32 (2),
+                                            osc::Value::string ("mic"), osc::Value::string ("Voice") }).applied == 1);
+        const auto micId = rig.lastApplied().back();
+        REQUIRE (rig.apply ("channel.create", { osc::Value::string ("mono"), osc::Value::string ("CH000001") }).applied == 1);
+        REQUIRE (rig.apply ("node.set", { osc::Value::string ("/godot/cue/" + micId + "/channel"),
+                                          osc::Value::string ("CH000001") }).applied == 1);
+        REQUIRE (rig.apply ("cue.plugin", added (micId)).applied == 1);
+        const auto channelPlugin = rig.lastApplied()[5];
+        const auto micFx = rig.lastApplied()[6];
+
+        REQUIRE (rig.apply ("fx.remove", { osc::Value::string (micFx) }).applied == 1);
+        CHECK_FALSE (rig.exists ("/godot/fx/" + micFx + "/plugin"));
+        CHECK (rig.at ("/godot/slot/CH000001/plugins") == channelPlugin);
+    }
+
+    SUBCASE ("refused for what is not an insert, what is not there, and under the lock")
+    {
+        CHECK (rig.apply ("fx.remove", { osc::Value::string (oneId) }).rejected == 1);
+        CHECK (rig.apply ("fx.remove", { osc::Value::string ("XX000000") }).rejected == 1);
+
+        REQUIRE (rig.apply ("node.set", { osc::Value::string ("/godot/document/locked"),
+                                          osc::Value::boolean (true) }).applied == 1);
+        CHECK (rig.apply ("fx.remove", { osc::Value::string (oneFx) }).rejected == 1);
+        CHECK (rig.at ("/godot/fx/" + oneFx + "/plugin") == pluginId);
+    }
+}
+
 TEST_CASE ("rack: a channel's plugins are its own chain, published beside the set's and never in its order")
 {
     /*  Phase 9b (namespace draft 18.2 and 18.3, decision BX). `channel.plugin`

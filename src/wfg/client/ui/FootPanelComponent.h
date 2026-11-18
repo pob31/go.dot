@@ -155,6 +155,9 @@ namespace wfg::client::ui
             /** `fx.create`, when an entry of the set is first switched in on a cue. */
             std::function<void (const std::string& cueId, const std::string& pluginId)> createFx;
 
+            /** `fx.remove`, from a plugin's Remove on a media cue's chain (namespace draft 133). */
+            std::function<void (const std::string& fxId)> removeFx;
+
             /*  A plugin added from a cue's chain, and Load now (namespace draft §105). */
             std::function<void (const std::string& cueId, const model::KnownPluginRow&)> addPlugin;
             std::function<void()> loadPlugins;

@@ -336,6 +336,21 @@ namespace wfg::doc
                             return fromEdit (edit, withId (args, 2, edit.id));
                         } });
 
+        /*  OFF ONE CUE (namespace draft 133): `object.delete` on the Fx would
+            leave the set's entry behind for every voice to go on carrying, and
+            pruning inside `object.delete` would change what a log written
+            before replays to. So the verb is its own. */
+        registry.add ({ "fx.remove",
+                        "Takes an insert off its cue, with what was set on it. A media cue's takes"
+                        " its entry of the show's plugin set with it when no other cue uses that"
+                        " entry, in the same step.",
+                        { { "fx", 's', false } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            return fromEdit (document.removeFx (args[0].getString()), args);
+                        } });
+
         /*  A PLUGIN'S WHOLE STATE, KEPT WITH A CUE (the author's decision of
             2026-09-25). The editing helper has written the bytes into the
             bundle - a fact about the disk, like a media file copied in - and

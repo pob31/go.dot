@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <map>
+#include <set>
 #include <sstream>
 
 namespace wfg::client::model
@@ -203,7 +204,35 @@ namespace wfg::client::model
         return fxAddress (fxId, "p" + std::to_string (index));
     }
 
+    namespace
+    {
+        /*  The entries of the set a fade names, by its `fx` list's keys
+            (`<entry>/<index>`): what its target's own chain is drawn with
+            even where the target has no insert for them. */
+        std::set<std::string> entriesMovedBy (const std::string& moveList)
+        {
+            std::set<std::string> out;
+
+            for (const auto& [key, value] : cue::parseMoveList (moveList))
+                if (const auto slash = key.rfind ('/'); slash != std::string::npos)
+                    out.insert (key.substr (0, slash));
+
+            return out;
+        }
+
+        FxReading readChain (const tree::TreeSnapshot& snapshot, const std::string& cueId,
+                             const std::set<std::string>& alsoKept);
+    }
+
     FxReading readFx (const tree::TreeSnapshot& snapshot, const std::string& cueId)
+    {
+        return readChain (snapshot, cueId, {});
+    }
+
+    namespace
+    {
+    FxReading readChain (const tree::TreeSnapshot& snapshot, const std::string& cueId,
+                         const std::set<std::string>& alsoKept)
     {
         FxReading out;
 
@@ -226,7 +255,12 @@ namespace wfg::client::model
 
         out.present = true;
 
-        if (kind == "media" || kind == "mic")
+        /*  HIDE UNUSED is a mic cue's now: a media cue's chain is its own
+            (§133) and has nothing of another cue's to hide. Its row stays in
+            the show, read by nothing. */
+        out.ownChain = kind == "media";
+
+        if (kind == "mic")
         {
             out.canHide = true;
             out.hideUnused = isYes (flag (snapshot, "/godot/cue/" + cueId + "/fxHideUnused"));
@@ -289,12 +323,6 @@ namespace wfg::client::model
         else
         {
             order = words (text (snapshot, "/godot/plugin/order"));
-
-            if (order.empty())
-            {
-                out.notice = "The show declares no plugins yet: Show settings, Plugins.";
-                return out;
-            }
         }
 
         const auto mine = fxOfCue (snapshot, cueId);
@@ -332,6 +360,12 @@ namespace wfg::client::model
 
         for (const auto& pluginId : order)
         {
+            /*  ITS OWN CHAIN: what the cue has no insert for is another
+                cue's - but for what a fade on it moves (`alsoKept`), which
+                stays drawn so the move can be seen and taken back. */
+            if (out.ownChain && mine.find (pluginId) == mine.end() && alsoKept.count (pluginId) == 0)
+                continue;
+
             const auto base = "/godot/plugin/" + pluginId + "/";
 
             FxStrip strip;
@@ -396,6 +430,7 @@ namespace wfg::client::model
         }
 
         return out;
+    }
     }
 
     //==============================================================================
@@ -550,7 +585,7 @@ namespace wfg::client::model
             return out;
         }
 
-        auto out = readFx (snapshot, targetId);
+        auto out = readChain (snapshot, targetId, entriesMovedBy (text (snapshot, fade + "fx")));
         out.fadeId = fadeId;
 
         if (! out.present)

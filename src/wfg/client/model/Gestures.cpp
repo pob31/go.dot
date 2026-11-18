@@ -138,6 +138,11 @@ namespace wfg::client::gesture
                  { osc::Value::string (cueId), osc::Value::string (pluginId) } };
     }
 
+    Event removeFx (const std::string& fxId)
+    {
+        return { origin::window, "fx.remove", { osc::Value::string (fxId) } };
+    }
+
     Event captureFx (const std::string& fxId, const std::string& stateFile, const std::string& values)
     {
         return { origin::window, "fx.capture",
