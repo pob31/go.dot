@@ -35580,3 +35580,24 @@ under its timeout; a path with a quote and a backslash in it announced, added an
 the fix, on Linux, memory grew 85 MB a second until the test was killed); a client answered 101 with no
 `Sec-WebSocket-Accept`, or a wrong one, reports an error and never opens (without the fix, a Debug build
 asserts on the end iterator and the process ends). Each seen red without its fix.
+
+## 131. A plugin copy-protected by PACE loads on macOS
+
+**Met 2026-11-18** by the author on the Mac mini, with 0.1.25 as released: *"Seventh Heaven and Oxford
+Envolution won't load or show their interface."* The show's log said, each time a cue took either, *the plugin
+host process died while loading*; macOS's crash reports said why: the child was killed with
+`EXC_BAD_ACCESS (SIGKILL, Code Signature Invalid)`, an *Invalid Page*, inside `PaceProtectionWrapper` while
+`dlopen` ran the plugin's initialisers. Both are copy-protected by PACE (iLok), whose wrapper decrypts the
+plugin's code in memory as it loads; under the hardened runtime a changed code page is a signature broken, and
+the process goes.
+
+- **BGD** **`wfg` is signed with `com.apple.security.cs.allow-unsigned-executable-memory`**, beside
+  `disable-library-validation` (packaging/macos/entitlements.plist). Every host on the Mac mini that loads such
+  plugins carries it: Live 12, QLab 5, REAPER, Max, LiveProfessor, Bitwig (which adds more); QLab 4.7, without
+  it, is the one that does not. The plugin host and the plugin window are both `wfg`, so both are mended. Windows
+  and Linux have no such rule and are not touched.
+
+Tried 2026-11-18 on the Mac mini: `wfg plugins --catalogue=<id>` (one instance in a child, no audio device)
+from the installed 0.1.25 fails for both plugins; from a copy of the same app signed again, ad hoc and with the
+hardened runtime, with this entitlement added, it lists Seventh Heaven's 18 parameters and Oxford Envolution's
+33. The release build signed with the Developer ID, the window, and sound through either are owed on the Mac.

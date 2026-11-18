@@ -16,6 +16,15 @@
                                 child processes, and a plugin is signed by its
                                 maker's team, not ours. Without it the hardened
                                 runtime refuses to load every one of them.
+    allow-unsigned-executable-memory
+                                a plugin copy-protected by PACE (iLok) decrypts
+                                its own code as it loads: Seventh Heaven, the
+                                Sonnox Oxford range and many more. Without it
+                                macOS kills the plugin host at the first changed
+                                page ("Code Signature Invalid", Invalid Page),
+                                so the plugin neither plays nor opens its
+                                window. Live, QLab 5, REAPER, Max and Bitwig
+                                carry it for the same reason.
     get-task-allow false        stated, not left out: notarization refuses a
                                 binary that allows a debugger to attach (WFS-DIY
                                 met it as statusCode 4000).
@@ -27,6 +36,8 @@
     <key>com.apple.security.device.camera</key>
     <true/>
     <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
     <true/>
     <key>com.apple.security.get-task-allow</key>
     <false/>
