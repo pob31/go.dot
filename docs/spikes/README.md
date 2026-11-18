@@ -17,6 +17,7 @@ PRD §9.2 gives the decision rule for the whole set:
 | 5 | External parameter control at 50 Hz | **PASS** — 512 params = 13% of a 20 ms tick on Windows, 14.5% on an M4 Pro; ~4 µs per write, ~5.7 µs on macOS. Fails at buffers 32/64 on xruns, which is those buffers, not the writes | [spike05-param-50hz.md](spike05-param-50hz.md) |
 | 6 | Live-input latency through a Rack, PDC | **PASS** — PDC is global and ON by default, but `Edit::setLatencyCompensationEnabled(false)` removes it entirely | [spike06-rack-latency-pdc.md](spike06-rack-latency-pdc.md) |
 | 7 | Proxy-plugin sandbox as a custom TE plugin type | **PASS** — 0.9 µs round trip, survives the child being killed | [spike07-proxy-plugin.md](spike07-proxy-plugin.md) |
+| 8 | *Not §6.1*: a plugin copy made while its sibling sounds; what a copy costs (namespace draft §133) | **A copy must not be made beside a sounding one** (Seventh Heaven drops the sibling's blocks); a state loads in 2-8 ms, a copy in 0.5 s and 235 MB - so copies are pooled by plugin and states go in at standby | [spike08-plugin-copies.md](spike08-plugin-copies.md) |
 | — | *Also verify*: TE transport chasing MTC | not yet run | — |
 | — | *Also verify*: multiple Edits summed by the DeviceManager | not addressed by any spike; fully open | — |
 

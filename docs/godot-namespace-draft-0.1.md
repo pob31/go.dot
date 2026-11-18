@@ -35669,10 +35669,16 @@ Mine *(proposed)*, the author's to overrule:
   hide. `fxHideUnused` stays in the show, read by nothing on a media cue.
 - **BGN** **A mic cue's and an aux's chain stay their channel's** (§18, §93), drawn whole and wired as before.
 
-To build, drawn in the plan: every voice carries a fixed row of empty insert places (eight unless the show
-says otherwise, more for a longer chain); the copies are pooled, a child process per plugin as now, a parked
-copy per plugin and state in use, lent to one voice at a time and never re-pointed by `ProxyLane::bind`, which
-is not safe while audio runs; a copy taken by a run gets a spare loaded behind it.
+To build, drawn in the plan and corrected by its spike (`docs/spikes/spike08-plugin-copies.md`, 2026-11-18,
+the Mac mini, Seventh Heaven and Oxford Envolution): every voice carries a fixed row of empty insert places
+(eight unless the show says otherwise, more for a longer chain); the copies are pooled **by plugin** - as many
+as sound at once and one to spare, lent to one voice at a time and never re-pointed by `ProxyLane::bind`,
+which is not safe while audio runs - and **the cue's state goes into a free copy when the cue comes to
+standby**. The spike: a state loads in 2 to 8 ms and disturbs nothing; a Seventh Heaven takes half a second
+and more to make, 235 MB to keep, and making one beside a sounding one drops the sounding one's blocks. So
+a copy is never made in a child with a lane sounding - more copies are another child - and the plan's
+instance protocol inside a child is dropped. The engine as it is keeps a copy a voice: sixteen voices, 3.9 GB
+for that one reverb.
 
 ### 133.2 Rows and commands
 
