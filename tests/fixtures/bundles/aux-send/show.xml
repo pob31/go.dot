@@ -1,0 +1,21 @@
+<Show>
+  <Lists>
+    <List id="AX000001" name="Sound">
+      <Media id="AX000002" channels="1" directOut="AX000004" file="tone.wav" name="Tone" number="1">
+        <Send id="AX000007" bus="AX000006"/>
+      </Media>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="1">
+    <Bus id="AX000004" name="Main L/R" width="2"/>
+    <Bus id="AX000005" firstChannel="2" name="Hall out" width="2"/>
+    <Rack>
+      <Channel id="AX000006" access="shared" class="stereo" directOut="AX000005" name="Hall"/>
+    </Rack>
+  </Audio>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces/>
+  <Dcas/>
+</Show>

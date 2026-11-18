@@ -3361,6 +3361,16 @@ namespace
                         spec.takeSeconds = static_cast<double> (channel.getProperty ("takeSeconds", 0.0));
                         spec.layers = static_cast<int> (channel.getProperty ("layers", 4));
 
+                        /*  AN AUX (namespace draft §93) is a SHARED channel: its
+                            input is what the tracks send it, one channel wide
+                            or two as its class takes in (cue::sourceChannelsOf's
+                            rule). Not said here until 2026-11-18, so a served
+                            show built every aux as a live-input channel and a
+                            send into one went nowhere; only the host's own
+                            tests, which fill the spec by hand, had an aux. */
+                        spec.aux = channel.getProperty ("access", "exclusive").toString() == "shared";
+                        spec.auxWidth = channel.getProperty ("class", "mono").toString() == "stereo" ? 2 : 1;
+
                         for (const auto entry : channel)
                             if (entry.hasType ("Plugin"))
                             {

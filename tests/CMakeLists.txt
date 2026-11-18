@@ -2077,6 +2077,19 @@ add_test(NAME blackbox.phase9b-width.fr_FR
 set_tests_properties(blackbox.phase9b-width.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
+# An aux in a SERVED show (namespace draft 132, BGE): `wfg serve` says which
+# rack channels are auxes, so a send into a shared channel is heard on the
+# aux's own out. The host's tests fill the graph's spec by hand and never saw
+# that serve did not.
+add_test(NAME blackbox.aux-served.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/aux_served.py" --wfg-locale=C)
+set_tests_properties(blackbox.aux-served.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.aux-served.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/aux_served.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.aux-served.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
 # The live rack, stage 9b.2 (namespace draft 18.10): named inputs made over OSC
 # on a hosted interface fed from a WAV, one meter reading a tone and one
 # silence with nothing listening, one input past the interface saying so, and

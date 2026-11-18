@@ -35601,3 +35601,23 @@ Tried 2026-11-18 on the Mac mini: `wfg plugins --catalogue=<id>` (one instance i
 from the installed 0.1.25 fails for both plugins; from a copy of the same app signed again, ad hoc and with the
 hardened runtime, with this entitlement added, it lists Seventh Heaven's 18 parameters and Oxford Envolution's
 33. The release build signed with the Developer ID, the window, and sound through either are owed on the Mac.
+
+## 132. An aux in a served show is an aux
+
+**Found 2026-11-18**, reading the plugin code for the author's rework of the cues' chains (§133 to come): the
+audio graph is told which rack channels are auxes by a flag on each (`RackChannelSpec::aux`, §93), and the one
+place that turns a show into that description - `audioShapeOf`, for `wfg serve` and the window alike - never
+set it. The host's tests fill the description by hand, so they had auxes; a show did not. Every shared
+channel of a served show was built as a live-input channel: a send into it found no input to land on and was
+left out (AVV's rule for an aux the graph was built without), and the aux said nothing through its own out.
+So since §93 was pushed (2026-10-19) no aux has sounded outside the tests, the returns of an imported Live
+set (§29, §121) included.
+
+- **BGE** **A shared rack channel is built as an aux**, its input one channel wide or two as its class takes
+  in - `cue::sourceChannelsOf`'s rule, which is what the sends already spread by.
+
+Built 2026-11-18. Test: `blackbox/aux_served.py` (fixture `bundles/aux-send`), a show served with one mono cue on the main pair and a send
+into a stereo aux whose own out is the pair after - heard on the aux's pair, and the session replays; seen
+red without the fix (the aux's pair silent), green with, in C and fr_FR. The mic cue's driver
+(`phase9b_mic.py`), whose channel is exclusive, as before. Owed: the author's ear on an aux with a real
+reverb, and on an imported Live set's returns.
