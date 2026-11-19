@@ -430,8 +430,7 @@ jobs:
           reports = sorted(glob.glob(os.path.expanduser("~/Library/Logs/DiagnosticReports/wfg_tests*.ips")), key=os.path.getmtime)
           print(len(reports), "crash report(s) for wfg_tests")
           for path in reports[-2:]:
-              head, body = open(path, errors="replace").read().split("
-", 1)
+              head, body = open(path, errors="replace").read().split(chr(10), 1)
               report = json.loads(body)
               images = report.get("usedImages", [])
               print("==", os.path.basename(path), report.get("exception"), report.get("termination", {}).get("indicator"))
