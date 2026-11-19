@@ -269,7 +269,7 @@ namespace wfg::video::card
         ThreadScope& operator= (const ThreadScope&) = delete;
 
     private:
-        bool entered = false;
+        [[maybe_unused]] bool entered = false;  // read on Windows only
     };
 
     /*  The words an output's settings are stored with (namespace draft §71.3),

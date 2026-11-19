@@ -10943,7 +10943,7 @@ TEST_CASE ("history: a cue fired earlier is placed by the clock, not read as ove
     const auto before = rig.planFor (rig.rain, -1.0);
     CHECK (before.instant == rainAt - 1);
     REQUIRE (rig.planned (before, rig.mediaId) != nullptr);
-    CHECK (rig.planned (before, rig.mediaId)->offset == doctest::Approx ((rainAt - 1 - thunderAt) / 50.0));
+    CHECK (rig.planned (before, rig.mediaId)->offset == doctest::Approx (static_cast<double> (rainAt - 1 - thunderAt) / 50.0));
     CHECK (rig.planned (before, rig.rain) == nullptr);
 
     //  The order reading is what a cue with no step gets, and says so.
@@ -11143,10 +11143,10 @@ TEST_CASE ("record: what was pressed between start and stop becomes a take of st
     CHECK (attribute (first, "name").empty());
     CHECK (cue::AutoNames { rig.document.root() }.of (first) == "Start Thunder");
     CHECK (osc::parseDouble (attribute (first, "preWait")).value_or (-1.0)
-             == doctest::Approx ((thunderAt - since) / 50.0));
+             == doctest::Approx (static_cast<double> (thunderAt - since) / 50.0));
     CHECK (attribute (second, "target") == rig.memoId);
     CHECK (osc::parseDouble (attribute (second, "preWait")).value_or (-1.0)
-             == doctest::Approx ((memoAt - since) / 50.0));
+             == doctest::Approx (static_cast<double> (memoAt - since) / 50.0));
 
     //  The record carries every identifier the take drew, list first.
     const auto* command = rig.engine.commands().find ("record.stop");

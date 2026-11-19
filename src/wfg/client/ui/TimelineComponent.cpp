@@ -254,7 +254,7 @@ namespace wfg::client::ui
             across is a pan, up and down is a zoom about the pointer. */
         if (std::abs (wheel.deltaX) > std::abs (wheel.deltaY))
         {
-            view.panBy (juce::roundToInt (-wheel.deltaX * getWidth() * 0.25), getWidth());
+            view.panBy (juce::roundToInt (-wheel.deltaX * static_cast<float> (getWidth()) * 0.25), getWidth());
             repaint();
             return;
         }

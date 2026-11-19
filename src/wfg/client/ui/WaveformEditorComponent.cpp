@@ -4005,7 +4005,7 @@ namespace wfg::client::ui
                 picture moves by an amount somebody can follow at any zoom -
                 a fixed number of pixels would crawl when zoomed out and fly
                 when zoomed in. */
-            view.panBy (juce::roundToInt (-wheel.deltaX * bar.getWidth() * 0.25),
+            view.panBy (juce::roundToInt (-wheel.deltaX * static_cast<float> (bar.getWidth()) * 0.25),
                         bar.getWidth());
             repaint();
             return;
