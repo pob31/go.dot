@@ -92,6 +92,9 @@ namespace wfg::client::ui
             /** `fx.remove`: a plugin taken off this cue, and no other (namespace draft 133). */
             std::function<void (const std::string& fxId)> removeFx;
 
+            /** `fx.move`: a plugin put at another place in this cue's own chain (stage 4). */
+            std::function<void (const std::string& fxId, int position)> moveFx;
+
             /** Show this cue's EQ in the foot instead of the chain. */
             std::function<void (const std::string& cueId)> openEq;
 
@@ -166,6 +169,18 @@ namespace wfg::client::ui
         bool offersRemove() const noexcept
         {
             return reading.fx.ownChain && ! onFade() && ! reading.fx.locked;
+        }
+
+        /** How many inserts of its own the chain shows: what the arrows count against. */
+        int ownInserts() const noexcept
+        {
+            auto count = 0;
+
+            for (const auto& strip : reading.fx.strips)
+                if (strip.present())
+                    ++count;
+
+            return count;
         }
 
         /** The add box's menu, under its button. */

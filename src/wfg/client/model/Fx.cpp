@@ -328,6 +328,31 @@ namespace wfg::client::model
         const auto mine = fxOfCue (snapshot, cueId);
         auto index = 0;
 
+        /*  A MEDIA CUE'S OWN ORDER (namespace draft 133, stage 4): its inserts
+            by the place each says it has in the cue's chain (`fx/index`) -
+            it was the set's order - and after them whatever a fade on it
+            moves that the cue has no insert for. */
+        if (out.ownChain)
+        {
+            std::vector<std::pair<int, std::string>> byPlace;
+
+            for (const auto& [pluginId, held] : mine)
+                byPlace.emplace_back (integer (snapshot, fxAddress (held.id, "index")), pluginId);
+
+            std::sort (byPlace.begin(), byPlace.end());
+
+            std::vector<std::string> own;
+
+            for (auto& [place, pluginId] : byPlace)
+                own.push_back (std::move (pluginId));
+
+            for (const auto& pluginId : order)
+                if (alsoKept.count (pluginId) != 0 && std::find (own.begin(), own.end(), pluginId) == own.end())
+                    own.push_back (pluginId);
+
+            order = std::move (own);
+        }
+
         out.fileChannels = integer (snapshot, "/godot/cue/" + cueId + "/channels");
         out.chainChannels = integer (snapshot, "/godot/cue/" + cueId + "/chainChannels");
         out.insertLatency = integer (snapshot, "/godot/cue/" + cueId + "/insertLatency");

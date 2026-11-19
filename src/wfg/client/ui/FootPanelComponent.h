@@ -158,6 +158,9 @@ namespace wfg::client::ui
             /** `fx.remove`, from a plugin's Remove on a media cue's chain (namespace draft 133). */
             std::function<void (const std::string& fxId)> removeFx;
 
+            /** `fx.move`, from the arrows on a plugin's box (stage 4). */
+            std::function<void (const std::string& fxId, int position)> moveFx;
+
             /*  A plugin added from a cue's chain, and Load now (namespace draft §105). */
             std::function<void (const std::string& cueId, const model::KnownPluginRow&)> addPlugin;
             std::function<void()> loadPlugins;

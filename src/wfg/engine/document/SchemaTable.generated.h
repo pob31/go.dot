@@ -119,6 +119,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_strip_role[] = { "sampler", "dca" };
     inline constexpr std::string_view enum_strip_endpoint[] = { "absolute", "gate" };
     inline constexpr std::string_view enum_strip_word[] = { "free", "dca", "unassigned", "armed", "pending", "playing", "held", "stopping", "closing", "lane", "rec", "off", "recording" };
+    inline constexpr std::string_view enum_plugins_chains[] = { "set", "own" };
     inline constexpr std::string_view enum_plugin_format[] = { "VST3", "AU", "LV2" };
     inline constexpr std::string_view enum_plugin_side[] = { "before", "after" };
     inline constexpr std::string_view enum_plugin_state[] = { "unloaded", "loading", "loaded", "missing", "failed" };
@@ -5548,6 +5549,14 @@ namespace wfg::doc::generated
           "dB", 50.0, false, "park",
           "",
           "The trim this DCA is applying now, in dB, added to the level of every run whose cue is marked with it and of every run under a group so marked. Nought is the resting value and what a show opens with, and what it goes back to once every cue on it is done (namespace draft 116). Never stored: it is what a fader is doing tonight and not a decision about the show (PRD 4.10), which is also why writing it is not undoable. Written with node.set from a strip, a panel or the page, and moved by a fade cue that names this DCA." },
+        { "plugins", "chains",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "set",
+          false, 0.0, false, 0.0,
+          enum_plugins_chains, 2,
+          "", 50.0, false, "park",
+          "",
+          "Whose order a media cue-s inserts sound in (namespace draft 133, stage 4). own: the order of the cue-s own Fx children, which is every show written since a cue-s chain became its own. set: a show written before, when the chain was the show-s plugin set in the set-s order on every cue - read once into that order, cue by cue, so it sounds as it did, and marked own from then on. Written by the engine, never by a hand: there is nothing to choose." },
         { "plugins", "changed",
           ValueType::boolean, 'T', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "false",
@@ -5555,7 +5564,7 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 5.0, false, "park",
           "",
-          "Whether the show's set differs from the audio graph playing it - an entry added, taken out or moved since the graph was built (2026-09-26). The graph is fixed when it is built (PRD 3.25), so a changed set sounds as it was until plugin.load rebuilds the graph, which Show settings, Plugins offers as Load now. False when there is no graph to differ from." },
+          "Whether the audio graph must be rebuilt for the show as it stands (Load now). Since namespace draft 133 stage 4 the plugin set is no part of that - a plugin added on a cue is given a child with nothing rebuilt - and what is: a media cue with more inserts than a voice was built with places, and the rack, as below. It read: whether the show's set differs from the audio graph playing it - an entry added, taken out or moved since the graph was built (2026-09-26). The graph is fixed when it is built (PRD 3.25), so a changed set sounds as it was until plugin.load rebuilds the graph, which Show settings, Plugins offers as Load now. False when there is no graph to differ from." },
         { "plugins", "order",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           false, "",

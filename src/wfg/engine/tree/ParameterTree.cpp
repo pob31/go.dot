@@ -780,8 +780,23 @@ namespace wfg::tree
             return schema.flag (fx, "fx", "enabled");
         }
 
-        /*  The cue's enabled inserts in CHAIN order - the set's order, not the
-            children's - for `media/fx` (pages draft §8, item 3). */
+        /*  WHERE AN INSERT STANDS IN ITS CUE'S CHAIN (namespace draft §133,
+            stage 4): a media cue's chain is its own, its inserts in the order
+            of its Fx children (cue::ownChainOf); a mic cue's and an aux's is
+            their channel's, the plugin's place in it. -1 for an insert that
+            names nothing of its chain. */
+        int chainIndexOf (const juce::ValueTree& cue, const std::string& pluginId)
+        {
+            if (! cue.hasType ("Media"))
+                return setEntryFor (cue, pluginId).index;
+
+            const auto own = cue::ownChainOf (cue);
+            const auto at = std::find (own.begin(), own.end(), pluginId);
+            return at != own.end() ? static_cast<int> (at - own.begin()) : -1;
+        }
+
+        /*  The cue's enabled inserts in CHAIN order, for `media/fx` (pages
+            draft §8, item 3). */
         std::string enabledFxInChainOrder (const juce::ValueTree& cue)
         {
             std::vector<std::pair<int, std::string>> found;
@@ -791,10 +806,10 @@ namespace wfg::tree
                 if (! child.hasType ("Fx") || ! fxIsEnabled (child))
                     continue;
 
-                const auto entry = setEntryFor (cue, child["plugin"].toString().toStdString());
+                const auto index = chainIndexOf (cue, child["plugin"].toString().toStdString());
 
-                if (entry.index >= 0)
-                    found.emplace_back (entry.index, child[idProperty].toString().toStdString());
+                if (index >= 0)
+                    found.emplace_back (index, child[idProperty].toString().toStdString());
             }
 
             std::sort (found.begin(), found.end());
@@ -836,15 +851,14 @@ namespace wfg::tree
 
                 if (name == "cue")        text = cueId;
                 else if (name == "name")  text = entry.element.isValid() ? entry.element["name"].toString().toStdString() : std::string {};
-                else if (name == "index") text = std::to_string (std::max (0, entry.index));
+                else if (name == "index") text = std::to_string (std::max (0, chainIndexOf (fx.getParent(), fx["plugin"].toString().toStdString())));
                 else if (name == "problem" && fx.getParent().hasType ("Media"))
                 {
                     /*  Why this insert plays its cue dry, off the chain. A mic
                         cue's chain is its channel's, worked out when it sounds
                         (Phase 9b); until then it says nothing here. */
                     const auto cue = fx.getParent();
-                    const auto slots = cue::slotIdsOf (cue.getRoot().getChildWithName ("Audio").getChildWithName ("Plugins"),
-                                                       walkPlugins().table);
+                    const auto slots = cue::ownChainOf (cue);
                     const auto chain = cue::chainOfCue (cue, walkPlugins().table, walkPlugins().trackChannels);
                     const auto at = std::find (slots.begin(), slots.end(), fx["plugin"].toString().toStdString());
 
@@ -3475,12 +3489,27 @@ namespace wfg::tree
 
                     if (pluginTable != nullptr && pluginTable->hasGraph())
                     {
-                        std::string builtOrder;
+                        /*  THE SET IS NOT THE GRAPH'S SHAPE ANY MORE (namespace
+                            draft §133, stage 4): a plugin added on a cue is
+                            given a child with nothing rebuilt. The PLACES are:
+                            a cue with more inserts than a voice was built
+                            with places is what Load now is still for. */
+                        const auto places = pluginTable->builtPlaces();
 
-                        for (const auto& id : pluginTable->built())
-                            builtOrder += (builtOrder.empty() ? "" : " ") + id;
+                        const auto walk = [&setChanged, places] (const juce::ValueTree& at, auto&& recurse) -> void
+                        {
+                            for (const auto child : at)
+                            {
+                                if (child.hasType ("Media")
+                                      && static_cast<int> (cue::ownChainOf (child).size()) > places)
+                                    setChanged = true;
 
-                        setChanged = builtOrder != order;
+                                recurse (child, recurse);
+                            }
+                        };
+
+                        if (places > 0)
+                            walk (container.getParent().getChildWithName ("Lists"), walk);
 
                         /*  AND THE RACK (Phase 9b): a channel added, taken out,
                             or its chain changed since the graph was built is
@@ -3531,8 +3560,13 @@ namespace wfg::tree
                     for (const auto* row : doc::Schema::rowsForOwner ("plugins"))
                     {
                         const auto name = std::string (row->name);
+                        /*  `chains` is the one the show stores (namespace draft
+                            133, stage 4): whose order its cues' inserts sound
+                            in, as written, `set` for a container not there. */
                         const auto text = name == "order"   ? order
                                         : name == "changed" ? std::string (setChanged ? "true" : "false")
+                                        : name == "chains"  ? (plugins.isValid() ? plugins.getProperty ("chains", "set").toString().toStdString()
+                                                                                 : std::string ("set"))
                                                             : std::string {};
 
                         nodes.push_back (makeLeaf (std::string (godot) + "/plugin/" + name, *row, text));
@@ -3574,8 +3608,15 @@ namespace wfg::tree
                             if (pluginTable != nullptr && pluginTable->hasGraph() && pluginTable->builtSlotOf (id) < 0
                                   && std::find (builtRackIds.begin(), builtRackIds.end(), id) == builtRackIds.end())
                             {
-                                status.state = "unloaded";
-                                status.problem = "added since the audio graph was built; Load now rebuilds it";
+                                /*  OF THE SET: on its way - the audio side is
+                                    told of it within a tick and gives it a
+                                    child (§133, stage 4). OF THE RACK: a
+                                    channel's chain is still the graph's. */
+                                const auto ofTheSet = entry.getParent().hasType ("Plugins");
+
+                                status.state = ofTheSet ? "loading" : "unloaded";
+                                status.problem = ofTheSet ? std::string {}
+                                                          : std::string ("added since the audio graph was built; Load now rebuilds it");
                             }
 
                             /*  THE CATALOGUE, by the entry's identifier: what this

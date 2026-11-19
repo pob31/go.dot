@@ -175,13 +175,18 @@ def run_load_now(report: Report, locale: "str | None") -> None:
                 report.equal(value_of(server, "/godot/plugin/changed"), False,
                              "and the set is what the graph holds")
 
+                # NO LOAD NOW FOR A PLUGIN (namespace draft 133, stage 4): an entry
+                # added mid-session read `unloaded` and the set read changed
+                # until the graph was rebuilt. The audio side is told of it
+                # within a tick now and it comes up with nothing rebuilt.
                 hand.send("/godot/cmd/plugin/create", ["Second gain", "godot:test-gain", "", "", "PG7N0002"])
-                report.equal(wait_for(server, "/godot/plugin/changed", True), True,
-                             "an entry added mid-session makes the set read changed")
-                report.equal(value_of(server, "/godot/plugin/PG7N0002/state"), "unloaded",
-                             "the new entry reads unloaded")
-                report.check("Load now" in str(value_of(server, "/godot/plugin/PG7N0002/problem")),
-                             "and says what brings it in", str(value_of(server, "/godot/plugin/PG7N0002/problem")))
+                report.equal(wait_for(server, "/godot/plugin/PG7N0002/state", "loaded", timeout=30.0), "loaded",
+                             "an entry added mid-session comes up loaded with nothing rebuilt",
+                             str(value_of(server, "/godot/plugin/PG7N0002/problem")))
+                report.equal(value_of(server, "/godot/plugin/changed"), False,
+                             "and the set does not read changed: a plugin is not the graph's shape")
+                report.equal(value_of(server, "/godot/plugin/PG7N0002/problem"), "",
+                             "and it has nothing to say")
 
                 hand.send("/godot/cmd/node/set", ["/godot/document/locked", True])
                 report.equal(wait_for(server, "/godot/document/locked", True), True, "the show is locked")
@@ -191,7 +196,7 @@ def run_load_now(report: Report, locale: "str | None") -> None:
 
                 hand.send("/godot/cmd/plugin/load", [])
                 report.equal(wait_for(server, "/godot/plugin/PG7N0002/state", "loaded", timeout=30.0), "loaded",
-                             "plugin.load rebuilds the graph and the new entry comes up loaded",
+                             "plugin.load still rebuilds the graph, and the entry comes up loaded again",
                              str(value_of(server, "/godot/plugin/PG7N0002/problem")))
                 # WAITED FOR, not read once: the rebuild brings every entry up
                 # again and they need not finish in order, so the first could
@@ -202,7 +207,9 @@ def run_load_now(report: Report, locale: "str | None") -> None:
                              "loaded", "and so does the first, again")
                 report.equal(value_of(server, "/godot/plugin/changed"), False,
                              "the set no longer reads changed")
-                report.equal(value_of(server, "/godot/audio/settingsStatus"), "ready",
+                # Waited for: nothing above waits out the rebuild any more, both
+                # entries having been loaded before it was asked for.
+                report.equal(wait_for(server, "/godot/audio/settingsStatus", "ready", timeout=30.0), "ready",
                              "and the audio side says it is ready", str(value_of(server, "/godot/audio/settingsError")))
             finally:
                 hand.close()

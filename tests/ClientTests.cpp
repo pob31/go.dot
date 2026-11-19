@@ -767,6 +767,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::eqReset ("B3N8R5TW"),
         gesture::createFx ("B3N8R5TW", "PG7N0001"),
         gesture::removeFx ("FX7N0001"),
+        gesture::moveFx ("FX7N0001", 1),
         gesture::captureFx ("FX7N0001", "state/PG7N0001-0123456789abcdef.state", "0:0.5 1:0"),
         gesture::createPlugin ("Verb", "VST3-0badf00d-verb", "VST3", "C:/plugins/verb.vst3"),
         gesture::restartPlugin ("PG7N0001"),
@@ -9659,17 +9660,19 @@ TEST_CASE ("client: a media cue's inserts are its own, a strip per insert it has
     //  The catalogue is the tree's business; a rig with no store sees no parameters, honestly.
     CHECK (reading.strips[0].params.empty());
 
-    //  And the first of the set after it: drawn before, in the set's order.
+    /*  And the first of the set after it: drawn AFTER, in the cue's own
+        order - the order its inserts were put on it - and never the set's
+        (namespace draft 133, stage 4). */
     rig.apply (40, "window", "fx.create", { osc::Value::string (cue), osc::Value::string (gainId) });
     snapshot = rig.publish (41);
     reading = model::readFx (*snapshot, cue);
     REQUIRE (reading.strips.size() == 2u);
-    CHECK (reading.strips[0].pluginId == gainId);
+    CHECK (reading.strips[0].pluginId == verbId);
     CHECK (reading.strips[0].index == 0);
     CHECK (reading.strips[0].present());
     CHECK (reading.strips[0].enabled);
     CHECK_FALSE (reading.strips[0].fxId.empty());
-    CHECK (reading.strips[1].pluginId == verbId);
+    CHECK (reading.strips[1].pluginId == gainId);
     CHECK (reading.strips[1].index == 1);
 
     const auto fxId = reading.strips[0].fxId;
@@ -9693,9 +9696,27 @@ TEST_CASE ("client: a media cue's inserts are its own, a strip per insert it has
         snapshot = rig.publish (45);
         reading = model::readFx (*snapshot, cue);
         REQUIRE (reading.strips.size() == 1u);
-        CHECK (reading.strips[0].pluginId == verbId);
+        CHECK (reading.strips[0].pluginId == gainId);
         CHECK (reading.strips[0].index == 0);
         CHECK (model::readPluginSet (*snapshot).size() == 1u);
+    }
+
+    SUBCASE ("and the arrows put one later in this cue's chain: the order it sounds in, and is drawn in")
+    {
+        const auto move = gesture::moveFx (fxId, 1);
+        CHECK (move.command == "fx.move");
+        rig.apply (44, "window", move.command, move.args);
+        snapshot = rig.publish (45);
+        reading = model::readFx (*snapshot, cue);
+        REQUIRE (reading.strips.size() == 2u);
+        CHECK (reading.strips[0].pluginId == gainId);
+        CHECK (reading.strips[0].index == 0);
+        CHECK (reading.strips[1].pluginId == verbId);
+        CHECK (reading.strips[1].index == 1);
+        CHECK (reading.strips[1].fxId == fxId);
+
+        //  The set is as it was: the order is the cue's, not the show's.
+        CHECK (model::readPluginSet (*snapshot)[0].id == gainId);
     }
 
     SUBCASE ("and the machine's known list reads beside the set, empty when no scan was run")
@@ -17176,9 +17197,11 @@ TEST_CASE ("client: a fade has its target's panels - a sound's EQ and chain, a p
     REQUIRE (chain.present);
     CHECK (chain.fadeId == "FAD1");
     REQUIRE (chain.strips.size() == 2u);
-    CHECK (chain.strips[0].fadeMoves == std::vector<std::string> { "parameter 1", "parameter 4" });
-    CHECK (model::fadeMoveWords (chain.strips[0]) == "moves 2 values: parameter 1, parameter 4");
-    CHECK (model::fadeMoveWords (chain.strips[1]) == "moves nothing");
+    CHECK (chain.strips[0].name == "Delay");
+    CHECK (model::fadeMoveWords (chain.strips[0]) == "moves nothing");
+    CHECK (chain.strips[1].name == "Reverb");
+    CHECK (chain.strips[1].fadeMoves == std::vector<std::string> { "parameter 1", "parameter 4" });
+    CHECK (model::fadeMoveWords (chain.strips[1]) == "moves 2 values: parameter 1, parameter 4");
     CHECK_FALSE (model::readFadeFx (snapshot, "FAD2").present);
     CHECK_FALSE (model::readFadeFx (snapshot, "FAD5").present);
 

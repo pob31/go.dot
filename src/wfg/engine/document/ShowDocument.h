@@ -431,6 +431,14 @@ namespace wfg::doc
             that is not an Fx; a locked show refuses first. */
         EditResult removeFx (const std::string& fxId);
 
+        /*  AN INSERT PUT ELSEWHERE IN ITS CUE'S CHAIN (namespace draft 133,
+            stage 4): `position` counts the cue's inserts from nought, and the
+            others close up round it. A media cue's only - `typeMismatch` for
+            a mic cue's or an aux's, whose order is their channel's -
+            `badValue` for a place the chain has not got, `unknownId`, and a
+            locked show first. */
+        EditResult moveFx (const std::string& fxId, int position);
+
         /*  `level` empty is the row's default; otherwise the send is born at
             it, checked like any written value (2026-09-25). */
         EditResult createSend (const std::string& cueId, const std::string& busId,

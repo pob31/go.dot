@@ -114,6 +114,7 @@ namespace wfg::audio
         void setFxShape (int track, int slot, int feed, int back) override;
         void requestFxState (int track, int slot, const std::string& path) override;
         void holdFx (int track, const cue::FxSetting& fx) override;
+        void prepareInserts (const std::vector<cue::InsertKind>& kinds) override;
 
         /*  THE LIVE RACK (Phase 9b): a rack channel's track is played through
             its gate - opened at the launch's sample over the cue's fade-in,
@@ -188,6 +189,9 @@ namespace wfg::audio
         struct FxHeld { int track = 0; cue::FxSetting fx; };
         std::atomic<int> holdsQueued { 0 };
 
+        /** The plugins the show plays through, as the runner last said them (stage 4). */
+        struct InsertsWanted { std::vector<cue::InsertKind> kinds; };
+
         /*  EVERYTHING THE MESSAGE THREAD IS ASKED FOR, IN ONE QUEUE, in the
             order the tick thread asked it. An arm snaps its cue's whole states
             onto the voice, and a state asked for after it - an undo in
@@ -195,7 +199,7 @@ namespace wfg::audio
             first, let an arm and a newer state in one ten-millisecond batch end
             on the arm's older state (handoff 2026-09-26, finding 3). */
         std::mutex queueMutex;
-        std::vector<std::variant<cue::ArmRequest, StateWanted, FxHeld>> queued;
+        std::vector<std::variant<cue::ArmRequest, StateWanted, FxHeld, InsertsWanted>> queued;
 
         /** One arm, on the message thread: the file, the routing, the EQ, the inserts. */
         void serviceArm (const cue::ArmRequest& request);

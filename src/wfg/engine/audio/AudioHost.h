@@ -166,6 +166,14 @@ namespace wfg::audio
             stage, fixed with the graph like everything else here. */
         std::vector<PluginSpec> plugins;
 
+        /*  HOW MANY INSERT PLACES A VOICE CARRIES (namespace draft §133, stage
+            4): a cue's inserts fill them in the cue's own order, whichever
+            plugins they are. Nought is "as many as the set has entries" - a
+            rig put together by hand, which says its plugins and nothing more;
+            serve asks for at least four and as many as the show's longest
+            chain, eight at most (cue/InsertChain.h). */
+        int insertPlaces = 0;
+
         /*  THE LIVE RACK (Phase 9b, decisions BX and CK): one track per rack
             channel, AFTER the voices and outside their count, each with the
             live input stage at its head and its own chain. */
@@ -917,14 +925,32 @@ namespace wfg::audio
             more copies were made since, in the order they were. */
         plugin::ProxyHost* proxy (int index) noexcept;
 
-        /** The host an entry of the set is played through - its plugin's first - or null. */
+        /*  The host an entry of the set is played through - its plugin's
+            first - or null. By the entry's id; by a number, the entry the
+            graph was BUILT with at that place in the set. */
+        plugin::ProxyHost* proxyOfEntry (const std::string& pluginId) noexcept;
         plugin::ProxyHost* proxyOfSlot (int slot) noexcept;
 
         /*  THE POOL, counted (namespace draft §133, stage 3), for the console's
-            line and the tests: how many copies of that slot's plugin there are
-            in all, and how many of them a voice holds now. Message thread. */
+            line and the tests: how many copies of that entry's plugin there
+            are in all, and how many of them a voice holds now. Message thread. */
+        int pooledCopies (const std::string& pluginId) const noexcept;
+        int pooledCopiesLent (const std::string& pluginId) const noexcept;
         int pooledCopies (int slot) const noexcept;
         int pooledCopiesLent (int slot) const noexcept;
+
+        /** How many insert places each voice was built with. */
+        int insertPlaces() const noexcept;
+
+        /*  THE PLUGINS THE SHOW PLAYS THROUGH NOW (namespace draft §133,
+            stage 4): every entry of the set, in the order a copy should be
+            ready. One that is a plugin the pool has no child for gets one,
+            started at once and loading in the background - no graph is
+            rebuilt for a plugin added on a cue; one that is a plugin it has
+            is one more entry that child stands for; one no longer listed is
+            forgotten, its child left for the next build. Message thread.
+            Nothing without a graph that has voices. */
+        void prepareInserts (const std::vector<PluginSpec>& entries);
 
         /** A voice's lane for an entry, or null. Any thread. */
         plugin::ProxyLane* proxyLane (int trackIndex, int slot) noexcept;
@@ -964,7 +990,8 @@ namespace wfg::audio
             snapTrackEq. */
         void snapTrackFx (int trackIndex, int slot, bool enabled,
                           const std::vector<std::pair<int, float>>& values,
-                          const std::string& statePath = {}, bool held = true);
+                          const std::string& statePath = {}, bool held = true,
+                          const std::string& pluginId = {});
 
         /*  The tick thread, at every launch: every entry this voice has
             switched in holds the state its cue asked for - two atomics a

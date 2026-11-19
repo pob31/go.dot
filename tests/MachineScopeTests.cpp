@@ -120,7 +120,7 @@ namespace
         "audio.configure", "audio.setup", "audio.defaults", "audio.defaultsReady",
         "audio.settingsReady", "audio.clockMoved", "audio.reconnect", "audio.connection",
         "audio.testSignal", "audio.testStop", "audio.editBuilt",
-        "plugin.scan", "plugin.scanRetry", "plugin.scanned", "plugin.failed", "plugin.restart",
+        "plugin.scan", "plugin.scanRetry", "plugin.scanned", "plugin.failed", "plugin.restart", "plugin.loading",
         "document.saveAs", "document.autosave", "document.recover", "document.discardRecovery",
         "media.cleanCache", "media.lookAgain", "ffmpeg.install", "pd.install", "process.edit", "process.help", "script.edit",
         "videoOutput.identify", "videoOutput.grid", "video.hideProjectors", "spacemouse.closeDriver",

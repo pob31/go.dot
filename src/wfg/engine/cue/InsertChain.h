@@ -92,9 +92,20 @@ namespace wfg::cue
     InsertChain chainOf (int fileChannels, int trackChannels,
                          const std::vector<bool>& switchedIn, const std::vector<InsertShape>& shapes);
 
-    /*  WHICH SET ENTRY IS WHICH SLOT: the graph's, in slot order, when the
-        table says there is one; the set's own order otherwise. */
-    std::vector<std::string> slotIdsOf (const juce::ValueTree& plugins, const plugin::PluginTable* table);
+    /*  HOW MANY INSERTS A MEDIA CUE MAY HAVE (namespace draft §133, stage 4):
+        a voice carries insert places, built with the graph, and a cue's
+        inserts fill them in the cue's own order. Eight at most, whatever the
+        graph was built with; `fx.create` refuses a ninth (`chain-full`). */
+    constexpr int insertPlacesAtMost = 8;
+
+    /*  A MEDIA CUE'S OWN CHAIN (namespace draft §133, stage 4, the author,
+        2026-11-18): the entries of the set its inserts name, IN THE ORDER OF
+        ITS Fx CHILDREN - which is the order they sound in, and the place on
+        the voice each is sent by. An Fx naming what is not an entry of the
+        set is left out, as is a second naming an entry already there and
+        anything past the eighth. It was the set's order, the same for every
+        cue (decision AE). */
+    std::vector<std::string> ownChainOf (const juce::ValueTree& mediaCue);
 
     /** Each slot's shape off the table; unknown for an entry not loaded, or with no table. */
     std::vector<InsertShape> shapesOf (const std::vector<std::string>& slotIds, const plugin::PluginTable* table);

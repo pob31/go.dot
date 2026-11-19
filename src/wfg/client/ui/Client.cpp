@@ -815,6 +815,8 @@ namespace wfg::client
                 footActions.createFx = [this] (const std::string& cueId, const std::string& pluginId)
                                        { send (gesture::createFx (cueId, pluginId)); };
                 footActions.removeFx = [this] (const std::string& fxId) { send (gesture::removeFx (fxId)); };
+                footActions.moveFx = [this] (const std::string& fxId, int position)
+                                     { send (gesture::moveFx (fxId, position)); };
                 footActions.addPlugin = [this] (const std::string& cueId, const model::KnownPluginRow& plugin)
                                         { send (gesture::createCuePlugin (cueId, plugin.name, plugin.identifier,
                                                                           plugin.format, plugin.path)); };

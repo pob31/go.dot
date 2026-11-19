@@ -41,6 +41,7 @@
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/DcaTable.h>
+#include <wfg/engine/cue/InsertChain.h>
 #include <wfg/engine/cue/Override.h>
 #include <wfg/engine/cue/FxRows.h>
 #include <wfg/engine/cue/LaneCommands.h>
@@ -13843,13 +13844,17 @@ TEST_CASE ("persistent: the plan is what the section declares, and a disabled cu
 }
 
 //==============================================================================
-TEST_CASE ("fx: the arm carries the cue's inserts against the set, an edit pushes what moved, a withdrawn value goes back to the preset")
+TEST_CASE ("fx: the arm carries the cue's own inserts, an edit pushes what moved, a withdrawn value goes back to the preset")
 {
-    /*  Decision AE and §17.4: every voice carries the whole set; a cue says
-        which entries it switches in and what values it sets. At the arm the
-        request carries one FxSetting per entry in chain order; while the cue
-        sounds, an edit to the row pushes only what changed - one value, one
-        switch, one value withdrawn as -1 - and a quiet tick pushes nothing. */
+    /*  A CUE'S CHAIN IS ITS OWN (namespace draft 133, stage 4; it was decision
+        AE's setting for every entry of the set). At the arm the request
+        carries a setting for each of a voice's eight places: the cue's
+        inserts in the order of its Fx children, each naming its plugin, and
+        the rest empty - sent, so a voice gives back what another cue left
+        there. An entry the cue has no insert for is not the cue's at all.
+        While the cue sounds, an edit to the row pushes only what changed -
+        one value, one switch, one value withdrawn as -1 - and a quiet tick
+        pushes nothing. */
     RoutedRig rig;
     rig.setMedia (rig.mediaId, 2);
     rig.aimAt (rig.mediaId, rig.main);
@@ -13859,7 +13864,7 @@ TEST_CASE ("fx: the arm carries the cue's inserts against the set, an edit pushe
     const auto verb = rig.document.createPlugin ("Verb", "VST3-0badf00d-verb", "VST3", "", "");
     REQUIRE (verb.ok);
 
-    /*  Only the gain is switched in, with one value; the verb has no Fx at all. */
+    /*  Only the gain is the cue's, with one value; the verb has no Fx at all. */
     const auto fx = rig.document.createFx (rig.mediaId, gain.id, "");
     REQUIRE (fx.ok);
     REQUIRE (rig.document.setAttribute ("/godot/fx/" + fx.id + "/values", "0:0.25").ok);
@@ -13870,16 +13875,23 @@ TEST_CASE ("fx: the arm carries the cue's inserts against the set, an edit pushe
     REQUIRE (track >= 0);
 
     const auto& armed = rig.audio.lastArmFx;
-    REQUIRE (armed.size() == 2u);
+    REQUIRE (armed.size() == static_cast<std::size_t> (cue::insertPlacesAtMost));
     CHECK (armed[0].slot == 0);
     CHECK (armed[0].enabled);
     CHECK (armed[0].fxId == fx.id);
+    CHECK (armed[0].pluginId == gain.id);
     REQUIRE (armed[0].values.size() == 1u);
     CHECK (armed[0].values[0].first == 0);
     CHECK (armed[0].values[0].second == doctest::Approx (0.25f));
-    CHECK (armed[1].slot == 1);
-    CHECK_FALSE (armed[1].enabled);
-    CHECK (armed[1].values.empty());
+
+    for (std::size_t place = 1; place < armed.size(); ++place)
+    {
+        CHECK (armed[place].slot == static_cast<int> (place));
+        CHECK (armed[place].fxId.empty());
+        CHECK (armed[place].pluginId.empty());
+        CHECK_FALSE (armed[place].enabled);
+        CHECK (armed[place].values.empty());
+    }
 
     for (int i = 0; i < 3; ++i)
         rig.tickOnce();
@@ -13967,7 +13979,7 @@ TEST_CASE ("fx: an insert switched in before GO asks for the cue's state; one sw
     const auto run = rig.runOf (rig.mediaId);
     const auto track = rig.runs.find (run)->track;
     REQUIRE (track >= 0);
-    REQUIRE (rig.audio.lastArmFx.size() == 1u);
+    REQUIRE (rig.audio.lastArmFx.size() == static_cast<std::size_t> (cue::insertPlacesAtMost));
     CHECK_FALSE (rig.audio.lastArmFx[0].enabled);
     CHECK (rig.audio.fxStates.empty());
 
@@ -13998,7 +14010,89 @@ TEST_CASE ("fx: an insert switched in before GO asks for the cue's state; one sw
     CHECK (rig.audio.fxStates.size() == 2u);
 }
 
-TEST_CASE ("fx: the slots are the graph's - an entry added since has none, one moved ahead keeps its own, one taken out is switched out")
+TEST_CASE ("go: in show mode a GO waits for the standby's plugins, and a cue fired by a hand for its own; unlocked it goes")
+{
+    /*  Namespace draft 133, stage 5, BGI - the author, 2026-11-18: "Engaging
+        the show mode preloads all plugins and only allows to fire once it's
+        done", and then, offered the choice, that the STANDBY'S being ready is
+        enough. Which plugins are still coming up is said in the log
+        (`plugin.loading`), so the rule reads the log's word and never the
+        machine: a replay refuses what the session refused. */
+    RoutedRig rig;
+    rig.setMedia (rig.mediaId, 2);
+    rig.aimAt (rig.mediaId, rig.main);
+
+    const auto gain = rig.document.createPlugin ("Test gain", "godot:test-gain", "VST3", "", "");
+    REQUIRE (gain.ok);
+    const auto verb = rig.document.createPlugin ("Verb", "VST3-0badf00d-verb", "VST3", "", "");
+    REQUIRE (verb.ok);
+    const auto fx = rig.document.createFx (rig.mediaId, gain.id, "");
+    REQUIRE (fx.ok);
+
+    rig.setStandby (rig.mediaId);
+
+    const auto loading = [&rig] (const std::string& ids)
+    {
+        REQUIRE (rig.submitAndTick ("plugin.loading", { osc::Value::string (ids) }).rejected == 0);
+    };
+
+    const auto lock = [&rig] (bool on)
+    {
+        REQUIRE (rig.submitAndTick ("node.set", { osc::Value::string ("/godot/document/locked"),
+                                                  osc::Value::boolean (on) }).rejected == 0);
+    };
+
+    const auto standby = [&rig]
+    {
+        return rig.document.getAttribute (cue::standbyAddressOf (rig.listId)).value_or ("");
+    };
+
+    SUBCASE ("locked, the standby's plugin still loading: refused, the pointer where it was, and the next press fires")
+    {
+        loading (gain.id + " " + verb.id);
+        lock (true);
+
+        CHECK (rig.submitAndTick ("go").rejected == 1);
+        CHECK (rig.engine.lastError().find ("plugins-loading") != std::string::npos);
+        CHECK (standby() == rig.mediaId);
+
+        //  Its own is up; another cue's still loading holds nothing back.
+        loading (verb.id);
+        CHECK (rig.submitAndTick ("go").rejected == 0);
+        CHECK (standby() != rig.mediaId);
+    }
+
+    SUBCASE ("an insert switched out is not waited for")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/fx/" + fx.id + "/enabled", "false").ok);
+        loading (gain.id);
+        lock (true);
+        CHECK (rig.submitAndTick ("go").rejected == 0);
+    }
+
+    SUBCASE ("unlocked, the GO goes and the launch waits, as it always did")
+    {
+        loading (gain.id);
+        CHECK (rig.submitAndTick ("go").rejected == 0);
+        CHECK (standby() != rig.mediaId);
+    }
+
+    SUBCASE ("a cue fired by a hand in show mode waits for its own plugins too")
+    {
+        loading (gain.id);
+        lock (true);
+        CHECK (rig.submitAndTick ("cue.fire", { osc::Value::string (rig.mediaId) }).rejected == 1);
+        CHECK (rig.engine.lastError().find ("plugins-loading") != std::string::npos);
+
+        //  The memo beside it has no plugin and fires.
+        CHECK (rig.submitAndTick ("cue.fire", { osc::Value::string (rig.memoId) }).rejected == 0);
+
+        loading ("");
+        CHECK (rig.submitAndTick ("cue.fire", { osc::Value::string (rig.mediaId) }).rejected == 0);
+    }
+}
+
+TEST_CASE ("fx: the places are the cue's own - an entry added since the graph was built is sent, one taken out of the set is not")
 {
     /*  2026-09-26: a set edited after the graph was built used to send a
         cue's settings by the set's order as it stood NOW, so an entry put
@@ -14022,12 +14116,15 @@ TEST_CASE ("fx: the slots are the graph's - an entry added since has none, one m
     REQUIRE (verbFx.ok);
     REQUIRE (rig.document.setAttribute ("/godot/fx/" + verbFx.id + "/values", "0:0.5").ok);
 
-    SUBCASE ("an entry added since the graph was built is not sent, and the built ones keep their slots")
+    SUBCASE ("an entry added since the graph was built is sent like any other, after what the cue had")
     {
+        /*  It was not sent at all, having no slot until Load now (2026-09-26).
+            A place is no plugin's for good now, and the audio side gives a
+            plugin added since a child of its own (namespace draft 133, stage
+            4). Where it stands in the SET changes nothing for the cue. */
         const auto late = rig.document.createPlugin ("Late", "VST3-00000000-late", "VST3", "", "");
         REQUIRE (late.ok);
 
-        //  Put at the head of the set, where the document would number it slot 0.
         auto plugins = rig.document.root().getChildWithName ("Audio").getChildWithName ("Plugins");
         const auto lateNode = rig.document.findById (late.id);
         plugins.moveChild (plugins.indexOf (lateNode), 0, nullptr);
@@ -14037,15 +14134,26 @@ TEST_CASE ("fx: the slots are the graph's - an entry added since has none, one m
 
         rig.play();
         const auto& armed = rig.audio.lastArmFx;
-        REQUIRE (armed.size() == 2u);
-        CHECK (armed[0].slot == 0);
-        CHECK_FALSE (armed[0].enabled);          // the gain: no Fx on the cue
-        CHECK (armed[1].slot == 1);
-        CHECK (armed[1].enabled);                // the verb, still slot 1
-        CHECK (armed[1].fxId == verbFx.id);
+        REQUIRE (armed.size() == static_cast<std::size_t> (cue::insertPlacesAtMost));
+
+        //  The cue's own two, wherever the document put them among its children, and nothing of the gain's.
+        std::vector<std::string> sent;
+
+        for (const auto& setting : armed)
+            if (! setting.fxId.empty())
+                sent.push_back (setting.pluginId);
+
+        const auto own = cue::ownChainOf (rig.document.findById (rig.mediaId));
+        CHECK (sent == own);
+        CHECK (std::find (sent.begin(), sent.end(), verb.id) != sent.end());
+        CHECK (std::find (sent.begin(), sent.end(), late.id) != sent.end());
+        CHECK (std::find (sent.begin(), sent.end(), gain.id) == sent.end());
+        CHECK (armed[0].enabled);
+        CHECK (armed[1].enabled);
+        CHECK (armed[2].fxId.empty());
     }
 
-    SUBCASE ("an entry taken out since keeps its slot, switched out")
+    SUBCASE ("an entry taken out of the set since is not the cue's any more, and what follows moves up")
     {
         const auto gainFx = rig.document.createFx (rig.mediaId, gain.id, "");
         REQUIRE (gainFx.ok);
@@ -14055,11 +14163,13 @@ TEST_CASE ("fx: the slots are the graph's - an entry added since has none, one m
 
         rig.play();
         const auto& armed = rig.audio.lastArmFx;
-        REQUIRE (armed.size() == 2u);
+        REQUIRE (armed.size() == static_cast<std::size_t> (cue::insertPlacesAtMost));
         CHECK (armed[0].slot == 0);
-        CHECK_FALSE (armed[0].enabled);          // its Fx is on the cue, its entry is not in the set
-        CHECK (armed[1].slot == 1);
-        CHECK (armed[1].enabled);
+        CHECK (armed[0].enabled);                // the verb: the only insert whose entry is in the set
+        CHECK (armed[0].fxId == verbFx.id);
+        CHECK (armed[0].pluginId == verb.id);
+        CHECK (armed[1].fxId.empty());           // the gain's Fx is on the cue, its entry is not in the set
+        CHECK_FALSE (armed[1].enabled);
     }
 }
 
@@ -14129,7 +14239,7 @@ TEST_CASE ("width: the arm sends each insert the cue's width there, and a plugin
     const auto run = rig.play();
     const auto track = rig.runs.find (run)->track;
 
-    REQUIRE (rig.audio.lastArmFx.size() == 1u);
+    REQUIRE (rig.audio.lastArmFx.size() == static_cast<std::size_t> (cue::insertPlacesAtMost));
     CHECK (rig.audio.lastArmFx[0].feed == 1);
     CHECK (rig.audio.lastArmFx[0].back == 1);
 

@@ -77,6 +77,7 @@
 #include <functional>
 #include <limits>
 #include <set>
+#include <sstream>
 #include <system_error>
 #include <utility>
 
@@ -21266,6 +21267,8 @@ namespace wfg::cue
         applyOutputLevels();
         applyRouting();
         applyEq();
+        prepareInserts();
+        watchPlugins (engine);
         applyFx();
         applyAuxes();
         recordCurves (engine, tick);
@@ -25861,19 +25864,27 @@ namespace wfg::cue
         }
         else
         {
-            for (const auto entry : document.root().getChildWithName ("Audio").getChildWithName ("Plugins"))
-                if (entry.hasType ("Plugin"))
-                    inSet.push_back (entry.getProperty ("id").toString().toStdString());
-
-            slots = pluginTable != nullptr && pluginTable->hasGraph() ? pluginTable->built() : inSet;
+            /*  A MEDIA CUE'S ARE ITS OWN (namespace draft §133, stage 4): its
+                inserts in the order of its Fx children, one a place, and the
+                places after them EMPTY - sent all the same, so a voice that
+                held another cue's insert there gives its copy back. It was a
+                setting for every entry of the set, in the set's order. */
+            slots = ownChainOf (cue);
+            inSet = slots;
+            slots.resize (static_cast<std::size_t> (insertPlacesAtMost));
         }
+
+        const auto ownChain = cue.hasType ("Media");
 
         for (std::size_t slot = 0; slot < slots.size(); ++slot)
         {
             FxSetting setting;
             setting.slot = static_cast<int> (slot);
             const auto& entryId = slots[slot];
-            const auto stillInSet = std::find (inSet.begin(), inSet.end(), entryId) != inSet.end();
+            const auto stillInSet = ! entryId.empty() && std::find (inSet.begin(), inSet.end(), entryId) != inSet.end();
+
+            if (ownChain)
+                setting.pluginId = entryId;
 
             for (const auto child : cue)
             {
@@ -26081,6 +26092,181 @@ namespace wfg::cue
         }
     }
 
+    void Runner::setPluginsLoading (const std::string& stillLoading)
+    {
+        pluginsLoading.clear();
+
+        std::istringstream words (stillLoading);
+
+        for (std::string id; words >> id;)
+            pluginsLoading.insert (id);
+    }
+
+    bool Runner::waitsForPlugins (const juce::ValueTree& cue) const
+    {
+        if (pluginsLoading.empty() || ! cue.isValid())
+            return false;
+
+        static const Reader schema;
+
+        const auto waits = [this] (const juce::ValueTree& media)
+        {
+            if (! media.hasType ("Media"))
+                return false;
+
+            for (const auto child : media)
+                if (child.hasType ("Fx") && schema.flag (child, "fx", "enabled")
+                      && pluginsLoading.count (child.getProperty ("plugin").toString().toStdString()) != 0)
+                    return true;
+
+            return false;
+        };
+
+        if (waits (cue))
+            return true;
+
+        for (const auto& id : armablesFor (cue))
+            if (waits (document.findById (id)))
+                return true;
+
+        return false;
+    }
+
+    void Runner::watchPlugins (Engine& engine)
+    {
+        /*  THE ENTRIES OF THE SET WHOSE PLUGIN HAS NOT COME UP, read off the
+            table when it or the show moved and SAID IN THE LOG when the list
+            changed (stage 5): one record, the ids, empty for none. With no
+            table - a replay, a rig with no audio - nothing is said, and what
+            the log holds is what there is. */
+        if (pluginTable == nullptr)
+            return;
+
+        const auto revision = pluginTable->revision();
+        const auto show = document.showRevision();
+
+        if (revision == loadingRevision && show == loadingShowRevision)
+            return;
+
+        loadingRevision = revision;
+        loadingShowRevision = show;
+
+        std::string loading;
+
+        if (pluginTable->hasGraph())
+            for (const auto entry : document.root().getChildWithName ("Audio").getChildWithName ("Plugins"))
+            {
+                if (! entry.hasType ("Plugin"))
+                    continue;
+
+                const auto id = entry.getProperty ("id").toString().toStdString();
+
+                //  Not told to the audio side yet, or its child still coming up.
+                if (pluginTable->builtSlotOf (id) < 0 || pluginTable->statusOf (id).state == "loading")
+                    loading += (loading.empty() ? "" : " ") + id;
+            }
+
+        if (loading == loadingSaid)
+            return;
+
+        loadingSaid = loading;
+        engine.submit (origin::engine, "plugin.loading", { osc::Value::string (loading) });
+    }
+
+    void Runner::prepareInserts()
+    {
+        /*  WHAT THE AUDIO SIDE SHOULD HAVE A COPY READY OF (namespace draft
+            §133, stage 4, BGG): every entry of the set, the ones the cues
+            nearest the standby play through first - from the standby on down
+            the show, then what is above it - and after them any entry no cue
+            uses. Sent when it changes; applyFx's gate, and for its reason. */
+        if (audio == nullptr)
+            return;
+
+        const auto revision = document.showRevision();
+
+        if (revision == insertsRevision)
+            return;
+
+        insertsRevision = revision;
+
+        static const juce::Identifier idWord { "id" };
+        const auto plugins = document.root().getChildWithName ("Audio").getChildWithName ("Plugins");
+        std::vector<InsertKind> declared;
+
+        for (const auto entry : plugins)
+        {
+            if (! entry.hasType ("Plugin"))
+                continue;
+
+            InsertKind kind;
+            kind.pluginId = entry[idWord].toString().toStdString();
+            kind.identifier = entry.getProperty ("identifier").toString().toStdString();
+            kind.name = entry.getProperty ("name").toString().toStdString();
+
+            //  A preset is a file under the bundle's plugins/, by name (§17.7): the path serve gives a child.
+            if (const auto preset = entry.getProperty ("preset").toString(); preset.isNotEmpty())
+                kind.presetPath = pluginsFolder.empty()
+                                    ? preset.toStdString()
+                                    : juce::File (juce::String (pluginsFolder)).getChildFile (preset)
+                                          .getFullPathName().toStdString();
+
+            declared.push_back (std::move (kind));
+        }
+
+        if (declared.empty() && insertsSent.empty())
+            return;
+
+        std::string standbyId;
+
+        if (const auto focused = focus.list (document); focused.isValid())
+            standbyId = focused[juce::Identifier ("standby")].toString().toStdString();
+
+        //  Every media cue in the order the show is written, and where the standby falls among them.
+        std::vector<juce::ValueTree> media;
+        auto from = std::size_t { 0 };
+
+        const auto walk = [&] (const juce::ValueTree& at, auto&& recurse) -> void
+        {
+            for (const auto child : at)
+            {
+                if (! standbyId.empty() && child[idWord].toString().toStdString() == standbyId)
+                    from = media.size();
+
+                if (child.hasType ("Media"))
+                    media.push_back (child);
+
+                recurse (child, recurse);
+            }
+        };
+
+        walk (document.root().getChildWithName ("Lists"), walk);
+
+        std::vector<std::string> nearest;
+
+        for (std::size_t n = 0; n < media.size(); ++n)
+            for (auto& entryId : ownChainOf (media[(from + n) % media.size()]))
+                if (std::find (nearest.begin(), nearest.end(), entryId) == nearest.end())
+                    nearest.push_back (std::move (entryId));
+
+        std::vector<InsertKind> ordered;
+
+        for (const auto& entryId : nearest)
+            for (const auto& kind : declared)
+                if (kind.pluginId == entryId)
+                    ordered.push_back (kind);
+
+        for (const auto& kind : declared)
+            if (std::find (nearest.begin(), nearest.end(), kind.pluginId) == nearest.end())
+                ordered.push_back (kind);
+
+        if (ordered == insertsSent)
+            return;
+
+        insertsSent = ordered;
+        audio->prepareInserts (ordered);
+    }
+
     void Runner::applyFx()
     {
         /*  applyEq's shape, for its reasons: gated on the show's revision, only
@@ -26130,7 +26316,9 @@ namespace wfg::cue
                 /*  THE INSERT ITSELF CAME OR WENT (namespace draft §133, stage
                     3): the voice has a copy only for an insert its cue has, so
                     it is lent one now, whole, or gives its copy back. */
-                if (next.fxId.empty() != last.fxId.empty())
+                /*  OR ANOTHER INSERT STANDS IN THIS PLACE NOW (stage 4): one
+                    taken off before it, or the chain put in another order. */
+                if (next.fxId != last.fxId)
                 {
                     audio->holdFx (run->track, next);
                     continue;
@@ -27250,6 +27438,21 @@ namespace wfg::cue
                                 return answer;
                             }
 
+                            /*  IN SHOW MODE, NOT BEFORE THE STANDBY'S PLUGINS
+                                ARE UP (namespace draft §133, stage 5, BGI - the
+                                author's, 2026-11-18, who chose "the standby's
+                                are enough" over "every one first": the lock is
+                                remembered, and a show come back from a crash
+                                must not wait for the whole load). Refused as
+                                too-soon is: said, the pointer not moved, the
+                                next press fires it. Unlocked, a GO goes as it
+                                always did and the launch waits, late. */
+                            if (document.isLocked() && runner.waitsForPlugins (document.findById (standby)))
+                            {
+                                answer.refusal = reason::pluginsLoading;
+                                return answer;
+                            }
+
                             /*  THE GO RECORD, OPENED BEFORE THE FIRE (2026-10-01,
                                 namespace draft §24): what Doh! would take back
                                 - the list, the cue, where the pointer and the
@@ -27712,6 +27915,15 @@ namespace wfg::cue
                             if (! runsNow (cue))
                                 return Outcome::rejected (reason::disabled);
 
+                            /*  NOR, IN SHOW MODE, ONE WHOSE PLUGINS ARE STILL
+                                LOADING, from a hand (namespace draft §133,
+                                stage 5, BGI): a cue fired from elsewhere than
+                                the standby waits for its own. The engine's own
+                                fires - a start cue's, under a GO that was let
+                                through - are not held. */
+                            if (from != origin::engine && document.isLocked() && runner.waitsForPlugins (cue))
+                                return Outcome::rejected (reason::pluginsLoading);
+
                             /*  A MANUAL SEQUENCE GROUP HAS NOBODY TO BE ITS
                                 PARENT when it is fired by name. §3.6 makes the
                                 operator the parent: its members start on GO, one
@@ -27814,6 +28026,20 @@ namespace wfg::cue
 
                             return Outcome::ok (withRun (args, runAt, made));
                         };
+
+        /*  THIS MACHINE'S, as every plugin record is (§58, AGC): which plugins
+            are still coming up here. Never down the link, never a step of
+            undo; in the log so a replay judges a GO as the session did. */
+        registry.add (machineLocal ({ "plugin.loading",
+                        "The entries of the show's plugin set whose plugin has not come up yet, by id,"
+                        " space-separated; empty for none. Said by the engine when the list changes.",
+                        { { "ids", 's', false } },
+                        false,
+                        [&runner] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            runner.setPluginsLoading (args[0].getString());
+                            return Outcome::ok (args);
+                        } }));
 
         registry.add ({ "cue.fire",
                         "Fires a named cue without touching standby - what a button on a surface"

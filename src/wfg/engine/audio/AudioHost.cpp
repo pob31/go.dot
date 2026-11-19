@@ -525,7 +525,7 @@ namespace wfg::audio
             options.defaultMasterVolumedB = 0.0f;
 
             edit = te::Edit::createEdit (std::move (options));
-            proxySlots = static_cast<int> (spec.plugins.size());
+            proxySlots = spec.insertPlaces > 0 ? spec.insertPlaces : static_cast<int> (spec.plugins.size());
             voices = std::max (0, spec.tracks);
 
             if (edit == nullptr)
@@ -935,6 +935,7 @@ namespace wfg::audio
                     ids.push_back (entry.id);
 
                 services.table->setBuilt (std::move (ids));
+                services.table->setBuiltPlaces (voices > 0 ? proxySlots : 0);
                 toldTable = true;
             }
 
@@ -1001,32 +1002,79 @@ namespace wfg::audio
                 (`growIfNeeded`), never made in one that may be sounding. */
             poolDeadline = spec.proxyDeadlineMicroseconds;
             poolChannels = editChannels;
-            classOfSlot.assign (static_cast<std::size_t> (proxySlots), -1);
 
-            for (int slot = 0; slot < proxySlots; ++slot)
+            for (const auto& entry : spec.plugins)
             {
-                const auto& entry = spec.plugins[static_cast<std::size_t> (slot)];
-                auto found = -1;
-
-                for (std::size_t k = 0; k < pool.size(); ++k)
-                    if (pool[k].plugin.identifier == entry.identifier && pool[k].plugin.presetPath == entry.presetPath)
-                        found = static_cast<int> (k);
-
-                if (found < 0)
-                {
-                    found = static_cast<int> (pool.size());
-                    pool.emplace_back();
-                    pool.back().plugin = entry;
-                }
-
-                pool[static_cast<std::size_t> (found)].ids.push_back (entry.id);
-                classOfSlot[static_cast<std::size_t> (slot)] = found;
+                builtEntries.push_back (entry.id);
+                kindOfEntry[entry.id] = kindFor (entry);
             }
 
             for (int k = 0; k < static_cast<int> (pool.size()); ++k)
                 addCopies (k, std::min (voices, copiesAtStart), true);
 
             startRackProxies (spec);
+        }
+
+        /*  The kind an entry is - its plugin and preset - made if there is
+            none yet, with no copy; and the entry counted among those it
+            stands for. */
+        int kindFor (const PluginSpec& entry)
+        {
+            auto found = -1;
+
+            for (std::size_t k = 0; k < pool.size(); ++k)
+                if (pool[k].plugin.identifier == entry.identifier && pool[k].plugin.presetPath == entry.presetPath)
+                    found = static_cast<int> (k);
+
+            if (found < 0)
+            {
+                found = static_cast<int> (pool.size());
+                pool.emplace_back();
+                pool.back().plugin = entry;
+            }
+
+            auto& ids = pool[static_cast<std::size_t> (found)].ids;
+
+            if (std::find (ids.begin(), ids.end(), entry.id) == ids.end())
+                ids.push_back (entry.id);
+
+            return found;
+        }
+
+        /*  THE SET AS IT STANDS NOW (namespace draft §133, stage 4). */
+        void prepareInserts (const std::vector<PluginSpec>& entries)
+        {
+            if (voices <= 0 || edit == nullptr)
+                return;
+
+            std::map<std::string, int> now;
+            std::vector<std::string> ids;
+
+            for (const auto& entry : entries)
+            {
+                const auto before = pool.size();
+                const auto kindIndex = kindFor (entry);
+                auto& kind = pool[static_cast<std::size_t> (kindIndex)];
+
+                if (pool.size() > before)
+                    addCopies (kindIndex, std::min (voices, copiesAtStart), true);
+                else if (! kind.copies.empty())
+                    kind.copies.front()->host->alsoServe (entry.id);
+
+                now[entry.id] = kindIndex;
+                ids.push_back (entry.id);
+            }
+
+            kindOfEntry = std::move (now);
+
+            if (toldTable && services.table != nullptr && services.table->built() != ids)
+                services.table->setBuilt (std::move (ids));
+        }
+
+        int kindOf (const std::string& pluginId) const noexcept
+        {
+            const auto found = kindOfEntry.find (pluginId);
+            return found != kindOfEntry.end() ? found->second : -1;
         }
 
         //======================================================================
@@ -1070,11 +1118,18 @@ namespace wfg::audio
             bool enabled = false;
             std::vector<std::pair<int, float>> values;
             std::string statePath;
+            std::string pluginId;
         };
 
         std::vector<std::unique_ptr<PooledCopy>> pooledCopies;
         std::vector<PoolKind> pool;
-        std::vector<int> classOfSlot;
+
+        /*  WHICH KIND AN ENTRY OF THE SET IS, as the set stands (stage 4):
+            a place is no plugin's for good, so a voice is lent a copy by the
+            entry its cue's insert names. And the entries the graph was BUILT
+            with, in the set's order then, for a rig that still arms by number. */
+        std::map<std::string, int> kindOfEntry;
+        std::vector<std::string> builtEntries;
         std::vector<WaitingClaim> waitingClaims;
         std::int64_t poolDeadline = 0;
         int poolChannels = 2;
@@ -1098,7 +1153,8 @@ namespace wfg::audio
             proxies.clear();
             pooledCopies.clear();
             pool.clear();
-            classOfSlot.clear();
+            kindOfEntry.clear();
+            builtEntries.clear();
             waitingClaims.clear();
         }
 
@@ -1251,11 +1307,6 @@ namespace wfg::audio
             return mayCome ? nullptr : other;
         }
 
-        int slotsOfKind (int kindIndex) const noexcept
-        {
-            return static_cast<int> (std::count (classOfSlot.begin(), classOfSlot.end(), kindIndex));
-        }
-
         /*  ONE TO SPARE: when the last free copy of a plugin has been lent,
             another is made - in a child of its own, since making one beside a
             sounding one drops the sounding one's blocks (the spike) - so the
@@ -1269,36 +1320,51 @@ namespace wfg::audio
                 if (copy->track < 0)
                     return;
 
-            if (static_cast<int> (kind.copies.size()) < voices * slotsOfKind (kindIndex))
+            if (static_cast<int> (kind.copies.size()) < voices * proxySlots)
                 addCopies (kindIndex, 1, false);
         }
 
         /*  A CUE'S INSERT ON A VOICE'S PLACE, at its arm: the place keeps the
             copy it has, or is lent a free one, and the copy takes the cue's
             switch, values and whole state. */
-        void claimPlace (int track, int slot, bool enabled,
+        void claimPlace (int track, int slot, const std::string& pluginId, bool enabled,
                          const std::vector<std::pair<int, float>>& values, const std::string& statePath)
         {
             auto* place = placeAt (track, slot);
 
-            if (place == nullptr || slot >= static_cast<int> (classOfSlot.size()))
+            if (place == nullptr)
                 return;
 
-            const auto kindIndex = classOfSlot[static_cast<std::size_t> (slot)];
+            const auto kindIndex = kindOf (pluginId);
             auto* copy = copyOf (place->target());
+
+            /*  ANOTHER PLUGIN STANDS IN THIS PLACE NOW (stage 4): the copy it
+                held is given back, and one of the right kind lent. */
+            if (copy != nullptr && copy->kind != kindIndex)
+            {
+                releasePlace (track, slot);
+                copy = nullptr;
+            }
 
             if (copy == nullptr)
             {
                 auto mayCome = false;
-                copy = freeCopyOf (kindIndex, mayCome);
 
+                if (kindIndex >= 0)
+                    copy = freeCopyOf (kindIndex, mayCome);
+
+                /*  NONE FREE - or a plugin the pool has not been told of yet,
+                    which the next word from the runner brings: wait. */
                 if (copy == nullptr)
                 {
                     forgetWaiting (track, slot);
-                    waitingClaims.push_back ({ track, slot, enabled, values, statePath });
+                    waitingClaims.push_back ({ track, slot, enabled, values, statePath, pluginId });
                     place->lane().setEnabled (enabled);
                     place->setTarget (&place->lane());
-                    growIfNeeded (kindIndex);
+
+                    if (kindIndex >= 0)
+                        growIfNeeded (kindIndex);
+
                     return;
                 }
 
@@ -1334,7 +1400,7 @@ namespace wfg::audio
             const auto waiting = waitingClaims;
 
             for (const auto& claim : waiting)
-                claimPlace (claim.track, claim.slot, claim.enabled, claim.values, claim.statePath);
+                claimPlace (claim.track, claim.slot, claim.pluginId, claim.enabled, claim.values, claim.statePath);
         }
 
         bool isWaiting (int track) const noexcept
@@ -3833,7 +3899,8 @@ namespace wfg::audio
 
     int AudioHost::proxyCount() const noexcept
     {
-        return impl->proxySlots;
+        //  The entries of the set the pool plays through, as it was last told them.
+        return static_cast<int> (impl->kindOfEntry.size());
     }
 
     plugin::ProxyHost* AudioHost::proxy (int index) noexcept
@@ -3844,35 +3911,57 @@ namespace wfg::audio
         return impl->proxies[static_cast<std::size_t> (index)].get();
     }
 
-    plugin::ProxyHost* AudioHost::proxyOfSlot (int slot) noexcept
+    plugin::ProxyHost* AudioHost::proxyOfEntry (const std::string& pluginId) noexcept
     {
-        if (slot < 0 || slot >= static_cast<int> (impl->classOfSlot.size()))
+        const auto kindIndex = impl->kindOf (pluginId);
+
+        if (kindIndex < 0)
             return nullptr;
 
-        const auto& kind = impl->pool[static_cast<std::size_t> (impl->classOfSlot[static_cast<std::size_t> (slot)])];
+        const auto& kind = impl->pool[static_cast<std::size_t> (kindIndex)];
         return kind.copies.empty() ? nullptr : kind.copies.front()->host;
     }
 
-    int AudioHost::pooledCopies (int slot) const noexcept
+    int AudioHost::pooledCopies (const std::string& pluginId) const noexcept
     {
-        if (slot < 0 || slot >= static_cast<int> (impl->classOfSlot.size()))
-            return 0;
-
-        return static_cast<int> (impl->pool[static_cast<std::size_t> (impl->classOfSlot[static_cast<std::size_t> (slot)])].copies.size());
+        const auto kindIndex = impl->kindOf (pluginId);
+        return kindIndex < 0 ? 0 : static_cast<int> (impl->pool[static_cast<std::size_t> (kindIndex)].copies.size());
     }
 
-    int AudioHost::pooledCopiesLent (int slot) const noexcept
+    int AudioHost::pooledCopiesLent (const std::string& pluginId) const noexcept
     {
-        if (slot < 0 || slot >= static_cast<int> (impl->classOfSlot.size()))
+        const auto kindIndex = impl->kindOf (pluginId);
+
+        if (kindIndex < 0)
             return 0;
 
         auto lent = 0;
 
-        for (const auto* copy : impl->pool[static_cast<std::size_t> (impl->classOfSlot[static_cast<std::size_t> (slot)])].copies)
+        for (const auto* copy : impl->pool[static_cast<std::size_t> (kindIndex)].copies)
             if (copy->track >= 0)
                 ++lent;
 
         return lent;
+    }
+
+    namespace
+    {
+        //  The entry the graph was built with at that place in the set, or none.
+        std::string builtEntryAt (const std::vector<std::string>& built, int slot)
+        {
+            return slot >= 0 && slot < static_cast<int> (built.size()) ? built[static_cast<std::size_t> (slot)]
+                                                                        : std::string {};
+        }
+    }
+
+    plugin::ProxyHost* AudioHost::proxyOfSlot (int slot) noexcept  { return proxyOfEntry (builtEntryAt (impl->builtEntries, slot)); }
+    int AudioHost::pooledCopies (int slot) const noexcept          { return pooledCopies (builtEntryAt (impl->builtEntries, slot)); }
+    int AudioHost::pooledCopiesLent (int slot) const noexcept      { return pooledCopiesLent (builtEntryAt (impl->builtEntries, slot)); }
+    int AudioHost::insertPlaces() const noexcept                   { return impl->voices > 0 ? impl->proxySlots : 0; }
+
+    void AudioHost::prepareInserts (const std::vector<PluginSpec>& entries)
+    {
+        impl->prepareInserts (entries);
     }
 
     plugin::ProxyLane* AudioHost::proxyLane (int trackIndex, int slot) noexcept
@@ -3947,14 +4036,18 @@ namespace wfg::audio
 
     void AudioHost::snapTrackFx (int trackIndex, int slot, bool enabled,
                                  const std::vector<std::pair<int, float>>& values,
-                                 const std::string& statePath, bool held)
+                                 const std::string& statePath, bool held, const std::string& pluginId)
     {
         /*  A VOICE'S INSERT IS LENT A COPY, or gives its copy back when the
             cue has no such insert (namespace draft §133, stage 3). */
         if (impl->placeAt (trackIndex, slot) != nullptr)
         {
+            /*  BY THE ENTRY THE INSERT NAMES; a rig that arms by number alone
+                means the entry the graph was built with at that place. */
             if (held)
-                impl->claimPlace (trackIndex, slot, enabled, values, statePath);
+                impl->claimPlace (trackIndex, slot,
+                                  pluginId.empty() ? builtEntryAt (impl->builtEntries, slot) : pluginId,
+                                  enabled, values, statePath);
             else
                 impl->releasePlace (trackIndex, slot);
 

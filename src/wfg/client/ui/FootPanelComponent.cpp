@@ -389,6 +389,7 @@ namespace wfg::client::ui
                 chaining.set = actions.set;
                 chaining.createFx = actions.createFx;
                 chaining.removeFx = actions.removeFx;
+                chaining.moveFx = actions.moveFx;
                 chaining.addPlugin = actions.addPlugin;
                 chaining.load = actions.loadPlugins;
                 chaining.edit = [this] (const std::string& cueId, const std::string& pluginId)

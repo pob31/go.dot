@@ -1724,6 +1724,17 @@ plugin quietly eats the audio budget of the whole show. And the budget is
 properly stated as *deadline × maximum simultaneously-failed strips*, not as a
 single number.
 
+*Amended in 0.8, at the author's direction (2026-11-18); the mechanics are the namespace draft's §133.*
+**A media cue's plugin chain is its own.** Its inserts are the plugins somebody put on that cue and no other,
+in the order that cue has them, eight at most; a plugin comes off one cue without touching another. The
+plugins are loaded in the background as the show opens, those the cues nearest the standby play through asked
+for first, and a plugin put on a cue needs no rebuilt graph. A plugin's copies are **pooled**: a few of each,
+lent to a voice for the cue that plays through it with that cue's whole state, never one a voice - a spike
+with a convolution reverb measured 235 MB a copy and 3.9 GB for one reverb on sixteen voices
+(`docs/spikes/spike08-plugin-copies.md`). **In show mode a GO waits for the standby's plugins**: refused and
+said while one of them is still coming up, and a cue fired from elsewhere waits for its own; unlocked, a GO
+goes and the launch is late by the load. A mic cue's and an aux's chain stay their rack channel's.
+
 #### Rack channels are slots *(added 2026-09-07)*
 
 The rack is a **pool of channels declared at load** — so many of each width

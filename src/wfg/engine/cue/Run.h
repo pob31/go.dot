@@ -356,6 +356,15 @@ namespace wfg::cue
     {
         int slot = 0;
         std::string fxId;
+
+        /*  WHICH PLUGIN (namespace draft §133, stage 4): the entry of the
+            set this insert names. A voice's place is no longer one plugin's
+            for good - `slot` is the insert's place in the cue's own chain -
+            so the voice is told which plugin to be lent a copy of. Empty for
+            a place the cue has nothing in, and on a rack channel, whose
+            slots are still its chain's. */
+        std::string pluginId;
+
         bool enabled = false;
         std::vector<std::pair<int, float>> values;
 
@@ -378,7 +387,7 @@ namespace wfg::cue
         bool sameAs (const FxSetting& other) const noexcept
         {
             if (slot != other.slot || enabled != other.enabled || fxId != other.fxId
-                 || stateFile != other.stateFile || values.size() != other.values.size()
+                 || pluginId != other.pluginId || stateFile != other.stateFile || values.size() != other.values.size()
                  || feed != other.feed || back != other.back)
                 return false;
 
@@ -389,6 +398,24 @@ namespace wfg::cue
                     return false;
 
             return true;
+        }
+    };
+
+    /*  A PLUGIN THE SHOW'S CUES PLAY THROUGH, for the audio side to have a
+        copy ready of (namespace draft §133, stage 4): an entry of the set by
+        its id, and what a child is made from. The runner sends the list when
+        it changes, those nearest the standby first (BGG). */
+    struct InsertKind
+    {
+        std::string pluginId;
+        std::string identifier;
+        std::string name;
+        std::string presetPath;
+
+        bool operator== (const InsertKind& other) const noexcept
+        {
+            return pluginId == other.pluginId && identifier == other.identifier
+                     && name == other.name && presetPath == other.presetPath;
         }
     };
 

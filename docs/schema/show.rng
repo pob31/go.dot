@@ -5177,6 +5177,15 @@
 
   <define name="Plugins">
     <element name="Plugins">
+      <optional>
+        <attribute name="chains">
+          <a:documentation>Whose order a media cue-s inserts sound in (namespace draft 133, stage 4). own: the order of the cue-s own Fx children, which is every show written since a cue-s chain became its own. set: a show written before, when the chain was the show-s plugin set in the set-s order on every cue - read once into that order, cue by cue, so it sounds as it did, and marked own from then on. Written by the engine, never by a hand: there is nothing to choose.</a:documentation>
+          <choice>
+            <value>set</value>
+            <value>own</value>
+          </choice>
+        </attribute>
+      </optional>
       <zeroOrMore>
         <ref name="Plugin"/>
       </zeroOrMore>

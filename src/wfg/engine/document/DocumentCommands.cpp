@@ -351,6 +351,16 @@ namespace wfg::doc
                             return fromEdit (document.removeFx (args[0].getString()), args);
                         } });
 
+        registry.add ({ "fx.move",
+                        "Puts a media cue's insert at another place in the cue's own chain, counted"
+                        " from nought; the others close up round it. The chain sounds in that order.",
+                        { { "fx", 's', false }, { "position", 'i', false } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            return fromEdit (document.moveFx (args[0].getString(), args[1].getInt32()), args);
+                        } });
+
         /*  A PLUGIN'S WHOLE STATE, KEPT WITH A CUE (the author's decision of
             2026-09-25). The editing helper has written the bytes into the
             bundle - a fact about the disk, like a media file copied in - and

@@ -395,6 +395,17 @@ namespace wfg
             cart may always go. The remedy is to make another list first. */
         inline constexpr const char* lastList        = "last-list";
 
+        /*  A NINTH INSERT ON ONE CUE (namespace draft §133, stage 4): a voice
+            carries eight insert places at most, and a cue's inserts fill
+            them one each. */
+        inline constexpr const char* chainFull       = "chain-full";
+
+        /*  IN SHOW MODE, A CUE WHOSE PLUGINS ARE STILL LOADING (namespace
+            draft §133, stage 5, BGI): a GO on a standby, or a fire of a cue,
+            that has an insert switched in whose plugin has not come up yet.
+            Refused, said, and nothing queued: the next press fires it. */
+        inline constexpr const char* pluginsLoading  = "plugins-loading";
+
         /*  THE STACK IS EMPTY, and that is not the same fact as the show being
             unedited: a `document.revert`, a `document.recover` or a bundle load
             clears the history without clearing the show, and an edit that wrote

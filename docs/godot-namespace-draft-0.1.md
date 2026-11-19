@@ -35775,9 +35775,101 @@ could hold; nothing of ours allocating through it all. The drivers that listen: 
 heard, the child killed mid-cue and back, a state per cue), `phase9b_width.py`, `phase9b_mic.py`,
 `phase9b_plugins.py`, `aux_served.py`.
 
-### 133.6 Owed
+### 133.6 As built: stage 4, the chain in the cue's own order, and no rebuild for a plugin
 
-The stages after these: the switch - K places a voice in place of one an entry, a cue's inserts lent in its
-own order, `fx.move`, no Load now for an add; a voice's copies given back when its run ends; the loader and
-the GO rule (BGG-BGI); the windows by insert, the Plugins tab, PRD §3.18 and the tester guides. On the Mac
-with Seventh Heaven: a show's memory before and after stage 3. The author's look at stage 1.
+Built 2026-11-18 and 19.
+
+Mine *(proposed)*, the author's to overrule:
+
+- **BGO** **Eight inserts a cue at most.** A voice carries insert places, built with the graph, and a cue's
+  inserts fill them one each in the cue's order. A served show builds **four** places a voice, or as many as
+  its longest chain, so its first plugins need nothing rebuilt; a cue given more inserts than a voice has
+  places is the one thing Load now is still for, and `plugin/changed` says so. A ninth is refused,
+  `chain-full`.
+- **BGP** **A plugin put on a cue goes last**, and `fx.create` appends as it always did: the order is the order
+  the cue was given them in until somebody moves one (`fx.move`).
+- **BGQ** **A show written before is read into the set's order, once**, cue by cue, and marked
+  (`<Plugins chains="own">`); a marked one keeps the order it was written with. A show such a build wrote
+  cannot be opened by an older build, as with every row added.
+- **BGR** **The plugins are made all at once, each in its own process**, when the graph is built and when one
+  is added - none waits for another, so *nearest the standby first* (BGG) is the order they are asked in
+  and nothing more. A queue that holds the far ones back is owed only if a show with many heavy plugins shows
+  them getting in each other's way.
+
+What changed:
+
+- **The document.** `cue::ownChainOf` is a media cue's chain: the entries its `Fx` children name, in their
+  order. `fx.move <fx> <position>`; `createFx` and `cue.plugin` refuse a ninth before anything is written;
+  `plugins/chains`, written by the engine alone; the reader's one-time sort.
+- **The runner.** `fxOf` gives a media cue a setting for each of eight places - its inserts in its order, each
+  naming its plugin (`FxSetting::pluginId`), the rest empty and sent all the same so a voice gives back what
+  another cue left there. `applyFx` re-asks the arm's work for a place another insert now stands in.
+  `prepareInserts` tells the audio side which plugins the show plays through whenever that changes, the
+  standby's cues' first, then down the show, then what is above.
+- **The audio side.** A voice's places are no plugin's for good: `snapTrackFx` is told the entry, and a place
+  holding a copy of another plugin gives it back and is lent the right one. `AudioHost::prepareInserts`: a
+  plugin the pool has no child for gets one at once; one it has is one more entry that child stands for
+  (`ProxyHost::alsoServe`); an entry no longer listed is forgotten, its child left for the next build. A cue
+  armed for a plugin the pool has not been told of waits, as for a copy.
+- **The tree.** `fx/index` and `media/fx` are the cue's own order for a media cue; `plugin/changed` is true for
+  a chain longer than the places built (and for the rack, as before), never for the set; an entry the audio
+  side has not been told of yet reads `loading` for the tick that takes, where it read *added since the audio
+  graph was built; Load now rebuilds it*.
+- **The window.** The strips are in the cue's order; `<` and `>` on a plugin's box move it earlier and later,
+  shown when the cue has more than one, with Remove's rules.
+
+| Address | Type | Access | Notes |
+|---|---|---|---|
+| `/godot/plugin/chains` | `s`, `set` (`set`, `own`) | rw, show | the engine's: whose order the cues' inserts sound in (BGQ) |
+
+`fx.move <fx> <position>` - a media cue's insert at another place of its own chain, counted from nought;
+`type-mismatch` for a mic cue's or an aux's, `bad-value` past the chain's end. `chain-full` from `fx.create`
+and `cue.plugin`.
+
+Tests: the arm carries eight settings, the cue's own first and each naming its plugin; an entry added since
+the graph was built is sent, one taken out of the set is not and what follows moves up (GoTests); `fx.move`
+both ways with one undo, its refusals, the ninth refused and nothing left of it, a show written before read
+into the set's order and marked, a marked one left alone (PluginSetTests); a plugin added since the build
+given a child with nothing rebuilt, the same plugin again one more entry of the child there, places taking
+any plugin in any order and giving back the wrong one, a cue waiting for a plugin not yet told of
+(ProxyTests); the strips in the cue's order and the arrows (ClientTests). `phase9b_plugins.py` says the new
+truth: an entry added mid-session comes up loaded with nothing rebuilt, and the set does not read changed.
+
+### 133.7 As built: stage 5, show mode waits for the standby's plugins
+
+Built 2026-11-19. BGH and BGI.
+
+- **Everything is loaded as the show opens and as a plugin is added** (BGR), locked or not, so engaging the
+  lock has nothing left to start: what it changes is the GO.
+- **Locked, a GO on a standby with an insert switched in whose plugin is still coming up is refused**,
+  `plugins-loading` - said under the transport as *GO ignored: the standby's plugins are still loading - press
+  again in a moment*, the pointer not moved, nothing queued - and so is a cue fired by a hand
+  (`cue.fire`, `cue.press`, a number, a trigger) for its own. The engine's own fires under a GO that was let
+  through are not held. An insert switched out is not waited for, nor a plugin that failed or is not on this
+  machine: it will not come, and the cue is silent through it in its own words. Unlocked, a GO goes and the
+  launch waits, late, as before.
+- **The rule reads the log, not the machine.** Which plugins are coming up is this machine's fact, so
+  `Runner::watchPlugins` says it in a record whenever it changes - `plugin.loading <ids>`, machine-local,
+  empty for none - and the GO's rule reads what that record's handler kept. A replay has no plugin and no
+  table and refuses what the session refused, as the audio outage's refusals are reproduced (§23).
+
+`plugin.loading <ids>` - the entries of the set whose plugin has not come up, space-separated; the engine's.
+
+Tests (GoTests): locked and the standby's plugin loading, the GO refused with the pointer where it was, and
+let through once its own is up though another cue's still loads; an insert switched out not waited for;
+unlocked, the GO goes; a cue fired by a hand in show mode refused for its own and a memo beside it fired.
+
+### 133.8 Owed
+
+- **A voice's copies given back when its run ends.** They are kept until the voice takes a cue without the
+  insert, so a plugin's copies can grow toward the voices that have used it; the runner frees a voice without
+  saying so today.
+- **How many are still loading, said in the window** before a GO is refused for it - a count under the
+  transport, and the mark on the cue's row.
+- **The plugin's own window by insert** (it is by entry, which is the same thing since each add makes its
+  entry, until a part is pasted), the Plugins tab without *Add to set*, PRD §3.18's full rewrite, the tester
+  guides.
+- **On the Mac**: Seventh Heaven and Oxford Envolution heard through the pool; a show's memory against the
+  3.9 GB of before; the cost of the idle insert places a voice now always carries (four a voice in a served
+  show, where a show with no plugin had none), in a Release build.
+- The author's look at stages 1 and 4 in the window.

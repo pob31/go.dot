@@ -36,6 +36,7 @@
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/DocumentCommands.h>
+#include <wfg/engine/cue/InsertChain.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/log/EventLog.h>
 #include <wfg/engine/plugin/PluginTable.h>
@@ -288,8 +289,14 @@ TEST_CASE ("plugin set: the four rows the machine fills read off the table, and 
     CHECK (table.statusOf ("NOPE0001").state == "unloaded");
 }
 
-TEST_CASE ("plugin set: an entry the graph was built without says what brings it in, and the set reads changed")
+TEST_CASE ("plugin set: an entry added since the graph was built is on its way with nothing rebuilt; a chain longer than a voice's places reads changed")
 {
+    /*  It read `unloaded`, *added since the audio graph was built; Load now
+        rebuilds it*, and the set read changed (2026-09-26). The set is not
+        the graph's shape any more (namespace draft 133, stage 4): the audio
+        side gives a plugin added since a child of its own. A voice's insert
+        PLACES are the graph's, and a cue with more inserts than a voice has
+        places is what Load now is still for. */
     Rig rig;
     plugin::PluginTable table;
     rig.parameters.setPlugins (&table);
@@ -308,19 +315,191 @@ TEST_CASE ("plugin set: an entry the graph was built without says what brings it
     REQUIRE (rig.apply ("plugin.create", entry ("Verb", "VST3-abcd1234-verb", "VST3", "")).applied == 1);
     const auto second = rig.lastApplied().at (4);
 
-    CHECK (rig.at ("/godot/plugin/changed") == "true");
-    CHECK (rig.at ("/godot/plugin/" + second + "/state") == "unloaded");
-    CHECK (rig.at ("/godot/plugin/" + second + "/problem").find ("Load now") != std::string::npos);
+    CHECK (rig.at ("/godot/plugin/changed") == "false");
+    CHECK (rig.at ("/godot/plugin/" + second + "/state") == "loading");
+    CHECK (rig.at ("/godot/plugin/" + second + "/problem") == "");
     CHECK (rig.at ("/godot/plugin/" + first + "/problem") == "");
 
-    //  Rebuilt with both: the same again.
+    //  The audio side has it: what its child says, from then on.
     table.setBuilt ({ first, second });
     CHECK (rig.at ("/godot/plugin/changed") == "false");
+    CHECK (rig.at ("/godot/plugin/" + second + "/state") == "unloaded");
     CHECK (rig.at ("/godot/plugin/" + second + "/problem") == "");
+
+    /*  TWO PLACES A VOICE, and a cue given a third insert: the graph is one
+        place short for it, which is the one thing left to rebuild for. */
+    table.setBuiltPlaces (2);
+    REQUIRE (rig.apply ("list.create", { osc::Value::string ("Main") }).applied == 1);
+    const auto listId = rig.lastApplied().back();
+    REQUIRE (rig.apply ("cue.create", { osc::Value::string (listId), osc::Value::int32 (0),
+                                        osc::Value::string ("media"), osc::Value::string ("Tone") }).applied == 1);
+    const auto cueId = rig.lastApplied().back();
+
+    REQUIRE (rig.apply ("fx.create", { osc::Value::string (cueId), osc::Value::string (first) }).applied == 1);
+    REQUIRE (rig.apply ("fx.create", { osc::Value::string (cueId), osc::Value::string (second) }).applied == 1);
+    CHECK (rig.at ("/godot/plugin/changed") == "false");
+
+    std::vector<osc::Value> third { osc::Value::string (cueId) };
+
+    for (auto& word : entry ("Third", "godot:test-gain", "VST3", ""))
+        third.push_back (word);
+
+    REQUIRE (rig.apply ("cue.plugin", third).applied == 1);
+    CHECK (rig.at ("/godot/plugin/changed") == "true");
+
+    table.setBuiltPlaces (4);
+    CHECK (rig.at ("/godot/plugin/changed") == "false");
 
     //  And no graph at all again - the host stopped - is no change either.
     table.clearBuilt();
     CHECK (rig.at ("/godot/plugin/changed") == "false");
+}
+
+TEST_CASE ("plugin set: a cue's inserts sound in the order of its own chain - moved by fx.move, eight at most, and a show written before read into the set's order once")
+{
+    /*  Namespace draft 133, stage 4. The chain's order was the set's, the
+        same on every cue (decision AE); it is the order of the cue's own Fx
+        children. */
+    Rig rig;
+
+    REQUIRE (rig.apply ("list.create", { osc::Value::string ("Main") }).applied == 1);
+    const auto listId = rig.lastApplied().back();
+    REQUIRE (rig.apply ("cue.create", { osc::Value::string (listId), osc::Value::int32 (0),
+                                        osc::Value::string ("media"), osc::Value::string ("Tone") }).applied == 1);
+    const auto cueId = rig.lastApplied().back();
+
+    const auto add = [&rig, &cueId] (const std::string& name)
+    {
+        std::vector<osc::Value> args { osc::Value::string (cueId) };
+
+        for (auto& word : entry (name.c_str(), "godot:test-gain", "VST3", ""))
+            args.push_back (word);
+
+        return rig.apply ("cue.plugin", args);
+    };
+
+    REQUIRE (add ("One").applied == 1);
+    const auto one = rig.lastApplied()[6];
+    REQUIRE (add ("Two").applied == 1);
+    const auto two = rig.lastApplied()[6];
+    REQUIRE (add ("Three").applied == 1);
+    const auto three = rig.lastApplied()[6];
+
+    const auto places = [&] { return rig.at ("/godot/fx/" + one + "/index") + rig.at ("/godot/fx/" + two + "/index")
+                                       + rig.at ("/godot/fx/" + three + "/index"); };
+
+    //  A show made now is marked as its cues' own from its first plugin.
+    CHECK (rig.at ("/godot/plugin/chains") == "own");
+    CHECK (places() == "012");
+    CHECK (rig.at ("/godot/cue/" + cueId + "/fx") == one + " " + two + " " + three);
+
+    SUBCASE ("fx.move puts one elsewhere and the others close up; one undo puts it back")
+    {
+        const auto setOrder = rig.at ("/godot/plugin/order");
+
+        REQUIRE (rig.apply ("fx.move", { osc::Value::string (three), osc::Value::int32 (0) }).applied == 1);
+        CHECK (places() == "120");
+        CHECK (rig.at ("/godot/cue/" + cueId + "/fx") == three + " " + one + " " + two);
+
+        REQUIRE (rig.apply ("fx.move", { osc::Value::string (three), osc::Value::int32 (2) }).applied == 1);
+        CHECK (places() == "012");
+
+        REQUIRE (rig.apply ("fx.move", { osc::Value::string (one), osc::Value::int32 (1) }).applied == 1);
+        CHECK (places() == "102");
+
+        //  The set's own order is nobody's business any more, and is not touched.
+        CHECK (rig.at ("/godot/plugin/order") == setOrder);
+
+        REQUIRE (rig.apply ("undo").applied == 1);
+        CHECK (places() == "012");
+
+        //  Where it is already: applied, and nothing moves.
+        CHECK (rig.apply ("fx.move", { osc::Value::string (two), osc::Value::int32 (1) }).applied == 1);
+        CHECK (places() == "012");
+    }
+
+    SUBCASE ("refused past the chain's end, for what is not a media cue's insert, and under the lock")
+    {
+        CHECK (rig.apply ("fx.move", { osc::Value::string (one), osc::Value::int32 (3) }).rejected == 1);
+        CHECK (rig.apply ("fx.move", { osc::Value::string (one), osc::Value::int32 (-1) }).rejected == 1);
+        CHECK (rig.apply ("fx.move", { osc::Value::string (cueId), osc::Value::int32 (0) }).rejected == 1);
+        CHECK (rig.apply ("fx.move", { osc::Value::string ("XX000000"), osc::Value::int32 (0) }).rejected == 1);
+
+        REQUIRE (rig.apply ("node.set", { osc::Value::string ("/godot/document/locked"),
+                                          osc::Value::boolean (true) }).applied == 1);
+        CHECK (rig.apply ("fx.move", { osc::Value::string (one), osc::Value::int32 (2) }).rejected == 1);
+        CHECK (places() == "012");
+    }
+
+    SUBCASE ("a ninth insert is refused chain-full: a voice has eight places")
+    {
+        for (int n = 4; n <= cue::insertPlacesAtMost; ++n)
+            REQUIRE (add ("More " + std::to_string (n)).applied == 1);
+
+        const auto entries = rig.at ("/godot/plugin/order");
+        CHECK (add ("One too many").rejected == 1);
+
+        //  And nothing is left behind of it: the entry made for it went with the refusal.
+        CHECK (rig.at ("/godot/plugin/order") == entries);
+    }
+}
+
+TEST_CASE ("plugin set: a show written before its cues' chains were their own is read into the set's order, once")
+{
+    /*  Namespace draft 133, stage 4. Such a show's inserts sat on a cue in
+        whatever order they were switched in and sounded in the SET'S order;
+        read, each cue's are put into that order, which is the order they
+        sound in from now on, and the show is marked. One marked keeps the
+        order it was written with. */
+    const auto show = [] (const char* mark, const char* first, const char* second)
+    {
+        return std::string ("<Show>\n"
+                            "  <Lists>\n"
+                            "    <List id=\"RD000001\" name=\"Main\">\n"
+                            "      <Media file=\"a.wav\" id=\"RD000002\" name=\"A\">\n"
+                            "        <Fx id=\"RD00001") + first + "\" plugin=\"RD00008" + first + "\"/>\n"
+               "        <Range id=\"RD000020\" in=\"0\" out=\"1\"/>\n"
+               "        <Fx id=\"RD00001" + second + "\" plugin=\"RD00008" + second + "\"/>\n"
+               "      </Media>\n"
+               "    </List>\n"
+               "  </Lists>\n"
+               "  <Mounts/>\n"
+               "  <Audio tracks=\"1\">\n"
+               "    <Plugins" + mark + ">\n"
+               "      <Plugin format=\"VST3\" id=\"RD000080\" identifier=\"VST3-gain\" name=\"Gain\"/>\n"
+               "      <Plugin format=\"VST3\" id=\"RD000081\" identifier=\"VST3-verb\" name=\"Verb\"/>\n"
+               "    </Plugins>\n"
+               "  </Audio>\n"
+               "</Show>\n";
+    };
+
+    const auto chainOf = [] (const std::string& text)
+    {
+        doc::ShowDocument document;
+        const auto result = doc::CanonicalXml::read (text, document);
+
+        for (const auto& problem : result.problems)
+            INFO (problem);
+
+        REQUIRE (result.ok);
+
+        std::string out;
+
+        for (const auto& id : cue::ownChainOf (document.findById ("RD000002")))
+            out += (out.empty() ? "" : " ") + id;
+
+        return out + " | " + document.root().getChildWithName ("Audio").getChildWithName ("Plugins")
+                               .getProperty ("chains").toString().toStdString();
+    };
+
+    //  Written before, the verb switched in first: read into the set's order, and marked.
+    CHECK (chainOf (show ("", "1", "0")) == "RD000080 RD000081 | own");
+
+    //  Already in the set's order: as it was.
+    CHECK (chainOf (show ("", "0", "1")) == "RD000080 RD000081 | own");
+
+    //  Marked its cues' own: the verb first is what somebody decided.
+    CHECK (chainOf (show (" chains=\"own\"", "1", "0")) == "RD000081 RD000080 | own");
 }
 
 TEST_CASE ("plugin set: a format word the show cannot store is refused bad-value, and makes nothing")

@@ -78,16 +78,27 @@ namespace wfg::cue
         return out;
     }
 
-    std::vector<std::string> slotIdsOf (const juce::ValueTree& plugins, const plugin::PluginTable* table)
+    std::vector<std::string> ownChainOf (const juce::ValueTree& mediaCue)
     {
-        if (table != nullptr && table->hasGraph())
-            return table->built();
+        std::vector<std::string> inSet;
+
+        for (const auto entry : mediaCue.getRoot().getChildWithName ("Audio").getChildWithName ("Plugins"))
+            if (entry.hasType ("Plugin"))
+                inSet.push_back (entry.getProperty ("id").toString().toStdString());
 
         std::vector<std::string> out;
 
-        for (const auto entry : plugins)
-            if (entry.hasType ("Plugin"))
-                out.push_back (entry.getProperty ("id").toString().toStdString());
+        for (const auto child : mediaCue)
+        {
+            if (! child.hasType ("Fx") || static_cast<int> (out.size()) >= insertPlacesAtMost)
+                continue;
+
+            const auto entryId = child.getProperty ("plugin").toString().toStdString();
+
+            if (std::find (inSet.begin(), inSet.end(), entryId) != inSet.end()
+                  && std::find (out.begin(), out.end(), entryId) == out.end())
+                out.push_back (entryId);
+        }
 
         return out;
     }
@@ -195,22 +206,13 @@ namespace wfg::cue
             return chainOf (sourceChannelsOf (cue), rackTrackChannels, switchedIn, shapesOf (slots, table));
         }
 
-        const auto plugins = cue.getRoot().getChildWithName ("Audio").getChildWithName ("Plugins");
-        const auto slots = slotIdsOf (plugins, table);
-
-        std::vector<std::string> inSet;
-
-        for (const auto entry : plugins)
-            if (entry.hasType ("Plugin"))
-                inSet.push_back (entry.getProperty ("id").toString().toStdString());
-
+        /*  A MEDIA CUE'S CHAIN IS ITS OWN (namespace draft §133, stage 4): its
+            inserts in the order of its Fx children, a step for each. */
+        const auto slots = ownChainOf (cue);
         std::vector<bool> switchedIn (slots.size(), false);
 
         for (std::size_t slot = 0; slot < slots.size(); ++slot)
         {
-            if (std::find (inSet.begin(), inSet.end(), slots[slot]) == inSet.end())
-                continue;
-
             for (const auto child : cue)
                 if (child.hasType ("Fx") && child.getProperty ("plugin").toString().toStdString() == slots[slot])
                 {

@@ -216,6 +216,10 @@ namespace wfg::client::gesture
         the Remove button of a plugin's box in the cue's chain. */
     Event removeFx (const std::string& fxId);
 
+    /*  An insert put earlier or later in its cue's own chain (namespace draft
+        133, stage 4): `fx.move`, from the arrows on a plugin's box. */
+    Event moveFx (const std::string& fxId, int position);
+
     /*  A plugin's whole state kept with a cue (author, 2026-09-25): the file
         its editing helper wrote under the bundle's plugins/, and every
         parameter's value, in one step. */

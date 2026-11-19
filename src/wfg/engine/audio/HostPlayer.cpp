@@ -70,7 +70,7 @@ namespace wfg::audio
 
     void HostPlayer::serviceArms()
     {
-        std::vector<std::variant<cue::ArmRequest, StateWanted, FxHeld>> work;
+        std::vector<std::variant<cue::ArmRequest, StateWanted, FxHeld, InsertsWanted>> work;
 
         {
             const std::lock_guard<std::mutex> lock { queueMutex };
@@ -86,10 +86,26 @@ namespace wfg::audio
                 if (auto* lane = audioHost.proxyLane (wanted->track, wanted->slot))
                     lane->wantState (wanted->path);
             }
+            else if (const auto* kinds = std::get_if<InsertsWanted> (&item))
+            {
+                std::vector<PluginSpec> entries;
+
+                for (const auto& kind : kinds->kinds)
+                {
+                    PluginSpec entry;
+                    entry.id = kind.pluginId;
+                    entry.identifier = kind.identifier;
+                    entry.name = kind.name;
+                    entry.presetPath = kind.presetPath;
+                    entries.push_back (std::move (entry));
+                }
+
+                audioHost.prepareInserts (entries);
+            }
             else if (const auto* held = std::get_if<FxHeld> (&item))
             {
                 audioHost.snapTrackFx (held->track, held->fx.slot, held->fx.enabled, held->fx.values,
-                                       held->fx.statePath, ! held->fx.fxId.empty());
+                                       held->fx.statePath, ! held->fx.fxId.empty(), held->fx.pluginId);
                 audioHost.setTrackFxShape (held->track, held->fx.slot, held->fx.feed, held->fx.back);
                 holdsQueued.fetch_sub (1, std::memory_order_release);
             }
@@ -188,7 +204,7 @@ namespace wfg::audio
         for (const auto& fx : request.fx)
         {
             audioHost.snapTrackFx (request.track, fx.slot, fx.enabled, fx.values, fx.statePath,
-                                   ! fx.fxId.empty());
+                                   ! fx.fxId.empty(), fx.pluginId);
             audioHost.setTrackFxShape (request.track, fx.slot, fx.feed, fx.back);
         }
 
@@ -626,6 +642,13 @@ namespace wfg::audio
         return (audioHost.isRackTrack (track) || audioHost.isTrackSourceReady (track))
                  && holdsQueued.load (std::memory_order_acquire) == 0
                  && audioHost.isTrackFxSettled (track);
+    }
+
+    void HostPlayer::prepareInserts (const std::vector<cue::InsertKind>& kinds)
+    {
+        //  The tick thread; in the one queue, so an arm asked after it finds its plugin known.
+        const std::lock_guard<std::mutex> lock { queueMutex };
+        queued.emplace_back (InsertsWanted { kinds });
     }
 
     void HostPlayer::holdFx (int track, const cue::FxSetting& fx)

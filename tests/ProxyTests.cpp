@@ -2335,6 +2335,141 @@ TEST_CASE ("M35: a cue's whole state loaded onto a voice - how long it takes, an
     }
 }
 
+TEST_CASE ("proxy: a plugin added since the graph was built is given a child with nothing rebuilt, and any place takes any plugin")
+{
+    /*  Namespace draft 133, stage 4. A voice's insert places are no plugin's
+        for good: a cue's inserts fill them in its own order, each naming the
+        entry it is lent a copy of. And the set is not the graph's shape: the
+        runner says which plugins the show plays through (`prepareInserts`),
+        one the pool has no child for gets one at once, one that is a plugin
+        it has is one more entry that child stands for. */
+    ScopedStorage storage;
+    audio::AudioHost host { storage.path() };
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 64;
+    settings.outputChannels = 2;
+    REQUIRE (host.start (settings));
+
+    plugin::PluginTable table;
+    audio::ProxyServices services;
+    services.table = &table;
+    services.launch = launchOfThisBinary();
+    host.setProxyServices (services);
+
+    //  Built with one plugin and four places a voice: a show's first plugins need no rebuild.
+    auto spec = specWithPlugins (2, 1);
+    spec.insertPlaces = 4;
+    REQUIRE (host.buildEdit (spec));
+    CHECK (host.insertPlaces() == 4);
+    CHECK (table.builtPlaces() == 4);
+    CHECK (host.proxyCount() == 1);
+    REQUIRE (host.proxy (0) != nullptr);
+    CHECK (host.proxy (1) == nullptr);
+
+    for (int slot = 0; slot < 4; ++slot)
+        CHECK (host.proxyLane (0, slot) != nullptr);
+
+    CHECK (host.proxyLane (0, 4) == nullptr);
+
+    const auto poll = [&host] (auto done, int milliseconds = 10000)
+    {
+        const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds (milliseconds);
+
+        while (std::chrono::steady_clock::now() < end)
+        {
+            host.pollProxies();
+
+            if (done())
+                return true;
+
+            std::this_thread::sleep_for (std::chrono::milliseconds (10));
+        }
+
+        return done();
+    };
+
+    REQUIRE (poll ([&] { return table.statusOf ("PG7N0001").state == "loaded"; }));
+
+    const auto entryOf = [] (const std::string& id, const std::string& preset)
+    {
+        audio::PluginSpec entry;
+        entry.id = id;
+        entry.identifier = plugin::Catalogue::testGainIdentifier();
+        entry.name = "Test gain " + id;
+        entry.presetPath = preset;
+        return entry;
+    };
+
+    /*  THE SAME PLUGIN ON ANOTHER CUE, and another kind - told apart here by
+        a preset: the first is one more entry the child that is there stands
+        for, the second gets a child of its own, now. */
+    host.prepareInserts ({ entryOf ("PG7N0001", {}), entryOf ("PG7N0002", {}), entryOf ("PG7N0003", "other.preset") });
+
+    CHECK (host.proxyOfEntry ("PG7N0002") == host.proxy (0));
+    CHECK (host.proxy (0)->serves ("PG7N0002"));
+    REQUIRE (host.proxy (1) != nullptr);
+    CHECK (host.proxyOfEntry ("PG7N0003") == host.proxy (1));
+    CHECK (host.pooledCopies (std::string ("PG7N0003")) == 2);
+    CHECK (table.built() == std::vector<std::string> { "PG7N0001", "PG7N0002", "PG7N0003" });
+
+    //  Said again, nothing more is made.
+    host.prepareInserts ({ entryOf ("PG7N0001", {}), entryOf ("PG7N0002", {}), entryOf ("PG7N0003", "other.preset") });
+    CHECK (host.proxy (2) == nullptr);
+
+    REQUIRE (poll ([&] { return table.statusOf ("PG7N0002").state == "loaded"
+                                  && table.statusOf ("PG7N0003").state == "loaded"; }));
+
+    /*  A CUE WHOSE CHAIN IS THE THIRD THEN THE FIRST: the places take them in
+        that order, each a copy of its own plugin. */
+    host.snapTrackFx (0, 0, true, {}, {}, true, "PG7N0003");
+    host.snapTrackFx (0, 1, true, {}, {}, true, "PG7N0001");
+    CHECK (host.pooledCopiesLent (std::string ("PG7N0003")) == 1);
+    CHECK (host.pooledCopiesLent (std::string ("PG7N0001")) == 1);
+    auto* const third = host.trackInsertTarget (0, 0);
+    auto* const first = host.trackInsertTarget (0, 1);
+    REQUIRE (third != nullptr);
+    REQUIRE (first != nullptr);
+    CHECK (third != first);
+
+    /*  THE NEXT CUE ON THAT VOICE has them the other way round: each place
+        gives back the copy of the wrong plugin and is lent one of the right. */
+    host.snapTrackFx (0, 0, true, {}, {}, true, "PG7N0001");
+    host.snapTrackFx (0, 1, true, {}, {}, true, "PG7N0003");
+    CHECK (poll ([&] { return host.isTrackFxSettled (0); }));
+    CHECK (host.pooledCopiesLent (std::string ("PG7N0003")) == 1);
+    CHECK (host.pooledCopiesLent (std::string ("PG7N0001")) == 1);
+    REQUIRE (host.trackInsertTarget (0, 0) != nullptr);
+    CHECK (host.trackInsertTarget (0, 0) != third);
+    CHECK (host.trackInsertTarget (0, 0) != first);
+    CHECK (host.trackInsertTarget (0, 0)->isEnabled());
+    REQUIRE (host.trackInsertTarget (0, 1) != nullptr);
+    CHECK (host.trackInsertTarget (0, 1) != first);
+
+    /*  A PLUGIN THE POOL HAS NOT BEEN TOLD OF waits - not ready, never dry -
+        and is lent its copy once it has. */
+    host.snapTrackFx (1, 0, true, {}, {}, true, "PG7N0009");
+    CHECK_FALSE (host.isTrackFxSettled (1));
+    REQUIRE (host.trackInsertTarget (1, 0) != nullptr);
+    CHECK (host.trackInsertTarget (1, 0)->isEnabled());
+
+    host.prepareInserts ({ entryOf ("PG7N0001", {}), entryOf ("PG7N0002", {}), entryOf ("PG7N0003", "other.preset"),
+                           entryOf ("PG7N0009", {}) });
+    CHECK (poll ([&] { return host.isTrackFxSettled (1); }));
+    CHECK (host.pooledCopiesLent (std::string ("PG7N0009")) == 2);       // the first plugin's kind: two voices hold one
+
+    rt::resetCounts();
+
+    for (int i = 0; i < 50; ++i)
+        host.processBlock();
+
+    if (rt::isCounting())
+        CHECK (rt::violations() == 0);
+
+    host.stop();
+}
+
 TEST_CASE ("block fence: what was taken away is free once the block that could be in it has ended")
 {
     /*  Namespace draft 133, stage 2. A voice's insert place is pointed at

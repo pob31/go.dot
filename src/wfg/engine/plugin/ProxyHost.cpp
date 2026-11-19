@@ -663,6 +663,15 @@ namespace wfg::plugin
         return id == impl->spec.pluginId
                  || std::find (impl->spec.alsoIds.begin(), impl->spec.alsoIds.end(), id) != impl->spec.alsoIds.end();
     }
+    void ProxyHost::alsoServe (const std::string& id)
+    {
+        if (id.empty() || serves (id))
+            return;
+
+        impl->spec.alsoIds.push_back (id);
+        impl->publish();
+    }
+
     PluginTable::Status ProxyHost::status() const               { return impl->statusNow(); }
     std::string ProxyHost::regionPath() const                   { return impl->regionFile.getFullPathName().toStdString(); }
     bool ProxyHost::childIsRunning() const                      { return impl->child != nullptr && impl->child->isRunning(); }

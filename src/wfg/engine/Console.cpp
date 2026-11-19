@@ -33,6 +33,7 @@
 #include <wfg/engine/net/SscV2.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/cue/AutoName.h>
+#include <wfg/engine/cue/InsertChain.h>
 #include <wfg/engine/cue/DcaTable.h>
 #include <wfg/engine/cue/PictureSpec.h>
 #include <wfg/engine/cue/LiveEdits.h>
@@ -2969,6 +2970,10 @@ namespace
         /** The show's plugin set, in document order (Phase 9a). */
         std::vector<wfg::audio::PluginSpec> plugins;
 
+        /*  HOW MANY INSERT PLACES A VOICE GETS (namespace draft 133, stage 4):
+            four, or as many as the show's longest chain, eight at most. */
+        int insertPlaces = 4;
+
         /*  The live rack's channels, each with its own chain, in document
             order (Phase 9b): a track each, after the voices. */
         std::vector<wfg::audio::RackChannelSpec> rack;
@@ -3402,6 +3407,28 @@ namespace
                         shape.plugins.push_back (std::move (plugin));
                     }
 
+        /*  THE LONGEST CHAIN A CUE HAS (namespace draft 133, stage 4): a voice
+            is built with that many insert places - four at least, so a show
+            takes its first plugins with no graph rebuilt, and eight at most,
+            which is as many as a cue may have. */
+        {
+            auto longest = 0;
+
+            const auto walk = [&longest] (const juce::ValueTree& at, auto&& recurse) -> void
+            {
+                for (const auto child : at)
+                {
+                    if (child.hasType ("Media"))
+                        longest = std::max (longest, static_cast<int> (wfg::cue::ownChainOf (child).size()));
+
+                    recurse (child, recurse);
+                }
+            };
+
+            walk (document.root().getChildWithName ("Lists"), walk);
+            shape.insertPlaces = std::clamp (longest, 4, wfg::cue::insertPlacesAtMost);
+        }
+
         if (shape.tracks > 0 && shape.outputs <= 0)
         {
             shape.problem = "the show has audio tracks and no buses, so there is"
@@ -3433,6 +3460,7 @@ namespace
         spec.channelsPerTrack = shape.channelsPerTrack;
         spec.slots = shape.slots;
         spec.plugins = shape.plugins;
+        spec.insertPlaces = shape.insertPlaces;
         spec.rack = shape.rack;
         spec.proxyDeadlineMicroseconds = proxyDeadlineMicroseconds;
 

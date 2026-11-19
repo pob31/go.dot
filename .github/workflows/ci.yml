@@ -615,7 +615,12 @@ jobs:
   rtsan:
     name: real-time safety (Linux, Clang 20)
     needs: pins
-    runs-on: ubuntu-latest
+    # NOT ubuntu-latest: it became 26.04 on 2026-11-18, for which apt.llvm.org
+    # has no Clang 20 (`resolute llvm-toolchain-resolute-20 Release`: 404), and
+    # the job failed at its install step on every push from then on - so the
+    # gate heard nothing. 24.04 is the release the pinned compiler exists for,
+    # and the one the farm's own sanitizer build runs on. Move both together.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v5
         with:

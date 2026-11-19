@@ -231,6 +231,18 @@ namespace wfg::client::model
         if (fields[4] == "go" && fields[3] == "too-soon")
             return "GO ignored: too soon after the last one (Show settings > Playback)";
 
+        /*  IN SHOW MODE, A CUE WHOSE PLUGINS ARE STILL COMING UP (namespace
+            draft 133, stage 5, BGI): the GO, or a fire of the cue by a hand.
+            Said in words for too-soon's reason - and that pressing again is
+            what there is to do. */
+        if (fields[3] == "plugins-loading")
+            return fields[4] == "go" ? "GO ignored: the standby's plugins are still loading - press again in a moment"
+                                     : "Not fired: that cue's plugins are still loading - press again in a moment";
+
+        /*  A NINTH INSERT (stage 4): a cue has eight places and no more. */
+        if (fields[3] == "chain-full")
+            return "Not added: a cue takes eight plugins at most";
+
         /*  DOH!'S REFUSALS IN WORDS (PRD §3.32, 2026-10-01), each naming
             what to do about it: the window and the debounce are Playback
             settings, and "trigger-after-go" is the author's own sentence. A

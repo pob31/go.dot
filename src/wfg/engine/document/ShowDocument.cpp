@@ -19,6 +19,7 @@
 #include <wfg/engine/cue/AutoName.h>
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/GroupMode.h>
+#include <wfg/engine/cue/InsertChain.h>
 #include <wfg/engine/cue/KeyChord.h>
 #include <wfg/engine/cue/Override.h>
 #include <wfg/engine/cue/TriggerIndex.h>
@@ -3403,13 +3404,61 @@ namespace wfg::doc
         /*  ONE FX PER ENTRY PER CUE, for createSend's reason: the entry is on
             the voice once, and two children switching it in would be two
             sets of values for one instance. */
+        auto inserts = 0;
+
         for (const auto& child : cue)
-            if (child.hasType ("Fx")
-                 && child.getProperty ("plugin").toString().toStdString() == pluginId)
+        {
+            if (! child.hasType ("Fx"))
+                continue;
+
+            if (child.getProperty ("plugin").toString().toStdString() == pluginId)
                 return EditResult::failed (reason::badValue);
+
+            ++inserts;
+        }
+
+        /*  EIGHT ON A MEDIA CUE AT MOST (namespace draft §133, stage 4): a
+            voice has that many insert places and no more, and an insert the
+            voice has no place for would be on the cue and never heard. */
+        if (cue.hasType ("Media") && inserts >= cue::insertPlacesAtMost)
+            return EditResult::failed (reason::chainFull);
 
         return insertObject (cue, endOfSequence, "Fx", id,
                              { { "plugin", pluginId } });
+    }
+
+    EditResult ShowDocument::moveFx (const std::string& fxId, int position)
+    {
+        if (auto refusal = refuseIfLocked())
+            return *refusal;
+
+        const auto fx = findById (fxId);
+
+        if (! fx.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        auto cue = fx.getParent();
+
+        //  A mic cue's and an aux's chain is their channel's, in the channel's order.
+        if (! fx.hasType ("Fx") || ! cue.hasType ("Media"))
+            return EditResult::failed (reason::typeMismatch);
+
+        std::vector<int> places;
+
+        for (int i = 0; i < cue.getNumChildren(); ++i)
+            if (cue.getChild (i).hasType ("Fx"))
+                places.push_back (i);
+
+        if (position < 0 || position >= static_cast<int> (places.size()))
+            return EditResult::failed (reason::badValue);
+
+        const auto from = cue.indexOf (fx);
+        const auto to = places[static_cast<std::size_t> (position)];
+
+        if (from != to)
+            cue.moveChild (from, to, structuralHistory());
+
+        return EditResult::succeeded (fxId);
     }
 
     EditResult ShowDocument::removeFx (const std::string& fxId)
@@ -5950,7 +5999,11 @@ namespace wfg::doc
                 if (audio.getChild (i).hasType ("Bus") || audio.getChild (i).hasType ("Inputs"))
                     at = i + 1;
 
+            /*  A CUE'S CHAIN IS ITS OWN from the first plugin of a show made
+                now (namespace draft §133, stage 4); a show written before is
+                marked as it is read (CanonicalXml). */
             plugins = juce::ValueTree ("Plugins");
+            plugins.setProperty ("chains", "own", nullptr);
             audio.addChild (plugins, at, nullptr);
         }
 
@@ -6016,6 +6069,19 @@ namespace wfg::doc
 
         if (cue.hasType ("Mic") && channelId.empty())
             return EditResult::failed (reason::badValue);
+
+        //  And a media cue with its eight inserts takes no ninth (namespace draft 133, stage 4).
+        if (cue.hasType ("Media"))
+        {
+            auto inserts = 0;
+
+            for (const auto& child : cue)
+                if (child.hasType ("Fx"))
+                    ++inserts;
+
+            if (inserts >= cue::insertPlacesAtMost)
+                return EditResult::failed (reason::chainFull);
+        }
 
         const auto entry = cue.hasType ("Media")
                              ? createPlugin (name, identifier, format, path, pluginId)

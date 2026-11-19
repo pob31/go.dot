@@ -184,6 +184,12 @@ namespace wfg::plugin
             others it serves (Phase 9b). */
         bool serves (const std::string& id) const noexcept;
 
+        /*  ONE MORE ENTRY THIS CHILD STANDS FOR (namespace draft §133, stage
+            4): a plugin added on another cue is another entry of the set and
+            the same plugin, played through the child that is already there.
+            Written the state at once. Message thread. */
+        void alsoServe (const std::string& id);
+
         /** What the table holds for this entry. */
         PluginTable::Status status() const;
 

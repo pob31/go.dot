@@ -572,6 +572,14 @@ namespace wfg::cue
             The tick thread; nothing by default. */
         virtual void holdFx (int, const FxSetting&) {}
 
+        /*  THE PLUGINS THE SHOW PLAYS THROUGH (namespace draft §133, stage 4,
+            BGG): every entry of the set, those the cues nearest the standby
+            use first. The audio side makes a child for any it has none for -
+            in the background, so a plugin added on a cue needs no rebuilt
+            graph - and forgets the entries no longer listed. The tick thread,
+            when the list changes; nothing by default. */
+        virtual void prepareInserts (const std::vector<InsertKind>&) {}
+
         /*  Whether that track's cue is sounding, out of any of its slots.
             Tick thread. Track-wide for the reason `stop` is: the question is
             about the cue. */
@@ -2476,6 +2484,34 @@ namespace wfg::cue
             the runs whose twenty-three rows differ from what the voice holds. */
         void applyEq();
         void applyFx();
+
+        /*  THE PLUGINS THE SHOW PLAYS THROUGH, told to the audio side when
+            they change, nearest the standby first (namespace draft §133,
+            stage 4): the tick thread, with applyFx. */
+        void prepareInserts();
+        std::vector<InsertKind> insertsSent;
+        std::uint64_t insertsRevision = ~std::uint64_t { 0 };
+
+    public:
+        /*  WHICH PLUGINS ARE STILL COMING UP (namespace draft §133, stage 5,
+            BGI). A fact about this machine, and so not read where a GO is
+            judged: `watchPlugins` says it in a record of the log whenever it
+            changes (`plugin.loading`, the entries by id), the record's handler
+            keeps it here, and the GO's rule reads only this - so a replay,
+            which has no plugin and no table, refuses what the session
+            refused, from the log alone. */
+        void setPluginsLoading (const std::string& stillLoading);
+
+        /*  Whether that cue - or what it starts first, as the standby arms it -
+            has an insert switched in whose plugin is still loading. */
+        bool waitsForPlugins (const juce::ValueTree& cue) const;
+
+    private:
+        void watchPlugins (Engine& engine);
+        std::set<std::string> pluginsLoading;
+        std::string loadingSaid;
+        std::uint64_t loadingRevision = ~std::uint64_t { 0 };
+        std::uint64_t loadingShowRevision = ~std::uint64_t { 0 };
 
         /*  What arming the standby means when the pointer is on a GROUP.
 

@@ -551,6 +551,65 @@ namespace wfg::doc
                       && osc::parseDouble (node["startOffset"].toString().toStdString()).value_or (0.0) > 0.0)
                     node.removeProperty ("startOffset", nullptr);
 
+                /*  A CUE'S CHAIN WAS THE SHOW'S SET, IN THE SET'S ORDER (decision
+                    AE), until a cue's chain became its own and sounds in the
+                    order of its Fx children (namespace draft §133, stage 4).
+                    A show written before is put into the order it sounded in,
+                    cue by cue, once, and marked; one marked is left alone. */
+                if (node.hasType ("Show"))
+                    if (auto plugins = node.getChildWithName ("Audio").getChildWithName ("Plugins");
+                        plugins.isValid() && plugins["chains"].toString() != "own")
+                    {
+                        std::vector<juce::String> set;
+
+                        for (const auto entry : plugins)
+                            if (entry.hasType ("Plugin"))
+                                set.push_back (entry["id"].toString());
+
+                        const auto placeOf = [&set] (const juce::ValueTree& fx)
+                        {
+                            const auto at = std::find (set.begin(), set.end(), fx["plugin"].toString());
+                            return static_cast<int> (at - set.begin());
+                        };
+
+                        const auto sortChains = [&placeOf] (juce::ValueTree at, auto&& recurse) -> void
+                        {
+                            for (auto child : at)
+                                recurse (child, recurse);
+
+                            if (! at.hasType ("Media"))
+                                return;
+
+                            //  One at a time, each to the last place an insert before it holds: stable, and small.
+                            for (;;)
+                            {
+                                auto moved = false;
+                                auto last = -1;
+
+                                for (int i = 0; i < at.getNumChildren(); ++i)
+                                {
+                                    if (! at.getChild (i).hasType ("Fx"))
+                                        continue;
+
+                                    if (last >= 0 && placeOf (at.getChild (i)) < placeOf (at.getChild (last)))
+                                    {
+                                        at.moveChild (i, last, nullptr);
+                                        moved = true;
+                                        break;
+                                    }
+
+                                    last = i;
+                                }
+
+                                if (! moved)
+                                    break;
+                            }
+                        };
+
+                        sortChains (node.getChildWithName ("Lists"), sortChains);
+                        plugins.setProperty ("chains", "own", nullptr);
+                    }
+
                 return node;
             }
 

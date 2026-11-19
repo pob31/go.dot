@@ -179,6 +179,30 @@ namespace wfg::client::ui
                         owner.actions.removeFx (strip.fxId);
                 };
                 addChildComponent (remove);
+
+                /*  EARLIER AND LATER IN THIS CUE'S OWN CHAIN (namespace draft
+                    133, stage 4): the order the cue sounds through them. */
+                earlier.setButtonText ("<");
+                later.setButtonText (">");
+
+                for (auto* arrow : { &earlier, &later })
+                {
+                    arrow->setWantsKeyboardFocus (false);
+                    addChildComponent (*arrow);
+                }
+
+                earlier.onClick = [this]
+                {
+                    if (owner.actions.moveFx && owner.offersRemove() && strip.present() && strip.index > 0)
+                        owner.actions.moveFx (strip.fxId, strip.index - 1);
+                };
+
+                later.onClick = [this]
+                {
+                    if (owner.actions.moveFx && owner.offersRemove() && strip.present()
+                          && strip.index + 1 < owner.ownInserts())
+                        owner.actions.moveFx (strip.fxId, strip.index + 1);
+                };
             }
         }
 
@@ -231,6 +255,17 @@ namespace wfg::client::ui
                 door.setTooltip (isIn() ? "Open " + juce::String (strip.name) + "'s own window for this cue"
                                         : "Switch " + juce::String (strip.name) + " in on this cue and open its own window");
 
+                const auto movable = owner.offersRemove() && strip.present() && owner.ownInserts() > 1;
+
+                earlier.setVisible (movable);
+                later.setVisible (movable);
+                earlier.setEnabled (strip.index > 0);
+                later.setEnabled (strip.index + 1 < owner.ownInserts());
+                earlier.setTooltip ("Earlier in this cue's chain: the sound goes through " + juce::String (strip.name)
+                                    + " before the plugin now ahead of it");
+                later.setTooltip ("Later in this cue's chain: the sound goes through " + juce::String (strip.name)
+                                  + " after the plugin now behind it");
+
                 remove.setVisible (owner.offersRemove() && strip.present());
                 remove.setTooltip ("Take " + juce::String (strip.name) + " off this cue, with what was set on it."
                                    " No other cue is touched; Undo brings it back.");
@@ -268,7 +303,11 @@ namespace wfg::client::ui
                 load.setBounds (area.removeFromBottom (owner.scaled (24)).withWidth (owner.scaled (90)));
                 return;
             }
-            inSwitch.setBounds (area.removeFromTop (owner.scaled (22)).withWidth (owner.scaled (70)));
+            auto head = area.removeFromTop (owner.scaled (22));
+            inSwitch.setBounds (head.removeFromLeft (owner.scaled (70)));
+            later.setBounds (head.removeFromRight (owner.scaled (26)));
+            head.removeFromRight (owner.scaled (4));
+            earlier.setBounds (head.removeFromRight (owner.scaled (26)));
 
             auto foot = area.removeFromBottom (owner.scaled (24));
             door.setBounds (foot.removeFromLeft (owner.scaled (90)));
@@ -422,6 +461,7 @@ namespace wfg::client::ui
         juce::TextButton door;
         juce::TextButton load;      // the add box's Load now (§105)
         juce::TextButton remove;    // a plugin's, on a media cue: off this cue (§133)
+        juce::TextButton earlier, later;    // and its place in the cue's own chain (stage 4)
     };
 
     //==============================================================================

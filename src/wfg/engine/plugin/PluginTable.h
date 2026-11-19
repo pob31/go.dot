@@ -174,6 +174,28 @@ namespace wfg::plugin
             return graphBuilt;
         }
 
+        /*  HOW MANY INSERT PLACES A VOICE WAS BUILT WITH (namespace draft
+            §133, stage 4). The entries are no longer the graph's shape - a
+            plugin added since is given a child without a rebuild - but the
+            places are, and a cue with more inserts than a voice has places
+            is what Load now is still for. Nought with no graph. */
+        void setBuiltPlaces (int places)
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+
+            if (places == placesBuilt)
+                return;
+
+            placesBuilt = places;
+            ++revisionCount;
+        }
+
+        int builtPlaces() const
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+            return graphBuilt ? placesBuilt : 0;
+        }
+
         /** The entry's slot in the graph, or -1 for one the graph was built without. */
         int builtSlotOf (const std::string& pluginId) const
         {
@@ -266,5 +288,6 @@ namespace wfg::plugin
         std::map<std::string, std::vector<std::string>> builtRack;
         std::map<std::string, BuiltTake> builtTakes;
         bool graphBuilt = false;
+        int placesBuilt = 0;
     };
 }
