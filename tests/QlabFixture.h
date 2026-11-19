@@ -229,9 +229,14 @@ namespace wfg::test::qlab
                                   double from, double to, double duration, int shapeType = 3)
         {
             const auto up = shape (shapeType, 1.0);
-            const auto fadeObject = major >= 5
-                ? cues.object ("Fade", { { "shapes", Value::uid (cues.object ("FadeShapesFunction", { { "upShape", Value::uid (up) } })) } })
-                : cues.object ("Fade", { { "upShape", Value::uid (up) } });
+            /*  if/else, not ?: - GCC 15 reads the braced lists in a conditional's
+                arms as temporaries left dangling (-Wdangling-pointer). */
+            std::int64_t fadeObject = 0;
+
+            if (major >= 5)
+                fadeObject = cues.object ("Fade", { { "shapes", Value::uid (cues.object ("FadeShapesFunction", { { "upShape", Value::uid (up) } })) } });
+            else
+                fadeObject = cues.object ("Fade", { { "upShape", Value::uid (up) } });
 
             return network (name, message, patch, { { "fadeType", Value::integer (1) },
                                                     { "startValue", Value::number (from) },

@@ -613,14 +613,16 @@ jobs:
   # anticipates exactly this - and what it reports belongs in the PR, not in a
   # suppression. Nothing of Go.dot's may ever be added to the suppression list.
   rtsan:
-    name: real-time safety (Linux, Clang 20)
+    name: real-time safety (Linux, Clang 21)
     needs: pins
-    # NOT ubuntu-latest: it became 26.04 on 2026-11-18, for which apt.llvm.org
-    # has no Clang 20 (`resolute llvm-toolchain-resolute-20 Release`: 404), and
-    # the job failed at its install step on every push from then on - so the
-    # gate heard nothing. 24.04 is the release the pinned compiler exists for,
-    # and the one the farm's own sanitizer build runs on. Move both together.
-    runs-on: ubuntu-24.04
+    # CLANG 21 SINCE 2026-11-19 (the author: "let's move to Clang 21"). The
+    # runner image ubuntu-latest became 26.04 on 2026-11-18, for which
+    # apt.llvm.org has no Clang 20 (`resolute llvm-toolchain-resolute-20
+    # Release`: 404) but has 21, 22 and 23; 21 is also 26.04's own default
+    # LLVM. The job sat on ubuntu-24.04 for a day to keep 20. Clang on 26.04
+    # compiles against GCC 15's libstdc++, which is what Tracktion patch 0003
+    # (AudioClipPlayhead's state) is for.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
         with:
@@ -633,17 +635,17 @@ jobs:
       - name: Install build deps
         run: bash scripts/install-linux-deps.sh
 
-      - name: Install Clang 20
+      - name: Install Clang 21
         # apt.llvm.org's own installer, because -fsanitize=realtime does not
-        # exist before Clang 20 and Ubuntu's archive is several releases behind.
-        # Pinned to 20 rather than "latest": a sanitizer that changes what it
+        # exist before Clang 20 and the image ships no Clang at all.
+        # Pinned to 21 rather than "latest": a sanitizer that changes what it
         # reports between runs is a gate nobody can act on.
         run: |
           set -euo pipefail
           wget -qO llvm.sh https://apt.llvm.org/llvm.sh
           chmod +x llvm.sh
-          sudo ./llvm.sh 20
-          clang-20 --version
+          sudo ./llvm.sh 21
+          clang-21 --version
 
       - name: Install the French locale
         # The unit suite runs twice, and the second run needs this. TestMain.cpp
@@ -654,13 +656,13 @@ jobs:
 
       - name: Configure (rtsan)
         # The compilers are named explicitly rather than left to the preset's
-        # bare `clang`: llvm.sh installs `clang-20` and does not necessarily
+        # bare `clang`: llvm.sh installs `clang-21` and does not necessarily
         # leave an unversioned symlink behind, and a preset that silently found
         # the system Clang 18 would configure, build, and check nothing.
         run: >
           cmake --preset rtsan
-          -DCMAKE_C_COMPILER=clang-20
-          -DCMAKE_CXX_COMPILER=clang++-20
+          -DCMAKE_C_COMPILER=clang-21
+          -DCMAKE_CXX_COMPILER=clang++-21
 
       - name: Build (Debug)
         run: cmake --build --preset rtsan-debug

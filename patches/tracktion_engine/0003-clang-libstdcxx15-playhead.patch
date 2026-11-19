@@ -1,0 +1,34 @@
+Go.dot patch 0003 for Tracktion Engine: AudioClipPlayhead's state initialised.
+
+Clang with GCC 15's libstdc++ (Ubuntu 26.04, or the NUC with g++-15) does not
+compile Tracktion: libstdc++ 15 constrains std::atomic<T>'s default constructor
+on T being default-constructible, and AudioClipPlayhead::State - a nested class
+with default member initialisers - is not, to Clang, until AudioClipPlayhead is
+complete; make_shared<AudioClipPlayhead>() in AudioClipBase then has no
+constructor to call. GCC itself and libc++ (macOS) accept it. Initialising the
+member asks for State's constructor, not atomic's, and changes nothing else.
+Upstreamable as it stands; drop it when Tracktion carries the same. The line
+carries a notice that Go.dot modified it (GPL-3, section 5(a)).
+
+Applied by Go.dot's build, cmake/WfgSubmodulePatches.cmake, in the order
+patches/tracktion_engine/series gives; refreshed from the working tree with
+scripts/patches.py tracktion_engine refresh, which keeps this header. Against
+Tracktion Engine a5e44996f5f0.
+
+diff --git a/modules/tracktion_engine/model/clips/tracktion_AudioClipBase.h b/modules/tracktion_engine/model/clips/tracktion_AudioClipBase.h
+index 45733adbab4..e4230323776 100644
+--- a/modules/tracktion_engine/model/clips/tracktion_AudioClipBase.h
++++ b/modules/tracktion_engine/model/clips/tracktion_AudioClipBase.h
+@@ -52,7 +52,11 @@ private:
+         uint32_t lastUpdateMs = 0;
+     };
+ 
+-    std::atomic<State> state;
++    // Go.dot modified this line, 2026-11-19, patch 0003-clang-libstdcxx15-playhead:
++    // initialised, so std::atomic's default constructor (constrained on State
++    // being default-constructible, which a nested class with member
++    // initialisers is not until the enclosing class is complete) is not needed.
++    std::atomic<State> state { State {} };
+ };
+ 
+ //==============================================================================
