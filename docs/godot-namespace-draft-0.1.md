@@ -35869,7 +35869,12 @@ unlocked, the GO goes; a cue fired by a hand in show mode refused for its own an
 - **The plugin's own window by insert** (it is by entry, which is the same thing since each add makes its
   entry, until a part is pasted), the Plugins tab without *Add to set*, PRD §3.18's full rewrite, the tester
   guides.
-- **On the Mac**: Seventh Heaven and Oxford Envolution heard through the pool; a show's memory against the
-  3.9 GB of before; the cost of the idle insert places a voice now always carries (four a voice in a served
-  show, where a show with no plugin had none), in a Release build.
+- **On the Mac**: Seventh Heaven and Oxford Envolution *heard* through the pool, by the author; the cost of
+  the idle insert places a voice now always carries (four a voice in a served show, where a show with no
+  plugin had none), in a Release build.
+
+Measured 2026-11-19 on the Mac mini, Release, `m34_set_load.py` with sixteen voices and the Mac's own scan:
+one insert of Seventh Heaven is one child of **636 MB**, loaded 2.0 s after the ports, where sixteen copies
+were 3861 MB (spike 08); three inserts of it are still one child, 613 MB, loaded in 2.4 s, where they were
+three children of that size. Oxford Envolution the same shape, loaded in 1.5 s.
 - The author's look at stages 1 and 4 in the window.
