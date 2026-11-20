@@ -26,17 +26,30 @@
 
 namespace wfg::plugin
 {
-    std::int64_t proxyDeadlineFor (int sampleRate, int blockSize, std::int64_t requestedMicroseconds) noexcept
+    std::int64_t proxyFloorFor (int sampleRate, int blockSize) noexcept
     {
-        if (requestedMicroseconds > 0)
-            return requestedMicroseconds;
-
         if (sampleRate <= 0 || blockSize <= 0)
             return ProxyLane::defaultDeadlineMicroseconds;
 
         const auto blockPeriodUs = static_cast<std::int64_t> (blockSize) * 1000000 / sampleRate;
         return std::max<std::int64_t> (1, std::min<std::int64_t> (ProxyLane::defaultDeadlineMicroseconds,
                                                                   blockPeriodUs / 4));
+    }
+
+    std::int64_t proxyDeadlineFor (int sampleRate, int blockSize, std::int64_t requestedMicroseconds) noexcept
+    {
+        if (requestedMicroseconds > 0)
+            return requestedMicroseconds;
+
+        const auto floor = proxyFloorFor (sampleRate, blockSize);
+
+        if (sampleRate <= 0 || blockSize <= 0)
+            return floor;
+
+        /*  A SHARE OF THE BLOCK PERIOD (namespace draft §139, BHB), and never
+            less than the old rule gave. */
+        const auto blockPeriodUs = static_cast<double> (blockSize) * 1000000.0 / static_cast<double> (sampleRate);
+        return std::max (floor, static_cast<std::int64_t> (blockPeriodUs * ProxyLane::laneCapFraction));
     }
 
     //==============================================================================
@@ -48,6 +61,10 @@ namespace wfg::plugin
             : spec (std::move (specToUse)), lanes (std::move (lanesToUse)), table (tableToUse)
         {
             deadlineUs = proxyDeadlineFor (spec.sampleRate, spec.maxSamples, spec.deadlineMicroseconds);
+
+            //  A limit asked for is fixed: its floor is itself, and no callback's end cuts it.
+            floorUs = spec.deadlineMicroseconds > 0 ? deadlineUs
+                                                    : proxyFloorFor (spec.sampleRate, spec.maxSamples);
         }
 
         //======================================================================
@@ -77,7 +94,67 @@ namespace wfg::plugin
             status.inputs = inputs;
             status.outputs = outputs;
             status.layout = layout;
+            status.lateBlocks = lateBlocksTold;
+            status.late = lateSpell ? std::string (lateWords) : std::string();
             return status;
+        }
+
+        /*  LATE BLOCKS, SAID (namespace draft §139, BHE). Counted by the lanes
+            a block at a time; told here twice a spell - when the first late
+            block of one is seen, and two seconds after its last - with the
+            total as it then stands. Before this the count was read by nothing
+            but the eight-in-a-row rule, and a cue could crackle all evening
+            with an empty log. */
+        void watchLate (std::uint32_t now)
+        {
+            std::uint32_t total = 0;
+
+            for (auto* lane : lanes)
+                if (lane != nullptr)
+                    total += lane->misses() + lane->starved();
+
+            const auto fresh = total != lateBlocksSeen;
+            lateBlocksSeen = total;
+
+            if (fresh)
+            {
+                lateLastAt = now;
+
+                if (! lateSpell)
+                {
+                    lateSpell = true;
+                    tellLate();
+                }
+
+                return;
+            }
+
+            if (lateSpell && now - lateLastAt > static_cast<std::uint32_t> (lateSpellEndsAfterMs))
+                endLateSpell();
+        }
+
+        void endLateSpell()
+        {
+            if (! lateSpell)
+                return;
+
+            lateSpell = false;
+            tellLate();
+        }
+
+        void tellLate()
+        {
+            lateBlocksTold = lateBlocksSeen;
+            publish();
+
+            if (late)
+            {
+                const auto words = lateSpell ? std::string (lateWords) : std::string();
+                late (spec.pluginId, lateBlocksTold, words);
+
+                for (const auto& id : spec.alsoIds)
+                    late (id, lateBlocksTold, words);
+            }
         }
 
         /** Writes the table and tells the tree, when something a reader could see moved. */
@@ -171,7 +248,7 @@ namespace wfg::plugin
                     continue;
 
                 auto* lane = region::laneAt (base, spec.channels, spec.maxSamples, static_cast<int> (i));
-                lanes[i]->setDeadlineMicroseconds (deadlineUs);
+                lanes[i]->setAllowance (deadlineUs, floorUs);
                 lanes[i]->setCallEnabled (false);
                 lanes[i]->bind (header, lane, region::audioOf (lane), spec.channels, spec.maxSamples);
             }
@@ -283,6 +360,9 @@ namespace wfg::plugin
             for (auto* lane : lanes)
                 if (lane != nullptr)
                     lane->setCallEnabled (false);
+
+            //  A spell of late blocks ends in the failure, which says the rest.
+            endLateSpell();
 
             /*  A child that stopped answering is put down now, so the restart
                 launches into a clean region rather than beside a hung twin -
@@ -424,7 +504,20 @@ namespace wfg::plugin
 
                     anyEnabled = anyEnabled || lane->isEnabled();
 
-                    if (lane->consecutiveMisses() >= static_cast<std::uint32_t> (ProxyLane::missesBeforeFailure))
+                    /*  EIGHT IN A ROW, AND FOR A TENTH OF A SECOND (BHD): the
+                        run timed from the poll that first saw it. */
+                    const auto lateInARow = lane->consecutiveMisses();
+
+                    if (i >= lateSince.size())
+                        lateSince.resize (lanes.size(), 0);
+
+                    if (lateInARow == 0)
+                        lateSince[i] = 0;
+                    else if (lateSince[i] == 0)
+                        lateSince[i] = std::max<std::uint32_t> (1, now);
+
+                    if (lateInARow >= static_cast<std::uint32_t> (ProxyLane::missesBeforeFailure)
+                         && now - lateSince[i] >= static_cast<std::uint32_t> (failureAfterMs))
                     {
                         fail ("the plugin stopped answering: " + std::to_string (ProxyLane::missesBeforeFailure)
                               + " blocks late in a row on "
@@ -435,6 +528,7 @@ namespace wfg::plugin
                 }
 
                 header->wantSpin.store (anyEnabled ? 1u : 0u, std::memory_order_relaxed);
+                watchLate (now);
 
                 if (child == nullptr || ! child->isRunning())
                 {
@@ -459,6 +553,15 @@ namespace wfg::plugin
                     if (news.late)
                     {
                         fail ("a cue's state has been loading for more than five seconds: the plugin host is stuck");
+                        return;
+                    }
+
+                    /*  AND A RESET (namespace draft §139, BHC), which the
+                        lane waits for without calling the child: one owed
+                        that long is the same child, stuck. */
+                    if (lane->resetOverdue (now))
+                    {
+                        fail ("a plugin's reset has been running for more than five seconds: the plugin host is stuck");
                         return;
                     }
 
@@ -531,6 +634,13 @@ namespace wfg::plugin
         PluginTable* table = nullptr;
         FailureHandler failed;
         ChangeHandler changed;
+        LateHandler late;
+
+        /** Late blocks as the lanes count them, as last told, and the spell in progress (BHE). */
+        std::uint32_t lateBlocksSeen = 0;
+        std::uint32_t lateBlocksTold = 0;
+        std::uint32_t lateLastAt = 0;
+        bool lateSpell = false;
 
         juce::File regionFile;
         juce::File descriptionFile;
@@ -545,6 +655,7 @@ namespace wfg::plugin
         int latencySamples = 0;
         int reportedLatency = 0;
         std::vector<int> laneLatency;
+        std::vector<std::uint32_t> lateSince;      ///< when each lane's run of late blocks was first seen, or nought
         int paramCount = 0;
         int inputs = 0;
         int outputs = 0;
@@ -552,6 +663,7 @@ namespace wfg::plugin
         double stateLoadMs = 0.0;
         std::string stateProblem;
         std::int64_t deadlineUs = ProxyLane::defaultDeadlineMicroseconds;
+        std::int64_t floorUs = ProxyLane::defaultDeadlineMicroseconds;
 
         std::uint32_t launchedAt = 0;
         std::uint32_t restartDueAt = 0;
@@ -570,6 +682,7 @@ namespace wfg::plugin
     }
 
     void ProxyHost::onFailed (FailureHandler handler)   { impl->failed = std::move (handler); }
+    void ProxyHost::onLate (LateHandler handler)        { impl->late = std::move (handler); }
     void ProxyHost::onChanged (ChangeHandler handler)   { impl->changed = std::move (handler); }
 
     bool ProxyHost::start (std::string& problem)

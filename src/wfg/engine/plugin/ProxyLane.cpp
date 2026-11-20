@@ -23,6 +23,52 @@
 
 namespace wfg::plugin
 {
+    namespace
+    {
+        /*  THE BOUNDED SPIN (§17.6). No condition variable, no semaphore, no
+            sleep: those enter the kernel and PRD §4.2 forbids that on the
+            audio thread. True once the child has answered `seq`; false when
+            `end` has passed and it has not. The clock is read once in
+            sixty-four turns. */
+        bool answeredInTime (const region::Lane& lane, std::uint64_t seq,
+                             std::chrono::steady_clock::time_point end) noexcept
+        {
+            for (int turns = 0; lane.responseSeq.load (std::memory_order_acquire) < seq;)
+            {
+                if (++turns >= 64)
+                {
+                    turns = 0;
+
+                    if (std::chrono::steady_clock::now() > end)
+                        return false;
+                }
+            }
+
+            return true;
+        }
+
+        /** Every sample of the first `channels` channels a hundred decibels down or more. */
+        bool isSilence (float* const* channelData, int channels, int numSamples) noexcept
+        {
+            for (int channel = 0; channel < channels; ++channel)
+            {
+                const auto* samples = channelData[channel];
+
+                for (int n = 0; n < numSamples; ++n)
+                    if (samples[n] > ProxyLane::restThreshold || samples[n] < -ProxyLane::restThreshold)
+                        return false;
+            }
+
+            return true;
+        }
+
+        /** A reset the child was asked for and has not said it made. */
+        bool resetIsOwed (const region::Lane& lane) noexcept
+        {
+            return lane.resetDoneSeq.load (std::memory_order_acquire) != lane.resetSeq.load (std::memory_order_acquire);
+        }
+    }
+
     ProxyLane::ProxyLane()
     {
         for (auto& value : shadow)
@@ -40,6 +86,10 @@ namespace wfg::plugin
         audio = audioToUse;
         regionChannels = channels;
         regionMaxSamples = maxSamples;
+
+        //  What ten seconds is here (BHF); a region that names no rate is taken at 48 kHz.
+        const auto rate = headerToUse != nullptr ? headerToUse->sampleRate.load (std::memory_order_relaxed) : 0u;
+        restAfterSamples = static_cast<std::int64_t> (restAfterSeconds * static_cast<double> (rate > 0 ? rate : 48000u));
 
         /*  The shadow first, then the pointer with release, then the shadow
             once more: a store that landed between the first copy and the
@@ -60,6 +110,7 @@ namespace wfg::plugin
     void ProxyLane::unbind() noexcept
     {
         lane.store (nullptr, std::memory_order_release);
+        resetOwed = false;
         header = nullptr;
         audio = nullptr;
         regionChannels = 0;
@@ -73,7 +124,20 @@ namespace wfg::plugin
 
     void ProxyLane::setDeadlineMicroseconds (std::int64_t microseconds) noexcept
     {
-        deadlineUs.store (std::max<std::int64_t> (1, microseconds), std::memory_order_relaxed);
+        //  Fixed: the floor is the cap, so no callback's end comes before it.
+        setAllowance (microseconds, microseconds);
+    }
+
+    void ProxyLane::setAllowance (std::int64_t capMicroseconds, std::int64_t floorMicroseconds) noexcept
+    {
+        const auto cap = std::max<std::int64_t> (1, capMicroseconds);
+        deadlineUs.store (cap, std::memory_order_relaxed);
+        floorUs.store (std::clamp<std::int64_t> (floorMicroseconds, 1, cap), std::memory_order_relaxed);
+    }
+
+    std::int64_t ProxyLane::floorMicroseconds() const noexcept
+    {
+        return floorUs.load (std::memory_order_relaxed);
     }
 
     std::int64_t ProxyLane::deadlineMicroseconds() const noexcept
@@ -91,9 +155,12 @@ namespace wfg::plugin
             heard. The reset is asked for before the switch lands, so the first
             block the child is called for already comes after it. */
         if (shouldBeEnabled && enabled.load (std::memory_order_relaxed) == 0)
-            requestReset();
+            dryWhileReset.store (askReset(), std::memory_order_relaxed);
 
-        enabled.store (shouldBeEnabled ? 1 : 0, std::memory_order_relaxed);
+        /*  With release, and read with acquire by the audio thread: a block
+            that sees the switch sees the reset asked for before it, and waits
+            for it (namespace draft §139, BHC). */
+        enabled.store (shouldBeEnabled ? 1 : 0, std::memory_order_release);
     }
 
     bool ProxyLane::isEnabled() const noexcept
@@ -157,11 +224,42 @@ namespace wfg::plugin
 
     void ProxyLane::requestReset() noexcept
     {
+        askReset();
+    }
+
+    std::uint32_t ProxyLane::askReset() noexcept
+    {
+        std::uint32_t asked = 0;
+
         if (auto* bound = lane.load (std::memory_order_acquire))
-            bound->resetSeq.fetch_add (1, std::memory_order_release);
+            asked = bound->resetSeq.fetch_add (1, std::memory_order_release) + 1u;
 
         //  And the fades start over: nothing of the last cue's is faded from.
         clearRequests.fetch_add (1, std::memory_order_relaxed);
+        return asked;
+    }
+
+    bool ProxyLane::resetOverdue (std::uint32_t nowMs) noexcept
+    {
+        auto* bound = lane.load (std::memory_order_acquire);
+
+        if (bound == nullptr || ! resetIsOwed (*bound))
+        {
+            resetOwed = false;
+            return false;
+        }
+
+        /*  Timed from the poll that first saw one owed, and not started over
+            by another asked meanwhile: a child that makes none of them is
+            stuck however often it is asked. */
+        if (! resetOwed)
+        {
+            resetOwed = true;
+            resetOwedSince = nowMs;
+            return false;
+        }
+
+        return nowMs - resetOwedSince > stateLoadLimitMs;
     }
 
     //==============================================================================
@@ -178,10 +276,18 @@ namespace wfg::plugin
 
     bool ProxyLane::stateSettled() const noexcept
     {
+        auto* bound = lane.load (std::memory_order_acquire);
+
         if (enabled.load (std::memory_order_relaxed) == 0
              || callEnabled.load (std::memory_order_relaxed) == 0
-             || lane.load (std::memory_order_acquire) == nullptr)
+             || bound == nullptr)
             return true;
+
+        /*  A RESET STILL TO BE MADE is waited for as a state is (namespace
+            draft §139, BHC): the lane is silent until it is, and a cue
+            launched through it meanwhile would lose its first moments. */
+        if (resetIsOwed (*bound))
+            return false;
 
         return settledStateSeq.load (std::memory_order_acquire) >= wantedStateSeq.load (std::memory_order_acquire);
     }
@@ -263,6 +369,9 @@ namespace wfg::plugin
                                || settledStateSeq.load (std::memory_order_acquire)
                                     < wantedStateSeq.load (std::memory_order_acquire);
         restoreStatePath = pending ? std::string() : heldStatePath;
+
+        //  And a reset the last child owed is not the new one's to be late for.
+        resetOwed = false;
 
         if (stateInFlight)
         {
@@ -358,7 +467,7 @@ namespace wfg::plugin
     void ProxyLane::process (float* const* channelData, int numChannels, int numSamples,
                              const BlockClock* clock, std::int64_t blockStart) noexcept
     {
-        if (enabled.load (std::memory_order_relaxed) == 0 || channelData == nullptr || numSamples <= 0)
+        if (enabled.load (std::memory_order_acquire) == 0 || channelData == nullptr || numSamples <= 0)
             return;
 
         /*  THE CUE'S WIDTH HERE (setShape): what is sent, and what is taken
@@ -371,12 +480,15 @@ namespace wfg::plugin
         if (feedSaid == 0)
             return;
 
-        //  A NEW CUE ON THE VOICE: nothing of the last one's to fade from.
+        //  A NEW CUE ON THE VOICE: nothing of the last one's to fade from - and awake, not yet heard (BHF).
         if (const auto asked = clearRequests.load (std::memory_order_relaxed); asked != clearsSeen)
         {
             clearsSeen = asked;
             lastSample.fill (0.0f);
             silenced = false;
+            quietSamples = 0;
+            heardSinceReset = false;
+            resting.store (0, std::memory_order_relaxed);
         }
 
         auto* bound = lane.load (std::memory_order_acquire);
@@ -409,13 +521,86 @@ namespace wfg::plugin
             return;
         }
 
-        const auto started = std::chrono::steady_clock::now();
-        const auto limit = std::chrono::microseconds (deadlineUs.load (std::memory_order_relaxed));
+        /*  BEING RESET (namespace draft §139, BHC): the same. A reset is not
+            a block's work - a VST3's is a whole deactivation, milliseconds of
+            it - so the child makes it apart from its answering and says when
+            it has; asked to answer a block through it, every cue's first
+            blocks were late, and eight of them failed the plugin. */
+        const auto resetAsked = bound->resetSeq.load (std::memory_order_acquire);
 
-        /*  A BLOCK LONGER THAN THE REGION CARRIES is sent in pieces under the
-            one deadline (2026-09-26), where it used to be cut short with its
-            tail left dry. The pieces follow one another, so the plugin hears
-            the block in order. */
+        if (bound->resetDoneSeq.load (std::memory_order_acquire) != resetAsked)
+        {
+            /*  SWITCHED IN UNDER A SOUNDING CUE, and this the reset the switch
+                asked for: the block as it was while the insert was out, a
+                moment longer - a step from dry to wet when the plugin is
+                ready, where silence would be a hole at every audition. Any
+                other reset finds the insert in, and is never the dry block. */
+            if (dryWhileReset.load (std::memory_order_relaxed) == resetAsked)
+                return;
+
+            silenceFrom (channelData, back, 0, numSamples);
+            return;
+        }
+
+        /*  AT REST (namespace draft §139, BHF): the cue this lane played is
+            over and its tail rang out ten seconds ago, so silence in is
+            silence out and nobody is asked. Sound arriving wakes it, and is
+            played through it in this very block. */
+        const auto silentIn = isSilence (channelData, channels, numSamples);
+
+        if (silentIn && heardSinceReset && quietSamples >= restAfterSamples)
+        {
+            for (int channel = 0; channel < back; ++channel)
+                std::fill_n (channelData[channel], numSamples, 0.0f);
+
+            if (resting.load (std::memory_order_relaxed) == 0)
+                resting.store (1, std::memory_order_relaxed);
+
+            return;
+        }
+
+        if (! silentIn)
+            heardSinceReset = true;
+
+        if (resting.load (std::memory_order_relaxed) != 0)
+            resting.store (0, std::memory_order_relaxed);
+
+        /*  HOW LONG THIS BLOCK MAY WAIT (namespace draft §139, BHB): the
+            lane's cap from now - a share of the block period - unless the
+            callback's own end comes first, and never less than the floor,
+            which is what every lane had before there was an allowance. A
+            wait cut short by the callback is `starved`: other plugins used
+            the time, and this one is not failed for it. */
+        const auto started = std::chrono::steady_clock::now();
+        auto end = started + std::chrono::microseconds (deadlineUs.load (std::memory_order_relaxed));
+        auto cutShort = false;
+
+        if (clock != nullptr && clock->budgetEndNanos > 0)
+        {
+            const auto least = started + std::chrono::microseconds (floorUs.load (std::memory_order_relaxed));
+            const auto byCallback = std::max (least, std::chrono::steady_clock::time_point (
+                                                         std::chrono::duration_cast<std::chrono::steady_clock::duration> (
+                                                             std::chrono::nanoseconds (clock->budgetEndNanos))));
+
+            if (byCallback < end)
+            {
+                end = byCallback;
+                cutShort = true;
+            }
+        }
+
+        const auto late = [this, cutShort]
+        {
+            if (cutShort)
+            {
+                starvedCount.fetch_add (1, std::memory_order_relaxed);
+                return;
+            }
+
+            missCount.fetch_add (1, std::memory_order_relaxed);
+            consecutive.fetch_add (1, std::memory_order_relaxed);
+        };
+
         //  THE CLOCK, when it moved since the header last had it (BEI).
         if (clock != nullptr && clock->seq != clockSeqSent)
         {
@@ -423,6 +608,24 @@ namespace wfg::plugin
             clockSeqSent = clock->seq;
         }
 
+        /*  AN ANSWER STILL OWED (BHC). The child answers in the audio it was
+            sent, so a request it was late for leaves that audio its own until
+            it answers: written over now, the plugin would be given its own
+            output with this block's input on top of it. Waited for inside
+            this block's limit and thrown away - it answers a block long gone
+            - and if it does not come this block is late too, nothing sent. */
+        if (const auto owed = bound->requestSeq.load (std::memory_order_relaxed);
+            ! answeredInTime (*bound, owed, end))
+        {
+            late();
+            silenceFrom (channelData, back, 0, numSamples);
+            return;
+        }
+
+        /*  A BLOCK LONGER THAN THE REGION CARRIES is sent in pieces under the
+            one deadline (2026-09-26), where it used to be cut short with its
+            tail left dry. The pieces follow one another, so the plugin hears
+            the block in order. */
         for (int offset = 0; offset < numSamples;)
         {
             const auto samples = std::min (numSamples - offset, regionMaxSamples);
@@ -439,34 +642,26 @@ namespace wfg::plugin
             bound->requestSeq.store (seq, std::memory_order_release);
             blockCount.fetch_add (1, std::memory_order_relaxed);
 
-            /*  THE BOUNDED SPIN (§17.6). No condition variable, no semaphore, no
-                sleep: those enter the kernel and PRD §4.2 forbids that here. */
-            auto late = false;
-
-            for (int turns = 0; bound->responseSeq.load (std::memory_order_acquire) < seq;)
-            {
-                if (++turns >= 64)
-                {
-                    turns = 0;
-
-                    if (std::chrono::steady_clock::now() - started > limit)
-                    {
-                        late = true;
-                        break;
-                    }
-                }
-            }
-
-            if (late)
+            if (! answeredInTime (*bound, seq, end))
             {
                 /*  LATE: the rest of the block silent over the quick fade (CV),
                     never the dry block still in the caller's buffer - on a
                     wet-only reverb that is the original signal, loud and out of
                     place. Counted for the host, which fails a plugin eight
-                    blocks late in a row. */
-                missCount.fetch_add (1, std::memory_order_relaxed);
-                consecutive.fetch_add (1, std::memory_order_relaxed);
+                    blocks late in a row - or as starved, when it was the
+                    callback's end and not the lane's own cap that cut it. */
+                late();
+                silenceFrom (channelData, back, offset, numSamples);
+                return;
+            }
 
+            /*  A RESET ASKED FOR WHILE THIS BLOCK WAS OUT (BHC): the child
+                parks a lane to reset it and answers what it is asked
+                meanwhile with the audio as it came, so this answer may be the
+                dry block - and the cue it belonged to is being cleared out
+                anyway. Silent from here, neither late nor answered. */
+            if (bound->resetSeq.load (std::memory_order_acquire) != resetAsked)
+            {
                 silenceFrom (channelData, back, offset, numSamples);
                 return;
             }
@@ -493,6 +688,14 @@ namespace wfg::plugin
 
         answeredCount.fetch_add (1, std::memory_order_relaxed);
         consecutive.store (0, std::memory_order_relaxed);
+
+        //  Silence in, and silence back: so much nearer its rest (BHF). Anything else, and the count begins again.
+        quietSamples = silentIn && isSilence (channelData, back, numSamples) ? quietSamples + numSamples : 0;
+    }
+
+    bool ProxyLane::isResting() const noexcept
+    {
+        return resting.load (std::memory_order_relaxed) != 0;
     }
 
     //==============================================================================
@@ -500,6 +703,7 @@ namespace wfg::plugin
     std::uint64_t ProxyLane::answered() const noexcept           { return answeredCount.load (std::memory_order_relaxed); }
     std::uint32_t ProxyLane::misses() const noexcept             { return missCount.load (std::memory_order_relaxed); }
     std::uint32_t ProxyLane::consecutiveMisses() const noexcept  { return consecutive.load (std::memory_order_relaxed); }
+    std::uint32_t ProxyLane::starved() const noexcept            { return starvedCount.load (std::memory_order_relaxed); }
 
     void ProxyLane::clearMisses() noexcept
     {

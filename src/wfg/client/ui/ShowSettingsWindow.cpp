@@ -6054,7 +6054,8 @@ namespace wfg::client::ui
                 std::string out;
                 for (const auto& row : rows)
                     out += row.id + '|' + row.name + '|' + row.state + '|' + row.problem + '|' + row.preset + '|'
-                             + std::to_string (row.latencySamples) + '|' + row.layout + '\n';
+                             + std::to_string (row.latencySamples) + '|' + row.layout + '|' + row.late + '|'
+                             + std::to_string (row.lateBlocks) + '\n';
                 return out;
             }
 
@@ -6720,8 +6721,15 @@ namespace wfg::client::ui
                 if (! entry.problem.empty())
                     words += " - " + juce::String (entry.problem);
 
+                //  And one that is not keeping up, or was (namespace draft 139, BHE).
+                if (! entry.late.empty())
+                    words += " - " + juce::String (entry.late);
+                else if (entry.lateBlocks > 0)
+                    words += " - " + juce::String (model::lateSoFar (entry.lateBlocks));
+
                 g.setFont (Look::font (theme, 12.0f));
-                g.setColour (Look::colour (theme, entry.state == "failed" || entry.state == "missing" ? "ink" : "ink-dim"));
+                g.setColour (Look::colour (theme, entry.state == "failed" || entry.state == "missing" || ! entry.late.empty()
+                                                    ? "ink" : "ink-dim"));
                 g.drawText (words, area, juce::Justification::centredLeft, true);
             }
 

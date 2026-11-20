@@ -443,6 +443,14 @@ namespace wfg::audio
 
             current = requested;
             sampleRate = static_cast<double> (requested.sampleRate);
+
+            //  The plugins' share of a callback (namespace draft §139, BHB), once per start.
+            callbackBudgetNanos = requested.sampleRate > 0
+                                    ? static_cast<std::int64_t> (plugin::ProxyLane::callbackFraction * 1.0e9
+                                                                   * static_cast<double> (requested.blockSize)
+                                                                   / static_cast<double> (requested.sampleRate))
+                                    : 0;
+            blockEntry = -1;
             blocks.store (0, std::memory_order_relaxed);
             running = true;
 
@@ -1201,6 +1209,9 @@ namespace wfg::audio
             if (services.onFailed)
                 host->onFailed (services.onFailed);
 
+            if (services.onLate)
+                host->onLate (services.onLate);
+
             if (first && services.onChanged)
                 host->onChanged (services.onChanged);
 
@@ -1754,6 +1765,9 @@ namespace wfg::audio
                 if (services.onFailed)
                     host->onFailed (services.onFailed);
 
+                if (services.onLate)
+                    host->onLate (services.onLate);
+
                 if (services.onChanged)
                     host->onChanged (services.onChanged);
 
@@ -2051,6 +2065,21 @@ namespace wfg::audio
             //  AND THE BLOCK CLOCK for the plugins' playheads (§123, BEI).
             blockClock.blockStart = tapView.blockStart;
             takeClock();
+
+            /*  AND WHEN THE PLUGINS' TIME IN THIS CALLBACK IS UP (namespace
+                draft §139, BHB): a share of the block period after the device
+                asked for the block. Past it no lane waits beyond its floor,
+                so plugins that cannot keep up are muted and the interface is
+                still answered in time. Integers, and the audio thread's own. */
+            if (blockEntry >= 0)
+            {
+                blockClock.budgetEndNanos = blockEntry + callbackBudgetNanos;
+                blockEntry = -1;
+            }
+            else
+            {
+                blockClock.budgetEndNanos = 0;
+            }
 
             /*  THE TAP, filled before Tracktion runs (namespace draft §18.4):
                 the rack's input stage reads it during the call below, in this
@@ -3417,6 +3446,10 @@ namespace wfg::audio
             read and cleared inside it. */
         std::int64_t blockTime = -1;
 
+        /** The callback's entry as it was said for the block to come, and its share of the period (BHB). */
+        std::int64_t blockEntry = -1;
+        std::int64_t callbackBudgetNanos = 0;
+
         HostSettings current;
         BlockSink* sink = nullptr;
 
@@ -3458,6 +3491,7 @@ namespace wfg::audio
     { impl->processBlock (inputs, numInputs); }
 
     void AudioHost::setBlockTime (std::int64_t hostNanos) noexcept { impl->blockTime = hostNanos; }
+    void AudioHost::setBlockEntry (std::int64_t hostNanos) noexcept { impl->blockEntry = hostNanos; }
 
     void AudioHost::setHold (ShowHold* hold) noexcept
     {

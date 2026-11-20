@@ -130,6 +130,9 @@ namespace wfg::audio
         std::function<void (const std::string& pluginId, const std::string& problem)> onFailed;
         std::function<void()> onChanged;
 
+        /** A spell of late blocks began or ended (namespace draft §139, BHE): the entry, its count, its words. */
+        std::function<void (const std::string& pluginId, std::uint32_t blocks, const std::string& words)> onLate;
+
         /*  THIS MACHINE'S LIST, for the description each child makes its
             plugin from (2026-09-26): Go.dot's own known.xml as serve holds
             it, asked at every start of a host. Empty in a test rig, which
@@ -247,6 +250,17 @@ namespace wfg::audio
             A block with nothing said is not stamped: a test driving blocks by
             hand stamps none. The audio thread's; a plain store. */
         void setBlockTime (std::int64_t hostNanos) noexcept;
+
+        /*  WHEN THE DEVICE ASKED FOR THE NEXT BLOCK (namespace draft §139,
+            BHB), on the same clock: the callback's entry as it was read, or
+            the hosted pump's own reading once it has woken - never a deadline,
+            which may already be past. From it the block's plugins are given
+            their time: every lane's wait ends a share of the block period
+            after this moment at the latest. Said by the audio thread just
+            before `processBlock`, for that block only; with nothing said - a
+            test driving blocks by hand - each lane has its own cap and no
+            more is asked of it. */
+        void setBlockEntry (std::int64_t hostNanos) noexcept;
 
         /** Blocks processed since the last start. Any thread. */
         std::int64_t blocksProcessed() const noexcept;

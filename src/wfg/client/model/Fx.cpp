@@ -131,7 +131,20 @@ namespace wfg::client::model
         else if (strip.present() && strip.enabled && ! strip.dryWhy.empty())
             out += " - " + strip.dryWhy;
 
+        /*  NOT KEEPING UP (namespace draft 139, BHE): said while it lasts, and
+            the count kept after - what somebody reads when a cue has crackled. */
+        if (! strip.late.empty())
+            out += " - " + strip.late;
+        else if (strip.lateBlocks > 0)
+            out += " - " + lateSoFar (strip.lateBlocks);
+
         return out;
+    }
+
+    std::string lateSoFar (int blocks)
+    {
+        return blocks == 1 ? std::string ("1 buffer late so far")
+                           : std::to_string (blocks) + " buffers late so far";
     }
 
     std::string chainWords (const FxReading& reading)
@@ -399,6 +412,8 @@ namespace wfg::client::model
             strip.name = text (snapshot, base + "name");
             strip.state = text (snapshot, base + "state");
             strip.problem = text (snapshot, base + "problem");
+            strip.late = text (snapshot, base + "late");
+            strip.lateBlocks = integer (snapshot, base + "lateBlocks");
             strip.latencySamples = integer (snapshot, base + "latencySamples");
             strip.layout = text (snapshot, base + "layout");
 
@@ -472,6 +487,8 @@ namespace wfg::client::model
         row.preset = text (snapshot, base + "preset");
         row.state = text (snapshot, base + "state");
         row.problem = text (snapshot, base + "problem");
+        row.late = text (snapshot, base + "late");
+        row.lateBlocks = integer (snapshot, base + "lateBlocks");
         row.latencySamples = integer (snapshot, base + "latencySamples");
         row.paramCount = integer (snapshot, base + "paramCount");
         row.layout = text (snapshot, base + "layout");

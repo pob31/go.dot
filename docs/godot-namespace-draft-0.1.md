@@ -9966,6 +9966,10 @@ sounding on another voice hears no click.
 
 ### 17.6 The proxy
 
+*(2026-11-20: the limit below, where a reset is made, how the child's worker waits and what a late
+block says were revised in §139, after M86 ran a real plugin at the buffer a Mac opens with. What
+follows is as it was built.)*
+
 **One child process per plugin of the set, hosting one instance per voice** (plan decision 3).
 It is §3.18's unit of failure — *"a process per third-party plugin"* — so a crash takes out that
 plugin on every voice and nothing else; it makes P processes rather than N × P; and a preset is
@@ -10422,9 +10426,13 @@ decision N*:
 12. **The deadline is the smaller of 250 µs and a quarter of the block period**, overridable on
     the command line; **eight consecutive misses or a dead child mark the entry failed; one
     automatic restart after two seconds, then `plugin.restart`.**
+    *(Revised 2026-11-20, §139, BHB and BHD: that rule is now the floor; a lane may wait three
+    tenths of the block period, and a failure takes eight late blocks and a tenth of a second.)*
 13. **Tracktion's `Plugin::isEnabled` is never toggled**; Go.dot's lane flag is the bypass.
 14. **The child's worker spins hot while the entry is healthy and any lane is on**, one core per
     plugin, and sleep-polls otherwise; revised by M31.
+    *(Revised 2026-11-20, §139, BHG: it naps a tenth of a millisecond between requests, except on
+    Windows; the spin got it thrown off the processor on a Mac.)*
 15. **The test plugin is a child mode, `godot:test-gain`**, with `p1` as its kill switch; no VST3
     is built for the tests.
 16. **Scanning is a verb**, `wfg plugins --scan`, not an engine command; the Plugins tab says so
@@ -35863,7 +35871,9 @@ unlocked, the GO goes; a cue fired by a hand in show mode refused for its own an
 
 - **A voice's copies given back when its run ends.** They are kept until the voice takes a cue without the
   insert, so a plugin's copies can grow toward the voices that have used it; the runner frees a voice without
-  saying so today.
+  saying so today. *(2026-11-20, §139, BHF: such a copy's lane now rests ten seconds after its cue's tail, so it
+  is no longer asked for silence every block; the copy itself is still kept, and on Windows its child's worker
+  still spins.)*
 - **How many are still loading, said in the window** before a GO is refused for it - a count under the
   transport, and the mark on the cue's row.
 - **The plugin's own window by insert** (it is by entry, which is the same thing since each add makes its
@@ -35990,3 +36000,137 @@ ouvertes, mais vides." Two causes, one each.
 
 Owed: on a Mac, a show with a few plugin cues and a scan, and one Go.dot in Cmd+Tab (`lsappinfo list` counts one).
 On Windows, an import from a fresh launch's empty show leaves the imported show's window alone.
+
+## 139. A plugin's time comes from the buffer
+
+**Reported 2026-11-20** by the author: a friend who tried Go.dot on an M-Pro MacBook Pro put plugins on sound
+cues as inserts, and "they sounded distorted". The author's own reading: "Maybe we are asking too much from the
+plugin chains ... with very stringent processing latency on recorded media. As long as we have possible group
+latency matching between cues in a timeline group starting at the same time we might not need to enforce super
+low latency if this causes glitches, underruns and other unpleasant noises."
+
+It was not latency - the proxy adds none (§17.6) and still adds none. It was the *limit*: how long the audio
+thread waits for a plugin's process to answer a block, and what that process did between blocks. Measured on the
+farm's Mac before a line was changed (`docs/spikes/spike09-plugin-allowance.md`, M86), four faults, each enough
+alone:
+
+- the limit was the smaller of 250 µs and a quarter of the block, a gain's round trip (§17.11, decision 12),
+  whatever the buffer - and Seventh Heaven needs 0.6 to 0.7 ms of a 512-sample block, so at the buffer a Mac
+  opens with it was late for every block, failed, was relaunched, failed again and stayed down;
+- on a Mac the child's worker, spinning without pause in the real-time class (decision 14), was thrown off the
+  processor for 5 to 20 ms one block in fifteen - with a gain for a plugin. A block answered late is silent over
+  a fade (CV), and a twentieth of them muted is the "distorted" of the report;
+- an insert's reset - asked at every arm, 12 ms for Seventh Heaven at 512 - ran inside that limit and kept the
+  child's other lanes waiting;
+- a child's worker spun for as long as any of its lanes was switched in, and nothing switched one out when its
+  cue ended (§133.8): eight performance cores hold four such workers and little more.
+
+**The author's rulings** (asked 2026-11-20, each as recommended but the third, which is his own): the plugin's
+time comes **from the buffer**, with no latency added - not a buffer late with the plugins in parallel; a plugin
+that is not keeping up is said **on screen and in the log**; and lining cues up for a plugin's own declared
+delay is "a timeline group property with a toggle in the inspector" (§140, not built here).
+
+- **BHB** **The allowance.** A lane may wait three tenths of the block period for its answer
+  (`ProxyLane::laneCapFraction`: 3.2 ms at 512 and 48 kHz, 0.8 ms at 128), and every wait in one device callback
+  ends six tenths of the period after the callback began (`callbackFraction`), so plugins that cannot keep up
+  are muted and the interface is still answered in time. No lane is ever given less than the old rule gave
+  (`proxyFloorFor`), however late in the callback it is asked. The callback's entry is the clock value the
+  device layer already read for the block's stamp (`AudioHost::setBlockEntry`; the hosted pump reads its own
+  once woken, never its deadline, which may be past), and it reaches every proxy - voices, rack, auxes - in the
+  `BlockClock` they already had (`budgetEndNanos`). `--proxy-deadline-us` and `setDeadlineMicroseconds` stay a
+  fixed limit no callback's end cuts, so every driver and case that asked for one behaves as it did. *(The time
+  from the buffer is the author's; the two fractions are mine, from M86, and are named constants.)*
+- **BHC** **A request is never written over, and a reset is not a block's work.** The child answers in the audio
+  it was sent. A lane that gave up on a block used to write the next one over it while the child was still
+  answering, and took the result - the plugin's own output with new input on top - for an answer. Now a block
+  that finds the last request unanswered waits for it inside its own limit, throws the answer away, and only
+  then sends; if it does not come the block is late too, and nothing is sent. A new child answers, unplayed,
+  whatever its predecessor died on. And a reset has its own count (`region::Lane::resetDoneSeq`, layout 6): it
+  is made on the child's message thread with that lane parked, as a cue's state is loaded, so the child's other
+  lanes go on being answered; until it is made the lane is silent, not called, and counts nothing, and an arm
+  waits for it as for a state (`stateSettled`). One reset is not silent: the one a switch-in asks. An insert
+  switched in under a sounding cue passes the block as it did while it was out until the plugin is ready - a
+  step from dry to wet, as a switch always was, where silence would be a hole at every audition. CU stands: a
+  plugin that fails is never the dry block.
+- **BHD** **Starved is not failed, and failed takes a tenth of a second.** A lane cut short by the callback's end
+  before its own cap was not late by its own doing - other plugins had used the time - and is counted apart
+  (`starved()`): muted and said, never in the run that fails a plugin. And the run of eight late blocks must
+  have lasted a tenth of a second (`ProxyHost::failureAfterMs`): at a small buffer eight blocks are ten
+  milliseconds, and a process the system kept off the processor that long is a hole in the sound, not a plugin
+  to put down and leave silent for two seconds. *(Mine; changes decision 12's second half.)*
+- **BHE** **Late blocks are said.** The lanes counted them and nothing read the count but the eight-in-a-row
+  rule. The host now tells a spell of them twice - at the poll that first sees one, and two seconds after the
+  last - as a logged, machine-local record `plugin.late <id> <blocks> <words>` (through
+  `ProxyServices::onLate`; a replay writes the table as the session did), in two rows of the plugin
+  (`lateBlocks`, the count since it loaded; `late`, the words while a spell lasts), as a problem on the Plugins
+  page and a mark on every cue through it (*plugin late*), and on the cue's FX strip and the Plugins tab - the
+  words while it lasts, *"12 buffers late so far"* after. Never one a block, nothing periodic. *(That it is said,
+  and where, is the author's; the words - "not keeping up: a buffer it answers late is silent" - are mine and
+  his to approve.)*
+- **BHF** **A lane at rest.** A lane that has played a cue and has had silence in and silence out for ten seconds
+  since is not called again until sound arrives, which is then played through it in that very block. Its cue is
+  over and its tail has rung out; until this it was asked for silence a block at a time for the rest of the
+  session, one lane after another on the audio thread. A lane armed and not yet heard never rests: a cue at
+  standby finds its plugin as it always did. Judged by the lane itself, on the audio thread, from what goes in
+  and what comes back - a hundred decibels down is silence. *(Mine.)*
+- **BHG** **The worker naps.** Between requests the child's worker sleeps a tenth of a millisecond at a time
+  while a lane is in - the most a request then waits - stays awake two tenths after each request, for the rest
+  of the callback's lanes, and sleeps a millisecond when none is in. The parent cannot wake it (a wake is a
+  kernel call, and its side is the audio thread), so how it waits is all there is to choose, and a real-time
+  thread that never gives the processor back is what a scheduler takes it from. Where a nap would be more than
+  a quarter of a lane's cap - buffers under 64 samples - it spins as before. **Not on Windows**, which did not
+  punish the spin on the author's laptop (never late, 13 µs a round trip) and cannot nap so briefly (a
+  millisecond to answer, 1.6 at worst, on a high-resolution timer): there the worker spins while a lane is in,
+  as it did. Linux naps as the Mac does (the NUC: never late, 0.1 ms). Its arithmetic runs with denormals off, which the engine's own guard never reached. *(Mine.)*
+
+**After** (the same Mac, the same case, Seventh Heaven; eight seconds a row, the rule as it now ships):
+
+| | before | after |
+|---|---|---|
+| 512 samples: blocks late | every one; failed twice and down | **0** of 749 |
+| 512: round trip, median / worst | 0.6-0.7 ms / the limit | 0.17 ms / 0.27-0.8 ms |
+| 128 samples: blocks late | 303 of 2999; failed twice | **0** of 2999 |
+| the gain alone, 512: over 250 µs | 50-57 of 749 | 0, worst 0.1 ms |
+| beside eleven other children, 512, median | 8.8 ms | 0.18 ms |
+| a reset beside a sounding lane | the sounding lane late | untouched |
+
+The plugin's own work is four times quicker too, which nobody asked for: its thread is no longer demoted in the
+middle of it.
+
+**What does not change.** No latency is added and none is compensated; a plugin's own declared delay is still
+shown and not lined up (AY) until §140. A late block is still silent over the quick fade, never dry (CU, CV).
+The graph is still one thread: plugins that sound together are still asked one after another, and the
+callback's share is what they have between them. The eight-in-a-row sentence, the one relaunch, the second
+failure inside a minute: as they were.
+
+**Tests**, each written first: in `ProxyTests`, *a request not answered is never written over, and the next
+block is sent whole once it is*; *a lane whose reset is still to be made is silent, not called, counts nothing
+and is not settled*; *an insert switched in under a sounding cue passes as it did until its reset is made, and
+is never a hole*; *a block answered while a reset was asked for is silent, neither late nor answered*; *a slow
+reset keeps its own lane silent and uncounted while the child's other lane goes on being answered* (the test
+gain's state says how long its reset takes); *the allowance is a share of the block, never under the old rule,
+and a deadline asked for is itself*; *a lane stops at the callback's end but never before its floor, and cut
+short it is starved, not failed*; *a spell of late blocks is said once when it begins and once when it ends,
+never a block at a time*; *a lane that has played and had silence in and out for ten seconds rests, and sound
+arriving is played through it at once*; the `plugin.late` half of the table's case. In `ProblemsTests` and
+`ClientTests`, the mark and the strip's words. Cases that switched an insert in and played a block in the same
+breath now wait for it as a launch does (`waitSettled`). M86 is the measurement.
+
+**Honest limits.**
+
+- **Windows keeps a core a plugin** while one of its lanes is switched in: the spin stays there (BHG), and a
+  lane at rest stops the calls, not the child's worker. What ends it is a voice's copies given back when its run
+  ends (§133.8), still owed.
+- **A plugin that returns sound after more than ten seconds of silence** - a delay that long - is at rest when
+  it would have: ten seconds is the rule, not the plugin's own word for its tail.
+- **Starved for ever is not failed.** A child that hangs while every one of its blocks is cut short by the
+  callback's end is silent and said, and never relaunched by the rule of eight; its process dying, its reset or
+  its state overdue still fail it.
+- **Resets and states of one child are made one after another** on its message thread: an arm behind a slow
+  load waits for it. It delays a launch that was fired cold; it stalls nothing that sounds.
+- **The fractions are from one Mac** (and Windows' spin from one laptop). The friend's MacBook Pro, an Intel
+  Mac and a slower Windows machine have not been heard.
+
+**Owed.** The friend's log and his ear on a build with this in it; the author's on the Mac. The words of BHE.
+The count by cue's insert (it is by plugin). The same M86 on a slower Mac, and with a real plugin on Linux -
+the NUC ran the gain alone with the napping worker: never late at 512 or 128, 0.17 ms at worst.

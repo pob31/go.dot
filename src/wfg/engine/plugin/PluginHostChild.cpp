@@ -20,12 +20,14 @@
 #include <wfg/engine/plugin/LaneMapping.h>
 #include <wfg/engine/plugin/PluginLoad.h>
 #include <wfg/engine/plugin/ProcessUtil.h>
+#include <wfg/engine/plugin/ProxyLane.h>
 #include <wfg/engine/plugin/SharedRegion.h>
 #include <wfg/engine/plugin/TestGainState.h>
 #include <wfg/engine/plugin/WorkgroupShare.h>
 #include <wfg/engine/app/MachinePower.h>
 
 #include <wfg/engine/app/RealtimeRights.h>
+#include <wfg/engine/clock/FineWait.h>
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_core/juce_core.h>
@@ -149,9 +151,26 @@ namespace wfg::plugin
                   control (std::make_unique<LaneControl[]> (static_cast<std::size_t> (std::max (1, count))))
             {
                 laneOf.reserve (static_cast<std::size_t> (count));
+                answeredAtStart.reserve (static_cast<std::size_t> (count));
 
                 for (int i = 0; i < count; ++i)
                     laneOf.push_back (region::laneAt (base, channels, maxSamples, i));
+
+                /*  WHAT THE LAST CHILD WAS ASKED AND NEVER ANSWERED IS NOBODY'S
+                    BLOCK NOW (namespace draft §139, BHC): a child relaunched
+                    into a region finds the request its predecessor died on,
+                    and played through a fresh instance that old audio would
+                    be the first thing in the plugin when the cue comes back.
+                    Answered here unplayed, before any worker runs and long
+                    before the parent calls again; and no reset is owed by
+                    instances just made. */
+                for (auto* lane : laneOf)
+                {
+                    const auto asked = lane->requestSeq.load (std::memory_order_acquire);
+                    answeredAtStart.push_back (asked);
+                    lane->responseSeq.store (asked, std::memory_order_release);
+                    lane->resetDoneSeq.store (lane->resetSeq.load (std::memory_order_acquire), std::memory_order_release);
+                }
             }
 
             /*  The worker's side of the gate, before anything else about a
@@ -201,18 +220,99 @@ namespace wfg::plugin
                     header.inWorkgroup.store (in, std::memory_order_relaxed);
             }
 
-            /*  THE SPIN POLICY (plan decision 14): hot while any lane is switched
-                in, one-millisecond polls otherwise. */
-            void restAfterIdlePass (bool anyRequest) const
+            /*  THE WAIT BETWEEN REQUESTS (namespace draft §139, BHG; it was
+                plan decision 14's spin). The parent cannot wake this thread -
+                a wake is a kernel call, and its side is the audio thread - so
+                the worker looks for work itself, and how it waits in between
+                is the whole of its manners.
+
+                IT USED TO SPIN, hot, for as long as any lane was switched in:
+                a core a plugin, and worse than a core. A thread in the
+                real-time class that never gives the processor back is exactly
+                what a system's scheduler takes it from: on a Mac (M86, M4
+                Pro) one buffer in fifteen found this worker gone for five to
+                twenty milliseconds, with a gain for a plugin, and not one did
+                once it slept between requests - or once it had no real-time
+                class at all, which is no answer on a machine that is busy.
+
+                SO IT NAPS: a tenth of a millisecond at a time while a lane is
+                in, which is the most a request then waits, and a millisecond
+                when none is. For a moment after a request it stays awake,
+                because the lanes of one device callback are asked one after
+                another and the next is already on its way. Where the buffer
+                is so small that a nap would be a real share of a lane's
+                allowance, it spins as it always did.
+
+                NOT ON WINDOWS, which does not punish the spin and cannot nap
+                so briefly: on the author's laptop the spinning worker was
+                never late in M86 (13 microseconds a round trip, 239 at
+                worst), and one napping on a high-resolution timer took a
+                millisecond to answer and 1.6 at worst - the timer's half
+                millisecond is a whole one by the time a thread runs again.
+                There it spins while a lane is in, as before, and only its
+                rest when none is uses the finer wait. */
+            void restAfterIdlePass (bool anyRequest) noexcept
             {
-                if (! anyRequest && header.wantSpin.load (std::memory_order_relaxed) == 0)
-                    std::this_thread::sleep_for (std::chrono::milliseconds (1));
+                const auto now = std::chrono::steady_clock::now();
+
+                if (anyRequest)
+                {
+                    lastAsked = now;
+                    return;
+                }
+
+                if (header.wantSpin.load (std::memory_order_relaxed) == 0)
+                {
+                    nap (std::chrono::milliseconds (1));
+                    return;
+                }
+
+                if (! napsBetweenRequests || now - lastAsked < lingerAfterRequest)
+                    return;
+
+                nap (napLength);
+            }
+
+            /*  How long it stays awake after a request, for the rest of the
+                callback's lanes; and a nap. */
+            static constexpr std::chrono::microseconds lingerAfterRequest { 200 };
+            static constexpr std::chrono::microseconds napLength { 100 };
+
+            /** A nap no longer than a quarter of what a lane may wait, or none at all; never on Windows. */
+            static bool napFits (const region::Header& header) noexcept
+            {
+               #if defined (_WIN32)
+                (void) header;
+                return false;
+               #else
+                const auto rate = std::max<std::uint32_t> (1, header.sampleRate.load (std::memory_order_relaxed));
+                const auto block = std::max<std::uint32_t> (1, header.blockSize.load (std::memory_order_relaxed));
+                const auto capUs = ProxyLane::laneCapFraction * 1000000.0 * static_cast<double> (block) / static_cast<double> (rate);
+                return capUs >= 4.0 * static_cast<double> (napLength.count());
+               #endif
+            }
+
+            void nap (std::chrono::nanoseconds length) noexcept
+            {
+               #if defined (_WIN32)
+                fineWait.wait (length);
+               #else
+                std::this_thread::sleep_for (length);
+               #endif
             }
 
             region::Header& header;
             WorkgroupFollower workgroup;
             int channels, maxSamples, count;
+            const bool napsBetweenRequests = napFits (header);
+            std::chrono::steady_clock::time_point lastAsked {};
+
+           #if defined (_WIN32)
+            FineWait fineWait;      ///< the worker thread's alone
+           #endif
+
             std::vector<region::Lane*> laneOf;
+            std::vector<std::uint64_t> answeredAtStart;     ///< each lane's request count when this child came up
             std::unique_ptr<LaneControl[]> control;
         };
 
@@ -255,6 +355,9 @@ namespace wfg::plugin
                 the epoch moves. */
             float restingGain = 0.5f;
             float padFactor = 1.0f;
+
+            /** How long its reset takes, from its state: a slow one made on purpose. */
+            int resetDelayMs = 0;
         };
 
         struct TestGainWorker
@@ -275,8 +378,19 @@ namespace wfg::plugin
 
                 const auto baseline0 = lanes.header.baseline[0].load (std::memory_order_relaxed);
 
-                for (auto& instance : instances)
-                    instance.restingGain = baseline0;
+                for (std::size_t i = 0; i < instances.size(); ++i)
+                {
+                    instances[i].restingGain = baseline0;
+                    instances[i].answered = lanes.answeredAtStart[i];
+                }
+            }
+
+            /*  THE MESSAGE THREAD'S RESET, with the lane parked: a gain holds
+                nothing to clear, so only the time a real one takes is played. */
+            void resetLane (int i)
+            {
+                if (const auto delay = instances[static_cast<std::size_t> (i)].resetDelayMs; delay > 0)
+                    juce::Thread::sleep (delay);
             }
 
             /*  THE MESSAGE THREAD'S LOAD, with the lane parked: the file's
@@ -303,6 +417,7 @@ namespace wfg::plugin
                 auto& instance = instances[static_cast<std::size_t> (i)];
                 instance.restingGain = problem.empty() ? state.gain : lanes.header.baseline[0].load (std::memory_order_relaxed);
                 instance.padFactor = problem.empty() ? state.padFactor() : 1.0f;
+                instance.resetDelayMs = problem.empty() ? state.resetDelayMs : 0;
                 return problem;
             }
 
@@ -560,10 +675,21 @@ namespace wfg::plugin
                 instances.clear();
             }
 
+            /*  THE MESSAGE THREAD'S RESET, with the lane parked (namespace
+                draft §139, BHC): a VST3's is `setProcessing` and `setActive`
+                off and on again, which is the plugin's message thread's to
+                call and can take milliseconds - Seventh Heaven's was measured
+                at 2.5 to 15. On the worker, before the block, it was every
+                cue's first blocks late and every other lane of this child
+                kept waiting. */
+            void resetLane (int i)
+            {
+                instances[static_cast<std::size_t> (i)]->reset();
+            }
+
             struct LaneState
             {
                 std::uint32_t paramsSeen = 0;
-                std::uint32_t resetSeen = 0;
                 std::uint64_t answered = 0;
                 std::uint32_t epochSeen = 0;
                 std::vector<float> applied;
@@ -588,8 +714,17 @@ namespace wfg::plugin
 
                 std::vector<LaneState> state (static_cast<std::size_t> (lanes.count));
 
-                for (auto& s : state)
-                    s.applied.assign (baseline.size(), -2.0f);
+                for (std::size_t i = 0; i < state.size(); ++i)
+                {
+                    state[i].applied.assign (baseline.size(), -2.0f);
+                    state[i].answered = lanes.answeredAtStart[i];
+                }
+
+                /*  NO SUBNORMALS IN THE PLUGINS' ARITHMETIC: a reverb's tail
+                    falling through them costs many times a block's usual
+                    work on some processors, and the engine's own guard is the
+                    parent's thread's, not this one's. */
+                const juce::ScopedNoDenormals noDenormals;
 
                 juce::MidiBuffer midi;
 
@@ -648,13 +783,6 @@ namespace wfg::plugin
                                     s.applied[p] = target;
                                 }
                             }
-                        }
-
-                        if (const auto resetSeq = lane->resetSeq.load (std::memory_order_acquire);
-                            resetSeq != s.resetSeen)
-                        {
-                            s.resetSeen = resetSeq;
-                            instance.reset();
                         }
 
                         const auto numChannels = std::min<int> (lanes.channels, static_cast<int> (lane->numChannels.load (std::memory_order_relaxed)));
@@ -716,13 +844,19 @@ namespace wfg::plugin
             let go - answering that lane dry, missing nothing - the state goes
             in, the epoch moves so every value is set again on top, the lane
             is given back, and the parent is answered with how it went. Lanes
-            load one after another; that is the honest cost. */
+            load one after another; that is the honest cost.
+
+            AND A LANE'S RESET, the same way (namespace draft §139, BHC): the
+            worker let go of the instance, the reset made here, the parent
+            answered in `resetDoneSeq` - so the other lanes of this child go
+            on being answered while it runs, as they do through a load. */
         struct StateLoader final : juce::Timer
         {
             using Load = std::function<std::string (int lane, const std::string& path)>;
+            using Reset = std::function<void (int lane)>;
 
-            StateLoader (Lanes& lanesToUse, Load loadToUse)
-                : lanes (lanesToUse), load (std::move (loadToUse)),
+            StateLoader (Lanes& lanesToUse, Load loadToUse, Reset resetToUse)
+                : lanes (lanesToUse), load (std::move (loadToUse)), reset (std::move (resetToUse)),
                   pending (static_cast<std::size_t> (std::max (1, lanes.count)))
             {
             }
@@ -741,46 +875,92 @@ namespace wfg::plugin
 
                 if (! wait.active)
                 {
+                    /*  A RESET ASKED FOR (namespace draft §139, BHC), a state,
+                        or both - an arm asks both - under one hold of the
+                        lane, the reset first. */
                     const auto request = lane->stateRequestSeq.load (std::memory_order_acquire);
+                    const auto stateAsked = request > lane->stateDoneSeq.load (std::memory_order_relaxed);
+                    const auto resetAsked = lane->resetSeq.load (std::memory_order_acquire);
+                    const auto resetOwed = resetAsked != lane->resetDoneSeq.load (std::memory_order_relaxed);
 
-                    if (request <= lane->stateDoneSeq.load (std::memory_order_relaxed))
+                    if (! stateAsked && ! resetOwed)
                         return;
 
-                    lane->statePath[region::pathChars - 1] = 0;
-                    wait = { true, request, std::string (lane->statePath) };
+                    wait = {};
+                    wait.active = true;
+                    wait.state = stateAsked;
+                    wait.reset = resetOwed;
+                    wait.resetSeq = resetAsked;
+
+                    if (stateAsked)
+                    {
+                        lane->statePath[region::pathChars - 1] = 0;
+                        wait.seq = request;
+                        wait.path = lane->statePath;
+                    }
+
                     control.gate.store (1, std::memory_order_release);
-                    return;
+
+                    /*  THE WORKER LETS GO WITHIN A PASS - at once when it is
+                        answering, a millisecond when it rests - so it is
+                        waited for here a moment and not until the next tick:
+                        a cue fired cold waits on its reset. */
+                    const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds (2);
+
+                    while (control.gate.load (std::memory_order_acquire) != 2 && std::chrono::steady_clock::now() < until)
+                        std::this_thread::sleep_for (std::chrono::microseconds (100));
                 }
 
                 //  Not let go yet: the worker grants within a pass, idle or not.
                 if (control.gate.load (std::memory_order_acquire) != 2)
                     return;
 
-                const auto began = std::chrono::steady_clock::now();
-                const auto problem = load (i, wait.path);
-                const auto micros = std::chrono::duration_cast<std::chrono::microseconds> (std::chrono::steady_clock::now() - began);
+                if (wait.reset)
+                    reset (i);
 
-                control.epoch.fetch_add (1, std::memory_order_release);
+                std::string problem;
+                std::chrono::microseconds micros { 0 };
+
+                if (wait.state)
+                {
+                    const auto began = std::chrono::steady_clock::now();
+                    problem = load (i, wait.path);
+                    micros = std::chrono::duration_cast<std::chrono::microseconds> (std::chrono::steady_clock::now() - began);
+                    control.epoch.fetch_add (1, std::memory_order_release);
+                }
+
                 control.gate.store (0, std::memory_order_release);
 
-                std::memset (lane->stateProblem, 0, sizeof (lane->stateProblem));
-                std::snprintf (lane->stateProblem, sizeof (lane->stateProblem), "%s", problem.c_str());
-                lane->stateFailed.store (problem.empty() ? 0u : 1u, std::memory_order_relaxed);
-                lane->stateLoadMicros.store (static_cast<std::uint32_t> (std::min<long long> (micros.count(), 0xffffffffLL)),
-                                             std::memory_order_relaxed);
-                lane->stateDoneSeq.store (wait.seq, std::memory_order_release);
+                if (wait.state)
+                {
+                    std::memset (lane->stateProblem, 0, sizeof (lane->stateProblem));
+                    std::snprintf (lane->stateProblem, sizeof (lane->stateProblem), "%s", problem.c_str());
+                    lane->stateFailed.store (problem.empty() ? 0u : 1u, std::memory_order_relaxed);
+                    lane->stateLoadMicros.store (static_cast<std::uint32_t> (std::min<long long> (micros.count(), 0xffffffffLL)),
+                                                 std::memory_order_relaxed);
+                    lane->stateDoneSeq.store (wait.seq, std::memory_order_release);
+                }
+
+                //  The count it was made for: one asked meanwhile is made at the next tick.
+                if (wait.reset)
+                    lane->resetDoneSeq.store (wait.resetSeq, std::memory_order_release);
+
                 wait.active = false;
             }
 
             struct Waiting
             {
                 bool active = false;
+                bool state = false;
+                bool reset = false;
                 std::uint64_t seq = 0;
+                std::uint32_t resetSeq = 0;
                 std::string path;
             };
 
             Lanes& lanes;
             Load load;
+            Reset reset;
             std::vector<Waiting> pending;
         };
 
@@ -981,6 +1161,13 @@ namespace wfg::plugin
                     std::memory_order_relaxed);
 
             return problem;
+        },
+        [&testGain, &real] (int lane)
+        {
+            if (testGain != nullptr)
+                testGain->resetLane (lane);
+            else
+                real->resetLane (lane);
         });
 
         header.childReady.store (1, std::memory_order_release);

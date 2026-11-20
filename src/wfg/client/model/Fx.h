@@ -74,6 +74,12 @@ namespace wfg::client::model
         std::string state;
         std::string problem;
 
+        /*  NOT KEEPING UP (namespace draft 139, BHE): the engine's words while
+            it answers buffers too late to be played, and how many it has
+            since it loaded. */
+        std::string late {};
+        int lateBlocks = 0;
+
         /*  How late a cue is while this entry is in its signal, in samples:
             the plugin's own latency, uncompensated (PRD §3.25). Nought for
             one that adds none, and for one that has not loaded. */
@@ -206,6 +212,9 @@ namespace wfg::client::model
         there is not a problem for a cue that does not use it. */
     std::string stateSentence (const FxStrip&);
 
+    /** "12 buffers late so far" - what is kept of a plugin that did not keep up, once it does again. */
+    std::string lateSoFar (int blocks);
+
     /** "64 samples late while it is in", or nothing for an entry that adds none. */
     std::string latencyWords (const FxStrip&);
 
@@ -237,6 +246,8 @@ namespace wfg::client::model
         std::string preset;
         std::string state;
         std::string problem;
+        std::string late {};        ///< the engine's words while it is not keeping up (namespace draft 139)
+        int lateBlocks = 0;         ///< and how many buffers it has been late for since it loaded
         int latencySamples = 0;
         int paramCount = 0;
 

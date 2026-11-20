@@ -21,6 +21,13 @@
     any other (Phase 9a, §17.3) - AudioCommands.h's rule: a state transition is
     an event, logged and replayable.
 
+    `plugin.late <id:s> <blocks:i> <words:s>` - the plugin is not keeping up,
+    or is again (namespace draft 139, BHE): how many blocks it has answered
+    late since it loaded, each of them silent, and the words for it - empty
+    once two seconds have gone by without one. Submitted TWICE a spell by the
+    proxy host, at its start and at its end, never once a block; a replay
+    re-injects both and the table reads as the session's did.
+
     `plugin.failed <id:s> <problem:s>` - the child died or stopped answering,
     and every voice that has it switched in is silent (never dry, CU) until it
     is back. Submitted ONCE per failure by the

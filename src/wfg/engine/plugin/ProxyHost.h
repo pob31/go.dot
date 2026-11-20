@@ -137,6 +137,12 @@ namespace wfg::plugin
         using FailureHandler = std::function<void (const std::string& pluginId, const std::string& problem)>;
         using ChangeHandler = std::function<void()>;
 
+        /*  A SPELL OF LATE BLOCKS BEGAN, OR ENDED (namespace draft §139, BHE):
+            the entry, how many blocks it has been late for since it loaded,
+            and the words for it - empty when the spell is over. Twice a
+            spell, never once a block. */
+        using LateHandler = std::function<void (const std::string& pluginId, std::uint32_t blocks, const std::string& words)>;
+
         /** Milliseconds a child has to say it is ready. */
         static constexpr int readyTimeoutMs = 5000;
 
@@ -145,6 +151,20 @@ namespace wfg::plugin
 
         /** A second failure inside this many milliseconds stays failed. */
         static constexpr int failureWindowMs = 60000;
+
+        /** A spell of late blocks is over this long after the last of them (BHE). */
+        static constexpr int lateSpellEndsAfterMs = 2000;
+
+        /** What the entry says while it is not keeping up. */
+        static constexpr const char* lateWords = "not keeping up: a buffer it answers late is silent";
+
+        /*  HOW LONG A RUN OF LATE BLOCKS MUST HAVE LASTED before it fails the
+            plugin (namespace draft §139, BHD), beside its eight blocks: at a
+            small buffer eight blocks are ten milliseconds, and a process the
+            system kept off the processor that long - which a Mac was measured
+            doing to one in twenty blocks (M86) - is a hole in the sound, not a
+            plugin to be put down, relaunched and left silent two seconds. */
+        static constexpr int failureAfterMs = 100;
 
         /*  `lanes` are the voices' lanes for this plugin, track order; the
             table is where the entry's state is written. Neither may go away
@@ -157,6 +177,9 @@ namespace wfg::plugin
 
         /** Called once per failure, after the table has been written. */
         void onFailed (FailureHandler handler);
+
+        /** Called when a spell of late blocks begins and when it ends, on the polling thread. */
+        void onLate (LateHandler handler);
 
         /** Called whenever the table entry changed, so the tree can look again. */
         void onChanged (ChangeHandler handler);
@@ -217,4 +240,9 @@ namespace wfg::plugin
 
     /** The deadline rule (plan decision 12). */
     std::int64_t proxyDeadlineFor (int sampleRate, int blockSize, std::int64_t requestedMicroseconds) noexcept;
+
+    /** The least a lane is given however late in the callback it is asked:
+        the smaller of 250 microseconds and a quarter of the block - the whole
+        rule until 2026-11-20 (namespace draft §139, BHB). */
+    std::int64_t proxyFloorFor (int sampleRate, int blockSize) noexcept;
 }

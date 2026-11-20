@@ -16,6 +16,8 @@
 
 #include <wfg/engine/plugin/PluginCommands.h>
 
+#include <algorithm>
+
 #include <memory>
 
 namespace wfg::plugin
@@ -76,6 +78,28 @@ namespace wfg::plugin
                             auto status = table.statusOf (id);
                             status.state = "failed";
                             status.problem = args[1].getString();
+                            table.set (id, status);
+
+                            return Outcome::ok (args);
+                        } }));
+
+        registry.add (machineLocal ({ "plugin.late",
+                        "The plugin is not keeping up, or is again (namespace draft 139): how many blocks it"
+                        " has answered late since it loaded - each of them silent - and the words for it,"
+                        " empty once a spell of them is over. Twice a spell, never once a block.",
+                        { { "id", 's', false }, { "blocks", 'i', false }, { "words", 's', false } },
+                        true,
+                        [&table, known] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args[0].getString();
+
+                            if (! known (id))
+                                return Outcome::rejected (reason::unknownId);
+
+                            //  The rest of what the table holds is kept, as a failure keeps it.
+                            auto status = table.statusOf (id);
+                            status.lateBlocks = static_cast<std::uint32_t> (std::max (0, args[1].getInt32()));
+                            status.late = args[2].getString();
                             table.set (id, status);
 
                             return Outcome::ok (args);

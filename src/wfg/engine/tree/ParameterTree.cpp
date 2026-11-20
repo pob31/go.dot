@@ -3640,6 +3640,8 @@ namespace wfg::tree
                                 else if (name == "latencySamples") text = std::to_string (status.latencySamples);
                                 else if (name == "stateLoadMs")    text = osc::formatDouble (status.stateLoadMs);
                                 else if (name == "stateProblem")   text = status.stateProblem;
+                                else if (name == "lateBlocks")     text = std::to_string (status.lateBlocks);
+                                else if (name == "late")           text = status.late;
                                 else if (name == "inputs")         text = std::to_string (status.inputs);
                                 else if (name == "outputs")        text = std::to_string (status.outputs);
                                 else if (name == "layout")         text = status.layout;

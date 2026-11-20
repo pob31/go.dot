@@ -184,6 +184,45 @@ TEST_CASE ("problems: waiting is not a problem, and nothing is said of what nobo
     CHECK (model::machineProblems (off, model::indexObjects (off)).empty());
 }
 
+TEST_CASE ("problems: a plugin that is not keeping up is said while it is not, and its cues are marked (namespace draft 139)")
+{
+    /*  BHE. A buffer a plugin answers too late is silent, and until this
+        nothing said so: a cue could crackle with a clean Problems list and an
+        empty log. The engine's words stand while a spell of late buffers
+        lasts, and the mark goes when they do; the count that is left is no
+        problem. */
+    const auto late = snapshotOf ({
+        { "/godot/audio/status", word ("running") },
+        { "/godot/cue/SND1/kind", word ("media") },
+        { "/godot/cue/SND1/fx", word ("FX1") },
+        { "/godot/fx/FX1/plugin", word ("PL1") },
+        { "/godot/plugin/order", word ("PL1") },
+        { "/godot/plugin/PL1/name", word ("Reverb") },
+        { "/godot/plugin/PL1/state", word ("loaded") },
+        { "/godot/plugin/PL1/late", word ("not keeping up: a buffer it answers late is silent") },
+        { "/godot/plugin/PL1/lateBlocks", word ("12") },
+    });
+
+    const auto index = model::indexObjects (late);
+    const auto problems = model::machineProblems (late, index);
+    CHECK (anySays (problems, "Plugin Reverb is not keeping up: a buffer it answers late is silent - Show settings, Plugins."));
+
+    const std::vector<model::Row> rows { cueRow ("SND1", "media") };
+    const auto marks = model::cueProblems (model::needsOf (late, rows, index), problems);
+    REQUIRE (marks.count ("SND1") == 1);
+    CHECK (marks.at ("SND1").text == "plugin late");
+
+    const auto over = snapshotOf ({
+        { "/godot/audio/status", word ("running") },
+        { "/godot/cue/SND1/kind", word ("media") },
+        { "/godot/plugin/order", word ("PL1") },
+        { "/godot/plugin/PL1/name", word ("Reverb") },
+        { "/godot/plugin/PL1/state", word ("loaded") },
+        { "/godot/plugin/PL1/lateBlocks", word ("12") },
+    });
+    CHECK (model::machineProblems (over, model::indexObjects (over)).empty());
+}
+
 TEST_CASE ("problems: a cue that needs a missing thing is marked, and a shut group carries its members' (§64)")
 {
     /*  The author, 2026-10-15: "when a cue is missing something (screen is not

@@ -374,6 +374,13 @@ namespace wfg::audio
                 its schedule, so the line through the stamps is the schedule's. */
             audioHost.setBlockTime (std::chrono::duration_cast<std::chrono::nanoseconds> (due.time_since_epoch()).count());
 
+            /*  AND THE PLUGINS' TIME COUNTED FROM NOW (namespace draft §139,
+                BHB), not from the deadline: a pump woken late is still owed
+                its block, and a share of a period that began before it woke
+                would leave the plugins none. */
+            audioHost.setBlockEntry (std::chrono::duration_cast<std::chrono::nanoseconds> (
+                                         Clock::now().time_since_epoch()).count());
+
             /*  THE SHOW HELD (PRD §3.34): a block the hold does not run is
                 kept to the schedule and nothing else - no input read, nothing
                 captured or rendered, the count where it stood - so the render

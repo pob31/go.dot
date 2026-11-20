@@ -350,6 +350,7 @@ namespace wfg::audio
                 capture->write (inputChannelData, numInputChannels, numSamples, audioHost.clock().samplesElapsed());
 
             audioHost.setBlockTime (askedAt);
+            audioHost.setBlockEntry (askedAt);      // and the plugins' time is counted from it (§139, BHB)
             audioHost.processBlock (inputScratch.getArrayOfReadPointers(), inputScratch.getNumChannels());
 
             sink.destination = nullptr;

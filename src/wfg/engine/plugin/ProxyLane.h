@@ -76,6 +76,14 @@ namespace wfg::plugin
         std::int64_t blockStart = 0;
         cue::BeatClockState state;
         std::uint64_t seq = 0;
+
+        /*  WHEN THE PLUGINS' TIME IN THIS CALLBACK IS UP (namespace draft
+            §139, BHB), on the steady clock in nanoseconds: the moment the
+            device asked for the block plus the callback's share of its
+            period. Nought when nobody said when the block was asked for - a
+            test driving blocks by hand - and each lane's own cap is then the
+            only limit. */
+        std::int64_t budgetEndNanos = 0;
     };
 
     class ProxyLane
@@ -88,6 +96,18 @@ namespace wfg::plugin
 
         /** The deadline a lane starts with; the host sets the real one. */
         static constexpr std::int64_t defaultDeadlineMicroseconds = 250;
+
+        /*  THE ALLOWANCE (namespace draft §139, BHB). A plugin's time comes
+            from the buffer it is processing: a lane may wait for a share of
+            the block period, and every wait in one device callback ends a
+            larger share of the period after the callback began, so that
+            plugins that cannot keep up are muted and the interface itself
+            never runs dry. Until 2026-11-20 the limit was 250 microseconds
+            whatever the buffer - set from a gain's round trip - which a real
+            reverb at the buffer a Mac opens with needs three times over
+            (M86, docs/spikes/spike09-plugin-allowance.md). */
+        static constexpr double laneCapFraction = 0.30;
+        static constexpr double callbackFraction = 0.60;
 
         /*  THE QUICK FADE (CV): down to silence when the plugin cannot answer,
             and up again when it does - a millisecond at 48 kHz, a dip and
@@ -107,9 +127,18 @@ namespace wfg::plugin
 
         bool isBound() const noexcept;
 
-        /** The spin's limit; the host computes it from the block period. */
+        /*  A FIXED LIMIT, whatever the callback: what `--proxy-deadline-us`
+            and a test ask for. */
         void setDeadlineMicroseconds (std::int64_t microseconds) noexcept;
         std::int64_t deadlineMicroseconds() const noexcept;
+
+        /*  THE ALLOWANCE AS THE HOST COMPUTES IT (BHB): the lane's cap, and
+            the least it is ever given however late in the callback it is
+            asked - the old rule, so no lane has less than it had. Between
+            the two, the callback's end (`BlockClock::budgetEndNanos`) cuts
+            the wait short. */
+        void setAllowance (std::int64_t capMicroseconds, std::int64_t floorMicroseconds) noexcept;
+        std::int64_t floorMicroseconds() const noexcept;
 
         //======================================================================
         /** The cue's switch: whether this voice's block goes to the child. Any thread. */
@@ -130,8 +159,19 @@ namespace wfg::plugin
             Message thread, while the voice is silent. */
         void setValues (const std::vector<std::pair<int, float>>& values) noexcept;
 
-        /** Asks the child to reset the instance before its next block. */
+        /*  Asks the child to reset the instance. NOT A BLOCK'S WORK (namespace
+            draft §139, BHC): a VST3's reset is a whole deactivation and can
+            take milliseconds, so the child makes it apart from its answering
+            and says when it has (`resetDoneSeq`); until then the lane is
+            silent, not called, and counts no late block - and an arm waits
+            for it as for a state (`stateSettled`). The one reset that is not
+            silent is a switch-in's own (`setEnabled`): the block passes as it
+            did while the insert was out, until the plugin is ready. */
         void requestReset() noexcept;
+
+        /*  The host's poll, message thread: true once a reset has been owed
+            for longer than a state may load - a child that is stuck. */
+        bool resetOverdue (std::uint32_t nowMs) noexcept;
 
         /*  HOW WIDE THE CUE IS HERE (2026-09-26, cue/InsertChain.h): the
             channels sent - nought, and the block passes dry - and how many are
@@ -159,8 +199,9 @@ namespace wfg::plugin
         void expectState() noexcept;
 
         /*  Any thread, the tick thread's question at every launch: nothing
-            this lane was asked to load is still loading. A lane that is not
-            switched in, not called or not bound has nothing to wait for. */
+            this lane was asked to load is still loading, and no reset it was
+            asked for is still to be made. A lane that is not switched in, not
+            called or not bound has nothing to wait for. */
         bool stateSettled() const noexcept;
 
         /** What one pass of the host's poll found. */
@@ -204,9 +245,17 @@ namespace wfg::plugin
             out, or passes it dry by the insert's shape (said on the insert).
 
             NEVER THE DRY BLOCK OTHERWISE (CU, CV): a plugin that is not there,
-            not to be called, still taking a whole state, or late, leaves the
-            block SILENT over a quick fade from where the last answer left each
-            channel, and the first block it answers again fades back in. */
+            not to be called, still taking a whole state or being reset, or
+            late, leaves the block SILENT over a quick fade from where the last
+            answer left each channel, and the first block it answers again
+            fades back in.
+
+            A REQUEST IS NEVER WRITTEN OVER (namespace draft §139, BHC). The
+            child answers in the audio it was sent, so while one it was late
+            for is still unanswered that audio is its own: the next block
+            waits for the answer inside its own limit, throws it away - it
+            answers a block long gone - and only then sends. If it does not
+            come the block is late too, and nothing is sent. */
         void process (float* const* channelData, int numChannels, int numSamples) noexcept WFG_AUDIO_THREAD;
 
         /*  THE SAME, PLACED ON THE CLOCK (namespace draft §123, BEI): the beat
@@ -223,14 +272,39 @@ namespace wfg::plugin
         /** Blocks the child answered in time. */
         std::uint64_t answered() const noexcept;
 
-        /** Blocks the child was late for, in all. */
+        /** Blocks the child was late for, in all - one it was still answering
+            the last request through, and so was never sent, among them. */
         std::uint32_t misses() const noexcept;
 
         /** Late blocks since the last one that was in time. */
         std::uint32_t consecutiveMisses() const noexcept;
 
+        /*  Blocks cut short by the callback's end before the lane's own cap
+            (BHB): muted like a late one, and said, but not the plugin's
+            failing - other plugins had used the callback's time - so they
+            count in neither of the two above and never fail it. */
+        std::uint32_t starved() const noexcept;
+
         /** The host, on a restart: the new child starts with a clean sheet. */
         void clearMisses() noexcept;
+
+        /*  AT REST (namespace draft §139, BHF). A lane that has played a cue
+            and has had silence in and silence out for ten seconds since is
+            not called again until sound arrives: the cue is over and its
+            tail has rung out, and nothing gives a voice's copy back when its
+            run ends (§133.8), so until this every plugin that had ever played
+            went on being asked for silence, a block at a time and one after
+            another, for the rest of the session. Sound arriving is played
+            through it in that very block - never dry - and a lane armed and
+            not yet heard does not rest at all: a cue at standby finds its
+            plugin as warm as it always did. Any thread. */
+        bool isResting() const noexcept;
+
+        /** How long silence in and out must last before a lane rests. */
+        static constexpr double restAfterSeconds = 10.0;
+
+        /** Under this, a sample is silence for the rest's purposes: a hundred decibels down. */
+        static constexpr float restThreshold = 1.0e-5f;
 
     private:
         void publishClock (const cue::BeatClockState& state) noexcept WFG_AUDIO_THREAD;
@@ -262,6 +336,7 @@ namespace wfg::plugin
         /** What a relaunched child is to be given back (`restoreState`); the message thread's. */
         std::string restoreStatePath;
         std::atomic<std::int64_t> deadlineUs { defaultDeadlineMicroseconds };
+        std::atomic<std::int64_t> floorUs { defaultDeadlineMicroseconds };
 
         std::atomic<float> shadow[region::maxParams];
 
@@ -273,9 +348,31 @@ namespace wfg::plugin
         std::uint32_t flightSentAt = 0;
         bool stateInFlight = false;
 
+        /*  THE RESET A SWITCH-IN ASKED FOR (BHC), by its count: until that one
+            is made the block passes as it did while the insert was out, so an
+            insert switched in under a sounding cue is a step from dry to wet
+            and no hole. Any other reset finds the insert in, and is silent. */
+        std::atomic<std::uint32_t> dryWhileReset { 0 };
+
+        /** Asks the reset and says its count; nought when there is no child to ask. */
+        std::uint32_t askReset() noexcept;
+
+        /** Since when a reset has been owed, as the host's poll saw it; the message thread's. */
+        std::uint32_t resetOwedSince = 0;
+        bool resetOwed = false;
+
         std::atomic<std::uint64_t> blockCount { 0 };
         std::atomic<std::uint64_t> answeredCount { 0 };
         std::atomic<std::uint32_t> missCount { 0 };
         std::atomic<std::uint32_t> consecutive { 0 };
+        std::atomic<std::uint32_t> starvedCount { 0 };
+
+        /*  THE REST (BHF), the audio thread's own but for the flag: how long
+            in and out have both been silent, whether the lane has heard
+            sound since its last reset, and what ten seconds is in samples. */
+        std::int64_t quietSamples = 0;
+        std::int64_t restAfterSamples = 480000;
+        bool heardSinceReset = false;
+        std::atomic<int> resting { 0 };
     };
 }

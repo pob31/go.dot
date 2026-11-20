@@ -4806,6 +4806,17 @@ namespace
             engine.submit (wfg::origin::engine, "plugin.failed",
                            { wfg::osc::Value::string (id), wfg::osc::Value::string (problem) });
         };
+        proxyServices.onLate = [&engine] (const std::string& id, std::uint32_t blocks, const std::string& words)
+        {
+            /*  AND TWO a spell of late blocks (namespace draft §139, BHE): one
+                when it begins, one when two seconds have gone by without
+                another - the count as it stands, so the log of an evening
+                says which plugin did not keep up, and when. */
+            engine.submit (wfg::origin::engine, "plugin.late",
+                           { wfg::osc::Value::string (id),
+                             wfg::osc::Value::int32 (static_cast<std::int32_t> (std::min<std::uint32_t> (blocks, 0x7fffffffu))),
+                             wfg::osc::Value::string (words) });
+        };
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
         wfg::cue::registerCurveCommands (engine.commands(), engine, runner, document, curveTable, &spaceMouse);

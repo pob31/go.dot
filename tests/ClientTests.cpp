@@ -9795,6 +9795,22 @@ TEST_CASE ("client: a box in the chain says what became of its plugin, and what 
     strip.enabled = true;
     CHECK (model::stateSentence (strip) == "missing: not on this machine - this cue is silent while it has it switched in");
 
+    /*  NOT KEEPING UP (namespace draft 139, BHE): the engine's words while it
+        lasts, and the count that is left once it is over. */
+    {
+        model::FxStrip slow;
+        slow.state = "loaded";
+        slow.late = "not keeping up: a buffer it answers late is silent";
+        slow.lateBlocks = 12;
+        CHECK (model::stateSentence (slow) == "loaded - not keeping up: a buffer it answers late is silent");
+
+        slow.late.clear();
+        CHECK (model::stateSentence (slow) == "loaded - 12 buffers late so far");
+
+        slow.lateBlocks = 1;
+        CHECK (model::stateSentence (slow) == "loaded - 1 buffer late so far");
+    }
+
     strip.enabled = false;
     CHECK (model::stateSentence (strip) == "missing: not on this machine");
 

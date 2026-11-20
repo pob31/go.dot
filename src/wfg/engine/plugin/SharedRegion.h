@@ -61,8 +61,10 @@ namespace wfg::plugin::region
         the header, the latency after a cue's state on each lane. 4 since
         2026-10-22: whether the worker is in the interface's audio workgroup.
         5 since 2026-10-27: the beat clock in the header and each block's first
-        sample on its lane, for the plugins' playhead (namespace draft §123). */
-    constexpr std::uint32_t version = 5;
+        sample on its lane, for the plugins' playhead (namespace draft §123).
+        6 since 2026-11-20: a reset is answered (`resetDoneSeq`), so the parent
+        can wait for it without calling the lane (namespace draft §139). */
+    constexpr std::uint32_t version = 6;
 
     /** The most parameters a plugin may expose through the proxy; a plugin
         with more has the rest neither published nor written. */
@@ -103,8 +105,10 @@ namespace wfg::plugin::region
             Stored with release after the sentence is written. */
         std::atomic<std::uint32_t> childFailed;
 
-        /** Parent to child: some lane is switched in, so the worker spins hot;
-            nought lets it sleep between polls (plan decision 14). */
+        /*  Parent to child: some lane is switched in, so the worker looks for
+            requests a tenth of a millisecond apart; nought lets it look once a
+            millisecond. The name is from when it spun without pause (plan
+            decision 14, until namespace draft §139, BHG). */
         std::atomic<std::uint32_t> wantSpin;
 
         /** Child to parent, once: the catalogue file beside the region is
@@ -159,10 +163,16 @@ namespace wfg::plugin::region
 
     struct Lane
     {
-        /** Bumped by the parent with release once the block is in `audio`. */
+        /*  Bumped by the parent with release once the block is in `audio` -
+            and only once the last request has been answered (namespace draft
+            §139, BHC): while `responseSeq` is behind, the audio is the child's
+            to write its answer into, and the parent neither reads nor writes
+            it. */
         std::atomic<std::uint64_t> requestSeq;
 
-        /** Stored by the child with release once its answer is in `audio`. */
+        /** Stored by the child with release once its answer is in `audio`. A
+            new child starts with it at `requestSeq`: what the last one was
+            asked and never answered is nobody's block now. */
         std::atomic<std::uint64_t> responseSeq;
 
         std::atomic<std::uint32_t> numChannels;
@@ -172,9 +182,19 @@ namespace wfg::plugin::region
             every value whose revision it has not seen. */
         std::atomic<std::uint32_t> paramRevision;
 
-        /** Bumped by the parent at an arm; the child resets the instance
-            before the next block so the previous cue's tail is not in it. */
+        /** Bumped by the parent at an arm; the child resets the instance so
+            the previous cue's tail is not in it. */
         std::atomic<std::uint32_t> resetSeq;
+
+        /*  THE RESET, ANSWERED (namespace draft §139, BHC): the count the
+            child last reset the instance for, stored with release once it has.
+            A reset can take milliseconds - a VST3's is a whole deactivation -
+            so it is made on the child's message thread with the lane parked,
+            as a state is loaded, and until this has caught up with `resetSeq`
+            the parent neither calls the lane nor counts a late block: it is
+            silent, as while a state loads. A new child starts with the two
+            equal, its instances being fresh. */
+        std::atomic<std::uint32_t> resetDoneSeq;
 
         /*  WHERE THIS PIECE STARTS in Go.dot's count of samples (namespace
             draft §123, BEI), stored before the request: what the playhead

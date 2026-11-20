@@ -1932,6 +1932,37 @@ of step — where a hole is only a hole.
 - **A cue wider than a plugin takes still passes it dry, whole**: that is a configuration, said on
   the insert when it is made, and not a failure.
 
+*Amended in 0.8, at the author's direction (2026-11-20) - decisions BHB to BHG,
+`docs/godot-namespace-draft-0.1.md` §139; `docs/spikes/spike09-plugin-allowance.md`.* The **hard
+deadline** of this section was set from a gain's round trip, the smaller of 250 µs and a quarter of
+the block whatever the buffer, and no real plugin had been run under it at the buffer a Mac opens
+with. A convolution reverb needs nearly three times that of a 512-sample block; a tester's inserts
+"sounded distorted", and on the same class of Mac the reverb was late for every block and failed.
+The author's ruling: **a plugin's time comes from the buffer, and no latency is added.**
+
+- **The allowance.** A plugin may take three tenths of the block period to answer, and every wait
+  in one device callback ends six tenths of the period after the callback began: plugins that
+  cannot keep up are muted, each for its own block, and the interface is still answered in time.
+  The old rule is the least any lane is given. *In time → zero added latency* stands.
+- **Late is said.** A plugin that is not keeping up says so while it is not - on the Plugins page,
+  on every cue through it, on the cue's FX strip - and in the log, once when a spell of late
+  blocks begins and once when it ends. A late block is still silent over the quick fade, never
+  dry.
+- **Failed takes longer than a hiccup.** Eight late blocks in a row *and* a tenth of a second; a
+  block cut short because other plugins had used the callback's time is said and not counted
+  toward it.
+- **A reset is not a block's work.** It is made apart from the answering, the insert silent until
+  it is - or, for an insert switched in under a sounding cue, passing as it did while it was out -
+  and a launch waits for it as for a cue's state.
+- **The plugin's process does not spin.** It was *one core per plugin*, and on a Mac the spin
+  itself made it late one block in fifteen. It naps a tenth of a millisecond between requests,
+  except on Windows, where the spin is not punished and a nap that short cannot be had; and a
+  plugin whose cue is over and whose tail has rung out is not asked again until sound arrives.
+
+The table of this section's first amendment (what a missed deadline costs the audio thread) reads
+differently now: a late block costs the lane's cap and not 250 µs, the callback's share bounds the
+sum, and a failed strip is still never called.
+
 ### 3.19 Video
 
 Built in, by decision (§2, no Alt-Tab). Millumin over OSC remains the escape

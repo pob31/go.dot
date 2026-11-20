@@ -80,6 +80,15 @@ namespace wfg::plugin
             int inputs = 0;
             int outputs = 0;
             std::string layout;
+
+            /*  NOT KEEPING UP (namespace draft §139, BHE): how many blocks it
+                has answered late or not been given time for since it loaded -
+                each of them silent (CV) - and, while it is happening, the
+                words for it; empty once two seconds have gone by without one.
+                Written when a spell of them begins and when it ends, never a
+                block at a time. */
+            std::uint32_t lateBlocks = 0;
+            std::string late {};
         };
 
         /** Replaces what is known about one entry. Answers whether anything a
@@ -97,6 +106,7 @@ namespace wfg::plugin
                                    || held.stateProblem != status.stateProblem
                                    || held.inputs != status.inputs || held.outputs != status.outputs
                                    || held.layout != status.layout
+                                   || held.lateBlocks != status.lateBlocks || held.late != status.late
                                    || std::abs (held.stateLoadMs - status.stateLoadMs) > 1.0e-9;
             held = status;
 

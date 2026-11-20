@@ -449,8 +449,16 @@ namespace wfg::client::model
             const auto base = "/godot/plugin/" + entry.id + "/";
             const auto state = text (snapshot, base + "state");
 
+            /*  NOT KEEPING UP (namespace draft 139, BHE), while it lasts: it
+                answers some buffers too late to be played and each of those is
+                silent, which is heard as crackle on every cue through it. */
             if (state != "missing" && state != "failed")
+            {
+                if (const auto late = text (snapshot, base + "late"); ! late.empty())
+                    add (out, page, "plugin:" + entry.id, "plugin late", "Plugin " + entry.name + on + " is " + late);
+
                 return;
+            }
 
             const auto why = text (snapshot, base + "problem");
             add (out, page, "plugin:" + entry.id, state == "missing" ? "plugin missing" : "plugin failed",

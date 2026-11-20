@@ -26,7 +26,9 @@
     whole path: the editing helper captures it, the cue keeps the file, and
     the voice child loads it before the cue plays and is heard a quarter as
     loud. `loadDelayMs` is for tests only: the voice child sleeps that long
-    while loading, which is how a slow plugin is made on purpose.
+    while loading, which is how a slow plugin is made on purpose; and
+    `resetDelayMs` the same at a reset, which is a VST3's deactivation made on
+    purpose (namespace draft 139).
 
     Plain text, a word a line, so a test can write one by hand. Std only: the
     voice child's test gain has no JUCE at all.
@@ -45,6 +47,7 @@ namespace wfg::plugin
         bool die = false;
         bool pad = false;
         int loadDelayMs = 0;
+        int resetDelayMs = 0;
 
         /** What Pad does to the signal: twelve decibels, a quarter. */
         float padFactor() const noexcept { return pad ? 0.25f : 1.0f; }
@@ -57,6 +60,9 @@ namespace wfg::plugin
 
             if (loadDelayMs > 0)
                 out << "loadDelayMs=" << loadDelayMs << "\n";
+
+            if (resetDelayMs > 0)
+                out << "resetDelayMs=" << resetDelayMs << "\n";
 
             return out.str();
         }
@@ -83,6 +89,7 @@ namespace wfg::plugin
                 else if (key == "die")          { int v = 0; value >> v; state.die = v != 0; }
                 else if (key == "pad")          { int v = 0; value >> v; state.pad = v != 0; }
                 else if (key == "loadDelayMs")  value >> state.loadDelayMs;
+                else if (key == "resetDelayMs") value >> state.resetDelayMs;
             }
 
             return state;

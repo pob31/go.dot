@@ -30,6 +30,7 @@
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/app/RealtimeRights.h>
 #include <wfg/engine/audio/AudioHost.h>
 #include <wfg/engine/clock/AudioClockSource.h>
 #include <wfg/engine/audio/CueEq.h>
@@ -102,7 +103,7 @@ namespace
     {
         VectorRegion (int channels, int maxSamples, int lanes)
             : bytes (plugin::region::regionBytes (channels, maxSamples, lanes), 0),
-              channelCount (channels), sampleCount (maxSamples)
+              channelCount (channels), sampleCount (maxSamples), laneCount (lanes)
         {
             header = new (bytes.data()) plugin::region::Header {};
 
@@ -121,8 +122,23 @@ namespace
             proxy.bind (header, l, plugin::region::audioOf (l), channelCount, sampleCount);
         }
 
+        /*  THE CHILD'S PART, PLAYED BY HAND (namespace draft 139, BHC): every
+            reset asked for is made - a lane waits for its reset, so a case
+            that switches one in says so before it expects a call. */
+        void answerResets()
+        {
+            for (int i = 0; i < laneCount; ++i)
+                lane (i)->resetDoneSeq.store (lane (i)->resetSeq.load());
+        }
+
+        /** And its answer to what a lane was last asked, the audio left as it is. */
+        void answer (int index)
+        {
+            lane (index)->responseSeq.store (lane (index)->requestSeq.load());
+        }
+
         std::vector<char> bytes;
-        int channelCount, sampleCount;
+        int channelCount, sampleCount, laneCount;
         plugin::region::Header* header = nullptr;
     };
 
@@ -166,6 +182,28 @@ namespace
                 return false;
 
             std::this_thread::sleep_for (std::chrono::milliseconds (10));
+        }
+    }
+
+    /*  Polls the host until the lane has nothing left to wait for - the
+        reset its switch-in asked for made, its state held - or the time is
+        up. What every arm waits for before its launch (namespace draft 139,
+        BHC): until then a lane just switched in passes its block as it came. */
+    bool waitSettled (plugin::ProxyHost& host, plugin::ProxyLane& lane, int milliseconds = 5000)
+    {
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds (milliseconds);
+
+        for (;;)
+        {
+            host.poll();
+
+            if (lane.stateSettled())
+                return true;
+
+            if (std::chrono::steady_clock::now() > until)
+                return false;
+
+            std::this_thread::sleep_for (std::chrono::milliseconds (2));
         }
     }
 
@@ -265,12 +303,13 @@ TEST_CASE ("proxy: a lane that is off leaves the block untouched; unbound or not
     CHECK (region.lane (0)->requestSeq.load() == 0);
 }
 
-TEST_CASE ("proxy: with nobody answering, a lane misses at its deadline, is silent for it, and counts")
+TEST_CASE ("proxy: with nobody answering, a lane misses at its deadline, is silent for it, counts, and sends nothing more")
 {
     plugin::ProxyLane lane;
     VectorRegion region (2, 64, 1);
     region.bind (lane, 0);
     lane.setEnabled (true);
+    region.answerResets();
     lane.setDeadlineMicroseconds (200);
 
     Block block (2, 64, 0.5f);
@@ -287,12 +326,15 @@ TEST_CASE ("proxy: with nobody answering, a lane misses at its deadline, is sile
 
     const auto took = std::chrono::steady_clock::now() - started;
 
+    /*  ONE REQUEST, and nine blocks that waited for its answer and sent
+        nothing (namespace draft 139, BHC): the audio of a request not yet
+        answered is the child's to write in. Late all the same, each of them. */
     CHECK (block.allEqual (0.0f));      // never the dry block (CV)
-    CHECK (lane.blocks() == 10);
+    CHECK (lane.blocks() == 1);
     CHECK (lane.misses() == 10);
     CHECK (lane.consecutiveMisses() == 10);
     CHECK (lane.answered() == 0);
-    CHECK (region.lane (0)->requestSeq.load() == 10);
+    CHECK (region.lane (0)->requestSeq.load() == 1);
 
     /*  Ten deadlines of 200 µs is two milliseconds; two seconds is the bound,
         because a thread preempted on a shared box is late without the spin
@@ -323,6 +365,7 @@ TEST_CASE ("proxy: a late block fades to silence from where the last answer left
     VectorRegion region (1, 64, 1);
     region.bind (lane, 0);
     lane.setEnabled (true);
+    region.answerResets();
     lane.setDeadlineMicroseconds (200);
 
     auto* shared = region.lane (0);
@@ -392,6 +435,7 @@ TEST_CASE ("proxy: a lane puts each piece's first sample and the beat clock in t
     VectorRegion region (2, 64, 1);
     region.bind (lane, 0);
     lane.setEnabled (true);
+    region.answerResets();
 
     plugin::BlockClock clock;
     clock.blockStart = 1000;
@@ -421,11 +465,15 @@ TEST_CASE ("proxy: a lane puts each piece's first sample and the beat clock in t
     CHECK (header->gridBeatsPerBar.load() == 3u);
     CHECK (header->gridPlaying.load() == 1u);
 
-    //  The same clock again: not written again. A moved count: written, the count even once more.
+    /*  The same clock again: not written again. A moved count: written, the
+        count even once more. Each request answered - late - before the next,
+        since nothing is sent over one still owed. */
+    region.answer (0);
     lane.process (block.data(), 2, 64, &clock, 1064);
     CHECK (header->gridSeq.load() == 2u);
     CHECK (laid->blockStartSample.load() == 1064u);
 
+    region.answer (0);
     clock.seq = 2;
     clock.state.clock.bpmTo = 70.0;
     lane.process (block.data(), 2, 64, &clock, 1128);
@@ -466,6 +514,7 @@ TEST_CASE ("proxy: a plugin's playhead reads the tempo, the beat and the bar at 
     plugin::ProxyLane lane;
     region.bind (lane, 0);
     lane.setEnabled (true);
+    region.answerResets();
 
     plugin::BlockClock clock;
     clock.seq = 1;
@@ -555,13 +604,496 @@ TEST_CASE ("proxy: an insert switched in is reset first, so nothing it last held
     CHECK (l->resetSeq.load() == from + 2);
 }
 
-TEST_CASE ("proxy: the deadline rule is the smaller of 250 microseconds and a quarter of the block")
+TEST_CASE ("proxy: a request not answered is never written over, and the next block is sent whole once it is")
 {
-    CHECK (plugin::proxyDeadlineFor (48000, 64, 0) == 250);        // 1333 µs block, a quarter is 333
-    CHECK (plugin::proxyDeadlineFor (48000, 32, 0) == 166);        // 666 µs block, a quarter is 166
-    CHECK (plugin::proxyDeadlineFor (96000, 16, 0) == 41);
+    /*  Namespace draft 139, BHC. The child answers in the audio it was sent.
+        A lane that gave up on a block and wrote the next one over it handed
+        the plugin its own half-written answer with new input on top, and took
+        the result for an answer. Now the audio of a request still owed is the
+        child's: the next block waits for it inside its own limit, late if it
+        does not come, and sends nothing. */
+    constexpr auto fade = plugin::ProxyLane::fadeSamples;
+
+    plugin::ProxyLane lane;
+    VectorRegion region (1, 64, 1);
+    region.bind (lane, 0);
+    lane.setEnabled (true);
+    region.answerResets();
+    lane.setDeadlineMicroseconds (200);
+
+    auto* shared = region.lane (0);
+    auto* audio = plugin::region::audioOf (shared);
+
+    rt::resetCounts();
+
+    const auto play = [&lane] (Block& block)
+    {
+        const rt::ScopedRealtimeCheck ours { rt::Region::ours };
+        lane.process (block.data(), 1, 64);
+    };
+
+    //  Sent, and not answered: late, silent, and the audio is the child's now.
+    Block first (1, 64, 0.5f);
+    play (first);
+    CHECK (first.allEqual (0.0f));
+    CHECK (shared->requestSeq.load() == 1);
+    CHECK (lane.blocks() == 1);
+    CHECK (lane.misses() == 1);
+
+    //  The child, still at it: half its answer written.
+    std::fill (audio, audio + 32, 0.125f);
+
+    //  THE NEXT BLOCK, and still no answer: late too, nothing sent, not a sample of that audio touched.
+    Block second (1, 64, 0.75f);
+    play (second);
+    CHECK (second.allEqual (0.0f));
+    CHECK (shared->requestSeq.load() == 1);
+    CHECK (lane.blocks() == 1);
+    CHECK (lane.misses() == 2);
+    CHECK (lane.consecutiveMisses() == 2);
+
+    for (int n = 0; n < 64; ++n)
+        CHECK (audio[n] == doctest::Approx (n < 32 ? 0.125f : 0.5f));
+
+    /*  ANSWERED AT LAST: thrown away - it answers a block long gone - and the
+        block in hand sent whole. The stand-in answers every later request at
+        once with what it was sent, so what comes back is this block, rising
+        from the silence before it, and nothing of the answer that was late. */
+    std::fill (audio + 32, audio + 64, 0.125f);
+    shared->responseSeq.store (1u << 30);
+
+    Block third (1, 64, 0.25f);
+    play (third);
+    CHECK (shared->requestSeq.load() == 2);
+    CHECK (lane.blocks() == 2);
+    CHECK (lane.misses() == 2);
+    CHECK (lane.consecutiveMisses() == 0);
+    CHECK (third.storage[0] == doctest::Approx (0.25f / static_cast<float> (fade)));
+    CHECK (third.storage[63] == doctest::Approx (0.25f));
+    CHECK (audio[0] == doctest::Approx (0.25f));
+
+    if (rt::isCounting())
+        CHECK (rt::violations() == 0);
+}
+
+TEST_CASE ("proxy: a lane whose reset is still to be made is silent, not called, counts nothing and is not settled")
+{
+    /*  Namespace draft 139, BHC. A reset is not a block's work - a VST3's is
+        a whole deactivation - so the child makes it apart from its answering
+        and says when it has. Asked to answer through it, every cue's first
+        blocks were late and eight failed the plugin. */
+    constexpr auto fade = plugin::ProxyLane::fadeSamples;
+
+    plugin::ProxyLane lane;
+    VectorRegion region (1, 64, 1);
+    region.bind (lane, 0);
+
+    auto* shared = region.lane (0);
+    shared->responseSeq.store (1u << 30);       // a child that answers at once, with what it was sent
+
+    lane.setEnabled (true);
+    region.answerResets();
+    lane.setDeadlineMicroseconds (200);
+    CHECK (lane.stateSettled());
+
+    Block in (1, 64, 0.5f);
+    lane.process (in.data(), 1, 64);
+    CHECK (in.allEqual (0.5f));
+    CHECK (lane.blocks() == 1);
+
+    //  A RESET OF AN INSERT THAT IS IN - an arm, a kill: silent until it is made, and nobody asked.
+    lane.requestReset();
+    CHECK (shared->resetSeq.load() == 2);
+    CHECK (shared->resetDoneSeq.load() == 1);
+    CHECK_FALSE (lane.stateSettled());
+
+    rt::resetCounts();
+
+    for (int i = 0; i < 20; ++i)
+    {
+        Block waiting (1, 64, 0.5f);
+        {
+            const rt::ScopedRealtimeCheck ours { rt::Region::ours };
+            lane.process (waiting.data(), 1, 64);
+        }
+        CHECK (waiting.allEqual (0.0f));
+    }
+
+    if (rt::isCounting())
+        CHECK (rt::violations() == 0);
+
+    CHECK (lane.blocks() == 1);
+    CHECK (lane.misses() == 0);
+    CHECK (lane.consecutiveMisses() == 0);
+    CHECK (shared->requestSeq.load() == 1);
+
+    //  MADE: called again, the first answer rising from the silence.
+    region.answerResets();
+    CHECK (lane.stateSettled());
+
+    Block after (1, 64, 0.5f);
+    lane.process (after.data(), 1, 64);
+    CHECK (lane.blocks() == 2);
+    CHECK (after.storage[0] == doctest::Approx (0.5f / static_cast<float> (fade)));
+    CHECK (after.storage[63] == doctest::Approx (0.5f));
+
+    /*  THE HOST'S POLL: one owed for longer than a state may load is a child
+        that is stuck - timed from the poll that first saw it owed. */
+    lane.requestReset();
+    CHECK_FALSE (lane.resetOverdue (1000));
+    CHECK_FALSE (lane.resetOverdue (1000 + plugin::ProxyLane::stateLoadLimitMs));
+    CHECK (lane.resetOverdue (1001 + plugin::ProxyLane::stateLoadLimitMs));
+
+    region.answerResets();
+    CHECK_FALSE (lane.resetOverdue (900000));
+
+    lane.requestReset();
+    CHECK_FALSE (lane.resetOverdue (2000000));
+    CHECK_FALSE (lane.resetOverdue (2000100));
+}
+
+TEST_CASE ("proxy: an insert switched in under a sounding cue passes as it did until its reset is made, and is never a hole")
+{
+    /*  Namespace draft 139, BHC. The one reset that is not silent: the
+        switch-in's own. The insert was out, so the cue was heard without it;
+        it goes on so for the moment the plugin takes to be ready, and then
+        the plugin is heard - a step, as a switch always was, where silence
+        would be a dip at every audition of an insert. */
+    plugin::ProxyLane lane;
+    VectorRegion region (1, 64, 1);
+    region.bind (lane, 0);
+
+    auto* shared = region.lane (0);
+    shared->responseSeq.store (1u << 30);
+
+    lane.setEnabled (true);
+    lane.setDeadlineMicroseconds (200);
+    CHECK_FALSE (lane.stateSettled());      // a launch still waits for it
+
+    Block before (1, 64, 0.5f);
+    lane.process (before.data(), 1, 64);
+    CHECK (before.allEqual (0.5f));         // as it came, and nobody asked
+    CHECK (lane.blocks() == 0);
+    CHECK (lane.misses() == 0);
+
+    region.answerResets();
+
+    Block ready (1, 64, 0.5f);
+    lane.process (ready.data(), 1, 64);
+    CHECK (lane.blocks() == 1);
+    CHECK (ready.allEqual (0.5f));          // the stand-in's answer, with no fade: there was no silence
+
+    //  Out and in again is the same; a reset asked of it once it is in is silent.
+    lane.setEnabled (false);
+    lane.setEnabled (true);
+    Block again (1, 64, 0.5f);
+    lane.process (again.data(), 1, 64);
+    CHECK (again.allEqual (0.5f));
+    CHECK (lane.blocks() == 1);
+
+    lane.requestReset();
+    Block cleared (1, 64, 0.5f);
+    lane.process (cleared.data(), 1, 64);
+    CHECK (cleared.allEqual (0.0f));
+    CHECK (lane.blocks() == 1);
+}
+
+TEST_CASE ("proxy: a block answered while a reset was asked for is silent, neither late nor answered")
+{
+    /*  The child parks a lane to reset it and answers what it is asked
+        meanwhile with the audio as it came - so an answer that crosses a
+        reset may be the dry block, and is not taken. */
+    plugin::ProxyLane lane;
+    VectorRegion region (1, 64, 1);
+    region.bind (lane, 0);
+    lane.setEnabled (true);
+    region.answerResets();
+    lane.setDeadlineMicroseconds (2000000);
+
+    auto* shared = region.lane (0);
+
+    std::thread child ([&lane, shared]
+    {
+        while (shared->requestSeq.load() == 0)
+            std::this_thread::yield();
+
+        lane.requestReset();
+        shared->responseSeq.store (1);
+    });
+
+    Block block (1, 64, 0.5f);
+    lane.process (block.data(), 1, 64);
+    child.join();
+
+    CHECK (block.allEqual (0.0f));
+    CHECK (lane.blocks() == 1);
+    CHECK (lane.misses() == 0);
+    CHECK (lane.answered() == 0);
+}
+
+TEST_CASE ("proxy: a slow reset keeps its own lane silent and uncounted while the child's other lane goes on being answered")
+{
+    /*  Namespace draft 139, BHC, with a child. The reset is made on the
+        child's message thread with that lane parked, as a state is loaded -
+        so a cue armed through one copy of a plugin no longer stalls the cue
+        sounding through another copy in the same child. The test gain's
+        state says how long its reset takes. */
+    Folder folder;
+    plugin::PluginTable table;
+    plugin::ProxyLane lanes[2];
+    auto spec = testGainSpec (folder, 2, 2, 64);
+    spec.deadlineMicroseconds = 200000;
+    plugin::ProxyHost host (spec, { &lanes[0], &lanes[1] }, &table);
+
+    std::string problem;
+    REQUIRE (host.start (problem));
+    REQUIRE (waitForState (host, "loaded", 5000));
+
+    const auto settled = [&host] (plugin::ProxyLane& lane, int milliseconds)
+    {
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds (milliseconds);
+
+        while (std::chrono::steady_clock::now() < until)
+        {
+            host.poll();
+
+            if (lane.stateSettled())
+                return true;
+
+            std::this_thread::sleep_for (std::chrono::milliseconds (2));
+        }
+
+        return lane.stateSettled();
+    };
+
+    const auto slow = folder.path.getChildFile ("slow-reset.state");
+    REQUIRE (slow.replaceWithText ("gain=0.5\ndie=0\npad=0\nresetDelayMs=400\n", false, false, "\n"));
+
+    lanes[0].setEnabled (true);
+    lanes[1].setEnabled (true);
+    lanes[1].wantState (slow.getFullPathName().toStdString());
+    REQUIRE (settled (lanes[0], 5000));
+    REQUIRE (settled (lanes[1], 5000));
+
+    //  Both answer: a half through a gain of a half.
+    for (auto& lane : lanes)
+    {
+        Block warm (2, 64, 0.5f);
+        lane.process (warm.data(), 2, 64);
+        CHECK (warm.storage[63] == doctest::Approx (0.25f));
+    }
+
+    /*  THE SLOW RESET on the second lane, and blocks on both while it runs.
+        A block after which the reset is still owed was played with it owed
+        throughout, and must be silent; how many there are is the machine's
+        business (a sleep of two milliseconds is fifteen on some), but four
+        tenths of a second holds more than a handful anywhere. */
+    lanes[1].requestReset();
+    CHECK_FALSE (lanes[1].stateSettled());
+
+    auto silentBlocks = 0;
+
+    for (int i = 0; i < 100; ++i)
+    {
+        Block sounding (2, 64, 0.5f), resetting (2, 64, 0.5f);
+        lanes[0].process (sounding.data(), 2, 64);
+        lanes[1].process (resetting.data(), 2, 64);
+
+        CHECK (sounding.storage[63] == doctest::Approx (0.25f));
+
+        if (! lanes[1].stateSettled())
+        {
+            CHECK (resetting.allEqual (0.0f));
+            ++silentBlocks;
+        }
+
+        host.poll();
+        std::this_thread::sleep_for (std::chrono::milliseconds (2));
+    }
+
+    CHECK (silentBlocks >= 5);
+    CHECK (lanes[0].misses() == 0);
+    CHECK (lanes[1].misses() == 0);
+    CHECK (host.status().state == "loaded");
+
+    //  Made: the second lane is called and heard again.
+    REQUIRE (settled (lanes[1], 5000));
+    Block back (2, 64, 0.5f);
+    lanes[1].process (back.data(), 2, 64);
+    CHECK (back.storage[63] == doctest::Approx (0.25f));
+    CHECK (lanes[1].misses() == 0);
+
+    host.stop();
+}
+
+TEST_CASE ("proxy: a lane that has played and had silence in and out for ten seconds rests, and sound arriving is played through it at once")
+{
+    /*  Namespace draft 139, BHF. Nothing gives a voice's copy back when its
+        run ends, so every plugin that had ever played was asked for silence a
+        block at a time for the rest of the session, one after another on the
+        audio thread. A lane now rests once its cue is over and its tail has
+        rung out - and only then: one armed and not yet heard is asked every
+        block, as a cue at standby always was. */
+    plugin::ProxyLane lane;
+    VectorRegion region (1, 64, 1);
+    region.header->sampleRate.store (48000);
+    region.bind (lane, 0);
+
+    auto* shared = region.lane (0);
+    shared->responseSeq.store (1u << 30);       // a child that answers at once, with what it was sent
+
+    lane.setEnabled (true);
+    region.answerResets();
+    lane.setDeadlineMicroseconds (200);
+
+    constexpr std::uint64_t tenSeconds = 480000 / 64;
+
+    const auto play = [&lane] (float value)
+    {
+        Block block (1, 64, value);
+        lane.process (block.data(), 1, 64);
+        return block.allEqual (value);
+    };
+
+    //  ARMED AND NOT YET HEARD: silence for as long as it lasts, asked every block.
+    for (std::uint64_t i = 0; i < tenSeconds + 10; ++i)
+        play (0.0f);
+
+    CHECK_FALSE (lane.isResting());
+    CHECK (lane.blocks() == tenSeconds + 10);
+
+    //  HEARD, then silence: asked for ten seconds more - its tail - and then no more.
+    CHECK (play (0.5f));
+    const auto sent = lane.blocks();
+
+    for (std::uint64_t i = 0; i < tenSeconds; ++i)
+        play (0.0f);
+
+    CHECK_FALSE (lane.isResting());
+    CHECK (lane.blocks() == sent + tenSeconds);
+
+    for (int i = 0; i < 100; ++i)
+        CHECK (play (0.0f));
+
+    CHECK (lane.isResting());
+    CHECK (lane.blocks() == sent + tenSeconds);
+    CHECK (lane.misses() == 0);
+
+    //  SOUND AGAIN: through the plugin in that very block, whole, and awake.
+    CHECK (play (0.25f));
+    CHECK_FALSE (lane.isResting());
+    CHECK (lane.blocks() == sent + tenSeconds + 1);
+
+    //  At rest once more, and THE NEXT CUE'S ARM wakes it: not yet heard, asked every block.
+    for (std::uint64_t i = 0; i < tenSeconds + 5; ++i)
+        play (0.0f);
+
+    CHECK (lane.isResting());
+    const auto before = lane.blocks();
+
+    lane.requestReset();
+    region.answerResets();
+
+    for (int i = 0; i < 20; ++i)
+        play (0.0f);
+
+    CHECK_FALSE (lane.isResting());
+    CHECK (lane.blocks() == before + 20);
+}
+
+TEST_CASE ("proxy: the allowance is a share of the block, never under the old rule, and a deadline asked for is itself")
+{
+    /*  Namespace draft 139, BHB. Until 2026-11-20 the whole rule was the
+        smaller of 250 microseconds and a quarter of the block - a gain's
+        round trip, whatever the buffer. It is the floor now: what a lane is
+        given however late in the callback it is asked. */
+    CHECK (plugin::proxyFloorFor (48000, 64) == 250);        // 1333 µs block, a quarter is 333
+    CHECK (plugin::proxyFloorFor (48000, 32) == 166);        // 666 µs block, a quarter is 166
+    CHECK (plugin::proxyFloorFor (96000, 16) == 41);
+    CHECK (plugin::proxyFloorFor (48000, 512) == 250);
+    CHECK (plugin::proxyFloorFor (0, 0) == plugin::ProxyLane::defaultDeadlineMicroseconds);
+
+    //  The cap: three tenths of the block period - 3.2 ms at the 512 a Mac opens with.
+    const auto about = [] (std::int64_t value, std::int64_t expected) { return value >= expected - 1 && value <= expected; };
+    CHECK (about (plugin::proxyDeadlineFor (48000, 512, 0), 3200));
+    CHECK (about (plugin::proxyDeadlineFor (48000, 128, 0), 800));
+    CHECK (about (plugin::proxyDeadlineFor (48000, 64, 0), 400));
+    CHECK (about (plugin::proxyDeadlineFor (96000, 1024, 0), 3200));
+
+    for (const auto rate : { 44100, 48000, 96000, 192000 })
+        for (const auto block : { 16, 32, 64, 128, 256, 512, 1024, 2048 })
+            CHECK (plugin::proxyDeadlineFor (rate, block, 0) >= plugin::proxyFloorFor (rate, block));
+
     CHECK (plugin::proxyDeadlineFor (48000, 64, 900) == 900);      // asked for
+    CHECK (plugin::proxyDeadlineFor (48000, 512, 900) == 900);
     CHECK (plugin::proxyDeadlineFor (0, 0, 0) == plugin::ProxyLane::defaultDeadlineMicroseconds);
+}
+
+TEST_CASE ("proxy: a lane stops at the callback's end but never before its floor, and cut short it is starved, not failed")
+{
+    /*  Namespace draft 139, BHB. Every wait in one device callback ends a
+        share of the block period after the callback began, so plugins that
+        cannot keep up are muted and the interface is still answered. A lane
+        the callback's end cut short was not late by its own doing - others
+        used the time - and is counted apart: muted, said, never failed. */
+    plugin::ProxyLane lane;
+    VectorRegion region (1, 64, 1);
+    region.bind (lane, 0);
+    lane.setEnabled (true);
+    region.answerResets();
+
+    const auto nanosNow = []
+    {
+        return std::chrono::duration_cast<std::chrono::nanoseconds> (
+                   std::chrono::steady_clock::now().time_since_epoch()).count();
+    };
+
+    const auto play = [&lane] (const plugin::BlockClock& clock)
+    {
+        Block block (1, 64, 0.5f);
+        const auto began = std::chrono::steady_clock::now();
+        lane.process (block.data(), 1, 64, &clock, 0);
+        const auto took = std::chrono::steady_clock::now() - began;
+        CHECK (block.allEqual (0.0f));
+        return std::chrono::duration_cast<std::chrono::microseconds> (took).count();
+    };
+
+    plugin::BlockClock clock;
+
+    //  THE CALLBACK'S TIME ALREADY UP: the lane waits its floor and no more, and is starved.
+    lane.setAllowance (2000000, 2000);
+    CHECK (lane.deadlineMicroseconds() == 2000000);
+    CHECK (lane.floorMicroseconds() == 2000);
+    clock.budgetEndNanos = nanosNow() - 1000000;
+    CHECK (play (clock) >= 2000);
+    CHECK (lane.starved() == 1);
+    CHECK (lane.misses() == 0);
+    CHECK (lane.consecutiveMisses() == 0);
+
+    //  WITH NO ENTRY SAID - a test driving blocks by hand - the cap alone: late by its own.
+    region.answer (0);
+    lane.setAllowance (3000, 1000);
+    clock.budgetEndNanos = 0;
+    CHECK (play (clock) >= 3000);
+    CHECK (lane.starved() == 1);
+    CHECK (lane.misses() == 1);
+
+    //  THE CALLBACK'S END AFTER THE CAP changes nothing: the cap rules.
+    region.answer (0);
+    clock.budgetEndNanos = nanosNow() + 1000000000;
+    CHECK (play (clock) >= 3000);
+    CHECK (lane.starved() == 1);
+    CHECK (lane.misses() == 2);
+
+    //  A LIMIT ASKED FOR IS FIXED: its floor is itself, and no callback's end comes before it.
+    region.answer (0);
+    lane.setDeadlineMicroseconds (3000);
+    CHECK (lane.floorMicroseconds() == 3000);
+    clock.budgetEndNanos = nanosNow() - 1000000;
+    CHECK (play (clock) >= 3000);
+    CHECK (lane.starved() == 1);
+    CHECK (lane.misses() == 3);
+    CHECK (lane.consecutiveMisses() == 3);
 }
 
 //==============================================================================
@@ -599,6 +1131,7 @@ TEST_CASE ("proxy: the test child comes up, halves an enabled lane's block, leav
     /*  The child sleeps between polls while no lane is in; the host's poll
         tells it to spin once one is. */
     host.poll();
+    REQUIRE (waitSettled (host, lanes[0]));
 
     Block first (2, 64, 0.8f);
     Block second (2, 64, 0.8f);
@@ -819,6 +1352,7 @@ TEST_CASE ("proxy: a lane sends the cue's width, takes the widened sides back, a
     VectorRegion region (2, 64, 1);
     region.bind (lane, 0);
     lane.setEnabled (true);
+    region.answerResets();
     lane.setDeadlineMicroseconds (200);
 
     //  A mono cue into a widening insert: one channel sent, two taken back.
@@ -1036,6 +1570,7 @@ TEST_CASE ("proxy: the mono and widening test children say their buses, take a m
         lanes[0].setDeadlineMicroseconds (200000);
         lanes[0].setEnabled (true);
         host.poll();
+        REQUIRE (waitSettled (host, lanes[0]));
 
         Block block (1, 64, 0.25f);
 
@@ -1068,6 +1603,7 @@ TEST_CASE ("proxy: the mono and widening test children say their buses, take a m
         lanes[0].setDeadlineMicroseconds (200000);
         lanes[0].setEnabled (true);
         host.poll();
+        REQUIRE (waitSettled (host, lanes[0]));
 
         Block block (2, 64, 0.25f);
 
@@ -1127,6 +1663,9 @@ TEST_CASE ("proxy: a cue's whole state is loaded onto its voice before it may la
     }
 
     host.poll();
+
+    for (auto& lane : lanes)
+        REQUIRE (waitSettled (host, lane));
 
     const auto stateFile = [&folder] (const char* name, const char* text)
     {
@@ -1276,6 +1815,7 @@ TEST_CASE ("proxy: a child killed mid-flight leaves the block silent, is marked 
     lane.setDeadlineMicroseconds (200000);
     lane.setEnabled (true);
     host.poll();
+    REQUIRE (waitSettled (host, lane));
 
     Block block (2, 64, 0.8f);
 
@@ -1321,9 +1861,11 @@ TEST_CASE ("proxy: a child killed mid-flight leaves the block silent, is marked 
     REQUIRE (failures.size() == 1);
     CHECK (failures[0].rfind ("PG7N0001: ", 0) == 0);
 
-    /*  Not called any more: the request sequence stops moving. */
+    /*  Not called any more: the request sequence stops moving. ONE was
+        sent to the dead child; the seven after it waited for its answer and
+        sent nothing, late each of them (namespace draft 139, BHC). */
     const auto sentAfter = lane.blocks();
-    CHECK (sentAfter == sentBefore + static_cast<std::uint64_t> (plugin::ProxyLane::missesBeforeFailure));
+    CHECK (sentAfter == sentBefore + 1);
     std::fill (block.storage.begin(), block.storage.end(), 0.8f);
     lane.process (block.data(), 2, 64);
     CHECK (lane.blocks() == sentAfter);
@@ -1390,6 +1932,7 @@ TEST_CASE ("proxy: a relaunched child is given the state its voice held, and the
     lane.setDeadlineMicroseconds (200000);
     lane.setEnabled (true);
     host.poll();
+    REQUIRE (waitSettled (host, lane));
 
     const auto stateFile = [&folder] (const char* name, const char* text)
     {
@@ -1526,6 +2069,101 @@ TEST_CASE ("proxy: a plugin the scan describes but the child cannot make reads f
 }
 
 //==============================================================================
+TEST_CASE ("proxy: a spell of late blocks is said once when it begins and once when it ends, never a block at a time")
+{
+    /*  Namespace draft 139, BHE. The lanes count late blocks one at a time;
+        the host tells them twice a spell - at the poll that first sees one,
+        and two seconds after the last - with the total as it then stands, in
+        the table and to whoever asked. Until this a count nothing read. */
+    Folder folder;
+    plugin::PluginTable table;
+    plugin::ProxyLane lane;
+    plugin::ProxyHost host (testGainSpec (folder, 1), { &lane }, &table);
+
+    struct Told { std::string id; std::uint32_t blocks; std::string words; };
+    std::vector<Told> told;
+    host.onLate ([&told] (const std::string& id, std::uint32_t blocks, const std::string& words)
+    {
+        told.push_back ({ id, blocks, words });
+    });
+
+    std::string problem;
+    REQUIRE (host.start (problem));
+    REQUIRE (waitForState (host, "loaded", 5000));
+
+    lane.setDeadlineMicroseconds (200000);
+    lane.setEnabled (true);
+    REQUIRE (waitSettled (host, lane));
+
+    Block block (2, 64, 0.5f);
+    const auto play = [&lane, &block]
+    {
+        std::fill (block.storage.begin(), block.storage.end(), 0.5f);
+        lane.process (block.data(), 2, 64);
+    };
+
+    //  Keeping up: nothing is said.
+    for (int i = 0; i < 10; ++i)
+        play();
+
+    host.poll();
+    CHECK (told.empty());
+    CHECK (table.statusOf ("PG7N0001").lateBlocks == 0);
+    CHECK (table.statusOf ("PG7N0001").late.empty());
+
+    /*  A FEW LATE BLOCKS - a limit no process can meet, and fewer than the
+        eight in a row that fail a plugin - then in time again. */
+    lane.setDeadlineMicroseconds (1);
+
+    while (lane.misses() < 3)
+    {
+        play();
+        std::this_thread::sleep_for (std::chrono::milliseconds (1));     // and the child answers before the next
+    }
+
+    lane.setDeadlineMicroseconds (200000);
+    const auto late = lane.misses();
+    REQUIRE (late < static_cast<std::uint32_t> (plugin::ProxyLane::missesBeforeFailure));
+
+    host.poll();
+    REQUIRE (told.size() == 1);
+    CHECK (told[0].id == "PG7N0001");
+    CHECK (told[0].blocks == late);
+    CHECK (told[0].words == plugin::ProxyHost::lateWords);
+    CHECK (table.statusOf ("PG7N0001").lateBlocks == late);
+    CHECK (table.statusOf ("PG7N0001").late == plugin::ProxyHost::lateWords);
+    CHECK (host.status().state == "loaded");
+
+    //  Polled again and again while the spell lasts: said no more.
+    for (int i = 0; i < 20; ++i)
+    {
+        play();
+        host.poll();
+        std::this_thread::sleep_for (std::chrono::milliseconds (10));
+    }
+
+    CHECK (told.size() == 1);
+
+    //  Two seconds without another: over, said once, the words gone and the count kept.
+    const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds (plugin::ProxyHost::lateSpellEndsAfterMs + 3000);
+
+    while (told.size() < 2 && std::chrono::steady_clock::now() < until)
+    {
+        play();
+        host.poll();
+        std::this_thread::sleep_for (std::chrono::milliseconds (10));
+    }
+
+    REQUIRE (told.size() == 2);
+    CHECK (told[1].blocks == late);
+    CHECK (told[1].words.empty());
+    CHECK (table.statusOf ("PG7N0001").lateBlocks == late);
+    CHECK (table.statusOf ("PG7N0001").late.empty());
+    CHECK (lane.misses() == late);
+
+    host.stop();
+}
+
 TEST_CASE ("proxy: plugin.failed writes the table and plugin.restart reaches the hook; an unknown id is refused")
 {
     CommandRegistry registry;
@@ -1570,6 +2208,28 @@ TEST_CASE ("proxy: plugin.failed writes the table and plugin.restart reaches the
     CHECK (outcome.applied);
     REQUIRE (restarted.size() == 1);
     CHECK (restarted[0] == "PG7N0001");
+
+    /*  NOT KEEPING UP, and again keeping up (namespace draft 139, BHE): the
+        count and the words into the table, the rest of it kept - so a replay
+        on a machine with no plugin reads as the session did. */
+    outcome = dispatch (registry, context, "plugin.late",
+                        { osc::Value::string ("PG7N0001"), osc::Value::int32 (3), osc::Value::string ("not keeping up") });
+    CHECK (outcome.applied);
+    CHECK (table.statusOf ("PG7N0001").lateBlocks == 3);
+    CHECK (table.statusOf ("PG7N0001").late == "not keeping up");
+    CHECK (table.statusOf ("PG7N0001").state == "failed");
+    CHECK (table.statusOf ("PG7N0001").latencySamples == 12);
+
+    outcome = dispatch (registry, context, "plugin.late",
+                        { osc::Value::string ("PG7N0001"), osc::Value::int32 (17), osc::Value::string ({}) });
+    CHECK (outcome.applied);
+    CHECK (table.statusOf ("PG7N0001").lateBlocks == 17);
+    CHECK (table.statusOf ("PG7N0001").late.empty());
+
+    outcome = dispatch (registry, context, "plugin.late",
+                        { osc::Value::string ("PG7N0009"), osc::Value::int32 (1), osc::Value::string ("nobody") });
+    CHECK_FALSE (outcome.applied);
+    CHECK (outcome.reason == reason::unknownId);
 
     /*  A replay has no hook and applies the record as a no-op. */
     CommandRegistry quiet;
@@ -1716,6 +2376,7 @@ TEST_CASE ("proxy: a real VST3 from this machine's scan comes up, reports its ca
     lanes[0].setDeadlineMicroseconds (200000);
     lanes[0].setEnabled (true);
     host.poll();
+    REQUIRE (waitSettled (host, lanes[0]));
 
     Block block (2, 256, 0.25f);
 
@@ -1797,6 +2458,7 @@ TEST_CASE ("proxy: the in-tree LV2 comes up in the child through JUCE's real LV2
     lanes[0].setDeadlineMicroseconds (200000);
     lanes[0].setEnabled (true);
     host.poll();
+    REQUIRE (waitSettled (host, lanes[0]));
 
     Block block (2, 64, 0.25f);
 
@@ -1857,6 +2519,7 @@ TEST_CASE ("proxy: Apple's AUBandpass comes up in the child through JUCE's AU ho
     lanes[0].setDeadlineMicroseconds (200000);
     lanes[0].setEnabled (true);
     host.poll();
+    REQUIRE (waitSettled (host, lanes[0]));
 
     Block block (2, 256, 0.5f);
 
@@ -2009,6 +2672,9 @@ TEST_CASE ("M31: the proxy's round trip at one, eight and sixteen lanes, the wak
 
                 host.poll();
 
+                for (auto& lane : lanes)
+                    REQUIRE (waitSettled (host, lane));
+
                 /*  Every lane driven, as a block does when every voice is in;
                     the lane reported is the last, warmed by the rest. */
                 std::vector<double> times;
@@ -2065,6 +2731,7 @@ TEST_CASE ("M32: a strip that fails - misses to the trip, kill to failed, the bl
     lane.setDeadlineMicroseconds (250);
     lane.setEnabled (true);
     host.poll();
+    REQUIRE (waitSettled (host, lane));
 
     Block audio (2, 64, 0.25f);
 
@@ -2277,6 +2944,8 @@ TEST_CASE ("M35: a cue's whole state loaded onto a voice - how long it takes, an
         lanes[0].setEnabled (true);
         lanes[1].setEnabled (true);
         host.poll();
+        REQUIRE (waitSettled (host, lanes[0]));
+        REQUIRE (waitSettled (host, lanes[1]));
 
         std::atomic<bool> playing { true };
         std::thread voiceOne ([&lanes, &playing]
@@ -2332,6 +3001,402 @@ TEST_CASE ("M35: a cue's whole state loaded onto a voice - how long it takes, an
         MESSAGE ((identifier == plugin::Catalogue::testGainIdentifier() ? std::string ("test-gain") : identifier) << " | "
                  << bytes << " | " << loads.front() << " | " << loads[loads.size() / 2] << " | " << loads.back()
                  << " | " << missesLoading << " | " << missesIdle);
+    }
+}
+
+//==============================================================================
+namespace
+{
+    /*  M86's rig: a child with its own folder, table and lanes, so several can
+        stand side by side. Declared in the order they must outlive one another. */
+    struct AllowanceChild
+    {
+        Folder folder;
+        plugin::PluginTable table;
+        std::vector<std::unique_ptr<plugin::ProxyLane>> lanes;
+        std::unique_ptr<plugin::ProxyHost> host;
+    };
+
+    struct AllowanceReading
+    {
+        std::vector<double> watched;      // the watched lane's round trips, in microseconds
+        std::vector<double> resets;       // the reset lane's first call after each switch-in
+        std::uint32_t misses = 0;         // the watched lane's
+        std::uint32_t starved = 0;        // its blocks cut short by the callback's end
+        int longestRun = 0;               // its late blocks in a row, at most
+        int failures = 0;                 // times a child was seen failed
+    };
+
+    /*  A SHOW'S BLOCKS, as near as a test comes: one thread in the real-time
+        class calls every lane in `order` once a block period, a second of
+        noise then a second of silence so a tail is computed too; another
+        polls the hosts every ten milliseconds, as the engine does, so the
+        worker's spin and the eight-in-a-row rule are the shipped ones. The
+        reset lane, if any, is asked for a reset every half second - what an
+        arm does to an insert - and how long it takes timed apart. */
+    AllowanceReading driveForAllowance (std::vector<std::unique_ptr<AllowanceChild>>& children,
+                                        const std::vector<plugin::ProxyLane*>& order,
+                                        plugin::ProxyLane* watched, plugin::ProxyLane* resetLane,
+                                        int block, double seconds)
+    {
+        AllowanceReading reading;
+        const auto periodUs = static_cast<double> (block) * 1000000.0 / 48000.0;
+        const auto blocks = static_cast<int> (seconds * 1000000.0 / periodUs);
+        const auto resetEvery = std::max (1, static_cast<int> (500000.0 / periodUs));
+        reading.watched.reserve (static_cast<std::size_t> (blocks));
+        reading.resets.reserve (static_cast<std::size_t> (blocks / resetEvery + 1));
+
+        std::atomic<bool> running { true };
+        std::atomic<int> failures { 0 };
+
+        std::thread poller ([&children, &running, &failures]
+        {
+            std::vector<char> wasFailed (children.size(), 0);
+
+            while (running.load())
+            {
+                for (std::size_t i = 0; i < children.size(); ++i)
+                {
+                    children[i]->host->poll();
+                    const char failed = children[i]->host->status().state == "failed" ? 1 : 0;
+
+                    if (failed != 0 && wasFailed[i] == 0)
+                        failures.fetch_add (1);
+
+                    wasFailed[i] = failed;
+                }
+
+                std::this_thread::sleep_for (std::chrono::milliseconds (10));
+            }
+        });
+
+        std::thread driver ([&reading, &order, watched, resetLane, block, blocks, resetEvery, periodUs]
+        {
+            app::takeRealtime (app::RealtimeRank::sound, periodUs / 1000.0, periodUs / 2000.0);
+
+            std::vector<Block> buffers;
+            buffers.reserve (order.size());
+
+            for (std::size_t i = 0; i < order.size(); ++i)
+                buffers.emplace_back (2, block, 0.0f);
+
+            std::uint32_t noise = 0x9e3779b9u;
+            const auto missesBefore = watched->misses();
+            const auto starvedBefore = watched->starved();
+            auto missesSeen = missesBefore;
+            auto run = 0;
+            auto next = std::chrono::steady_clock::now();
+            auto resetting = false;
+            auto resetAskedAt = next;
+
+            /*  NO ROW LONGER THAN THREE TIMES ITS LENGTH: with a dozen
+                children spinning the lanes' waits alone outlast the block
+                period, and the first run of this case took minutes over one
+                row. */
+            const auto giveUp = next + std::chrono::nanoseconds (static_cast<std::int64_t> (
+                                           3.0 * static_cast<double> (blocks) * periodUs * 1000.0));
+
+            for (int b = 0; b < blocks && std::chrono::steady_clock::now() < giveUp; ++b)
+            {
+                const auto sounding = static_cast<int> (static_cast<double> (b) * periodUs / 1000000.0) % 2 == 0;
+
+                for (auto& buffer : buffers)
+                {
+                    for (auto& sample : buffer.storage)
+                    {
+                        noise ^= noise << 13;
+                        noise ^= noise >> 17;
+                        noise ^= noise << 5;
+                        sample = sounding ? (static_cast<float> (noise & 0xffffu) / 65535.0f - 0.5f) * 0.5f : 0.0f;
+                    }
+                }
+
+                /*  THE CALLBACK'S END, said as the device layer says it
+                    (namespace draft 139, BHB): a share of the period from
+                    now. A row with a limit asked for ignores it. */
+                plugin::BlockClock clock;
+                clock.budgetEndNanos = std::chrono::duration_cast<std::chrono::nanoseconds> (
+                                           std::chrono::steady_clock::now().time_since_epoch()).count()
+                                     + static_cast<std::int64_t> (plugin::ProxyLane::callbackFraction * periodUs * 1000.0);
+
+                for (std::size_t i = 0; i < order.size(); ++i)
+                {
+                    auto* lane = order[i];
+
+                    /*  THE RESET, as an arm asks it of an insert that is in:
+                        timed from the asking to the block that finds it made
+                        (a block's length is the grain). Before namespace
+                        draft 139 it ran inside the next block's wait. */
+                    if (lane == resetLane && b > 0 && b % resetEvery == 0 && ! resetting)
+                    {
+                        lane->requestReset();
+                        resetting = true;
+                        resetAskedAt = std::chrono::steady_clock::now();
+                    }
+
+                    const auto t0 = std::chrono::steady_clock::now();
+                    lane->process (buffers[i].data(), 2, block, &clock, 0);
+                    const auto us = std::chrono::duration<double, std::micro> (std::chrono::steady_clock::now() - t0).count();
+
+                    if (lane == resetLane && resetting && lane->stateSettled())
+                    {
+                        resetting = false;
+                        reading.resets.push_back (std::chrono::duration<double, std::micro> (
+                                                      std::chrono::steady_clock::now() - resetAskedAt).count());
+                    }
+
+                    if (lane == watched && b > 0)
+                        reading.watched.push_back (us);
+                }
+
+                const auto missesNow = watched->misses();
+                run = missesNow != missesSeen ? run + 1 : 0;
+                missesSeen = missesNow;
+                reading.longestRun = std::max (reading.longestRun, run);
+
+                next += std::chrono::nanoseconds (static_cast<std::int64_t> (periodUs * 1000.0));
+                std::this_thread::sleep_until (next);
+            }
+
+            reading.misses = missesSeen - missesBefore;
+            reading.starved = watched->starved() - starvedBefore;
+        });
+
+        driver.join();
+        running.store (false);
+        poller.join();
+        reading.failures = failures.load();
+        return reading;
+    }
+}
+
+/*  M86 - what a real plugin needs of a buffer (namespace draft 139, spike 09).
+    M31 timed the transport with a gain child at 64 and 256 samples under a
+    limit of twenty milliseconds; no case ran a real plugin at the buffer a
+    Mac opens with (512) under the limit that ships. Here, for 512 and 128
+    samples at 48 kHz, each under a wide limit - what the plugin truly takes -
+    and under the shipped one - what is lost:
+
+      a  one lane (and, on a Mac, the same with a workgroup shared);
+      b  two lanes on one child, the pool's shape at the start;
+      c  two lanes, one of them switched out and in every half second: the
+         reset an arm asks for, timed, and the other lane's blocks meanwhile;
+      d  the plugin's child beside one, three, seven and eleven spinning ones.
+
+    `WFG_REAL_VST3=<identifier> wfg_tests --test-case="M86*" --no-skip`, a
+    Release build on a quiet machine; `WFG_M86_SECONDS` is each row's length
+    (eight by default). The table goes to docs/spikes/spike09-plugin-allowance.md. */
+TEST_CASE ("M86: what a real plugin needs of a buffer - under a wide limit and the shipped one, beside a reset and beside spinning children"
+           * doctest::skip())
+{
+    const auto realIdentifier = juce::SystemStats::getEnvironmentVariable ("WFG_REAL_VST3", {}).toStdString();
+    const auto seconds = std::max (1.0, juce::SystemStats::getEnvironmentVariable ("WFG_M86_SECONDS", "8").getDoubleValue());
+    const auto storage = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                            .getChildFile ("Go.dot").getChildFile ("engine").getFullPathName().toStdString();
+    const auto gain = plugin::Catalogue::testGainIdentifier();
+
+    plugin::shareWorkgroupHandle (nullptr);
+
+    MESSAGE ("M86 on " << juce::SystemStats::getOperatingSystemName() << ", "
+             << juce::SystemStats::getCpuModel() << ", " << juce::SystemStats::getNumCpus() << " cores, "
+             << seconds << " s a row");
+    MESSAGE ("plugin | block | limit | phase | children | lanes | n | p50 us | p99 | p99.9 | max | over 250 us | over 0.3 period"
+             " | misses | starved | longest run | failed | resets | reset p50 us | reset max | first late blocks");
+
+    auto childIndex = 0;
+
+    const auto make = [&childIndex] (const std::string& identifier, const std::string& xml,
+                                     int laneCount, int block, std::int64_t limitUs)
+    {
+        auto child = std::make_unique<AllowanceChild>();
+        std::vector<plugin::ProxyLane*> pointers;
+
+        for (int i = 0; i < laneCount; ++i)
+        {
+            child->lanes.push_back (std::make_unique<plugin::ProxyLane>());
+            pointers.push_back (child->lanes.back().get());
+        }
+
+        auto spec = testGainSpec (child->folder, laneCount, 2, block);
+        spec.pluginId = "PG7N" + juce::String (++childIndex).paddedLeft ('0', 4).toStdString();
+        spec.identifier = identifier;
+        spec.descriptionXml = xml;
+        spec.deadlineMicroseconds = limitUs;
+        child->host = std::make_unique<plugin::ProxyHost> (spec, pointers, &child->table);
+
+        std::string problem;
+        REQUIRE_MESSAGE (child->host->start (problem), problem);
+        const auto up = waitForState (*child->host, "loaded", 30000);
+        INFO (child->host->status().state << ": " << child->host->status().problem);
+        REQUIRE (up);
+
+        for (auto& lane : child->lanes)
+        {
+            if (limitUs > 0)
+                lane->setDeadlineMicroseconds (limitUs);
+
+            lane->setEnabled (true);
+        }
+
+        for (auto& lane : child->lanes)
+            REQUIRE (waitSettled (*child->host, *lane));
+
+        return child;
+    };
+
+    const auto say = [] (const std::string& name, int block, std::int64_t limitUs, const std::string& phase,
+                         std::size_t childCount, std::size_t laneCount, AllowanceReading reading)
+    {
+        const auto at = [] (std::vector<double>& sorted, double fraction)
+        {
+            return sorted.empty() ? 0.0
+                                  : sorted[std::min (sorted.size() - 1,
+                                                     static_cast<std::size_t> (static_cast<double> (sorted.size()) * fraction))];
+        };
+
+        const auto share = 0.3 * static_cast<double> (block) * 1000000.0 / 48000.0;
+        const auto over = [&reading] (double limit)
+        {
+            return std::count_if (reading.watched.begin(), reading.watched.end(), [limit] (double us) { return us > limit; });
+        };
+
+        const auto over250 = over (250.0);
+        const auto overShare = over (share);
+
+        /*  WHERE THE LATE ONES FALL, the first dozen by block: scattered, in
+            runs, or at a period says which kind of lateness it is. */
+        std::string lateAt;
+        auto listed = 0;
+
+        for (std::size_t i = 0; i < reading.watched.size() && listed < 12; ++i)
+        {
+            if (reading.watched[i] > 250.0)
+            {
+                lateAt += (listed == 0 ? "" : " ") + std::to_string (i);
+                ++listed;
+            }
+        }
+        std::sort (reading.watched.begin(), reading.watched.end());
+        std::sort (reading.resets.begin(), reading.resets.end());
+
+        MESSAGE (name << " | " << block << " | " << (limitUs > 0 ? std::to_string (limitUs) : std::string ("shipped")) << " | "
+                 << phase << " | " << childCount << " | " << laneCount << " | " << reading.watched.size() << " | "
+                 << juce::String (at (reading.watched, 0.5), 1) << " | " << juce::String (at (reading.watched, 0.99), 1) << " | "
+                 << juce::String (at (reading.watched, 0.999), 1) << " | "
+                 << juce::String (reading.watched.empty() ? 0.0 : reading.watched.back(), 1) << " | "
+                 << over250 << " | " << overShare << " | " << reading.misses << " | " << reading.starved << " | "
+                 << reading.longestRun << " | "
+                 << reading.failures << " | " << reading.resets.size() << " | "
+                 << juce::String (at (reading.resets, 0.5), 1) << " | "
+                 << juce::String (reading.resets.empty() ? 0.0 : reading.resets.back(), 1) << " | " << lateAt);
+    };
+
+    const auto stopAll = [] (std::vector<std::unique_ptr<AllowanceChild>>& children)
+    {
+        for (auto& child : children)
+            child->host->stop();
+    };
+
+    for (const auto& identifier : std::vector<std::string> { gain, realIdentifier })
+    {
+        if (identifier.empty())
+            continue;
+
+        std::string xml;
+
+        if (identifier != gain)
+        {
+            xml = plugin::describePlugin (storage, identifier);
+
+            if (xml.empty())
+            {
+                MESSAGE ("the scan does not know " << identifier << "; skipped");
+                continue;
+            }
+        }
+
+        const auto name = identifier == gain ? std::string ("test-gain") : identifier;
+
+        for (const auto block : { 512, 128 })
+        {
+            for (const std::int64_t limitUs : { std::int64_t { 20000 }, std::int64_t { 0 } })
+            {
+                //  a - one lane.
+                {
+                    std::vector<std::unique_ptr<AllowanceChild>> children;
+                    children.push_back (make (identifier, xml, 1, block, limitUs));
+                    auto* lane = children[0]->lanes[0].get();
+                    say (name, block, limitUs, "a one lane", 1, 1,
+                         driveForAllowance (children, { lane }, lane, nullptr, block, seconds));
+
+                   #if JUCE_MAC
+                    /*  THE SAME IN A WORKGROUP, a work interval of the test's
+                        own as the case above makes: the child's worker joins
+                        it, as it joins the interface's in a show. */
+                    auto* interval = AudioWorkIntervalCreate ("Go.dot M86", OS_CLOCK_MACH_ABSOLUTE_TIME, nullptr);
+
+                    if (interval != nullptr && plugin::shareWorkgroupHandle (interval)
+                         && waitForWorkgroup (*children[0]->host, 1, 5000))
+                        say (name, block, limitUs, "a in a workgroup", 1, 1,
+                             driveForAllowance (children, { lane }, lane, nullptr, block, seconds));
+                    else
+                        MESSAGE ("no workgroup joined here; that row is not taken");
+
+                    plugin::shareWorkgroupHandle (nullptr);
+
+                    if (interval != nullptr)
+                        os_release (interval);
+                   #endif
+
+                    stopAll (children);
+                }
+
+                //  b - two lanes on one child, the second watched.
+                {
+                    std::vector<std::unique_ptr<AllowanceChild>> children;
+                    children.push_back (make (identifier, xml, 2, block, limitUs));
+                    auto* first = children[0]->lanes[0].get();
+                    auto* second = children[0]->lanes[1].get();
+                    say (name, block, limitUs, "b two lanes", 1, 2,
+                         driveForAllowance (children, { first, second }, second, nullptr, block, seconds));
+                    stopAll (children);
+                }
+
+                /*  c - the reset. The lane switched in is called first, so
+                    under the shipped limit the parent has given up on it and
+                    asks the watched lane while the worker is still resetting. */
+                {
+                    std::vector<std::unique_ptr<AllowanceChild>> children;
+                    children.push_back (make (identifier, xml, 2, block, limitUs));
+                    auto* sounding = children[0]->lanes[0].get();
+                    auto* armed = children[0]->lanes[1].get();
+                    say (name, block, limitUs, "c beside a reset", 1, 2,
+                         driveForAllowance (children, { armed, sounding }, sounding, armed, block, seconds));
+                    stopAll (children);
+                }
+
+                //  d - beside spinning children: how many workers the machine stands.
+                if (identifier != gain)
+                {
+                    for (const auto others : { 1, 3, 7, 11 })
+                    {
+                        std::vector<std::unique_ptr<AllowanceChild>> children;
+                        children.push_back (make (identifier, xml, 1, block, limitUs));
+                        std::vector<plugin::ProxyLane*> order { children[0]->lanes[0].get() };
+
+                        for (int i = 0; i < others; ++i)
+                        {
+                            children.push_back (make (gain, {}, 1, block, limitUs));
+                            order.push_back (children.back()->lanes[0].get());
+                        }
+
+                        say (name, block, limitUs, "d beside spinning children", children.size(), order.size(),
+                             driveForAllowance (children, order, order.front(), nullptr, block, seconds));
+                        stopAll (children);
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -2956,7 +4021,19 @@ TEST_CASE ("rack: each channel is a track after the voices, its chain one child 
     }
 
     host.setTrackFxEnabled (1, 0, true);
-    host.pollProxies();
+
+    //  And its insert ready, as a launch waits for (namespace draft 139, BHC).
+    for (int waited = 0; waited < 500; ++waited)
+    {
+        host.pollProxies();
+
+        if (host.isTrackFxSettled (1))
+            break;
+
+        std::this_thread::sleep_for (std::chrono::milliseconds (10));
+    }
+
+    REQUIRE (host.isTrackFxSettled (1));
 
     LastSamples sink;
     host.setBlockSink (&sink);
@@ -3649,7 +4726,20 @@ TEST_CASE ("sampling: a take recorded through the plugin before the recorder loo
             host.setTrackFxEnabled (rack, slot, true);
         }
 
-        host.pollProxies();
+        /*  And its inserts ready, as a launch waits for (namespace draft 139,
+            BHC): until an insert's reset is made it passes the block as it
+            came. */
+        for (int waited = 0; waited < 500; ++waited)
+        {
+            host.pollProxies();
+
+            if (host.isTrackFxSettled (rack))
+                break;
+
+            std::this_thread::sleep_for (std::chrono::milliseconds (10));
+        }
+
+        REQUIRE (host.isTrackFxSettled (rack));
         host.openRackGate (rack, -1);
     };
 
