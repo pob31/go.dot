@@ -8979,57 +8979,60 @@ TEST_CASE ("client: a cue's DCA is a menu of the show's DCAs, and the sampler ro
     const auto snapshot = rig.publish (1);
     const auto panel = model::inspect (*snapshot, media.id);
 
-    /*  THE SHORT NAME UNDER THE NAME IT SHORTENS, on every cue: it is what a
-        seven-character display shows for this one. */
+    /*  A MEDIA CUE, STREAMLINED (the author, 2026-11-20, namespace draft §136):
+        what it is, where it plays, when - then drawers that start shut. The
+        short name went to the list's rows; the sends are the Sends door. */
+    std::vector<std::string> headings;
+    std::vector<bool> shut;
+
+    for (const auto& block : panel.blocks)
+    {
+        headings.push_back (block.heading);
+        shut.push_back (block.shut);
+    }
+
+    REQUIRE (headings.size() >= 7u);
+    CHECK (headings[0] == "what it is");
+    CHECK (headings[1] == "output");
+    CHECK (headings[2] == "when");
+    CHECK (headings[3] == "file");
+    CHECK (headings[4] == "timeline");
+    CHECK (headings[5] == "speed");
+    CHECK (headings[6] == "DCA");
+    CHECK_FALSE (shut[0]);
+    CHECK_FALSE (shut[1]);
+    CHECK_FALSE (shut[2]);
+
+    for (std::size_t at = 3; at < shut.size(); ++at)
+    {
+        INFO ("drawer " << headings[at]);
+        CHECK (shut[at]);
+    }
+
     const auto first = namesUnder (panel, "what it is");
-    REQUIRE (first.size() >= 3u);
+    REQUIRE (first.size() >= 2u);
     CHECK (first[0] == "number");
     CHECK (first[1] == "name");
-    CHECK (first[2] == "shortName");
+    CHECK (positionOf (first, "shortName") == first.size());
+    const auto listed = namesUnder (panel, "in the list");
+    REQUIRE_FALSE (listed.empty());
+    CHECK (listed.front() == "shortName");
 
-    /*  A SAMPLER MEMBER'S ROWS AFTER EVERYTHING A MEDIA CUE HAS, in the order a
-        press happens - in a drawer of their own since 2026-09-30 ("we can also
-        make more drawers for things"), straight after what the cue does. The
-        DCA stays behind with what the cue does: it trims any cue. */
-    const std::vector<std::string> wanted { "level", "startOffset", "dca" };
-    const auto does = namesUnder (panel, "what it does");
+    CHECK (namesUnder (panel, "output") == std::vector<std::string> { "directOut", "level" });
+    CHECK (namesUnder (panel, "file") == std::vector<std::string> { "file", "take", "lockedTo", "channels" });
+    CHECK (namesUnder (panel, "timeline") == std::vector<std::string> { "startOffset", "rangeJoin", "rangeJoinLength" });
 
-    std::vector<std::string> seen;
+    /*  The speed and its mode, whether it follows the tempo (namespace draft
+        §123), then its delay (§70); the DCA, which trims any cue, its own. */
+    CHECK (namesUnder (panel, "speed")
+             == std::vector<std::string> { "rate", "rateMode", "followTempo", "delay", "delayBy" });
+    CHECK (namesUnder (panel, "DCA") == std::vector<std::string> { "dca", "dcaCurve", "dcaOffset" });
 
-    for (const auto& name : does)
-        if (std::find (wanted.begin(), wanted.end(), name) != wanted.end())
-            seen.push_back (name);
-
-    CHECK (seen == wanted);
-
+    //  A sampler member's rows in their drawer, in the order a press happens (2026-09-30).
     const std::vector<std::string> pressed { "strip", "initialLevel", "release", "secondPress", "velocity",
                                              "velocityFloor", "pressure", "releaseFade" };
     CHECK (namesUnder (panel, "sampler") == pressed);
-
-    for (const auto& name : pressed)
-        CHECK (positionOf (does, name) == does.size());
-
-    //  The drawer comes straight after what the cue does, and before its place in the list.
-    std::vector<std::string> headings;
-
-    for (const auto& block : panel.blocks)
-        headings.push_back (block.heading);
-
-    const auto doesAt = positionOf (headings, "what it does");
-    REQUIRE (doesAt + 1 < headings.size());
-    CHECK (headings[doesAt + 1] == "sampler");
-
-    /*  The speed and its mode straight after where the file starts, whether
-        it follows the tempo (namespace draft §123), then its delay (§70), then
-        the sampler's rows (§22.7). */
-    const auto startOffsetAt = positionOf (does, "startOffset");
-    REQUIRE (startOffsetAt + 6 < does.size());
-    CHECK (does[startOffsetAt + 1] == "rate");
-    CHECK (does[startOffsetAt + 2] == "rateMode");
-    CHECK (does[startOffsetAt + 3] == "followTempo");
-    CHECK (does[startOffsetAt + 4] == "delay");
-    CHECK (does[startOffsetAt + 5] == "delayBy");
-    CHECK (does[startOffsetAt + 6] == "dca");
+    CHECK (positionOf (headings, "sampler") > positionOf (headings, "DCA"));
 
     //  Two words the tree runs together, said as two words.
     const std::vector<std::pair<std::string, std::string>> spoken {
@@ -15618,11 +15621,19 @@ TEST_CASE ("client: a time group is inspected as follows, its members as starts 
         CHECK_FALSE (fields[2].applies);
     }
 
-    //  A MEMBER: when it starts and how it keeps up, before what it plays.
+    /*  A MEMBER: when it starts and how it keeps up, before what it plays -
+        a media cue's at the head of when, its drawers below (§136). */
     for (const auto& id : { sound.id, scene.id })
     {
         INFO ("member " << id);
-        const auto fields = does (model::inspect (*snapshot, id));
+        const auto inspection = model::inspect (*snapshot, id);
+        auto fields = does (inspection);
+
+        if (inspection.kind == "media")
+            for (const auto& block : inspection.blocks)
+                if (block.heading == "when")
+                    fields = block.fields;
+
         REQUIRE (fields.size() >= 2u);
         CHECK (fields[0].name == "at");
         CHECK (fields[0].label == "starts at");
@@ -15650,14 +15661,21 @@ TEST_CASE ("client: a time group is inspected as follows, its members as starts 
     CHECK (shown (sound.id, "chase") == "free");
     CHECK (shown (scene.id, "chase") == "varispeed");
 
-    /*  A cue in no time group keeps its rows where they were, last of what it
-        does, greyed - named all the same, so moved into one it finds them. */
+    /*  A cue in no time group keeps its rows, greyed - named all the same, so
+        moved into one it finds them: a media cue's in its shut drawer of what
+        else it does (§136), not at the head of when. */
     {
-        const auto fields = does (model::inspect (*snapshot, loose.id));
-        REQUIRE (fields.size() >= 2u);
-        CHECK (fields[0].name == "file");
-
         const auto inspection = model::inspect (*snapshot, loose.id);
+        std::vector<std::string> more;
+
+        for (const auto& block : inspection.blocks)
+            if (block.heading == "more")
+                for (const auto& field : block.fields)
+                    more.push_back (field.name);
+
+        CHECK (positionOf (more, "at") < more.size());
+        CHECK (positionOf (more, "chase") < more.size());
+
         const auto* at = rowIn (inspection, "at");
         REQUIRE (at != nullptr);
         CHECK (at->label == "starts at");

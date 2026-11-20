@@ -630,8 +630,8 @@ namespace wfg::client::ui
         if (const auto chosen = drawerChosen.find (drawer); chosen != drawerChosen.end())
             return chosen->second;
 
-        //  The details start shut, as the fold always did.
-        if (drawer == "details")
+        //  The details start shut, as the fold always did - and a drawer its block says starts shut (§136).
+        if (drawer == "details" || shutAtFirst.count (drawer) > 0)
             return true;
 
         /*  A DRAWER NOBODY HAS TOUCHED IS OPEN, unless not one of its rows
@@ -1638,8 +1638,13 @@ namespace wfg::client::ui
             lines.push_back (std::move (line));
         };
 
+        shutAtFirst.clear();
+
         for (const auto& block : inspection.blocks)
         {
+            if (block.shut)
+                shutAtFirst.insert (block.heading);
+
             /*  EVERY BLOCK IS A DRAWER, headed by what opens and shuts it. The
                 head is remembered by the block's heading, so the drawer a hand
                 shut stays shut on the next cue that has one. */

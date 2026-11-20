@@ -137,6 +137,11 @@ namespace wfg::client::model
         if (heading == "what it does") return iconFor (kind, mode);
         if (heading == "sound")        return Icon::sound;
         if (heading == "speed")        return Icon::speed;
+        //  A media cue's drawers (namespace draft §136).
+        if (heading == "output")       return Icon::sends;
+        if (heading == "file")         return Icon::waveform;
+        if (heading == "timeline")     return Icon::timeline;
+        if (heading == "DCA")          return Icon::dca;
         if (heading == "sampler")      return Icon::sampler;
         if (heading == "sampling")     return Icon::take;
         if (heading == "in the list")  return Icon::list;

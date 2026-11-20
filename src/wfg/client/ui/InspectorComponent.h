@@ -47,6 +47,7 @@
 
 #include <functional>
 #include <map>
+#include <set>
 #include <memory>
 #include <optional>
 #include <string>
@@ -238,6 +239,7 @@ namespace wfg::client::ui
             cue that is not in a sampler group, which start shut with their
             count showing. The details start shut, as the fold always did. */
         std::map<std::string, bool> drawerChosen;
+        std::set<std::string> shutAtFirst;      ///< the blocks that start shut (§136), for the cue drawn
         bool isShut (const std::string& drawer) const;
         void toggleDrawer (const std::string& drawer);
 

@@ -1223,6 +1223,24 @@ TEST_CASE ("inspector UI: a cue's preset is drawn as a menu of the groups around
     panel.show (client::model::inspect (*rig.publish(), bed.id));
     panel.resized();
 
+    /*  A MEDIA CUE'S PLACE IN THE LIST STARTS SHUT (namespace draft §136):
+        opened, as a hand would, before the menu is looked for. */
+    std::vector<juce::Component*> shutHeads;
+    const std::function<void (juce::Component&)> findShut = [&] (juce::Component& root)
+    {
+        if (auto* tip = dynamic_cast<juce::SettableTooltipClient*> (&root);
+              tip != nullptr && tip->getTooltip() == "Opens this drawer")
+            shutHeads.push_back (&root);
+
+        for (auto* child : root.getChildren())
+            findShut (*child);
+    };
+
+    findShut (panel);
+
+    for (auto* head : shutHeads)
+        panel.pressedOn (head);
+
     juce::ComboBox* menu = nullptr;
 
     const std::function<void (juce::Component&)> walk = [&] (juce::Component& root)

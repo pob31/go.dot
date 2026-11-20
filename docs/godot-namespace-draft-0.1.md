@@ -35933,3 +35933,25 @@ mix and not a stereo direct out."*
   with a direct out still lands on the first one; in a show with none, it is given a send into the first mix at
   the row's default, a template that sent somewhere being left as it was. Shows already made keep their
   outputs.
+
+## 136. A media cue's inspector, streamlined
+
+**Asked 2026-11-20** by the author: *"the inspector is a bit daunting with so much information ... The direct
+out and send should be easy to see towards the top of the list so the user can quickly get to work on it. There
+might be more foldable containers to tuck away some of the very specific info."* Offered in/out/loop rows and a
+row per send, the author declined both: *"This is already available in the timeline foot panel and feels a bit
+redundant to have in the inspector"*, *"No need for redundant data. There's already an overwhelming amount of
+info for the user."* The order offered (output under the name, then when, then shut drawers) the author took;
+of two sets of drawer names offered, the author chose the shorter ones, which are mine.
+
+- **BGW** **What it is, output, when; the rest shut.** A media cue's rows: *what it is* (number, name, colour,
+  notes, flag), *output* (direct out, level), *when* - open - then drawers that start shut: *file* (file, take,
+  locked to, channels), *timeline* (start offset, how slices join), *speed* (speed, its mode, follows the tempo,
+  delay), *DCA*, *sampler*, *more* (what no drawer names: shared output, edited from, FX unused hidden, a time
+  group's rows on a cue in none) and *in the list* (short name, enabled, preset). A hand that opens one keeps
+  it open, as any drawer. The sends stay the head bar's Sends door; the in and out points and loops the
+  waveform's. The word *more* is mine and owed.
+
+- **BGX** **A time group's member** has its *starts at* and *chase* at the head of *when*, open.
+
+Only the desktop window's inspector; the console page's keeps its own blocks.

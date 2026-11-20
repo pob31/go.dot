@@ -2220,6 +2220,71 @@ namespace wfg::client::model
                 doesBlock.fields.erase (firstSampler, doesBlock.fields.end());
             }
 
+            /*  A MEDIA CUE, STREAMLINED (the author, 2026-11-20, namespace draft
+                §136: "the inspector is a bit daunting with so much information ...
+                The direct out and send should be easy to see towards the top of the
+                list so the user can quickly get to work on it. There might be more
+                foldable containers to tuck away some of the very specific info").
+                Where it plays straight under what it is - the sends are the head
+                bar's Sends door, not rows (the author: "No need for redundant
+                data") - then when; the rest in drawers that start shut. The
+                in and out points and the loops are the waveform's and not listed
+                here at all; what of the file's timing only the inspector writes -
+                the start offset, how slices join - is a shut drawer. */
+            std::vector<Block> mediaDrawers;
+
+            if (out.kind == "media")
+            {
+                const auto take = [&doesBlock] (const std::string& heading, const std::vector<std::string>& names,
+                                                bool shut)
+                {
+                    Block block { heading, {}, shut };
+
+                    for (const auto& name : names)
+                        for (auto at = doesBlock.fields.begin(); at != doesBlock.fields.end(); ++at)
+                            if (at->name == name)
+                            {
+                                block.fields.push_back (std::move (*at));
+                                doesBlock.fields.erase (at);
+                                break;
+                            }
+
+                    return block;
+                };
+
+                mediaDrawers.push_back (take ("output", { "directOut", "level" }, false));
+                mediaDrawers.push_back (take ("file", { "file", "take", "lockedTo", "channels" }, true));
+                mediaDrawers.push_back (take ("timeline", { "startOffset", "rangeJoin", "rangeJoinLength" }, true));
+                mediaDrawers.push_back (take ("speed", { "rate", "rateMode", "followTempo", "delay", "delayBy" }, true));
+                mediaDrawers.push_back (take ("DCA", { "dca", "dcaCurve", "dcaOffset" }, true));
+
+                //  The short name is for a seven-character display: with the list's rows.
+                for (auto at = isBlock.fields.begin(); at != isBlock.fields.end(); ++at)
+                    if (at->name == "shortName")
+                    {
+                        listBlock.fields.insert (listBlock.fields.begin(), std::move (*at));
+                        isBlock.fields.erase (at);
+                        break;
+                    }
+
+                /*  A TIME GROUP'S MEMBER says when it starts and how it keeps up
+                    first (§60, TG.10): at the head of when, open. */
+                if (asks.member)
+                {
+                    auto timed = take ("", { "at", "chase" }, false);
+                    whenBlock.fields.insert (whenBlock.fields.begin(),
+                                             std::make_move_iterator (timed.fields.begin()),
+                                             std::make_move_iterator (timed.fields.end()));
+                }
+
+                samplerBlock.shut = true;
+                listBlock.shut = true;
+
+                //  Whatever no drawer above names - kept, and tucked away. Word mine, owed.
+                doesBlock.heading = "more";
+                doesBlock.shut = true;
+            }
+
             /*  AND THE PANELS THIS CUE HAS, at the end of what it DOES and after
                 the sorts, so an opener never lands in the middle of the rows a
                 kind orders. The author asked for them here rather than in a menu
@@ -2244,9 +2309,25 @@ namespace wfg::client::model
                                      out.kind == "fade" ? fadeAimKind (snapshot, cueId) : std::string {});
             out.panelCue = cueId;
 
-            for (auto* block : { &isBlock, &whenBlock, &doesBlock, &samplerBlock, &listBlock })
-                if (! block->fields.empty())
-                    out.blocks.push_back (std::move (*block));
+            if (out.kind == "media")
+            {
+                //  What it is, where it plays, when; then the drawers, shut.
+                std::vector<Block*> order { &isBlock, &mediaDrawers[0], &whenBlock };
+
+                for (std::size_t at = 1; at < mediaDrawers.size(); ++at)
+                    order.push_back (&mediaDrawers[at]);
+
+                for (auto* block : { &samplerBlock, &doesBlock, &listBlock })
+                    order.push_back (block);
+
+                for (auto* block : order)
+                    if (! block->fields.empty())
+                        out.blocks.push_back (std::move (*block));
+            }
+            else
+                for (auto* block : { &isBlock, &whenBlock, &doesBlock, &samplerBlock, &listBlock })
+                    if (! block->fields.empty())
+                        out.blocks.push_back (std::move (*block));
 
             sortInto (reported, {});
             out.details = std::move (reported);
@@ -2287,8 +2368,11 @@ namespace wfg::client::model
                 if (field.name == "name")
                     drawer.fields.push_back (field);
 
+        /*  What it does is in several drawers on a sound since §136: all of
+            them, but what it is, when and its place in the list. */
         for (const auto& block : locked.blocks)
-            if (block.heading == "what it does")
+            if (block.heading != "what it is" && block.heading != "when" && block.heading != "in the list"
+                  && block.heading != "sampler")
                 for (const auto& field : block.fields)
                     if (! dropped (field.name))
                         drawer.fields.push_back (field);
@@ -2420,7 +2504,7 @@ namespace wfg::client::model
 
         for (const auto& block : each.front().blocks)
         {
-            Block shared { block.heading, {} };
+            Block shared { block.heading, {}, block.shut };
 
             for (const auto& first : block.fields)
             {

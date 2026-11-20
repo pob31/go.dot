@@ -288,6 +288,11 @@ namespace wfg::client::model
     {
         std::string heading;
         std::vector<Field> fields;
+
+        /*  A DRAWER THAT STARTS SHUT (namespace draft §136): what only some cues
+            are ever asked, one click away rather than in the way. A hand that
+            opens it keeps it open, as any drawer. */
+        bool shut = false;
     };
 
     struct Inspection
