@@ -35878,3 +35878,29 @@ one insert of Seventh Heaven is one child of **636 MB**, loaded 2.0 s after the 
 were 3861 MB (spike 08); three inserts of it are still one child, 613 MB, loaded in 2.4 s, where they were
 three children of that size. Oxford Envolution the same shape, loaded in 1.5 s.
 - The author's look at stages 1 and 4 in the window.
+
+## 134. A scan of the audio devices that meets an aggregate with no clock
+
+**Found 2026-11-20.** `unit.C.devices` ended in a SIGSEGV on GitHub's macOS runner at every push from
+`99600f50` (2026-11-18) on. I called it the runner's, having seen it pass three times on the Mac mini; the
+session beside this one read the run history - the same runner image green one commit before - and said it
+followed the code. It did not follow Go.dot's: read off macOS's own crash report, which the CI job now prints
+after a failure, the fault is in JUCE. `AggregateAudioDevice::getClockingDeviceUid()` asks CoreAudio for an
+aggregate device's clock device and then its main sub-device and takes the length of the string that comes
+back; a device with neither answers with no string, and `CFStringGetLength` of none is a read at address
+nought. A scan builds a description of every device on the list (`audio::availableDevices`, which is
+`wfg devices` and the Show settings' audio page), so it crashes when the list holds such an aggregate: on the
+runner, in the cases after one that had played through *Apple Virtual Sound Device*.
+
+- **BGS** **No string is no name** (`patches/JUCE-local/0002-coreaudio-aggregate-no-clock.patch`, a change of
+  Go.dot's own to JUCE, with its notice): the function goes on to the sub-devices and then to none, which its
+  caller already takes.
+
+Why it began at `99600f50`, which adds two counters round the audio block and nothing near a device, is not
+known: an aggregate caught half made or half gone is a matter of when the scan falls, and that commit may only
+have moved it. Not shown, and said as not shown.
+
+Built 2026-11-20. Not reproduced on any machine a hand can reach - the Mac mini passes the cases, under
+AddressSanitizer too - so the proof is the runner's: the patch applied from a clean JUCE on Windows, the pins'
+check green, and CI's macOS job to say the rest. Owed: that job green; the step that prints the crash report
+taken out again once it is; the fault reported to JUCE.

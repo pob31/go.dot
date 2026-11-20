@@ -17,6 +17,11 @@ same or Go.dot stops needing it.
   JUCE each finger as a touch source of its own. spatcore's own patch, which
   WFS-DIY carries too, with Go.dot's notice. Goes when JUCE lets a touch source
   exist on the Mac, or when the panel reader no longer injects.
+- `0002-coreaudio-aggregate-no-clock.patch` (2026-11-20): an aggregate device with
+  neither a clock device nor a main sub-device answers `getClockingDeviceUid()`
+  with no string, and JUCE took its length - a crash in any scan of the audio
+  devices that meets one (GitHub's macOS runner did, at every push for two days).
+  No string is no name. Goes when JUCE tests the string itself; to be reported.
 
 The rules are `patches/JUCE/`'s, and so is the machinery:
 

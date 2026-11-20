@@ -1,0 +1,59 @@
+Go.dot patch 0002 for JUCE (Go.dot's own changes): an aggregate device with no clock device is not a crash.
+
+AggregateAudioDevice::getClockingDeviceUid() asks CoreAudio for an aggregate
+device's clock device and then its main sub-device, each a CFString, and took
+the length of whichever came back. A device that has neither answers with no
+string at all - getPropertyOrDefault's default, a null CFStringRef - and
+CFStringGetLength of null is EXC_BAD_ACCESS at address nought. It is met in a
+scan of the audio devices (CoreAudioIODeviceType::createDevice, which builds an
+AggregateDeviceDescription for every name) when an aggregate is on the list
+without its clock: one CoreAudio is still putting together or taking apart, as
+JUCE's own are around a device session.
+
+Found 2026-11-20 on GitHub's macOS runner, where tests/DeviceTests.cpp ended in
+SIGSEGV at every push from 99600f50 on: a case plays through "Apple Virtual
+Sound Device", and a later case's audio::availableDevices() crashed here. Read
+off macOS's own crash report, printed by the CI job; the Mac mini never met it,
+under AddressSanitizer either. In Go.dot the same scan is `wfg devices` and the
+Show settings' audio page, so a crash there would have been the whole program.
+
+The change is one test: no string is no name, as an empty one is, and the
+function goes on to the sub-devices and then to "none", which its caller
+already takes. Each hunk carries a notice that Go.dot modified the file (AGPL-3
+and GPL-3, section 5(a)).
+
+Not JUCE's own fix, which is why it is not in patches/JUCE: not checked against
+JUCE's develop, and to be reported there. Applied on every platform so every
+build tree has one state; the file compiles on macOS alone.
+
+LINE ENDINGS. JUCE stores this file with CRLF, so the hunk's lines end in CRLF and
+must stay so; .gitattributes keeps this file byte for byte (-text).
+
+Applied by Go.dot's build, cmake/WfgJucePatches.cmake, in the order
+patches/JUCE-local/series gives; refreshed from the working tree with
+scripts/patches.py JUCE-local refresh, which keeps this header. Against JUCE
+7ff644f65d7d (9.0.0+, the JUCE Tracktion Engine a5e4499 pins). Drop it when JUCE
+tests the string itself.
+
+diff --git a/modules/juce_audio_devices/native/juce_CoreAudio_mac.cpp b/modules/juce_audio_devices/native/juce_CoreAudio_mac.cpp
+index ede3c22da5..edc2f82453 100644
+--- a/modules/juce_audio_devices/native/juce_CoreAudio_mac.cpp
++++ b/modules/juce_audio_devices/native/juce_CoreAudio_mac.cpp
+@@ -1009,8 +1009,16 @@ public:
+             kAudioAggregateDevicePropertyMasterSubDevice;
+            #endif
+ 
++        // MODIFIED BY GO.DOT (https://github.com/pob31/go.dot), 2026-11-20, by
++        // patches/JUCE-local/0002-coreaudio-aggregate-no-clock.patch, a change of Go.dot's
++        // own: an aggregate device that has no clock device and no main sub-device -
++        // one CoreAudio is still putting together or taking apart - answers these
++        // properties with no string at all, and CFStringGetLength of none is a crash
++        // (EXC_BAD_ACCESS at 0, in a scan of the devices). None is no name, as an
++        // empty one is.
+         for (auto selector : { kAudioAggregateDevicePropertyClockDevice, subDeviceSelector })
+-            if (auto uid = getPropertyOrDefault<CFStringProperty> (selector); CFStringGetLength (uid.get()) > 0)
++            if (auto uid = getPropertyOrDefault<CFStringProperty> (selector);
++                uid.get() != nullptr && CFStringGetLength (uid.get()) > 0)
+                 return String::fromCFString (uid.get());
+ 
+         if (auto devices = getSubDevices(); ! devices.empty())

@@ -57,6 +57,11 @@ above plus both series:
 - `0001-macos-touch-sources.patch` (2026-10-31): `canUseTouch()` answers true on
   macOS, so a USB touch panel's fingers reach JUCE as touch sources (namespace
   draft §125).
+- `0002-coreaudio-aggregate-no-clock.patch` (2026-11-20): an aggregate device with
+  neither a clock device nor a main sub-device answers `getClockingDeviceUid()`
+  with no string, and JUCE took its length - a crash in any scan of the audio
+  devices that meets one (GitHub's macOS runner did, at every push for two days).
+  No string is no name. Goes when JUCE tests the string itself; to be reported.
 
 JUCE bundles further dependencies with their own licences; the two that reach
 every Go.dot binary through `juce_graphics` are listed separately below. See
