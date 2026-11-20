@@ -1963,6 +1963,19 @@ The table of this section's first amendment (what a missed deadline costs the au
 differently now: a late block costs the lane's cap and not 250 µs, the callback's share bounds the
 sum, and a failed strip is still never called.
 
+*Amended in 0.8, at the author's direction (2026-11-20) - decisions BHH to BHK,
+`docs/godot-namespace-draft-0.1.md` §140.* A plugin's own declared delay - a limiter's look-ahead,
+a linear-phase EQ - is *shown, never compensated*, and that stands, with the one exception the
+author asked for: **"a timeline group property with a toggle in the inspector."** A timeline group
+whose `lineUp` is on places each of its sound cues the longest delay among its members' plugins,
+less its own, after the sample it is due on, and each of its pictures the longest: its members are
+heard and seen starting together, later than the show's clock by the slowest plugin and by nothing
+else. Off by default, and a show made before it plays as it did. Only the group's own members
+(§4.12) - a group inside has its own toggle; a mic cue is not held, and a member that is neither
+sound nor picture fires on its tick as before. The delay is read off the plugins loaded on this
+machine when the group's first member is placed; the document holds the toggle and never the
+figure (§4.10). No latency is added anywhere, and nothing outside such a group moves.
+
 ### 3.19 Video
 
 Built in, by decision (§2, no Alt-Tab). Millumin over OSC remains the escape

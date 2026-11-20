@@ -1324,6 +1324,16 @@ namespace wfg::cue
         std::int64_t soundDelay = 0;
         std::int64_t pictureDelay = 0;
 
+        /*  A TIMELINE GROUP'S LINE-UP (namespace draft §140, BHH, the author's:
+            "a timeline group property with a toggle in the inspector"), on the
+            GROUP's run: the longest delay the plugins of any one member declare,
+            in session samples. Read once, when the first member is placed, and
+            kept for the run's life - a plugin that loads half way through a
+            timeline does not move the members still to come against the ones
+            already sounding. A fact of this machine, never in the document. */
+        bool lineUpRead = false;
+        std::int64_t lineUp = 0;
+
         /*  HOW FAR AHEAD OF THE RECORD CLOCK ITS LAUNCH WAS PLACED, seconds
             (namespace draft §58, RD.9): a follower's sound placed on its
             leader's sample sounds this much before its own tick grid would

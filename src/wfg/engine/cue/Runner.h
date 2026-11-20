@@ -3354,7 +3354,14 @@ namespace wfg::cue
         /*  A RUN'S STREAM HELD BACK (namespace draft §70): fills `soundDelay`
             or `pictureDelay` from its cue's rows - a locked sound's from its
             movie's - once, at the session's rate. */
-        void readDelay (Run& run) const;
+        void readDelay (Run& run);
+
+        /*  WHAT A TIMELINE GROUP'S LINE-UP HOLDS THIS RUN BACK BY (namespace
+            draft §140), session samples, nought for a run no lined-up timeline
+            owns: a sound by the longest plugin delay among the group's members
+            less its own, a picture by the longest. Fills the group run's
+            `lineUp` the first time any member asks. */
+        std::int64_t lineUpHold (const Run& run);
 
         /*  Whether a movie run has a locked sound held back still to end - its
             tail playing on past the movie's last frame (namespace draft §70). */

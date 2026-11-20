@@ -159,8 +159,11 @@ namespace wfg::client::model
                     question (namespace draft §60) - and first of all on a time
                     group itself, which `inspect` moves it to. The join after
                     `advance`, as what happens between two members follows how
-                    the next one is started (namespace draft §69). */
+                    the next one is started (namespace draft §69). The line-up
+                    after the join: a timeline's question as the join is a
+                    sequence's (namespace draft §140). */
                 { "group",   { "mode", "takeover", "timeSource", "advance", "join", "joinLength", "joinCurve",
+                               "lineUp",
                                "selection", "play", "loops", "seed", "dca", "dcaCurve", "dcaOffset" } },
                 { "range",   { "name", "in", "out", "loops" } },
                 { "trigger", { "kind", "enabled", "address", "value", "port", "channel",
@@ -254,6 +257,9 @@ namespace wfg::client::model
                     for the author. */
                 { "joinLength", "crossfade length" },
                 { "joinCurve", "crossfade curve" },
+                /*  A TIMELINE'S LINE-UP (namespace draft §140): the toggle is the
+                    author's, the words the implementer's, for the author. */
+                { "lineUp", "line up plugin delays" },
                 //  A SOUND'S RANGES, HOW THEY WRAP (§69, AOJ): the implementer's words, for the author.
                 { "rangeJoin", "range wraps" },
                 { "rangeJoinLength", "wrap crossfade" },
@@ -1415,6 +1421,7 @@ namespace wfg::client::model
             const auto* join = fieldOf ("join");
 
             const auto sequence = mode == nullptr || mode->mixed || mode->value == "sequence";
+            const auto timeline = mode == nullptr || mode->mixed || mode->value == "timeline";
             const auto crossfade = join == nullptr || join->mixed || join->value == "crossfade";
 
             for (auto& field : decided)
@@ -1431,6 +1438,15 @@ namespace wfg::client::model
                 else if (field.name == "joinLength" || field.name == "joinCurve")
                 {
                     field.applies = field.applies && sequence && crossfade;
+                }
+
+                /*  THE LINE-UP IS A TIMELINE'S (namespace draft §140, BHH): its
+                    members start together, so there is something to line up;
+                    greyed on every other group, live on a selection that may
+                    hold one. */
+                else if (field.name == "lineUp")
+                {
+                    field.applies = field.applies && timeline;
                 }
             }
         }

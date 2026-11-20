@@ -9440,6 +9440,52 @@ TEST_CASE ("client: a sequence's join - after how it advances, in the author's w
     CHECK (appliesIn (both, "joinLength"));
 }
 
+TEST_CASE ("client: a timeline's line-up - a switch after the join, asked of a timeline and greyed on every other group (§140)")
+{
+    Rig rig;
+
+    const std::string list = "7K2QM9X4";
+
+    const auto sequence = rig.document.createCue (list, 0, "group", "Act");
+    const auto timeline = rig.document.createCue (list, 1, "group", "Storm", {}, { { "mode", "timeline" } });
+    const auto pads = rig.document.createCue (list, 2, "group", "Pads", {}, { { "mode", "sampler" } });
+    const auto clock = rig.document.createCue (list, 3, "group", "Clock", {}, { { "mode", "time" } });
+
+    for (const auto* made : { &sequence, &timeline, &pads, &clock })
+        REQUIRE (made->ok);
+
+    rig.parameters.markStale();
+    const auto snapshot = rig.publish (1);
+
+    //  After the join's three rows, before how a round is drawn.
+    const auto rows = namesUnder (model::inspect (*snapshot, timeline.id), "what it does");
+    const auto curveAt = positionOf (rows, "joinCurve");
+    REQUIRE (curveAt + 1 < rows.size());
+    CHECK (rows[curveAt + 1] == "lineUp");
+
+    //  A switch, off, that writes the group's own row.
+    const auto inspected = model::inspect (*snapshot, timeline.id);
+    const auto* lineUp = rowIn (inspected, "lineUp");
+    REQUIRE (lineUp != nullptr);
+    CHECK (lineUp->boolean);
+    CHECK (lineUp->writable);
+    CHECK (lineUp->value == "false");
+    CHECK (lineUp->label == "line up plugin delays");
+    CHECK (lineUp->address == "/godot/cue/" + timeline.id + "/lineUp");
+
+    //  A timeline is asked; a sequence, a sampler and a time group are not.
+    CHECK (appliesIn (inspected, "lineUp"));
+
+    for (const auto& id : { sequence.id, pads.id, clock.id })
+    {
+        INFO ("group " << id);
+        CHECK_FALSE (appliesIn (model::inspect (*snapshot, id), "lineUp"));
+    }
+
+    //  Two groups, one of them a timeline: the row stays live.
+    CHECK (appliesIn (model::inspectMany (*snapshot, { sequence.id, timeline.id }), "lineUp"));
+}
+
 TEST_CASE ("client: a sound's range wraps - asked of a sound with ranges, its length a crossfade's (§69, AOJ)")
 {
     Rig rig;

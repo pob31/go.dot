@@ -3338,15 +3338,17 @@ namespace wfg::cue
                 nothing - its delay is behind it. One at its top keeps its own. */
             if (cue.hasType ("Media"))
             {
+                /*  ITS GROUP'S LINE-UP IS NOT BEHIND IT (namespace draft §140,
+                    BHI): the plugins are as late wherever in its file it starts. */
                 if (wants.heldFor >= 0.0)
                 {
                     run->delayRead = true;
-                    run->soundDelay = videoSamplesFor (wants.heldFor);
+                    run->soundDelay = videoSamplesFor (wants.heldFor) + lineUpHold (*run);
                 }
                 else if (wants.offset > numberOf (cue, "startOffset") || wants.range >= 0)
                 {
                     run->delayRead = true;
-                    run->soundDelay = 0;
+                    run->soundDelay = lineUpHold (*run);
                 }
             }
 
@@ -14620,7 +14622,7 @@ namespace wfg::cue
         if (clip.point.range >= 0 || clip.point.from > numberOf (cue, "startOffset"))
         {
             run->delayRead = true;
-            run->soundDelay = 0;
+            run->soundDelay = lineUpHold (*run);        // its group's line-up is not (§140, BHI)
         }
 
         run->launchRequested = true;
@@ -18579,7 +18581,7 @@ namespace wfg::cue
         return false;
     }
 
-    void Runner::readDelay (Run& run) const
+    void Runner::readDelay (Run& run)
     {
         if (run.delayRead || samplesPerTick <= 0)
             return;
@@ -18594,18 +18596,105 @@ namespace wfg::cue
 
         const auto which = textOf (cue, "delay");
 
-        if (which != "sound" && which != "picture")
-            return;
+        if (which == "sound" || which == "picture")
+        {
+            //  On the session's samples, as a picture's every point is - with a player or none.
+            const auto samples = videoSamplesFor (numberOf (cue, "delayBy") / 1000.0);
 
-        //  On the session's samples, as a picture's every point is - with a player or none.
-        const auto samples = videoSamplesFor (numberOf (cue, "delayBy") / 1000.0);
+            /*  A SOUND IS HELD BACK ON A SOUND'S RUN, A PICTURE ON A PICTURE'S: a
+                movie that holds back its sounds places its own picture when due. */
+            if (which == "sound" && run.kind == "media")
+                run.soundDelay = samples;
+            else if (which == "picture" && run.kind == "video")
+                run.pictureDelay = samples;
+        }
 
-        /*  A SOUND IS HELD BACK ON A SOUND'S RUN, A PICTURE ON A PICTURE'S: a
-            movie that holds back its sounds places its own picture when due. */
-        if (which == "sound" && run.kind == "media")
-            run.soundDelay = samples;
-        else if (which == "picture" && run.kind == "video")
-            run.pictureDelay = samples;
+        /*  AND ITS GROUP'S LINE-UP ON TOP (namespace draft §140, BHI): the same
+            lag by the same road, so a seek, a speed change, a chase and a
+            resume keep it as they keep the cue's own. */
+        const auto hold = lineUpHold (run);
+
+        if (run.kind == "media")
+            run.soundDelay += hold;
+        else if (run.kind == "video")
+            run.pictureDelay += hold;
+    }
+
+    std::int64_t Runner::lineUpHold (const Run& run)
+    {
+        if (run.kind != "media" && run.kind != "video")
+            return 0;
+
+        const auto cue = document.findById (run.cue);
+
+        if (! cue.isValid())
+            return 0;
+
+        /*  WHOSE MEMBER IT IS: its own run's parent's - and a sound locked to
+            a movie is its movie's member's, a run further up (37.5, WJ). */
+        const auto locked = run.kind == "media" && followsAMovie (cue);
+        const auto member = locked ? document.findById (cue[juce::Identifier ("lockedTo")].toString().toStdString())
+                                   : cue;
+
+        /*  A TIMELINE THAT ASKS, AND ITS OWN MEMBERS ONLY (PRD §4.12: nothing
+            inherits downward): the group the cue is written in. A cue in a
+            header or a footer is written in that, and a member of a group
+            inside is that group's - neither is this one's to move. */
+        const auto group = member.getParent();
+
+        if (! group.isValid() || ! group.hasType ("Group")
+              || ! isTimeline (groupMode (group)) || textOf (group, "lineUp") != "true")
+            return 0;
+
+        /*  AND RUNNING UNDER IT: that group's run, a step up - two for a locked
+            sound, more for one a standby armed under a block. A member fired
+            on its own, by name or from the pointer, has no group run above it
+            and nothing to be lined up with. */
+        const auto groupId = group[idProperty].toString().toStdString();
+        Run* above = nullptr;
+
+        for (auto* up = runs.find (run.parent); up != nullptr && above == nullptr; up = runs.find (up->parent))
+            if (up->cue == groupId)
+                above = up;
+
+        if (above == nullptr)
+            return 0;
+
+        const auto wide = audio != nullptr ? audio->channelsPerTrack() : 2;
+
+        /*  THE LONGEST, ONCE A GROUP RUN (BHJ): every sound the group starts -
+            its sound cues and the sounds locked to its movies - by what the
+            plugins it is switched into declare, as the table has them now. One
+            not loaded has said nothing and counts nought. A mic cue is not
+            counted and not held: a live input has no start to move. */
+        if (! above->lineUpRead)
+        {
+            above->lineUpRead = true;
+            above->lineUp = 0;
+
+            const auto count = [&] (const juce::ValueTree& sound)
+            {
+                above->lineUp = std::max<std::int64_t> (above->lineUp,
+                                                         chainOfCue (sound, pluginTable, wide).latencySamples);
+            };
+
+            for (const auto& id : membersOf (group))
+            {
+                const auto node = document.findById (id);
+
+                if (node.hasType ("Media"))
+                    count (node);
+                else if (node.hasType ("Video"))
+                    for (const auto& sound : soundsLockedTo (id))
+                        count (document.findById (sound));
+            }
+        }
+
+        //  A picture has no plugin delay of its own: it waits for the slowest sound.
+        if (run.kind == "video")
+            return above->lineUp;
+
+        return std::max<std::int64_t> (0, above->lineUp - chainOfCue (cue, pluginTable, wide).latencySamples);
     }
 
     void Runner::fireLockedSounds (Engine& engine, std::int64_t tick, const std::string& movieCue,

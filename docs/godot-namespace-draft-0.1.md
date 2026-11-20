@@ -10763,7 +10763,7 @@ decision letter never reads as the plugin format.
 | **AV** | The layout ladder: the voice's width, 2-2, 1-2, 1-1, each standard and numbered; never every bus on; a sidechain fed silence | implementer's call |
 | **AW** | A cue wider than an insert takes, or one it would make narrower, passes it dry, whole, with a sentence — never half wet | implementer's call |
 | **AX** | **Load now** (`plugin.load`): the graph rebuilt with the set as it stands, on what plays now, only while nothing plays | implementer's call |
-| **AY** | Latency shown — per entry, per cue through its inserts, re-read after each state — and still never compensated | implementer's call |
+| **AY** | Latency shown — per entry, per cue through its inserts, re-read after each state — and still never compensated *(but where a timeline group asks: §140, BHH-BHK, the author's, 2026-11-20)* | implementer's call |
 
 **Built** (on `main`, one commit a stage): the known list in every mode and `--engine-folder` (stage 1);
 LV2, the in-tree test bundle, a child registering its plugin's format alone, the bundle recorded
@@ -36134,3 +36134,73 @@ breath now wait for it as a launch does (`waitSettled`). M86 is the measurement.
 **Owed.** The friend's log and his ear on a build with this in it; the author's on the Mac. The words of BHE.
 The count by cue's insert (it is by plugin). The same M86 on a slower Mac, and with a real plugin on Linux -
 the NUC ran the gain alone with the napping worker: never late at 512 or 128, 0.17 ms at worst.
+
+## 140. A timeline group lines up for its plugins' delay
+
+**Asked 2026-11-20** with §139, by the author's own reading of his friend's report: "As long as we have possible
+group latency matching between cues in a timeline group starting at the same time we might not need to enforce
+super low latency." §139 found the crackle was not latency and needed none added. What was left of the sentence
+is this: a plugin that looks ahead - a limiter, a linear-phase EQ - gives its sound back late by a number of
+samples it declares, Go.dot has shown that number since Phase 9a and never used it (AY), and two cues that start
+together, one through such a plugin, are heard apart by it.
+
+**The author's ruling** (2026-11-20, his own words, not one of the offered answers): "Make it a timeline group
+property with a toggle in the inspector."
+
+- **BHH** **The toggle.** `group/lineUp`, a switch, off by default, show scope; a group's row and no cue's. Off is
+  not written, so a show made before today saves as it was and plays as it did. It is asked of a timeline -
+  greyed in the inspector on a sequence, a sampler and a time group, live on a selection that may hold a timeline
+  - and kept, ignored, on the others, so a group whose mode is changed and changed back has not lost it. Written
+  by `node.set` and `node.setMany` like every row: a named command, one step of undo. *(The property and the
+  toggle are the author's. The name, the label - "line up plugin delays" - and "kept and ignored" are mine.)*
+- **BHI** **What it moves.** Each sound cue that is a member of the group is placed the longest delay among the
+  members, less its own, after the sample it is due on; each video member's picture the longest. So the slowest
+  sound starts where it always did and everything else waits for it: what is heard and what is seen begin
+  together, later than the show's clock by the longest delay and by nothing else. It goes by the road §70's Delay
+  made - `Run::soundDelay`, `Run::pictureDelay`, added in `Runner::readDelay` on top of the cue's own - so it is
+  on the sample and not on a tick, and a speed change, a chase, a seek, a pause and a Doh! keep it as they keep
+  the cue's. One difference from the cue's delay: a sound seated part way into its file has its own delay behind
+  it (AOV) and its group's line-up still in front of it, since the plugins are as late wherever it starts.
+  *(Mine.)*
+- **BHJ** **What is counted, and when.** The group's own members, as PRD §4.12 has it - nothing inherits
+  downward: a group inside has its own toggle and its members are neither counted nor moved, and a cue in the
+  header or the footer is not a member. A sound locked to a movie is counted and moved as its movie's. A sound's
+  delay is what the inserts it is switched into declare between them (`chainOfCue`, the figure the FX strip
+  already shows); one that will not take the cue, or is not loaded, declares nothing. The longest is read once a
+  group run, when its first member is placed, and kept on that run (`Run::lineUp`, published as
+  `run/<id>/lineUp`, in samples): a plugin that finishes loading half way down a timeline does not move the
+  members still to come against the ones already sounding. A member fired on its own - by name, or from the
+  pointer - has no group run above it and is not held. *(Mine.)*
+- **BHK** **What it is not.** The document holds the toggle and never a figure (§4.10): the delay is a fact of
+  the plugins loaded on this machine tonight, and a show opened where a plugin is missing lines up for the ones
+  that are there. No latency is added anywhere, and nothing outside a lined-up timeline moves: AY stands for
+  every other cue. *(Mine.)*
+
+**Tests**, each written before the code it passes: in `DocumentTests`, *a group's line-up - a toggle, off by
+default, a group's alone*; in `GoTests`, *a timeline that asks holds each sound by the longest plugin delay less
+its own, on the sample* - three sounds, dry, 480 and 1000 samples late, and one in a group inside, with the
+toggle off and on; and *a timeline loaded part way in still holds its sounds by the plugin delay they lack*, the
+seat's half of BHI; in `VideoTests`, *a lined-up timeline holds its picture by the longest plugin delay, and the
+sound that has it not at all*; in `ClientTests`, *a timeline's line-up - a switch after the join, asked of a
+timeline and greyed on every other group*. And a driver, `tests/blackbox/lineup.py`, in both locales: two sounds
+of one timeline, the same step, one to the left plain and one to the right through the test gain with a
+look-ahead of 480 samples in its state (`TestGainState::lookAhead`, tests only: the gain gives its sound back
+that late and declares it). Off, the render has the right 480 samples after the left; on, the two begin on the
+same sample, and `run/<id>/lineUp` reads 480.
+
+**Honest limits.**
+
+- **Only inserts on the cue.** A send into an aux whose plugins are late, a rack channel's, an output's: not
+  counted. The aux's return is late by its plugin as it was.
+- **A mic cue is neither counted nor held**: a live input has no start to move, and holding the files back for
+  it would be a choice about monitoring nobody has made.
+- **Members that are not sound or picture fire on the tick**, as they did: an OSC, MIDI, timecode or script
+  member, a fade aimed at a held sound. They are early by the hold - a millisecond or twenty.
+- **The planner does not know.** A timeline's shown length, a load to a time and a seat reckon without the hold;
+  it is on top of what they place.
+- **A delay that changes while the group runs** - a state loaded into a limiter moves its look-ahead - is not
+  followed until the group is fired again.
+- **A plugin's delay is its entry's**, the largest any cue's copy of it declares (2026-09-26). Two cues through
+  one plugin whose states differ in look-ahead are lined up as if both had the longer: the one with the shorter
+  is then early by the difference. Per copy needs the Runner to know which copy a cue was lent before it is
+  placed; owed.

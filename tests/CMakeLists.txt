@@ -2046,6 +2046,21 @@ add_test(NAME blackbox.phase9a-fx.fr_FR
 set_tests_properties(blackbox.phase9a-fx.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
+# A timeline group lines up for its plugins' delay, heard (namespace draft 140): two
+# sounds of one timeline, one through the test gain with a look-ahead of 480 samples
+# in its state. With the group's lineUp off the render has them 480 samples apart;
+# with it on, on the same sample, and the group's run says what it held them to.
+add_test(NAME blackbox.lineup.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/lineup.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.lineup.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.lineup.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/lineup.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.lineup.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
 # Finishing plugin hosting, stage 3 (the author's decision of 2026-09-26: a Scan
 # button in the app): `plugin.scan lv2 <folder>` runs the command line's own scan
 # as a child of a serve with an engine folder of its own, /godot/plugin/scan/...

@@ -358,6 +358,14 @@ namespace wfg::plugin
 
             /** How long its reset takes, from its state: a slow one made on purpose. */
             int resetDelayMs = 0;
+
+            /*  A LOOK-AHEAD MADE ON PURPOSE (namespace draft §140), from its
+                state: the sound given back this many samples late, a line a
+                channel, and declared as a limiter declares its own. Sized by
+                the loader and cleared by a reset, the lane parked for both. */
+            int lookAhead = 0;
+            std::vector<float> held;
+            std::size_t heldAt = 0;
         };
 
         struct TestGainWorker
@@ -389,8 +397,14 @@ namespace wfg::plugin
                 nothing to clear, so only the time a real one takes is played. */
             void resetLane (int i)
             {
-                if (const auto delay = instances[static_cast<std::size_t> (i)].resetDelayMs; delay > 0)
-                    juce::Thread::sleep (delay);
+                auto& instance = instances[static_cast<std::size_t> (i)];
+
+                if (instance.resetDelayMs > 0)
+                    juce::Thread::sleep (instance.resetDelayMs);
+
+                //  What a look-ahead still holds is the last cue's.
+                std::fill (instance.held.begin(), instance.held.end(), 0.0f);
+                instance.heldAt = 0;
             }
 
             /*  THE MESSAGE THREAD'S LOAD, with the lane parked: the file's
@@ -418,6 +432,10 @@ namespace wfg::plugin
                 instance.restingGain = problem.empty() ? state.gain : lanes.header.baseline[0].load (std::memory_order_relaxed);
                 instance.padFactor = problem.empty() ? state.padFactor() : 1.0f;
                 instance.resetDelayMs = problem.empty() ? state.resetDelayMs : 0;
+                instance.lookAhead = problem.empty() ? std::clamp (state.lookAhead, 0, 1 << 16) : 0;
+                instance.held.assign (static_cast<std::size_t> (instance.lookAhead)
+                                          * static_cast<std::size_t> (std::max (1, lanes.channels)), 0.0f);
+                instance.heldAt = 0;
                 return problem;
             }
 
@@ -483,6 +501,27 @@ namespace wfg::plugin
 
                                 for (int n = 0; n < numSamples; ++n)
                                     samples[n] *= factor;
+                            }
+
+                            /*  AND LATE BY ITS LOOK-AHEAD, when its state has one
+                                (namespace draft §140): each sample changes places
+                                with the one that went in that many before it. */
+                            if (const auto length = static_cast<std::size_t> (instance.lookAhead); length > 0)
+                            {
+                                for (int channel = 0; channel < numChannels; ++channel)
+                                {
+                                    auto* samples = audio + channel * lanes.maxSamples;
+                                    auto* line = instance.held.data() + static_cast<std::size_t> (channel) * length;
+                                    auto at = instance.heldAt;
+
+                                    for (int n = 0; n < numSamples; ++n)
+                                    {
+                                        std::swap (samples[n], line[at]);
+                                        at = at + 1 == length ? 0 : at + 1;
+                                    }
+                                }
+
+                                instance.heldAt = (instance.heldAt + static_cast<std::size_t> (numSamples)) % length;
                             }
 
                             /*  A mono cue goes into every input (LaneMapping.h),
@@ -1158,6 +1197,10 @@ namespace wfg::plugin
             if (real != nullptr)
                 lanes.laneOf[static_cast<std::size_t> (lane)]->latencySamples.store (
                     static_cast<std::uint32_t> (std::max (0, real->instances[static_cast<std::size_t> (lane)]->getLatencySamples())),
+                    std::memory_order_relaxed);
+            else if (testGain != nullptr)
+                lanes.laneOf[static_cast<std::size_t> (lane)]->latencySamples.store (
+                    static_cast<std::uint32_t> (testGain->instances[static_cast<std::size_t> (lane)].lookAhead),
                     std::memory_order_relaxed);
 
             return problem;

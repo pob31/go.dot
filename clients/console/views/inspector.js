@@ -145,9 +145,9 @@ const KIND_ORDER = {
   osc:     ["address", "value", "wait", "timeout"],
   midi:    ["port", "channel", "type", "data1", "data2", "fadeTo", "fadeTime", "fadeCurve", "sysex", "wait"],
   // The join after `advance` (namespace draft 69): what happens between two members follows
-  // how the next one is started.
-  group:   ["mode", "takeover", "advance", "join", "joinLength", "joinCurve", "selection", "play", "loops",
-            "seed", "dca", "dcaCurve", "dcaOffset"],
+  // how the next one is started. The line-up after it: a timeline's question (namespace draft 140).
+  group:   ["mode", "takeover", "advance", "join", "joinLength", "joinCurve", "lineUp",
+            "selection", "play", "loops", "seed", "dca", "dcaCurve", "dcaOffset"],
   range:   ["name", "in", "out", "loops"],
   trigger: ["kind", "enabled", "address", "value", "port", "channel",
             "type", "number", "data", "compare", "at"],

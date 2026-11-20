@@ -55,6 +55,7 @@
 #include <wfg/engine/cue/TextFields.h>
 #include <wfg/engine/log/EventLog.h>
 #include <wfg/engine/log/Replay.h>
+#include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/video/Compositor.h>
@@ -2482,6 +2483,84 @@ TEST_CASE ("video: a movie holds back its sound or its picture by its delay, on 
 
     //  Not a tick's worth: 12.5 ms is 600 samples.
     CHECK (fire ("picture", "12.5").picture == plain.picture + 600);
+}
+
+/*  A LINED-UP TIMELINE'S PICTURE WAITS FOR ITS SLOWEST SOUND (namespace draft
+    140): a picture has no plugin delay of its own, so it is held by the longest
+    among the group's sounds - a movie's locked sound counted with them - and
+    the sound by what it lacks of it. */
+TEST_CASE ("video: a lined-up timeline holds its picture by the longest plugin delay, and the sound that has it not at all (namespace draft 140)")
+{
+    struct Placed { std::int64_t picture = -1; std::int64_t sound = -1; };
+
+    const auto fire = [] (const char* lineUp)
+    {
+        const std::map<std::string, double> lengths { { "clip.mov", 20.0 }, { "clip (sound).wav", 20.0 } };
+        LaunchingPlayer audio;
+        VideoRig rig;
+        rig.runner.setPlayer (&audio);
+        rig.runner.setMediaDurations (&lengths);
+
+        REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000001"), osc::Value::int32 (0),
+                                                    osc::Value::string ("group"), osc::Value::string ("Scene"),
+                                                    osc::Value::string ("VD000090"),
+                                                    osc::Value::string ("mode"), osc::Value::string ("timeline"),
+                                                    osc::Value::string ("lineUp"), osc::Value::string (lineUp) }).applied >= 1);
+        REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000090"), osc::Value::int32 (0),
+                                                    osc::Value::string ("video"), osc::Value::string ("Clip"),
+                                                    osc::Value::string ("VD000091"),
+                                                    osc::Value::string ("source"), osc::Value::string ("movie"),
+                                                    osc::Value::string ("canvas"), osc::Value::string ("VD000011"),
+                                                    osc::Value::string ("file"), osc::Value::string ("clip.mov") }).applied >= 1);
+        REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000090"), osc::Value::int32 (1),
+                                                    osc::Value::string ("media"), osc::Value::string ("Clip sound"),
+                                                    osc::Value::string ("VD000092"),
+                                                    osc::Value::string ("file"), osc::Value::string ("clip (sound).wav") }).applied >= 1);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/VD000092/lockedTo", "VD000091").ok);
+
+        //  The movie's sound goes through a limiter that looks 480 samples ahead.
+        const auto limiter = rig.document.createPlugin ("Limiter", "VST3-0badf00d-limiter", "VST3", "", "");
+        REQUIRE (limiter.ok);
+        REQUIRE (rig.document.createFx ("VD000092", limiter.id, "").ok);
+
+        plugin::PluginTable table;
+        table.setBuilt ({ limiter.id });
+
+        plugin::PluginTable::Status up;
+        up.state = "loaded";
+        up.inputs = 2;
+        up.outputs = 2;
+        up.latencySamples = 480;
+        table.set (limiter.id, up);
+        rig.runner.setPlugins (&table);
+
+        rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000090") });
+
+        for (int n = 0; n < 40 && audio.launches.empty(); ++n)
+        {
+            audio.completeArms (rig.engine);
+            rig.ticks (1);
+        }
+
+        rig.ticks (6);
+
+        Placed placed;
+        const auto* movie = rig.runOf ("VD000091");
+        REQUIRE (movie != nullptr);
+        REQUIRE_FALSE (rig.sink.points[movie->id].empty());
+        placed.picture = rig.sink.points[movie->id].front().sample;
+        REQUIRE (audio.launches.size() == 1);
+        placed.sound = audio.launches.front().second;
+        rig.runner.setPlugins (nullptr);
+        return placed;
+    };
+
+    const auto plain = fire ("false");
+    const auto lined = fire ("true");
+
+    //  The sound's plugins are the slowest there are: it is where it was, and the picture waits for it.
+    CHECK (lined.sound == plain.sound);
+    CHECK (lined.picture == plain.picture + 480);
 }
 
 TEST_CASE ("video: Esc inside a delay - the stream held back never starts (namespace draft 70, AOU)")

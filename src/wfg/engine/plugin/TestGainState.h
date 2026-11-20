@@ -28,7 +28,9 @@
     loud. `loadDelayMs` is for tests only: the voice child sleeps that long
     while loading, which is how a slow plugin is made on purpose; and
     `resetDelayMs` the same at a reset, which is a VST3's deactivation made on
-    purpose (namespace draft 139).
+    purpose (namespace draft 139). `lookAhead`, tests only too: the gain gives
+    its sound back that many samples late and declares it, which is a limiter's
+    look-ahead made on purpose (namespace draft 140).
 
     Plain text, a word a line, so a test can write one by hand. Std only: the
     voice child's test gain has no JUCE at all.
@@ -48,6 +50,7 @@ namespace wfg::plugin
         bool pad = false;
         int loadDelayMs = 0;
         int resetDelayMs = 0;
+        int lookAhead = 0;
 
         /** What Pad does to the signal: twelve decibels, a quarter. */
         float padFactor() const noexcept { return pad ? 0.25f : 1.0f; }
@@ -63,6 +66,9 @@ namespace wfg::plugin
 
             if (resetDelayMs > 0)
                 out << "resetDelayMs=" << resetDelayMs << "\n";
+
+            if (lookAhead > 0)
+                out << "lookAhead=" << lookAhead << "\n";
 
             return out.str();
         }
@@ -90,6 +96,7 @@ namespace wfg::plugin
                 else if (key == "pad")          { int v = 0; value >> v; state.pad = v != 0; }
                 else if (key == "loadDelayMs")  value >> state.loadDelayMs;
                 else if (key == "resetDelayMs") value >> state.resetDelayMs;
+                else if (key == "lookAhead")    value >> state.lookAhead;
             }
 
             return state;

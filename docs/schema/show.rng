@@ -353,6 +353,15 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="lineUp">
+          <a:documentation>timeline: whether the group lines its members up for the delay their plugins declare (namespace draft 140, BHH; the author: a timeline group property with a toggle in the inspector). A plugin that looks ahead - a limiter, a linear-phase EQ - gives its sound back late by a number of samples it declares, and two members that start together are then heard apart by the difference. On, each sound cue that is a member of this group is placed the longest such delay among the members, less its own, after the sample it is due on, and each video member-s picture the longest, so what is heard and seen starts together; a sound locked to a movie counts as the movie-s. Off, the default, every member is placed on the sample it is due, as it always was. Only this group-s own members: a group inside it has its own toggle, and a cue in the header or footer is not moved. A mic cue is not held (a live input has no start to move), nor an OSC, MIDI, timecode or script member, which fires on the tick. The delay is read off this machine-s loaded plugins when the group-s first member is placed and kept for the run: a plugin not loaded then counts nought. The document holds the toggle and never the figure. Asked of a timeline only; kept and ignored on a sequence, a sampler and a time group.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="loops">
           <a:documentation>How many ROUNDS this group plays before it is done. Rounds, not playbacks: with play set, a round is a subset of the members, and three loops of two-of-five is six cues rather than three. Zero means for ever, which is what an ambience bed is, and is left by a stop verb, an advance or run.stop rather than by counting.</a:documentation>
           <data type="integer">

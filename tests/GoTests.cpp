@@ -898,6 +898,109 @@ TEST_CASE ("go: a sound held back is placed its delay later, on the sample, afte
     CHECK (lead ("sound", "7.3", "0.1") == waited + 350);
 }
 
+/*  A TIMELINE GROUP LINES UP (namespace draft 140, the author's: "a timeline
+    group property with a toggle in the inspector"). Asked, each of its sounds
+    is placed the longest plugin delay among the group's own members, less its
+    own, after the sample it is due on - so what comes out of the plugins starts
+    together, on the sample. Not asked, nothing moves; and a member of a group
+    inside it is that group's to move, not this one's (PRD 4.12). */
+TEST_CASE ("line-up: a timeline that asks holds each sound by the longest plugin delay less its own, on the sample")
+{
+    struct Placed
+    {
+        std::int64_t dry = -1, wet = -1, deep = -1, nested = -1;
+        std::int64_t groupHolds = -1;
+    };
+
+    const auto fire = [] (const char* lineUp)
+    {
+        Rig rig;
+        rig.clockRuns = true;
+
+        const auto file = [&rig] (const std::string& parent, int at, const char* name)
+        {
+            const auto id = rig.document.createCue (parent, at, "media", name).id;
+            REQUIRE (rig.document.setAttribute ("/godot/cue/" + id + "/file", "thunder.wav").ok);
+            return id;
+        };
+
+        const auto scene = rig.document.createCue (rig.listId, 2, "group", "Scene").id;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/mode", "timeline").ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + scene + "/lineUp", lineUp).ok);
+
+        const auto dry = file (scene, 0, "Dry");
+        const auto wet = file (scene, 1, "Through a limiter");
+        const auto deep = file (scene, 2, "Through a linear-phase EQ");
+
+        const auto inner = rig.document.createCue (scene, 3, "group", "Inside").id;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + inner + "/mode", "timeline").ok);
+        const auto nested = file (inner, 0, "Nested");
+
+        //  A limiter that looks 480 samples ahead, an EQ a thousand late.
+        const auto limiter = rig.document.createPlugin ("Limiter", "VST3-0badf00d-limiter", "VST3", "", "");
+        const auto phase = rig.document.createPlugin ("Phase", "VST3-0badf00d-phase", "VST3", "", "");
+        REQUIRE (limiter.ok);
+        REQUIRE (phase.ok);
+        REQUIRE (rig.document.createFx (wet, limiter.id, "").ok);
+        REQUIRE (rig.document.createFx (deep, phase.id, "").ok);
+
+        plugin::PluginTable table;
+        table.setBuilt ({ limiter.id, phase.id });
+
+        plugin::PluginTable::Status up;
+        up.state = "loaded";
+        up.inputs = 2;
+        up.outputs = 2;
+        up.latencySamples = 480;
+        table.set (limiter.id, up);
+        up.latencySamples = 1000;
+        table.set (phase.id, up);
+        rig.runner.setPlugins (&table);
+
+        rig.setStandby (scene);
+        REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+        const auto placedAt = [&rig] (const std::string& cueId) -> std::int64_t
+        {
+            const auto* run = rig.runs.find (rig.runOf (cueId));
+            return run != nullptr && ! run->launchRequested && run->launchedAtSample > 0 ? run->launchedAtSample : -1;
+        };
+
+        REQUIRE (rig.tickUntil ([&]
+        {
+            rig.audio.completeArms (rig.engine);
+            return placedAt (dry) > 0 && placedAt (wet) > 0 && placedAt (deep) > 0 && placedAt (nested) > 0;
+        }));
+
+        Placed placed;
+        placed.dry = placedAt (dry);
+        placed.wet = placedAt (wet);
+        placed.deep = placedAt (deep);
+        placed.nested = placedAt (nested);
+        placed.groupHolds = rig.runs.find (rig.runOf (scene))->lineUp;
+        rig.runner.setPlugins (nullptr);
+        return placed;
+    };
+
+    const auto plain = fire ("false");
+
+    //  Not asked: every member on the sample it is due, as it always was.
+    CHECK (plain.dry == plain.wet);
+    CHECK (plain.dry == plain.deep);
+    CHECK (plain.groupHolds == 0);
+
+    const auto lined = fire ("true");
+
+    //  Asked: the slowest where it was, the others later by what they lack.
+    CHECK (lined.deep == plain.deep);
+    CHECK (lined.wet == plain.wet + 1000 - 480);
+    CHECK (lined.dry == plain.dry + 1000);
+    CHECK (lined.groupHolds == 1000);
+
+    //  The group inside has its own toggle, and has not asked.
+    CHECK (lined.nested == plain.nested);
+}
+
 /*  A SOUND HELD BACK TAKES ITS SPEED CHANGES A DELAY LATER (namespace draft
     70, AOT): it reaches the change when it reaches the moment the picture did,
     so the lag stays the same in seconds. */
@@ -9324,6 +9427,63 @@ TEST_CASE ("seek: a scene that plays once, scrubbed, plays the rest of its round
         INFO ("member " << member);
         CHECK (runsOfCue (rig, member) == runsEach);
     }
+}
+
+/*  A LINED-UP TIMELINE LOADED PART WAY IN KEEPS ITS LINE-UP (namespace draft
+    140, BHI). A sound seated into its file has its own delay behind it (70,
+    AOV); its group's line-up is not - the plugins are as late wherever it
+    starts - so the two members sounding at the second asked for are still
+    placed apart by what one's plugin declares and the other's does not. */
+TEST_CASE ("line-up: a timeline loaded part way in still holds its sounds by the plugin delay they lack")
+{
+    const auto apart = [] (const char* lineUp)
+    {
+        JumpRig rig;
+        rig.clockRuns = true;
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.scene + "/lineUp", lineUp).ok);
+
+        //  The second member through a limiter that looks 480 samples ahead.
+        const auto limiter = rig.document.createPlugin ("Limiter", "VST3-0badf00d-limiter", "VST3", "", "");
+        REQUIRE (limiter.ok);
+        REQUIRE (rig.document.createFx (rig.middle, limiter.id, "").ok);
+
+        plugin::PluginTable table;
+        table.setBuilt ({ limiter.id });
+
+        plugin::PluginTable::Status up;
+        up.state = "loaded";
+        up.inputs = 2;
+        up.outputs = 2;
+        up.latencySamples = 480;
+        table.set (limiter.id, up);
+        rig.runner.setPlugins (&table);
+
+        //  Three seconds in: the first member three seconds into its file, the second one.
+        REQUIRE (rig.jumpTo (rig.scene, 3.0).rejected == 0);
+
+        const auto placedAt = [&rig] (const std::string& cueId) -> std::int64_t
+        {
+            const auto* run = rig.liveRunOf (cueId);
+            return run != nullptr && ! run->launchRequested && run->launchedAtSample > 0 ? run->launchedAtSample : -1;
+        };
+
+        REQUIRE (rig.tickUntil ([&]
+        {
+            rig.audio.completeArms (rig.engine);
+            return placedAt (rig.early) > 0 && placedAt (rig.middle) > 0;
+        }));
+
+        //  Seated, not started from the top.
+        CHECK (rig.liveRunOf (rig.early)->startOffset == doctest::Approx (3.0));
+        CHECK (rig.liveRunOf (rig.middle)->startOffset == doctest::Approx (1.0));
+
+        const auto gap = placedAt (rig.early) - placedAt (rig.middle);
+        rig.runner.setPlugins (nullptr);
+        return gap;
+    };
+
+    CHECK (apart ("false") == 0);
+    CHECK (apart ("true") == 480);
 }
 
 TEST_CASE ("seek: a scene a fade-and-stop is fading, sought, still stops at the fade's end")

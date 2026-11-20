@@ -3529,6 +3529,46 @@ TEST_CASE ("schema: a group's join - let play, gapless or crossfade, with a leng
     CHECK (read.validate().empty());
 }
 
+TEST_CASE ("schema: a group's line-up - a toggle, off by default, a group's alone (namespace draft 140)")
+{
+    const auto& schema = Schema::instance();
+
+    const auto* lineUp = schema.attribute ("Group", "lineUp");
+    REQUIRE (lineUp != nullptr);
+    CHECK (lineUp->defaultText() == "false");
+
+    //  A group's, and no cue's: nothing inherits downward, so no member carries one (PRD 4.12).
+    for (const auto* element : { "Media", "Video", "Mic", "Cue", "Fade", "Osc" })
+    {
+        INFO ("element " << element);
+        CHECK (schema.attribute (element, "lineUp") == nullptr);
+    }
+
+    ShowDocument document;
+    const auto list = document.createList ("Main").id;
+    const auto group = document.createCue (list, 0, "group", "Scene").id;
+    const auto base = "/godot/cue/" + group + "/";
+
+    CHECK (document.getAttribute (base + "lineUp") == std::optional<std::string> ("false"));
+
+    //  Off it is not written, so an old show saves as it was.
+    CHECK (CanonicalXml::write (document).find ("lineUp") == std::string::npos);
+
+    CHECK_FALSE (document.setAttribute (base + "lineUp", "yes").ok);
+
+    //  Kept on a group that is not a timeline, where it is ignored: the mode can change back.
+    REQUIRE (document.setAttribute (base + "lineUp", "true").ok);
+
+    ShowDocument read;
+    REQUIRE (CanonicalXml::read (CanonicalXml::write (document), read).ok);
+    CHECK (read.getAttribute (base + "lineUp") == std::optional<std::string> ("true"));
+    CHECK (read.validate().empty());
+
+    //  And a member's own row of that name does not exist to be written.
+    const auto member = document.createCue (group, 0, "media", "Rain").id;
+    CHECK_FALSE (document.setAttribute ("/godot/cue/" + member + "/lineUp", "true").ok);
+}
+
 TEST_CASE ("schema: a sound or picture delay - which stream, by how much, refused on a locked sound (namespace draft 70)")
 {
     const auto& schema = Schema::instance();
