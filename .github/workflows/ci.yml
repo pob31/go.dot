@@ -409,41 +409,6 @@ jobs:
         # CACHING / WHAT IS JUDGED WHERE at the top of this file.
         run: ctest --preset ci-macos
 
-      - name: Where the device tests crash, when they do
-        # unit.C.devices has ended in a SIGSEGV on this runner at every push
-        # since 99600f50 (2026-11-18), inside a scan of the audio devices after
-        # an earlier case had played through one - and on no machine a hand can
-        # reach, an AddressSanitizer build on the Mac mini included. So the
-        # runner says where: the cases run once more, and macOS's own crash
-        # report for them printed - the crashed thread's stack, through the
-        # signal's trampoline to the frame that faulted. (lldb was tried first,
-        # 3a052dcc: it stops at the first JUCE assertion, which a Debug build
-        # raises in the very first scan and which is not the crash.) Only
-        # after a failure; it judges nothing.
-        if: failure()
-        run: |
-          tests="$(find build/ci-macos -name wfg_tests -type f | head -n1)"
-          "$tests" --test-case="devices:*" > /dev/null 2>&1 || true
-          sleep 20
-          python3 - <<'PY'
-          import glob, json, os
-          reports = sorted(glob.glob(os.path.expanduser("~/Library/Logs/DiagnosticReports/wfg_tests*.ips")), key=os.path.getmtime)
-          print(len(reports), "crash report(s) for wfg_tests")
-          for path in reports[-2:]:
-              head, body = open(path, errors="replace").read().split(chr(10), 1)
-              report = json.loads(body)
-              images = report.get("usedImages", [])
-              print("==", os.path.basename(path), report.get("exception"), report.get("termination", {}).get("indicator"))
-              for index, thread in enumerate(report.get("threads", [])):
-                  crashed = thread.get("triggered", False)
-                  if not crashed and index != report.get("faultingThread"):
-                      continue
-                  print("-- thread", index, thread.get("name"), thread.get("queue"))
-                  for frame in thread.get("frames", [])[:45]:
-                      image = images[frame["imageIndex"]] if frame.get("imageIndex") is not None and frame["imageIndex"] < len(images) else {}
-                      print("   ", image.get("name", "?"), frame.get("symbol", "?"), frame.get("sourceFile", ""), frame.get("sourceLine", ""))
-          PY
-
       - name: ccache statistics
         if: always()
         run: ccache --show-stats || true
