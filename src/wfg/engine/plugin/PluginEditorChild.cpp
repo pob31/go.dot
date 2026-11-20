@@ -1018,9 +1018,10 @@ namespace wfg::plugin
         juce::initialiseNSApplication();
 
         /*  NO DOCK ICON, but a process that may own the key window: the
-            plugin's window is part of Go.dot, not a second application. */
-        if (windowed)
-            juce::Process::setDockIconVisible (false);
+            plugin's window is part of Go.dot, not a second application. And
+            without a window too (§138): a hidden editor was a "Go.dot" in
+            the Dock and Cmd+Tab with nothing in it. */
+        juce::Process::setDockIconVisible (false);
        #endif
 
         const auto began = std::chrono::steady_clock::now();

@@ -800,6 +800,11 @@ namespace wfg::plugin
 
             juce::ScopedJuceInitialiser_GUI juceForTheChild;
 
+           #if JUCE_MAC
+            //  No Dock icon while the plugin is up: part of Go.dot (§138).
+            juce::Process::setDockIconVisible (false);
+           #endif
+
             juce::PluginDescription description;
             juce::String bundle;
             std::string problem;
@@ -982,6 +987,12 @@ namespace wfg::plugin
 
        #if JUCE_MAC
         juce::initialiseNSApplication();
+
+        /*  NO DOCK ICON (namespace draft §138): one of these runs for every
+            plugin a show plays, from inside Go.dot.app, and each was a
+            "Go.dot" of its own in the Dock and in Cmd+Tab with no window - a
+            tester switching apps met more and more empty Go.dots. */
+        juce::Process::setDockIconVisible (false);
        #endif
 
         ExitWatch watch (&header, parentPid, lanes.workgroup);

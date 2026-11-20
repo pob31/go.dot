@@ -35966,3 +35966,27 @@ offered pictures and movies.
 
 - **BGY** **+ media offers what a drop takes**: the sounds, then every picture and movie a video cue reads
   (`model::newCueWildcard`). A sound still makes a media cue and a picture or movie a video cue.
+
+## 138. No empty Go.dot beside the show
+
+**Reported 2026-11-20** by the author: empty windows, "like a new project, an empty session", seen on Windows
+after an import, gone once the show was saved, closed and opened again. A friend's Mac said more: "quand je
+faisais command+tab pour switcher sur une autre app, au fur et à mesure j'avais plein d'instances de go.dot
+ouvertes, mais vides." Two causes, one each.
+
+- **BGZ** **A helper is no app to switch to (the Mac).** The plugin host - one for every plugin a show plays -
+  the plugin scan and its children, the plugin editor run without its window, and a serve with no window all run
+  NSApp's loop from inside Go.dot.app, whose Info.plist makes every program in it an ordinary application. Each
+  was a "Go.dot" of its own in the Dock and in Cmd+Tab with no window, and there were more of them the more
+  plugins loaded. Each now hides from the Dock as it starts (`juce::Process::setDockIconVisible (false)`, a
+  UI-element process, which can still own the key window), as the video renderer always has. A windowed serve
+  shows its icon where its window is made, as before.
+- **BHA** **An import gives way as Open does.** The launcher's empty show closes when Open or New starts
+  another show's window, while nothing has been done in it (Console.h, `emptyShowAtStart`). An Ableton Live or QLab
+  import opened its new show the same way but skipped that step, so the empty show stayed behind it: the empty
+  session. The import now gives way once its show's window is on its way and its report has been opened. An
+  empty show that was worked in stays, as with Open. Saving, closing and reopening had made the session go away
+  because a launch with a last show (`--remember`) never opens the empty one.
+
+Owed: on a Mac, a show with a few plugin cues and a scan, and one Go.dot in Cmd+Tab (`lsappinfo list` counts one).
+On Windows, an import from a fresh launch's empty show leaves the imported show's window alone.

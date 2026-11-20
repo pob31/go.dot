@@ -629,6 +629,9 @@ namespace wfg::plugin
 
        #if JUCE_MAC
         juce::initialiseNSApplication();
+
+        //  No Dock icon: part of Go.dot, never an app to switch to (§138).
+        juce::Process::setDockIconVisible (false);
        #endif
 
         StopTheLoop deadline;
@@ -768,6 +771,13 @@ namespace wfg::plugin
             macOS from its first day (the CI job, 2026-09-26). The scan child
             and the plugin children do the same, for the same reason. */
         juce::initialiseNSApplication();
+
+        /*  NO DOCK ICON (namespace draft §138): the app's scan runs this as a
+            child, from inside Go.dot.app, and a bundled program with an
+            application is a second "Go.dot" in the Dock and in Cmd+Tab - one
+            with no window, which a person switching apps meets as an empty
+            Go.dot. Harmless from a terminal. */
+        juce::Process::setDockIconVisible (false);
        #endif
 
         juce::MessageManager::getInstance()->runDispatchLoop();

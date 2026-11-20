@@ -3586,6 +3586,13 @@ namespace
             serve, headless ones too, since every one runs NSApp's loop. */
         juce::initialiseNSApplication();
         wfg::app::WindowApplication::keepArgumentsFromAppKit();
+
+        /*  A SERVE WITH NO WINDOW IS NO APP TO SWITCH TO (namespace draft
+            §138): started from inside Go.dot.app it would be a "Go.dot" in
+            the Dock and in Cmd+Tab with nothing in it. A windowed serve shows
+            its icon where its window is made (client/ui/Client.cpp). */
+        if (! args.containsOption ("--window"))
+            juce::Process::setDockIconVisible (false);
        #endif
 
         const juce::ScopedJuceInitialiser_GUI juceForTheVerb;

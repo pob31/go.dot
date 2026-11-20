@@ -5036,21 +5036,31 @@ namespace wfg::client
                                                   + " in a new window"
                                               : juce::String (refused));
 
-                /*  THE LAUNCHER'S EMPTY SHOW GIVES WAY (Console.h,
-                    `emptyShowAtStart`): the show on its way takes
-                    this window's place while nothing has been done
-                    here - nothing to save, and nothing to undo, so
-                    an empty show somebody worked in and saved is
-                    never closed under them. A refusal leaves it. */
-                if (refused.empty() && host.emptyShowAtStart && host.quit
-                      && ! last.hasSomethingToSave() && last.canUndo == model::Flag::no)
+                if (refused.empty())
+                    giveWayToTheShowOnItsWay();
+            }
+
+            /*  THE LAUNCHER'S EMPTY SHOW GIVES WAY (Console.h,
+                `emptyShowAtStart`): the show on its way - opened, new, or
+                imported (namespace draft §138: an import left the empty show
+                behind it, a second window with nothing in it) - takes this
+                window's place while nothing has been done here - nothing to
+                save, and nothing to undo, so an empty show somebody worked in
+                and saved is never closed under them. Called only once the
+                other window is on its way. */
+            void giveWayToTheShowOnItsWay()
+            {
+                if (! host.emptyShowAtStart)
+                    return;
+
+                if (host.quit && ! last.hasSomethingToSave() && last.canUndo == model::Flag::no)
                     host.quit();
 
                 /*  AND ONE THAT STAYS TAKES ITS SETTINGS OUT OF THE
                     WAY (§39): they were about its first moment, and
                     left up they sat beside the show just opened as if
                     they were that show's. */
-                else if (refused.empty() && host.emptyShowAtStart && audioSettings != nullptr)
+                else if (audioSettings != nullptr)
                     audioSettings->closeButtonPressed();
             }
 
@@ -5645,6 +5655,10 @@ namespace wfg::client
                         //  The report, in whatever reads Markdown here.
                         if (const juce::File report { juce::String::fromUTF8 (result.report.c_str()) }; report.existsAsFile())
                             report.startAsProcess();
+
+                        //  After the report: this window may go now (§138).
+                        if (refused.empty())
+                            giveWayToTheShowOnItsWay();
                     });
                 }).detach();
             }
