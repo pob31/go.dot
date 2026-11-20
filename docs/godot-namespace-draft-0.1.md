@@ -35896,11 +35896,18 @@ runner, in the cases after one that had played through *Apple Virtual Sound Devi
   Go.dot's own to JUCE, with its notice): the function goes on to the sub-devices and then to none, which its
   caller already takes.
 
+- **BGT** **A device with no name is not listed.** With BGS in, the runner's cases no longer crashed and
+  failed plainly instead: *everything listed says what it is* found a device whose name is empty - the
+  aggregate itself, on the list with no name as it had no clock. Nobody can ask for a device by no name, so
+  `audio::availableDevices` leaves it out.
+
 Why it began at `99600f50`, which adds two counters round the audio block and nothing near a device, is not
 known: an aggregate caught half made or half gone is a matter of when the scan falls, and that commit may only
 have moved it. Not shown, and said as not shown.
 
 Built 2026-11-20. Not reproduced on any machine a hand can reach - the Mac mini passes the cases, under
 AddressSanitizer too - so the proof is the runner's: the patch applied from a clean JUCE on Windows, the pins'
-check green, and CI's macOS job to say the rest. Owed: that job green; the step that prints the crash report
-taken out again once it is; the fault reported to JUCE.
+check green, and CI's macOS job to say the rest. The job on `263dbff6` said the first half: no crash, no crash
+report written, and the nameless device in its place (BGT). Version 0.1.27 carries both, at the author's word
+("You can add this fix to v0.1.27"); not tagged. Owed: that job green on the commit with BGT; the step that
+prints the crash report taken out again once it is; the fault reported to JUCE.

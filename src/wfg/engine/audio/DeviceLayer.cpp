@@ -75,6 +75,16 @@ namespace wfg::audio
 
             for (const auto& name : type->getDeviceNames (false))
             {
+                /*  A DEVICE WITH NO NAME IS NOT LISTED (namespace draft 134,
+                    BGT): nobody can ask for it - `--device=` and the settings
+                    page name a device - and it is not a device anybody has.
+                    macOS lists one for a moment round a device session, an
+                    aggregate CoreAudio is still making or taking apart: the
+                    same one whose missing clock device was a crash in JUCE
+                    (BGS). Met on GitHub's macOS runner, 2026-11-20. */
+                if (name.isEmpty())
+                    continue;
+
                 DeviceDescription described;
                 described.type = type->getTypeName().toStdString();
                 described.name = name.toStdString();
