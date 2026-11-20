@@ -2138,6 +2138,86 @@ TEST_CASE ("range table: a cue with no ranges shows the whole file, and looping 
     CHECK (std::count_if (showing.begin(), showing.end(), [] (juce::Button* button) { return button->isVisible(); }) == 1);
 }
 
+TEST_CASE ("waveform: a cue with no ranges has the whole file's edges on the bar, and a drag of one makes the range")
+{
+    /*  The author, 2026-11-20: "When a cue is created and I try to edit the in
+        and out points from the timeline, I first have to add a single complete
+        range and then start editing the in and out points. Could we make this
+        range by default". The table's standing row, on the bar. */
+    std::vector<std::pair<std::string, std::string>> written;
+    std::vector<std::tuple<std::string, double, double>> made;
+
+    ui::WaveformEditorComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& value)
+    { written.emplace_back (address, value); };
+    actions.createRange = [&] (const std::string& cueId, double in, double out)
+    { made.emplace_back (cueId, in, out); };
+
+    ui::WaveformEditorComponent editor (model::Theme {}, actions);
+    editor.setSize (900, 220);
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::waveform, "CUE00001" };
+    reading.cueKind = "media";
+    reading.file = "bed.wav";
+    reading.fileLength = 10.0;
+    editor.show (reading, nullptr);
+
+    const auto source = juce::Desktop::getInstance().getMainMouseSource();
+    const auto mouse = [&] (juce::Point<float> at, bool dragged)
+    {
+        const auto now = juce::Time::getCurrentTime();
+        return juce::MouseEvent (source, at, juce::ModifierKeys { juce::ModifierKeys::leftButtonModifier },
+                                 juce::MouseInputSource::defaultPressure, 0.0f, 0.0f, 0.0f, 0.0f,
+                                 &editor, &editor, now, at, now, 1, dragged);
+    };
+
+    //  The middle of the bar, between the sections' bands at the top and the foot.
+    const auto y = static_cast<float> (editor.barBounds().getCentreY());
+    const auto xOf = [&] (double seconds) { return editor.pointPosition ({ seconds, 0.0 }).x; };
+
+    //  THE OUT POINT, at the end of the file, pulled to seven seconds - drawn, nothing sent yet.
+    editor.mouseDown (mouse ({ xOf (10.0) - 1.0f, y }, false));
+    editor.mouseDrag (mouse ({ xOf (8.5), y }, true));
+    editor.mouseDrag (mouse ({ xOf (7.0), y }, true));
+
+    CHECK (made.empty());
+    CHECK (written.empty());
+    REQUIRE (editor.heldEdge().has_value());
+    CHECK (*editor.heldEdge() == doctest::Approx (7.0).epsilon (0.02));
+
+    //  LET GO: one range, from the top to where the hand left it, and no write beside it.
+    editor.mouseUp (mouse ({ xOf (7.0), y }, true));
+
+    REQUIRE (made.size() == 1u);
+    CHECK (std::get<0> (made[0]) == "CUE00001");
+    CHECK (std::get<1> (made[0]) == doctest::Approx (0.0));
+    CHECK (std::get<2> (made[0]) == doctest::Approx (7.0).epsilon (0.02));
+    CHECK (written.empty());
+
+    //  The tree has it: from now the edges are that range's and a drag writes to it.
+    reading.ranges = { { "RNG00001", "", 0.0, std::get<2> (made[0]), 1, 0 } };
+    editor.show (reading, nullptr);
+
+    editor.mouseDown (mouse ({ xOf (0.0) + 1.0f, y }, false));
+    editor.mouseDrag (mouse ({ xOf (2.0), y }, true));
+    editor.mouseUp (mouse ({ xOf (2.0), y }, true));
+
+    CHECK (made.size() == 1u);
+    REQUIRE_FALSE (written.empty());
+    CHECK (written.back().first == "/godot/range/RNG00001/in");
+
+    //  A PRESS ON AN EDGE THAT MOVES NOTHING makes nothing.
+    made.clear();
+    reading.subject.objectId = "CUE00002";
+    reading.ranges.clear();
+    editor.show (reading, nullptr);
+
+    editor.mouseDown (mouse ({ xOf (0.0) + 1.0f, y }, false));
+    editor.mouseUp (mouse ({ xOf (0.0) + 1.0f, y }, false));
+    CHECK (made.empty());
+}
+
 TEST_CASE ("inspector: an opener is a button that asks the window to open the panel, not a field")
 {
     /*  The author, 2026-09-21: "the controls to show the waveform, the send

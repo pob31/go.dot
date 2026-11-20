@@ -390,6 +390,24 @@ namespace wfg::client::ui
         model::Hit grabbed;
         std::optional<double> edgeHeld;
 
+        /*  THE WHOLE FILE ON THE BAR (the author, 2026-11-20: "I first have to
+            add a single complete range and then start editing the in and out
+            points. Could we make this range by default"). A cue with no ranges
+            is drawn with the range it plays - the start offset to the end of
+            the file - whose two edges can be dragged as any range's, the
+            table's standing row on the bar (RangeTableComponent's `Pending`).
+            The show does not hold it, so a drag is drawn here (`standingHeld`)
+            and made on release: one `range.create` over the span the hand left,
+            one step of Undo. Drawn until the tree has the range, another cue is
+            picked, or a second of passes says the make was refused. */
+        std::optional<std::pair<double, double>> standingHeld;
+        std::string standingCue;
+        bool standingSent = false;
+        int standingPasses = 0;
+
+        /** The ranges the bar draws and grabs: the cue's, or the whole file standing in. */
+        std::vector<model::RangeRow> rangesShown() const;
+
         /*  A MOVIE'S STRIP (namespace draft §47, AAI): its cuts and small
             pictures from the analyser's table, each picture made an image the
             first time it is drawn and kept while the strip is the same. */

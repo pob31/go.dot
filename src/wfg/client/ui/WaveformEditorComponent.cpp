@@ -662,6 +662,19 @@ namespace wfg::client::ui
         reading = readingToUse;
         media = std::move (mediaToUse);
 
+        /*  THE WHOLE FILE'S DRAG let go once the range it made is in the tree,
+            the cue is another, or the make never came (a second of passes). */
+        if (standingHeld.has_value()
+              && (standingCue != reading.subject.objectId || ! reading.ranges.empty()
+                  || (standingSent && ++standingPasses > 25)))
+        {
+            if (! standingSent && grabbed.handle != model::Handle::none && grabbed.rangeId.empty())
+                grabbed = {};
+
+            standingHeld.reset();
+            standingSent = false;
+        }
+
         //  A movie's strip, when the analyser has found it (§47, AAI).
         {
             std::shared_ptr<const video::strip::MovieStrip> found;
@@ -871,6 +884,28 @@ namespace wfg::client::ui
     std::vector<model::LanePoint> WaveformEditorComponent::lane() const
     {
         return held.has_value() ? *held : shownLane();
+    }
+
+    std::vector<model::RangeRow> WaveformEditorComponent::rangesShown() const
+    {
+        if (! reading.ranges.empty() || ! (reading.fileLength > 0.0))
+            return reading.ranges;
+
+        /*  The table's standing row, the same numbers: where the cue begins,
+            to the end of the file, once through. No identifier - the show has
+            no such range - which is how a drag on it is told apart. */
+        model::RangeRow whole;
+        whole.in = reading.startOffset > 0.0 && reading.startOffset < reading.fileLength ? reading.startOffset : 0.0;
+        whole.out = reading.fileLength;
+        whole.toEnd = true;
+
+        if (standingHeld.has_value() && standingCue == reading.subject.objectId)
+        {
+            whole.in = standingHeld->first;
+            whole.out = standingHeld->second;
+        }
+
+        return { whole };
     }
 
     double WaveformEditorComponent::heightAt (int y) const
@@ -1470,7 +1505,11 @@ namespace wfg::client::ui
             it is nought, because "the top of the file" is a decision somebody
             can move and a marker that appears only once it is non-zero is one
             nobody discovers. */
-        if (reading.ranges.empty())
+        const auto ranges = rangesShown();
+
+        /*  With a length known, the whole file's range stands in and its in
+            edge is that offset (below). */
+        if (ranges.empty())
         {
             const auto x = xOf (reading.startOffset);
 
@@ -1481,9 +1520,10 @@ namespace wfg::client::ui
             }
         }
 
-        for (std::size_t at = 0; at < reading.ranges.size(); ++at)
+        for (std::size_t at = 0; at < ranges.size(); ++at)
         {
-            const auto& range = reading.ranges[at];
+            const auto& range = ranges[at];
+            const auto standing = range.id.empty();
             const auto a = xOf (range.in);
             const auto b = xOf (range.out);
 
@@ -1493,16 +1533,20 @@ namespace wfg::client::ui
             const auto band = juce::Rectangle<int> (a, bar.getY(), juce::jmax (1, b - a),
                                                     bar.getHeight()).getIntersection (bar);
 
-            //  A wash, so the picture under it still reads.
-            g.setColour (Look::colour (theme, "picked").withAlpha (0.12f));
-            g.fillRect (band);
+            /*  A wash, so the picture under it still reads - on the whole file
+                only once a hand has moved it, when it is about to be a range. */
+            if (! standing || standingHeld.has_value())
+            {
+                g.setColour (Look::colour (theme, "picked").withAlpha (0.12f));
+                g.fillRect (band);
+            }
 
             /*  THE JOIN IS DRAWN ONCE AND DIFFERENTLY. Where one range ends and
                 the next begins, the two edges are the same instant and moving
                 one alone would tear the loop - so it is one mark, in the colour
                 of the thing it is, and it is grabbed as one. */
-            const auto joined = at + 1 < reading.ranges.size()
-                                  && model::sameInstant (range.out, reading.ranges[at + 1].in);
+            const auto joined = at + 1 < ranges.size()
+                                  && model::sameInstant (range.out, ranges[at + 1].in);
 
             const auto edge = [&] (int x, const char* token, int thickness)
             {
@@ -1529,7 +1573,7 @@ namespace wfg::client::ui
                 edge (b, hot (live, range.id, model::Handle::out) ? "ink" : "stopping", 2);
 
             //  The name and the loop count, where there is room for them.
-            if (band.getWidth() > 46)
+            if (! standing && band.getWidth() > 46)
             {
                 g.setColour (Look::colour (theme, "ink-dim"));
                 g.setFont (Look::font (theme, 11.0f));
@@ -3093,7 +3137,9 @@ namespace wfg::client::ui
             }
         }
 
-        if (reading.ranges.empty() || ! barArea().contains (event.getPosition()))
+        const auto shown = rangesShown();
+
+        if (shown.empty() || ! barArea().contains (event.getPosition()))
         {
             setMouseCursor (juce::MouseCursor::NormalCursor);
 
@@ -3106,7 +3152,7 @@ namespace wfg::client::ui
             return;
         }
 
-        const auto found = model::hitTest (reading.ranges, secondsAt (event.x), toleranceSeconds());
+        const auto found = model::hitTest (shown, secondsAt (event.x), toleranceSeconds());
 
         if (found.handle != hover.handle || found.rangeId != hover.rangeId)
         {
@@ -3274,7 +3320,7 @@ namespace wfg::client::ui
             }
         }
 
-        grabbed = model::hitTest (reading.ranges, secondsAt (event.x), toleranceSeconds());
+        grabbed = model::hitTest (rangesShown(), secondsAt (event.x), toleranceSeconds());
 
         if (grabbed.handle != model::Handle::none)
             return;
@@ -3625,9 +3671,15 @@ namespace wfg::client::ui
             return;
         }
 
-        if (grabbed.handle == model::Handle::none || actions.set == nullptr)
+        if (grabbed.handle == model::Handle::none)
             return;
 
+        const auto standing = grabbed.rangeId.empty();
+
+        if (standing ? actions.createRange == nullptr : actions.set == nullptr)
+            return;
+
+        const auto shown = rangesShown();
         auto seconds = secondsAt (event.x);
 
         /*  SNAPPED TO WHAT IS ALREADY THERE unless the hand says otherwise -
@@ -3637,7 +3689,7 @@ namespace wfg::client::ui
             "not the ordinary reading of this drag". */
         if (! event.mods.isAltDown())
         {
-            auto targets = model::snapTargets (reading.ranges, grabbed.rangeId, reading.fileLength);
+            auto targets = model::snapTargets (shown, grabbed.rangeId, reading.fileLength);
 
             /*  AND A MOVIE'S CUTS (§47, AAI): an in point on a shot's first
                 frame - while they are shown and snapped to (§47.10). */
@@ -3652,11 +3704,29 @@ namespace wfg::client::ui
             seconds = model::snapTo (seconds, targets, toleranceSeconds());
         }
 
-        const auto writes = model::dragTo (grabbed, seconds, reading.ranges, reading.fileLength);
+        const auto writes = model::dragTo (grabbed, seconds, shown, reading.fileLength);
 
-        for (const auto& write : writes)
-            actions.set (model::rangeAddress (write.rangeId, write.attribute),
-                         osc::formatDouble (write.seconds));
+        /*  ON THE WHOLE FILE the drag is drawn here and made on release, since
+            there is no range yet to write to. */
+        if (standing && ! writes.empty())
+        {
+            auto span = std::make_pair (shown.front().in, shown.front().out);
+
+            if (std::string (writes.front().attribute) == "in")
+                span.first = writes.front().seconds;
+            else
+                span.second = writes.front().seconds;
+
+            standingHeld = span;
+            standingCue = reading.subject.objectId;
+            standingSent = false;
+            standingPasses = 0;
+            repaint();
+        }
+        else
+            for (const auto& write : writes)
+                actions.set (model::rangeAddress (write.rangeId, write.attribute),
+                             osc::formatDouble (write.seconds));
 
         //  Where the edge is now, for the monitor's tile of a movie (§47, AAH).
         if (! writes.empty())
@@ -3928,6 +3998,16 @@ namespace wfg::client::ui
                 held.reset();
 
             pointMoved = false;
+        }
+
+        /*  THE WHOLE FILE'S DRAG MADE, as one range over the span the hand left
+            (`standingHeld`); a press that moved nothing made nothing. */
+        if (grabbed.handle != model::Handle::none && grabbed.rangeId.empty()
+              && standingHeld.has_value() && ! standingSent && actions.createRange != nullptr)
+        {
+            actions.createRange (standingCue, standingHeld->first, standingHeld->second);
+            standingSent = true;
+            standingPasses = 0;
         }
 
         grabbed = {};

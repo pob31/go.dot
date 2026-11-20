@@ -49,6 +49,7 @@
 #include <wfg/client/Client.h>
 
 #include <wfg/client/model/Cart.h>
+#include <wfg/client/model/Sends.h>
 #include <wfg/client/model/Video.h>
 #include <wfg/client/model/Devices.h>
 #include <wfg/client/model/DeviceTree.h>
@@ -4883,12 +4884,35 @@ namespace wfg::client
 
                 const auto lowest = firstDirectOut();
 
-                if (lowest.empty())
-                    return "This show has no direct out yet, so the cue has "
-                           "nowhere to play - Show, Show settings, Outputs.";
+                if (! lowest.empty())
+                {
+                    send (gesture::setNode ("/godot/cue/" + cueId + "/directOut", lowest));
+                    return {};
+                }
 
-                send (gesture::setNode ("/godot/cue/" + cueId + "/directOut", lowest));
-                return {};
+                /*  OR THE FIRST MIX, where the show has no direct out - which a
+                    new show is (the author, 2026-11-20: "The default output
+                    should be a stereo mix and not a stereo direct out"): a
+                    send into it at the row's default, the one a hand would
+                    make on that strip. A template that sent somewhere already
+                    said where it plays. */
+                if (latest != nullptr)
+                {
+                    const auto strips = model::readSends (*latest, cueId);
+
+                    if (std::any_of (strips.begin(), strips.end(),
+                                     [] (const model::SendStrip& strip) { return strip.present(); }))
+                        return {};
+
+                    if (! strips.empty())
+                    {
+                        send (gesture::createSend (cueId, strips.front().busId, std::nullopt));
+                        return {};
+                    }
+                }
+
+                return "This show has no output yet, so the cue has "
+                       "nowhere to play - Show, Show settings, Outputs.";
             }
 
             /*  Read from the pass's own snapshot, which `latest` is holding for

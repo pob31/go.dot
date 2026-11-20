@@ -393,7 +393,8 @@ TEST_CASE ("a new show arrives able to play something")
             const auto id = child["id"].toString().toStdString();
             CHECK (fresh.getAttribute ("/godot/bus/" + id + "/width") == "2");
             CHECK (fresh.getAttribute ("/godot/bus/" + id + "/firstChannel") == "0");
-            CHECK (fresh.getAttribute ("/godot/bus/" + id + "/kind") == "direct");
+            //  A mix every cue can send into (the author, 2026-11-20).
+            CHECK (fresh.getAttribute ("/godot/bus/" + id + "/kind") == "mix");
             CHECK (fresh.getAttribute ("/godot/bus/" + id + "/name") == "Main L/R");
         }
 

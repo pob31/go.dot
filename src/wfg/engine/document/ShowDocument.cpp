@@ -3210,11 +3210,13 @@ namespace wfg::doc
             ! count.ok)
             return count;
 
-        /*  A STEREO DIRECT OUT ON THE FIRST TWO CHANNELS, named the way every
-            fixture in this repository names it and the way anybody wiring a
-            rig would. A show with tracks and no bus is refused at the door of
-            the audio graph, so this is not a convenience. */
-        const auto out = createBus ("direct", 2);
+        /*  A STEREO MIX ON THE FIRST TWO CHANNELS, named the way anybody wiring
+            a rig would. A mix and not a direct out (the author, 2026-11-20:
+            "The default output should be a stereo mix and not a stereo direct
+            out"): every cue can send into it at once, where a direct out is
+            one cue's own. A show with tracks and no bus is refused at the door
+            of the audio graph, so this is not a convenience. */
+        const auto out = createBus ("mix", 2);
 
         if (! out.ok)
             return out;

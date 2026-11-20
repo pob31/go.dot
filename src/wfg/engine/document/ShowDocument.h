@@ -357,8 +357,8 @@ namespace wfg::doc
             2026-09-21 made that stranger rather than better.
 
             So a new show starts with a list, somewhere for sound to go, and
-            room for some of it: one stereo direct out on the first two
-            interface channels, and THIRTY-TWO cues able to sound at once
+            room for some of it: one stereo mix on the first two interface
+            channels (a direct out until 2026-11-20), and THIRTY-TWO cues able to sound at once
             (author, 2026-09-25: "Can we default to 32 voices when starting a
             new project so people don't have a broken app until they figure
             out the polyphony?"). It was eight, and eight runs out sooner than

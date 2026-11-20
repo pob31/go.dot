@@ -4,7 +4,7 @@
   </Lists>
   <Mounts/>
   <Audio enabled="true" tracks="32">
-    <Bus id="J3MT5XYA" name="Main L/R" width="2"/>
+    <Bus id="J3MT5XYA" kind="mix" name="Main L/R" width="2"/>
   </Audio>
   <MidiPorts/>
   <Network/>

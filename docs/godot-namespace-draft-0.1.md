@@ -35913,3 +35913,23 @@ report written, and the nameless device in its place (BGT). Version 0.1.27 carri
 `unit.C.devices` passing for the first time since `99600f50`; and the step that printed the crash report
 taken out of the workflow again. Reported to JUCE 2026-11-21 at the author's word ("Can you file the bug report
 directly?"): juce-framework/JUCE issue 1813; the patch goes when JUCE tests the string itself.
+
+## 135. The whole file on the bar, and a new show's mix
+
+**Asked 2026-11-20** by the author: *"When a cue is created and I try to edit the in and out points from the
+timeline, I first have to add a single complete range and then start editing the in and out points. Could we
+make this range by default so the user doesn't stumble on this?"* and *"The default output should be a stereo
+mix and not a stereo direct out."*
+
+- **BGU** **The whole file stands on the bar** as it already stood in the range table (2026-09-30): a cue with
+  no ranges is drawn with the range it plays - its start offset to the end of the file - and its two edges are
+  grabbed as any range's. The show does not hold it, so a drag is drawn in the window and made on release: one
+  `range.create` over the span the hand left, one step of Undo; a press that moves nothing makes nothing. Not
+  written by itself, for the reason the table gave (§4.10): an out point written on import would be a fact about
+  today's file.
+
+- **BGV** **A new show's output is a stereo mix**, "Main L/R" on the first two channels, where it was a direct
+  out: `startNewShow`, and the empty show the packages copy out on first launch. A sound dropped into a show
+  with a direct out still lands on the first one; in a show with none, it is given a send into the first mix at
+  the row's default, a template that sent somewhere being left as it was. Shows already made keep their
+  outputs.
