@@ -35911,4 +35911,5 @@ check green, and CI's macOS job to say the rest. The job on `263dbff6` said the 
 report written, and the nameless device in its place (BGT). Version 0.1.27 carries both, at the author's word
 ("You can add this fix to v0.1.27"); not tagged. CI on `984522f7`, 2026-11-21: the macOS job green, 121 of 121,
 `unit.C.devices` passing for the first time since `99600f50`; and the step that printed the crash report
-taken out of the workflow again. Owed: the fault reported to JUCE.
+taken out of the workflow again. Reported to JUCE 2026-11-21 at the author's word ("Can you file the bug report
+directly?"): juce-framework/JUCE issue 1813; the patch goes when JUCE tests the string itself.

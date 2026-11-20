@@ -21,7 +21,8 @@ same or Go.dot stops needing it.
   neither a clock device nor a main sub-device answers `getClockingDeviceUid()`
   with no string, and JUCE took its length - a crash in any scan of the audio
   devices that meets one (GitHub's macOS runner did, at every push for two days).
-  No string is no name. Goes when JUCE tests the string itself; to be reported.
+  No string is no name. Goes when JUCE tests the string itself; reported as
+  juce-framework/JUCE issue 1813.
 
 The rules are `patches/JUCE/`'s, and so is the machinery:
 
