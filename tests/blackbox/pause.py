@@ -342,9 +342,19 @@ def heard(report: Report, render: Path, log: Path) -> None:
                  f"{waited:.3f} s")
 
     # --- Esc while paused: nothing of it heard again --------------------------
-    second_pause = pauses[1] * TICK + RAMP_TICKS * TICK + BLOCK
-    tail_ramp = max((abs(v) for v in ramp[second_pause:]), default=0.0)
-    tail_later = max((abs(v) for v in later[second_pause:]), default=0.0)
+    #  Measured from where the second pause's de-click actually reaches silence, not
+    #  from its logged tick plus the fade: on a slow runner the fade can start a block
+    #  or a tick after that tick, and its last 1 % then fell inside the window (CI,
+    #  Windows, 2026-11-18 and 2026-11-20: ramp 0.00727, tone 0.00328 both times).
+    second_pause = pauses[1] * TICK
+    quiet = next((n for n in range(second_pause, min(len(ramp), len(later)))
+                  if abs(ramp[n]) < 0.001 and abs(later[n]) < 0.001), -1)
+    report.check(0 <= quiet <= second_pause + (RAMP_TICKS + 4) * TICK,
+                 "the second pause goes quiet within a tenth of a second, give or take its landing",
+                 f"{(quiet - second_pause) / RATE:.3f} s after its tick" if quiet >= 0 else "never")
+    tail_from = quiet if quiet >= 0 else second_pause
+    tail_ramp = max((abs(v) for v in ramp[tail_from:]), default=0.0)
+    tail_later = max((abs(v) for v in later[tail_from:]), default=0.0)
     report.check(tail_ramp < 0.001 and tail_later < 0.001,
                  "after Esc while paused, not a sample of what was paused is heard again",
                  f"ramp {tail_ramp:.5f}, tone {tail_later:.5f}")
