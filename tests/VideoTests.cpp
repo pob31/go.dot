@@ -2824,6 +2824,26 @@ TEST_CASE ("video: a conversion's sound cue and route are named from the movie a
 /*  THE WINDOW'S SIDE (namespace draft 37.6, F.4): the conversions as the
     readout says them and the sentence each change is worth; a sound's lock as
     a menu of the show's movies, and the rows the movie leads drawn, not typed. */
+TEST_CASE ("video: + media's chooser offers pictures and movies beside the sounds (§137)")
+{
+    /*  A friend of the author's, 2026-11-20: a PNG could not be picked - the
+        chooser offered the sounds alone, though the import makes a video cue of
+        a picture as a drop does. Every picture and movie the cue reads is offered. */
+    const std::string audio = "*.wav;*.aiff";
+    const auto offered = client::model::newCueWildcard (audio);
+
+    CHECK (offered.rfind (audio + ";", 0) == 0);
+
+    for (const auto* wanted : { "*.png", "*.jpg", "*.jpeg", "*.gif", "*.mov", "*.mp4" })
+    {
+        INFO (wanted);
+        CHECK (offered.find (wanted) != std::string::npos);
+    }
+
+    //  With no sound readers at all, the pictures still, and no stray separator.
+    CHECK (client::model::newCueWildcard ({}) == client::model::pictureWildcard());
+}
+
 TEST_CASE ("video: the window reads the conversions, and a sound's lock as a menu of movies")
 {
     CHECK (client::model::isMovieFile ("clip.MP4"));

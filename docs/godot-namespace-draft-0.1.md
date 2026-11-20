@@ -35955,3 +35955,14 @@ of two sets of drawer names offered, the author chose the shorter ones, which ar
 - **BGX** **A time group's member** has its *starts at* and *chase* at the head of *when*, open.
 
 Only the desktop window's inspector; the console page's keeps its own blocks.
+
+## 137. A picture picked for a new cue
+
+**Reported 2026-11-20** by a friend of the author's: a PNG could not be picked in the file chooser to make a
+video cue. The chooser behind *+ media* offered the sounds the audio readers take and nothing else - written
+before a picture or a movie could be a cue - though the import it hands the files to makes a video cue of a
+picture or a movie, as a drop of the same file does (§36). An existing video cue's own *choose* button already
+offered pictures and movies.
+
+- **BGY** **+ media offers what a drop takes**: the sounds, then every picture and movie a video cue reads
+  (`model::newCueWildcard`). A sound still makes a media cue and a picture or movie a video cue.

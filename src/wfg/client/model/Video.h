@@ -399,4 +399,11 @@ namespace wfg::client::model
 
     /*  The wildcard a file chooser offers for a video cue's file. */
     const char* pictureWildcard();
+
+    /*  AND FOR A NEW CUE FROM `+ media` (namespace draft §137): the sounds the
+        audio readers take, then the pictures and movies - the chooser offers
+        what a drop of the same file would make a cue of, a sound a media cue
+        and a picture or movie a video cue. It offered the sounds alone, from
+        before a picture could be a cue, so a PNG could not be picked. */
+    std::string newCueWildcard (const std::string& audioWildcard);
 }

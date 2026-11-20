@@ -636,6 +636,12 @@ namespace wfg::client::model
         return "*.png;*.jpg;*.jpeg;*.gif;*.mov;*.mp4;*.m4v;*.mkv;*.avi;*.mxf;*.webm;*.mpg;*.mpeg";
     }
 
+    std::string newCueWildcard (const std::string& audioWildcard)
+    {
+        return audioWildcard.empty() ? std::string (pictureWildcard())
+                                     : audioWildcard + ";" + pictureWildcard();
+    }
+
     std::string VideoInputRow::label() const
     {
         return name.empty() ? id : name;

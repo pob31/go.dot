@@ -6398,9 +6398,11 @@ namespace wfg::client
                 juce::AudioFormatManager formats;
                 formats.registerBasicFormats();
 
+                //  Sounds, pictures and movies: what a drop of the same file makes a cue of (§137).
                 chooser = std::make_unique<juce::FileChooser> (
                             "Choose the media for the new cue",
-                            mediaDialogFolder(), formats.getWildcardForAllFormats());
+                            mediaDialogFolder(),
+                            juce::String (model::newCueWildcard (formats.getWildcardForAllFormats().toStdString())));
 
                 chooser->launchAsync (juce::FileBrowserComponent::openMode
                                         | juce::FileBrowserComponent::canSelectFiles
