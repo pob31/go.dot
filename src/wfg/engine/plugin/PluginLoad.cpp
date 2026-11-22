@@ -106,6 +106,82 @@ namespace wfg::plugin
         return false;
     }
 
+    namespace
+    {
+        /** How wide the first input bus past the main one is, as the processor stands. */
+        int sidechainWidth (juce::AudioProcessor& processor)
+        {
+            return processor.getBusCount (true) > 1 ? processor.getChannelCountOfBus (true, 1) : 0;
+        }
+
+        /** The layout as it stands with the sidechain input set to `set`. */
+        bool trySidechain (juce::AudioProcessor& processor, const InsertLayout& chosen, const juce::AudioChannelSet& set)
+        {
+            if (processor.getBusCount (true) < 2)
+                return false;
+
+            auto layout = processor.getBusesLayout();
+            layout.inputBuses.getReference (1) = set;
+
+            return processor.setBusesLayout (layout)
+                     && processor.getMainBusNumInputChannels() == chosen.inputs
+                     && processor.getMainBusNumOutputChannels() == chosen.outputs
+                     && sidechainWidth (processor) == set.size();
+        }
+    }
+
+    void probeKey (juce::AudioProcessor& processor, InsertLayout& chosen)
+    {
+        chosen.keyOffer = 0;
+        chosen.keyForced = false;
+        chosen.keyedInputs = processor.getTotalNumInputChannels();
+
+        if (processor.getBusCount (true) < 2)
+            return;
+
+        const auto asTaken = processor.getBusesLayout();
+
+        /*  ONE THE LADDER COULD NOT SWITCH OFF is on already: it is the
+            sidechain, and a key is simply written into it. */
+        if (const auto already = sidechainWidth (processor); already > 0)
+        {
+            chosen.keyOffer = std::min (already, 2);
+            chosen.keyForced = true;
+            return;
+        }
+
+        for (const auto& set : { juce::AudioChannelSet::stereo(), juce::AudioChannelSet::mono() })
+            if (trySidechain (processor, chosen, set))
+            {
+                chosen.keyOffer = set.size();
+                chosen.keyedInputs = processor.getTotalNumInputChannels();
+                break;
+            }
+
+        processor.setBusesLayout (asTaken);
+    }
+
+    int layKey (juce::AudioProcessor& processor, const InsertLayout& chosen, bool on)
+    {
+        if (chosen.keyOffer <= 0 || chosen.keyForced)
+            return std::min (sidechainWidth (processor), 2);
+
+        const auto before = processor.getBusesLayout();
+        const auto set = on ? juce::AudioChannelSet::canonicalChannelSet (chosen.keyOffer)
+                            : juce::AudioChannelSet::disabled();
+
+        if (! trySidechain (processor, chosen, set))
+            processor.setBusesLayout (before);
+
+        return std::min (sidechainWidth (processor), 2);
+    }
+
+    void keyChannelIndices (juce::AudioProcessor& processor, int width, int (&into)[2])
+    {
+        for (int channel = 0; channel < 2; ++channel)
+            into[channel] = channel < width ? processor.getChannelIndexInProcessBlockBuffer (true, 1, channel) : -1;
+    }
+
     std::unique_ptr<juce::AudioPluginInstance> makeInsertInstance (juce::AudioPluginFormatManager& manager,
                                                                    const juce::PluginDescription& description,
                                                                    int channels, double sampleRate, int blockSize,
@@ -136,6 +212,9 @@ namespace wfg::plugin
             problem = description.name.toStdString() + ": " + problem;
             return nullptr;
         }
+
+        //  And whether it has a sidechain a key could go into (§141), before it is prepared.
+        probeKey (*instance, layout);
 
         instance->setNonRealtime (false);
         instance->prepareToPlay (sampleRate, blockSize);

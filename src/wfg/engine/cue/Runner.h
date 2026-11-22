@@ -557,6 +557,12 @@ namespace wfg::cue
             thread; atomics on the audio side. A no-op by default. */
         virtual void setFxShape (int, int, int, int) {}
 
+        /*  What one insert's plugin hears on its sidechain, changed under it
+            (namespace draft §141): picked, changed or taken off on a cue that
+            is armed or sounding, or an input repacked under it. Tick thread;
+            a word on the audio side. A no-op by default. */
+        virtual void setFxKey (int, int, const audio::KeySource&) {}
+
         /*  A cue's whole state for one entry changed after its arm and before
             its launch (the author's decision of 2026-09-25): load that one
             instead, and hold the launch until it is in. The tick thread; a
@@ -1629,6 +1635,14 @@ namespace wfg::cue
         /*  How wide a media cue is after the inserts it switches in
             (cue/InsertChain.h): what its routing reads (2026-09-26). */
         int chainChannelsOf (const juce::ValueTree& cue) const;
+
+        /*  AN INSERT'S KEY, FOUND (namespace draft §141, BHW): the word the
+            document holds - empty, `self`, an aux's id or an input's id - as
+            the graph reads it tonight. An input becomes the logical inputs it
+            spans now; an aux its place among the show's auxes; anything the
+            show has not got, no key - silence, said by the problem mark
+            (BHV). */
+        audio::KeySource keySourceOf (const std::string& word) const;
 
         /*  `moved` is a run's values a fade moved (namespace draft §26): a
             send it holds is heard at that level, and a bus the cue has no

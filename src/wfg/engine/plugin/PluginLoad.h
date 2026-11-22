@@ -45,6 +45,18 @@ namespace wfg::plugin
         int inputs = 0;
         int outputs = 0;
         std::string words;
+
+        /*  ITS SIDECHAIN (namespace draft §141, BHR): how wide a one the
+            plugin takes beside the main buses above - two, one, or nought for
+            none - asked once and switched back off; and whether it would not
+            let go of one, so it is on, fed silence, whether a key is picked
+            or not. Every instance of a child is made alike, so this holds for
+            all of them. */
+        int keyOffer = 0;
+        bool keyForced = false;
+
+        /** The plugin's input channels in all with the sidechain on: what the child's buffer is sized for. */
+        int keyedInputs = 0;
     };
 
     /*  THE LADDER, asked of the plugin in order until it agrees - never the
@@ -63,6 +75,24 @@ namespace wfg::plugin
         fed silence, since only the main inputs are ever written. False with
         the sentence the entry reads when no rung is taken. */
     bool chooseLayout (juce::AudioProcessor&, int voiceChannels, InsertLayout&, std::string& problem);
+
+    /*  WHETHER THE PLUGIN HAS A SIDECHAIN TO OFFER (namespace draft §141),
+        asked after the ladder and before the instance is prepared: its first
+        input bus past the main one switched on stereo, then mono, the main
+        buses as the ladder left them - and put back as it was. Fills the key
+        fields of the layout. */
+    void probeKey (juce::AudioProcessor&, InsertLayout&);
+
+    /*  THE SIDECHAIN SWITCHED ON OR OFF on an instance laid out by the two
+        above - released by the caller first and prepared again after, which
+        a VST3 needs. The main buses are never moved: a plugin that would
+        change them to take it is left as it was. Returns how wide the
+        sidechain is now, nought when it is off. */
+    int layKey (juce::AudioProcessor&, const InsertLayout&, bool on);
+
+    /*  Where the sidechain's channels sit in the buffer the plugin is handed,
+        one or two of them, -1 past its width. */
+    void keyChannelIndices (juce::AudioProcessor&, int width, int (&into)[2]);
 
     /*  One instance, laid out by the ladder above, prepared, and the preset
         applied (a .vstpreset to the VST3 client, whose loader is the SDK's

@@ -17,6 +17,7 @@
 
 #include <wfg/engine/audio/CueMatrix.h>
 #include <wfg/engine/audio/EqSettings.h>
+#include <wfg/engine/audio/KeySource.h>
 #include <wfg/engine/audio/LoopVoice.h>
 #include <wfg/engine/audio/TakeWriter.h>
 #include <wfg/engine/plugin/PluginScan.h>
@@ -998,6 +999,16 @@ namespace wfg::audio
         /*  How wide the cue is at one insert (2026-09-26): the channels it
             sends and how many come back. Any thread; atomics on the lane. */
         void setTrackFxShape (int trackIndex, int slot, int feed, int back) noexcept;
+
+        /*  WHAT ONE INSERT'S PLUGIN HEARS ON ITS SIDECHAIN (namespace draft
+            §141): an input, an aux, the cue itself, or nothing. Set before the
+            arm's snap, so the copy a voice is lent is laid out for it, and
+            again on an edit to a sounding cue. Tick or message thread; one
+            word on the place and, when the key comes or goes, a reset asked of
+            the plugin's child. And how wide the sidechain is laid out now,
+            nought for none or a plugin that would not take it. */
+        void setTrackFxKey (int trackIndex, int slot, const KeySource& key) noexcept;
+        int trackFxKeyHeld (int trackIndex, int slot) noexcept;
 
         /*  An arm: the cue's switch and every value for one entry, and the
             instance reset before its next block. Message thread, beside

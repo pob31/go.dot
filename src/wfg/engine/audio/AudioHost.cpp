@@ -475,6 +475,7 @@ namespace wfg::audio
                 they are bound to: a host unbinds its lanes as it goes. */
             dropProxies();
             trackLanes.clear();
+            trackPlaces.clear();
             voiceInserts.clear();
             proxySlots = 0;
 
@@ -667,6 +668,7 @@ namespace wfg::audio
                     edit.reset();
                     matrices.clear();
                     trackLanes.clear();
+                    trackPlaces.clear();
                     voiceInserts.clear();
                     eqs.clear();
                     return false;
@@ -688,6 +690,7 @@ namespace wfg::audio
                     edit.reset();
                     matrices.clear();
                     trackLanes.clear();
+                    trackPlaces.clear();
                     voiceInserts.clear();
                     eqs.clear();
                     return false;
@@ -695,6 +698,7 @@ namespace wfg::audio
 
                 eqs.push_back (&eqStage->eq());
                 trackLanes.emplace_back();
+                trackPlaces.emplace_back();
                 voiceInserts.emplace_back();
 
                 /*  THE SET'S PROXIES, between the EQ and the output stage, in
@@ -712,6 +716,7 @@ namespace wfg::audio
                     {
                         error = "the plugin proxy would not insert";
                         trackLanes.clear();
+                        trackPlaces.clear();
                         voiceInserts.clear();
                         edit.reset();
                         matrices.clear();
@@ -720,7 +725,9 @@ namespace wfg::audio
                     }
 
                     proxy->bindClock (&blockClock);
+                    proxy->bindTap (&tapView);
                     trackLanes.back().push_back (&proxy->lane());
+                    trackPlaces.back().push_back (proxy);
                     voiceInserts.back().push_back (proxy);
                 }
 
@@ -728,6 +735,7 @@ namespace wfg::audio
                 {
                     error = "the aux tap would not insert";
                     trackLanes.clear();
+                    trackPlaces.clear();
                     voiceInserts.clear();
                     edit.reset();
                     matrices.clear();
@@ -746,6 +754,7 @@ namespace wfg::audio
                     edit.reset();
                     matrices.clear();
                     trackLanes.clear();
+                    trackPlaces.clear();
                     voiceInserts.clear();
                     eqs.clear();
                     return false;
@@ -790,6 +799,7 @@ namespace wfg::audio
                 edit.reset();
                 matrices.clear();
                 trackLanes.clear();
+                trackPlaces.clear();
                 voiceInserts.clear();
                 eqs.clear();
                 return false;
@@ -825,6 +835,7 @@ namespace wfg::audio
                     error = "the Edit's tempo does not make one beat one second, so every"
                             " launch would be placed at the wrong distance";
                     trackLanes.clear();
+                    trackPlaces.clear();
                     voiceInserts.clear();
                     edit.reset();
                     matrices.clear();
@@ -1385,7 +1396,10 @@ namespace wfg::audio
 
             forgetWaiting (track, slot);
 
-            //  The copy made ready first, and only then heard through.
+            /*  The copy made ready first, and only then heard through - its
+                sidechain switched on when the cue at this place has a key
+                (namespace draft §141), laid out in the reset below. */
+            copy->lane.setKeyed (! place->key().isNone());
             copy->lane.setValues (values);
             copy->lane.setEnabled (enabled);
             copy->lane.requestReset();
@@ -1485,6 +1499,7 @@ namespace wfg::audio
                 edit.reset();
                 matrices.clear();
                 trackLanes.clear();
+                trackPlaces.clear();
                 voiceInserts.clear();
                 eqs.clear();
                 liveInputs.clear();
@@ -1539,6 +1554,7 @@ namespace wfg::audio
                 cue's inserts are sent by that place. */
             const auto take = channel.takeSeconds > 0.0 && ! channel.aux ? takeFor (channel.id) : nullptr;
             trackLanes.emplace_back (channel.plugins.size(), nullptr);
+            trackPlaces.emplace_back (channel.plugins.size(), nullptr);
 
             const auto insertProxies = [&] (bool beforeTheRecorder)
             {
@@ -1555,7 +1571,9 @@ namespace wfg::audio
                         return false;
 
                     proxy->bindClock (&blockClock);
+                    proxy->bindTap (&tapView);
                     trackLanes.back()[slot] = &proxy->lane();
+                    trackPlaces.back()[slot] = proxy;
                 }
 
                 return true;
@@ -1959,6 +1977,7 @@ namespace wfg::audio
         {
             dropProxies();
             trackLanes.clear();
+            trackPlaces.clear();
             voiceInserts.clear();
             liveInputs.clear();
             rackTracks.clear();
@@ -3244,6 +3263,11 @@ namespace wfg::audio
             the lanes live in it. `proxySlots` is the SET's size. */
         std::vector<std::vector<plugin::ProxyLane*>> trackLanes;
 
+        /*  AND EVERY TRACK'S PLACES THEMSELVES, beside its lanes and emptied
+            with them (namespace draft §141): a key is the place's - a voice's
+            and a rack channel's alike - where a lane is only what plays in it. */
+        std::vector<std::vector<ProxyPlugin*>> trackPlaces;
+
         /*  THE VOICES' INSERT PLACES THEMSELVES (namespace draft §133, stage
             2), by voice and slot, for what re-points one; the rack's are not
             here, and are never re-pointed. Emptied wherever `trackLanes` is,
@@ -4021,6 +4045,35 @@ namespace wfg::audio
     {
         if (auto* lane = proxyLane (trackIndex, slot))
             lane->setShape (feed, back);
+    }
+
+    void AudioHost::setTrackFxKey (int trackIndex, int slot, const KeySource& key) noexcept
+    {
+        if (trackIndex < 0 || slot < 0 || trackIndex >= static_cast<int> (impl->trackPlaces.size()))
+            return;
+
+        const auto& places = impl->trackPlaces[static_cast<std::size_t> (trackIndex)];
+
+        if (slot >= static_cast<int> (places.size()) || places[static_cast<std::size_t> (slot)] == nullptr)
+            return;
+
+        /*  THE PLACE FIRST, then the lane playing in it: a copy lent from
+            here on reads the place, and the one there now is asked for its
+            sidechain - laid out again by its child, the cue passing as it was
+            meanwhile (BHS). A voice waiting for a copy has none to ask. */
+        auto* place = places[static_cast<std::size_t> (slot)];
+        place->setKey (key);
+
+        if (auto* lane = place->target(); lane != nullptr && lane != &place->lane())
+            lane->setKeyed (! key.isNone());
+        else if (impl->placeAt (trackIndex, slot) == nullptr)
+            place->lane().setKeyed (! key.isNone());
+    }
+
+    int AudioHost::trackFxKeyHeld (int trackIndex, int slot) noexcept
+    {
+        auto* lane = proxyLane (trackIndex, slot);
+        return lane != nullptr ? lane->keyHeld() : 0;
     }
 
     std::uint64_t AudioHost::setTrackInsertTarget (int trackIndex, int slot, plugin::ProxyLane* lane) noexcept

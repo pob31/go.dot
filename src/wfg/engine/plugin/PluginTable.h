@@ -89,6 +89,11 @@ namespace wfg::plugin
                 block at a time. */
             std::uint32_t lateBlocks = 0;
             std::string late {};
+
+            /*  HOW WIDE A SIDECHAIN IT OFFERS (namespace draft §141): one or two
+                channels, or nought - and then no insert of it offers a key.
+                Nought before the child has said. */
+            int keyInputs = 0;
         };
 
         /** Replaces what is known about one entry. Answers whether anything a
@@ -105,7 +110,7 @@ namespace wfg::plugin
                                    || held.paramCount != status.paramCount
                                    || held.stateProblem != status.stateProblem
                                    || held.inputs != status.inputs || held.outputs != status.outputs
-                                   || held.layout != status.layout
+                                   || held.layout != status.layout || held.keyInputs != status.keyInputs
                                    || held.lateBlocks != status.lateBlocks || held.late != status.late
                                    || std::abs (held.stateLoadMs - status.stateLoadMs) > 1.0e-9;
             held = status;

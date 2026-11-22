@@ -62,7 +62,7 @@ namespace
         "    <List id=\"CP000001\" name=\"Main\">\n"
         "      <Media eqB1Gain=\"6\" eqHpf=\"true\" file=\"a.wav\" id=\"CP000002\" name=\"A\">\n"
         "        <Send bus=\"CP000090\" id=\"CP000010\" level=\"-6\" pan=\"-0.5\" swap=\"true\"/>\n"
-        "        <Fx id=\"CP000011\" plugin=\"CP000080\" values=\"0:0.25\"/>\n"
+        "        <Fx id=\"CP000011\" key=\"self\" plugin=\"CP000080\" values=\"0:0.25\"/>\n"
         "        <Fx enabled=\"false\" id=\"CP000012\" plugin=\"CP000081\"/>\n"
         "        <Range id=\"CP000013\" in=\"1\" loops=\"2\" name=\"Verse\" out=\"4\"/>\n"
         "      </Media>\n"
@@ -392,6 +392,10 @@ TEST_CASE ("cue parts: an effects chain pasted is swapped whole, in the source's
     CHECK (chain[1].getProperty ("plugin").toString() == "CP000081");
     CHECK (at (document, "/godot/fx/" + idOf (chain[0]) + "/values") == "0:0.25");
     CHECK (at (document, "/godot/fx/" + idOf (chain[1]) + "/enabled") == "false");
+
+    //  And what each insert listens to (namespace draft 141): the key goes with the chain.
+    CHECK (at (document, "/godot/fx/" + idOf (chain[0]) + "/key") == "self");
+    CHECK (at (document, "/godot/fx/" + idOf (chain[1]) + "/key").empty());
     CHECK_FALSE (document.findById ("CP000022").isValid());
     CHECK (pasted.id == idOf (chain[0]) + " " + idOf (chain[1]));
 

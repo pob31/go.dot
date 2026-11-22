@@ -104,6 +104,8 @@ namespace wfg::audio
             }
             else if (const auto* held = std::get_if<FxHeld> (&item))
             {
+                //  The key first: the copy lent below is laid out for it (§141).
+                audioHost.setTrackFxKey (held->track, held->fx.slot, held->fx.key);
                 audioHost.snapTrackFx (held->track, held->fx.slot, held->fx.enabled, held->fx.values,
                                        held->fx.statePath, ! held->fx.fxId.empty(), held->fx.pluginId);
                 audioHost.setTrackFxShape (held->track, held->fx.slot, held->fx.feed, held->fx.back);
@@ -203,6 +205,9 @@ namespace wfg::audio
             9a, PR 9a.8). */
         for (const auto& fx : request.fx)
         {
+            /*  ITS KEY FIRST (namespace draft §141): the place holds it, and
+                the copy the snap lends is asked for its sidechain by it. */
+            audioHost.setTrackFxKey (request.track, fx.slot, fx.key);
             audioHost.snapTrackFx (request.track, fx.slot, fx.enabled, fx.values, fx.statePath,
                                    ! fx.fxId.empty(), fx.pluginId);
             audioHost.setTrackFxShape (request.track, fx.slot, fx.feed, fx.back);
@@ -601,6 +606,11 @@ namespace wfg::audio
     void HostPlayer::setFxShape (int track, int slot, int feed, int back)
     {
         audioHost.setTrackFxShape (track, slot, feed, back);
+    }
+
+    void HostPlayer::setFxKey (int track, int slot, const KeySource& key)
+    {
+        audioHost.setTrackFxKey (track, slot, key);
     }
 
     /*  ANY SLOT, as the Player's contract says (2026-09-26). This asked slot

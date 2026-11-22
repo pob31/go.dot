@@ -3645,6 +3645,7 @@ namespace wfg::tree
                                 else if (name == "inputs")         text = std::to_string (status.inputs);
                                 else if (name == "outputs")        text = std::to_string (status.outputs);
                                 else if (name == "layout")         text = status.layout;
+                                else if (name == "keyInputs")      text = std::to_string (status.keyInputs);
                                 else if (name == "paramCount")     text = std::to_string (status.paramCount > 0 ? status.paramCount : knownCount);
                                 else                               text = storedText (attribute, entry);
 

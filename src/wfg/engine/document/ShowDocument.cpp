@@ -7481,6 +7481,43 @@ namespace wfg::doc
 
         References { problems, *this }.visit (showNode);
 
+        /*  AN INSERT'S KEY THAT NAMES NOTHING IT COULD HEAR (namespace draft
+            §141, BHV). `fx/key` is one word of three kinds - `self`, an aux's
+            id, a named input's id - so the `refers` column, which holds one
+            kind, cannot say it; this does. A warning, as every reference above
+            is: the key is silence until it names something again, and the
+            show opens. */
+        struct Keys
+        {
+            std::vector<std::string>& problems;
+            const ShowDocument& document;
+
+            void visit (const juce::ValueTree& node)
+            {
+                if (node.hasType ("Fx"))
+                {
+                    const auto key = node["key"].toString().toStdString();
+
+                    if (! key.empty() && key != "self")
+                    {
+                        const auto target = document.findById (key);
+                        const auto here = "/Show/.../Fx[" + node[idProperty].toString().toStdString() + "]/@key";
+
+                        if (! target.isValid())
+                            problems.push_back (here + ": names \"" + key + "\", which is not in this show");
+                        else if (! target.hasType ("Input")
+                                  && ! (target.hasType ("Channel") && target["access"].toString() == "shared"))
+                            problems.push_back (here + ": names \"" + key + "\", which is neither an aux nor an input");
+                    }
+                }
+
+                for (const auto& child : node)
+                    visit (child);
+            }
+        };
+
+        Keys { problems, *this }.visit (showNode);
+
         /*  A PRESET THAT NAMES A GROUP THE CUE IS NOT INSIDE.
 
             §13.7: `preset` names the ANCESTOR group whose header prepares this

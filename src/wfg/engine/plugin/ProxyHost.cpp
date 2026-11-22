@@ -94,6 +94,7 @@ namespace wfg::plugin
             status.inputs = inputs;
             status.outputs = outputs;
             status.layout = layout;
+            status.keyInputs = keyInputs;
             status.lateBlocks = lateBlocksTold;
             status.late = lateSpell ? std::string (lateWords) : std::string();
             return status;
@@ -416,6 +417,8 @@ namespace wfg::plugin
             reportedLatency = latencySamples;
             inputs = static_cast<int> (header->inputs.load (std::memory_order_relaxed));
             outputs = static_cast<int> (header->outputs.load (std::memory_order_relaxed));
+            keyInputs = static_cast<int> (std::min<std::uint32_t> (header->keyInputs.load (std::memory_order_relaxed),
+                                                                   static_cast<std::uint32_t> (region::keyChannelsMax)));
             header->layout[region::problemChars - 1] = 0;
             layout = header->layout;
             laneLatency.assign (lanes.size(), 0);
@@ -659,6 +662,7 @@ namespace wfg::plugin
         int paramCount = 0;
         int inputs = 0;
         int outputs = 0;
+        int keyInputs = 0;
         std::string layout;
         double stateLoadMs = 0.0;
         std::string stateProblem;

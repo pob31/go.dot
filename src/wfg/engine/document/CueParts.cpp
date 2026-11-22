@@ -56,7 +56,7 @@ namespace wfg::doc::parts
                 /*  The chain, in order, each insert with its state: the file
                     named by `stateFile` is immutable in the bundle, so two cues
                     naming it share nothing that either can change. */
-                { Part::fx, "fx", { "Media", "Mic" }, {}, "Fx", { "plugin", "enabled", "values", "stateFile" } },
+                { Part::fx, "fx", { "Media", "Mic" }, {}, "Fx", { "plugin", "enabled", "values", "stateFile", "key" } },
 
                 { Part::time, "time", { "Media", "Video" },
                   { "startOffset", "rate", "rateMode", "delay", "delayBy" },
@@ -538,7 +538,8 @@ namespace wfg::doc
                         drawn.push_back (made.id);
                         const auto fx = findById (made.id);
 
-                        for (const auto row : { "enabled", "values", "stateFile" })
+                        //  What it listens to with the rest (namespace draft §141): a key names a show-level thing.
+                        for (const auto row : { "enabled", "values", "stateFile", "key" })
                             if (const auto written = writeRow (want, fx, row); ! written.ok)
                                 return written;
                     }

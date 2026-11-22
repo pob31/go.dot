@@ -179,6 +179,23 @@ namespace wfg::plugin
             either is the voice's own width, as before any of this. Any thread. */
         void setShape (int feed, int back) noexcept;
 
+        /*  A KEY FOR THIS PLUGIN (namespace draft §141, BHR): whether the cue
+            this lane plays has one picked, so the plugin's sidechain input is
+            to be switched on. Unkeyed - the default, and every insert before
+            §141 - the plugin is laid out exactly as it always was. A change is
+            made in a reset: the child lays the instance out again on its own
+            thread with the lane parked, and an insert switched in meanwhile
+            passes the block as it was (BHS) - never a hole, never half wet.
+            Any thread but the audio one. */
+        void setKeyed (bool keyed) noexcept;
+        bool isKeyed() const noexcept;
+
+        /*  How wide a sidechain the plugin offers (one or two channels), and
+            how wide this lane's is laid out now - nought for none, or for a
+            plugin that would not take it. Any thread. */
+        int keyOffered() const noexcept;
+        int keyHeld() const noexcept;
+
         //======================================================================
         /*  A CUE'S WHOLE STATE (the author's decision of 2026-09-25): what the
             plugin's own window changed that is not a parameter, kept per cue
@@ -265,6 +282,16 @@ namespace wfg::plugin
         void process (float* const* channelData, int numChannels, int numSamples,
                       const BlockClock* clock, std::int64_t blockStart) noexcept WFG_AUDIO_THREAD;
 
+        /*  AND WITH A KEY (namespace draft §141): `keyChannels` of it - one or
+            two, more are not sent - beside each piece in the region, for the
+            plugin's sidechain. A null key, or nought channels, is no key, and
+            the sidechain is fed silence; so is any key to a lane whose cue
+            picked none. A key that sounds keeps the lane from its rest, as
+            sound arriving does. */
+        void process (float* const* channelData, int numChannels, int numSamples,
+                      const BlockClock* clock, std::int64_t blockStart,
+                      const float* const* key, int keyChannels) noexcept WFG_AUDIO_THREAD;
+
         //======================================================================
         /** Blocks sent to the child. */
         std::uint64_t blocks() const noexcept;
@@ -315,11 +342,13 @@ namespace wfg::plugin
         std::atomic<int> shapeBack { -1 };
         region::Header* header = nullptr;
         float* audio = nullptr;
+        float* keyArea = nullptr;
         int regionChannels = 0;
         int regionMaxSamples = 0;
 
         std::atomic<int> enabled { 0 };
         std::atomic<int> callEnabled { 1 };
+        std::atomic<int> keyed { 0 };
 
         /*  THE FADES (CV): where the last answer left each channel, and
             whether the lane is silent now - the audio thread's own. A new cue

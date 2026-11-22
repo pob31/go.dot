@@ -1,0 +1,23 @@
+<Show>
+  <Lists goDebounce="0">
+    <List id="KY000001" name="Sound">
+      <Media id="KY000002" channels="1" directOut="KY000004" file="tone.wav" name="Under the talkback" number="1">
+        <Fx id="KY000005" key="KY000021" plugin="KY000006"/>
+      </Media>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="1">
+    <Bus id="KY000004" name="Main L/R" width="2"/>
+    <Inputs>
+      <Input id="KY000021" name="Talkback"/>
+    </Inputs>
+    <Plugins>
+      <Plugin id="KY000006" format="VST3" identifier="godot:test-duck" name="Test duck"/>
+    </Plugins>
+  </Audio>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces/>
+  <Dcas/>
+</Show>

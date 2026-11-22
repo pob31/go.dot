@@ -39,7 +39,11 @@
         in, output `i` onto lane channel `i mod lane`, each at lane / outputs -
         two sides onto one voice channel at a half each.
       - Every other input the plugin has (a sidechain) is fed silence: the
-        buffer is cleared first, and only the main inputs are written.
+        buffer is cleared first, and only the main inputs are written - unless
+        the cue has a KEY picked for the insert (namespace draft §141), when
+        the plugin's one sidechain input carries it: a mono key into every one
+        of its channels, a stereo key side to side, and a stereo key into a
+        mono sidechain at a half each (`keyInto`).
 
     NAMES NO JUCE TYPE, allocates nothing, locks nothing: the child's worker
     calls it once per block, and a test calls it with plain arrays.
@@ -81,6 +85,29 @@ namespace wfg::plugin::lanemap
             if (from < shape.feed)
                 std::copy_n (lane[from], samples, buffer[input]);
         }
+    }
+
+    /*  THE KEY INTO THE PLUGIN'S SIDECHAIN (namespace draft §141, BHT):
+        `keyChannels` of key - nought, one or two - into the `sidechain`
+        channels of the plugin's buffer the caller located, one or two. No key
+        is silence, which the cleared buffer already holds. */
+    inline void keyInto (const float* const* key, int keyChannels, float* const* sidechain, int sidechainChannels,
+                         int samples) noexcept
+    {
+        if (keyChannels <= 0 || sidechainChannels <= 0)
+            return;
+
+        if (keyChannels == 1 || sidechainChannels >= keyChannels)
+        {
+            for (int channel = 0; channel < sidechainChannels; ++channel)
+                std::copy_n (key[keyChannels == 1 ? 0 : std::min (channel, keyChannels - 1)], samples, sidechain[channel]);
+
+            return;
+        }
+
+        //  Two sides of key into one: a half each, as a stereo cue folds onto one output (§42).
+        for (int n = 0; n < samples; ++n)
+            sidechain[0][n] = 0.5f * (key[0][n] + key[1][n]);
     }
 
     /*  The plugin's main outputs back into the lane: channel to channel up to

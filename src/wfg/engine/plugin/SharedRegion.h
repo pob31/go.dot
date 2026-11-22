@@ -63,8 +63,14 @@ namespace wfg::plugin::region
         5 since 2026-10-27: the beat clock in the header and each block's first
         sample on its lane, for the plugins' playhead (namespace draft §123).
         6 since 2026-11-20: a reset is answered (`resetDoneSeq`), so the parent
-        can wait for it without calling the lane (namespace draft §139). */
-    constexpr std::uint32_t version = 6;
+        can wait for it without calling the lane (namespace draft §139).
+        7 since 2026-11-22: a key beside the audio on every lane, and whether
+        the plugin's sidechain input is to carry it (namespace draft §141). */
+    constexpr std::uint32_t version = 7;
+
+    /*  THE WIDEST KEY A LANE CARRIES (namespace draft §141, BHT): one channel
+        or two. A wider input or cue is folded to two before it is sent. */
+    constexpr int keyChannelsMax = 2;
 
     /** The most parameters a plugin may expose through the proxy; a plugin
         with more has the rest neither published nor written. */
@@ -126,6 +132,13 @@ namespace wfg::plugin::region
             cue of a given width goes through it (LaneMapping.h). */
         std::atomic<std::uint32_t> inputs;
         std::atomic<std::uint32_t> outputs;
+
+        /*  HOW WIDE A SIDECHAIN INPUT THE PLUGIN OFFERS (namespace draft §141,
+            BHR): one or two channels, or nought for a plugin that has none or
+            will not switch one on beside the main buses it took. Asked once,
+            when the child makes its instances, and written before
+            `childReady`. */
+        std::atomic<std::uint32_t> keyInputs;
 
         /*  Child to parent: one while the worker is in the audio interface's
             workgroup the parent shares (macOS, 2026-10-22; WorkgroupShare.h),
@@ -196,6 +209,21 @@ namespace wfg::plugin::region
             equal, its instances being fresh. */
         std::atomic<std::uint32_t> resetDoneSeq;
 
+        /*  A KEY FOR THIS LANE'S PLUGIN (namespace draft §141, BHR). Parent to
+            child, `keyWanted`: one when the cue lent this copy has a key
+            picked, so the plugin's sidechain input is to be switched on;
+            stored before `resetSeq` moves, and acted on in that reset - the
+            instance laid out again on the child's message thread with the
+            lane parked, the one place a plugin may be. Child to parent,
+            `keyHeld`: how wide the sidechain input is now, nought when it is
+            off or the plugin would not take it, stored before `resetDoneSeq`.
+            And each request's `keyChannels`, stored before `requestSeq`: how
+            many channels of key the block carries in its key area - nought,
+            and the sidechain is fed silence. */
+        std::atomic<std::uint32_t> keyWanted;
+        std::atomic<std::uint32_t> keyHeld;
+        std::atomic<std::uint32_t> keyChannels;
+
         /*  WHERE THIS PIECE STARTS in Go.dot's count of samples (namespace
             draft §123, BEI), stored before the request: what the playhead
             places the beat against. */
@@ -227,7 +255,9 @@ namespace wfg::plugin::region
 
         /*  The audio follows this structure at `audioOf`, channel-major:
             `channels * maxSamples` floats, of which `numChannels * numSamples`
-            are the block. */
+            are the block; and the key after it at `keyOf`, `keyChannelsMax *
+            maxSamples` floats, of which `keyChannels * numSamples` are the
+            block's (§141). */
     };
 
     static_assert (std::atomic<std::uint64_t>::is_always_lock_free
@@ -255,7 +285,8 @@ namespace wfg::plugin::region
     constexpr std::size_t laneStride (int channels, int maxSamples) noexcept
     {
         return alignUp (sizeof (Lane)
-                        + static_cast<std::size_t> (channels) * static_cast<std::size_t> (maxSamples) * sizeof (float));
+                        + static_cast<std::size_t> (channels + keyChannelsMax) * static_cast<std::size_t> (maxSamples)
+                            * sizeof (float));
     }
 
     constexpr std::size_t regionBytes (int channels, int maxSamples, int lanes) noexcept
@@ -279,6 +310,12 @@ namespace wfg::plugin::region
         return reinterpret_cast<float*> (reinterpret_cast<char*> (lane) + sizeof (Lane));
     }
 
+    /** The lane's key, after its audio (namespace draft §141). */
+    inline float* keyOf (Lane* lane, int channels, int maxSamples) noexcept
+    {
+        return audioOf (lane) + static_cast<std::size_t> (channels) * static_cast<std::size_t> (maxSamples);
+    }
+
     /** FNV-1a over everything a layout depends on. */
     constexpr std::uint32_t layoutHashFor (int channels, int maxSamples, int lanes) noexcept
     {
@@ -297,6 +334,7 @@ namespace wfg::plugin::region
         mix (static_cast<std::uint32_t> (sizeof (Header)));
         mix (static_cast<std::uint32_t> (sizeof (Lane)));
         mix (static_cast<std::uint32_t> (maxParams));
+        mix (static_cast<std::uint32_t> (keyChannelsMax));
         mix (static_cast<std::uint32_t> (channels));
         mix (static_cast<std::uint32_t> (maxSamples));
         mix (static_cast<std::uint32_t> (lanes));

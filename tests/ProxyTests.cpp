@@ -4901,3 +4901,323 @@ TEST_CASE ("M40: the rack's children are its distinct plugins, not its channel s
 
     host.stop();
 }
+
+//==============================================================================
+//  A KEY FOR AN EFFECT (namespace draft 141): the plugin's road.
+
+TEST_CASE ("key: the region carries a key after each lane's audio, and its version says so")
+{
+    using namespace plugin::region;
+
+    CHECK (version == 7u);
+    CHECK (keyChannelsMax == 2);
+    CHECK (laneStride (2, 64) >= sizeof (Lane) + (2 + keyChannelsMax) * 64 * sizeof (float));
+
+    VectorRegion region (2, 64, 2);
+    auto* lane = region.lane (1);
+    CHECK (keyOf (lane, 2, 64) == audioOf (lane) + 2 * 64);
+
+    //  The key's room ends inside the lane's stride: the next lane starts after it.
+    CHECK (reinterpret_cast<char*> (keyOf (region.lane (0), 2, 64) + keyChannelsMax * 64)
+             <= reinterpret_cast<char*> (region.lane (1)));
+}
+
+TEST_CASE ("key: into a sidechain, a mono key goes to both sides, a stereo one side to side, two into one at a half")
+{
+    constexpr int n = 4;
+    float left[n] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    float right[n] = { 0.5f, 0.5f, 0.5f, 0.5f };
+    const float* key[2] = { left, right };
+
+    float a[n] {}, b[n] {};
+    float* sidechain[2] = { a, b };
+
+    SUBCASE ("mono into stereo")
+    {
+        plugin::lanemap::keyInto (key, 1, sidechain, 2, n);
+        CHECK (a[3] == doctest::Approx (1.0f));
+        CHECK (b[3] == doctest::Approx (1.0f));
+    }
+
+    SUBCASE ("stereo into stereo")
+    {
+        plugin::lanemap::keyInto (key, 2, sidechain, 2, n);
+        CHECK (a[0] == doctest::Approx (1.0f));
+        CHECK (b[0] == doctest::Approx (0.5f));
+    }
+
+    SUBCASE ("stereo into mono")
+    {
+        plugin::lanemap::keyInto (key, 2, sidechain, 1, n);
+        CHECK (a[2] == doctest::Approx (0.75f));
+        CHECK (b[2] == doctest::Approx (0.0f));
+    }
+
+    SUBCASE ("no key leaves the silence that is there")
+    {
+        plugin::lanemap::keyInto (key, 0, sidechain, 2, n);
+        CHECK (a[0] == doctest::Approx (0.0f));
+        CHECK (b[0] == doctest::Approx (0.0f));
+    }
+}
+
+namespace
+{
+    /*  THE CHILD'S PART FOR A KEY, PLAYED BY A THREAD: every request answered
+        as it comes, the key channels and the key's first sample noted. */
+    struct KeyListener
+    {
+        explicit KeyListener (VectorRegion& regionToUse)
+            : region (regionToUse),
+              thread ([this]
+              {
+                  while (! stop.load())
+                  {
+                      auto* lane = region.lane (0);
+                      const auto asked = lane->requestSeq.load (std::memory_order_acquire);
+
+                      if (asked > lane->responseSeq.load (std::memory_order_relaxed))
+                      {
+                          channels.store (static_cast<int> (lane->keyChannels.load (std::memory_order_relaxed)));
+                          first.store (plugin::region::keyOf (lane, region.channelCount, region.sampleCount)[0]);
+                          lane->responseSeq.store (asked, std::memory_order_release);
+                      }
+
+                      std::this_thread::yield();
+                  }
+              })
+        {
+        }
+
+        ~KeyListener()
+        {
+            stop.store (true);
+            thread.join();
+        }
+
+        VectorRegion& region;
+        std::atomic<bool> stop { false };
+        std::atomic<int> channels { -1 };
+        std::atomic<float> first { 0.0f };
+        std::thread thread;
+    };
+}
+
+TEST_CASE ("key: a lane whose cue picked a key sends it beside the block, and one that did not sends none")
+{
+    VectorRegion region (2, 64, 1);
+    plugin::ProxyLane lane;
+    region.bind (lane, 0);
+    lane.setDeadlineMicroseconds (200000);
+    lane.setEnabled (true);
+    region.answerResets();
+
+    std::vector<float> keyLeft (64, 0.75f), keyRight (64, 0.25f);
+    const float* key[2] = { keyLeft.data(), keyRight.data() };
+
+    KeyListener child (region);
+    Block block (2, 64, 0.5f);
+
+    SUBCASE ("unkeyed: no key reaches the region, whatever is handed in")
+    {
+        lane.process (block.data(), 2, 64, nullptr, 0, key, 2);
+        CHECK (child.channels.load() == 0);
+        CHECK (region.lane (0)->keyWanted.load() == 0u);
+    }
+
+    SUBCASE ("keyed: both sides of it, in the lane's key area")
+    {
+        lane.setKeyed (true);
+        CHECK (region.lane (0)->keyWanted.load() == 1u);
+        region.answerResets();
+
+        lane.process (block.data(), 2, 64, nullptr, 0, key, 2);
+        CHECK (child.channels.load() == 2);
+        CHECK (child.first.load() == doctest::Approx (0.75f));
+    }
+
+    SUBCASE ("keyed, a key wider than the region carries: two of it")
+    {
+        lane.setKeyed (true);
+        region.answerResets();
+
+        const float* wide[3] = { keyLeft.data(), keyRight.data(), keyRight.data() };
+        lane.process (block.data(), 2, 64, nullptr, 0, wide, 3);
+        CHECK (child.channels.load() == 2);
+    }
+}
+
+TEST_CASE ("key: picking a key under a sounding cue asks the child to lay its plugin out again, and the cue passes as it was meanwhile")
+{
+    VectorRegion region (2, 64, 1);
+    plugin::ProxyLane lane;
+    region.bind (lane, 0);
+    lane.setDeadlineMicroseconds (200000);
+    lane.setEnabled (true);
+    region.answerResets();
+
+    const auto resetsBefore = region.lane (0)->resetSeq.load();
+    lane.setKeyed (true);
+
+    CHECK (region.lane (0)->resetSeq.load() == resetsBefore + 1);
+    CHECK (region.lane (0)->keyWanted.load() == 1u);
+
+    //  The reset not made yet: the block as it came, and nothing sent.
+    const auto requestsBefore = region.lane (0)->requestSeq.load();
+    Block block (2, 64, 0.5f);
+    lane.process (block.data(), 2, 64);
+
+    CHECK (block.allEqual (0.5f));
+    CHECK (region.lane (0)->requestSeq.load() == requestsBefore);
+
+    //  The same pick again asks nothing more.
+    lane.setKeyed (true);
+    CHECK (region.lane (0)->resetSeq.load() == resetsBefore + 1);
+}
+
+TEST_CASE ("key: a plugin's sidechain is asked for after the ladder, switched back off, and switched on only for a key")
+{
+    using Set = juce::AudioChannelSet;
+    plugin::InsertLayout layout;
+    std::string problem;
+
+    const auto mainStereo = [] (const juce::AudioProcessor::BusesLayout& l)
+    {
+        return l.getMainInputChannelSet() == Set::stereo() && l.getMainOutputChannelSet() == Set::stereo();
+    };
+
+    SUBCASE ("a stereo sidechain it lets go of: offered, off, then on and off again")
+    {
+        PickyProcessor keyed (true, mainStereo);
+        REQUIRE (plugin::chooseLayout (keyed, 2, layout, problem));
+        plugin::probeKey (keyed, layout);
+
+        CHECK (layout.keyOffer == 2);
+        CHECK_FALSE (layout.keyForced);
+        CHECK (layout.keyedInputs == 4);
+        CHECK_FALSE (keyed.getBus (true, 1)->isEnabled());
+
+        CHECK (plugin::layKey (keyed, layout, true) == 2);
+        CHECK (keyed.getBus (true, 1)->isEnabled());
+        CHECK (keyed.getMainBusNumInputChannels() == 2);
+
+        int at[2] {};
+        plugin::keyChannelIndices (keyed, 2, at);
+        CHECK (at[0] == 2);
+        CHECK (at[1] == 3);
+
+        CHECK (plugin::layKey (keyed, layout, false) == 0);
+        CHECK_FALSE (keyed.getBus (true, 1)->isEnabled());
+    }
+
+    SUBCASE ("one that takes only a mono sidechain is offered as mono")
+    {
+        PickyProcessor keyed (true, [mainStereo] (const auto& l)
+        {
+            return mainStereo (l) && (l.inputBuses[1].isDisabled() || l.inputBuses[1] == Set::mono());
+        });
+
+        REQUIRE (plugin::chooseLayout (keyed, 2, layout, problem));
+        plugin::probeKey (keyed, layout);
+        CHECK (layout.keyOffer == 1);
+        CHECK (plugin::layKey (keyed, layout, true) == 1);
+    }
+
+    SUBCASE ("one it will not give up is on from the start, and stays on")
+    {
+        PickyProcessor keyed (true, [mainStereo] (const auto& l)
+        {
+            return mainStereo (l) && l.inputBuses.size() == 2 && ! l.inputBuses[1].isDisabled();
+        });
+
+        REQUIRE (plugin::chooseLayout (keyed, 2, layout, problem));
+        plugin::probeKey (keyed, layout);
+        CHECK (layout.keyOffer == 2);
+        CHECK (layout.keyForced);
+        CHECK (plugin::layKey (keyed, layout, false) == 2);
+    }
+
+    SUBCASE ("a plugin with no sidechain offers none")
+    {
+        PickyProcessor plain (false, mainStereo);
+        REQUIRE (plugin::chooseLayout (plain, 2, layout, problem));
+        plugin::probeKey (plain, layout);
+        CHECK (layout.keyOffer == 0);
+        CHECK (plugin::layKey (plain, layout, true) == 0);
+    }
+}
+
+TEST_CASE ("key: the test ducker hears its key through its child, and only when its cue picked one")
+{
+    Folder folder;
+    plugin::PluginTable table;
+    plugin::ProxyLane lanes[1];
+
+    auto spec = testGainSpec (folder, 1, 2, 64);
+    spec.identifier = plugin::Catalogue::testDuckIdentifier();
+    plugin::ProxyHost host (spec, { &lanes[0] }, &table);
+
+    std::string problem;
+    REQUIRE (host.start (problem));
+    REQUIRE (waitForState (host, "loaded", 5000));
+    CHECK (host.status().keyInputs == 2);
+    CHECK (lanes[0].keyOffered() == 2);
+
+    lanes[0].setDeadlineMicroseconds (200000);
+
+    std::vector<float> keyLeft (64, 0.5f), keyRight (64, 0.0f);
+    const float* key[2] = { keyLeft.data(), keyRight.data() };
+    Block block (2, 64, 0.25f);
+
+    const auto play = [&]
+    {
+        for (int i = 0; i < 4; ++i)
+        {
+            std::fill (block.storage.begin(), block.storage.end(), 0.25f);
+            lanes[0].process (block.data(), 2, 64, nullptr, 0, key, 2);
+        }
+    };
+
+    SUBCASE ("no key picked: the gain alone, whatever key is handed in")
+    {
+        lanes[0].setEnabled (true);
+        host.poll();
+        REQUIRE (waitSettled (host, lanes[0]));
+        CHECK (lanes[0].keyHeld() == 0);
+
+        play();
+        CHECK (block.allEqual (0.125f));
+    }
+
+    SUBCASE ("a key picked: down by the louder side of it")
+    {
+        lanes[0].setKeyed (true);
+        lanes[0].setEnabled (true);
+        host.poll();
+        REQUIRE (waitSettled (host, lanes[0]));
+        CHECK (lanes[0].keyHeld() == 2);
+
+        //  0.25 x the gain's 0.5 x (1 - 0.5).
+        play();
+        CHECK (block.allEqual (0.0625f));
+    }
+
+    SUBCASE ("a key picked under the sounding insert: dry a moment, then ducked")
+    {
+        lanes[0].setEnabled (true);
+        host.poll();
+        REQUIRE (waitSettled (host, lanes[0]));
+        play();
+        CHECK (block.allEqual (0.125f));
+
+        lanes[0].setKeyed (true);
+        host.poll();
+        REQUIRE (waitSettled (host, lanes[0]));
+        CHECK (lanes[0].keyHeld() == 2);
+
+        play();
+        CHECK (block.allEqual (0.0625f));
+    }
+
+    host.stop();
+}

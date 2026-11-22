@@ -2125,6 +2125,63 @@ TEST_CASE ("refers: a pointer at the wrong KIND of thing is caught too")
     CHECK (problems[0].find ("not a cue") != std::string::npos);
 }
 
+TEST_CASE ("key: an insert's key naming nothing it could hear is a warning, never a refusal (namespace draft 141, BHV)")
+{
+    /*  `fx/key` is one word of three kinds, so no `refers` column can check
+        it: validate does, by hand. `self`, an aux and an input are quiet; a
+        bus, or an id the show has not got, is said - and the show still
+        loads, its key silent until it names something again. */
+    ShowDocument document;
+
+    const auto listId = document.createList ("Main").id;
+    const auto cueId = document.createCue (listId, 0, "media", "Under").id;
+    auto audio = document.root().getChildWithName ("Audio");
+    REQUIRE (audio.isValid());
+
+    const auto add = [] (juce::ValueTree parent, const char* type, const std::string& id)
+    {
+        juce::ValueTree node { type };
+        node.setProperty (juce::Identifier ("id"), juce::String (id), nullptr);
+        parent.appendChild (node, nullptr);
+        return node;
+    };
+
+    const auto busId = document.ids().generate();
+    add (audio, "Bus", busId);
+
+    juce::ValueTree inputs { "Inputs" };
+    audio.appendChild (inputs, nullptr);
+    const auto inputId = document.ids().generate();
+    add (inputs, "Input", inputId);
+
+    juce::ValueTree rack { "Rack" };
+    audio.appendChild (rack, nullptr);
+    const auto auxId = document.ids().generate();
+    add (rack, "Channel", auxId).setProperty (juce::Identifier ("access"), "shared", nullptr);
+
+    auto fx = add (document.findById (cueId), "Fx", document.ids().generate());
+
+    for (const auto& heard : { std::string ("self"), inputId, auxId, std::string() })
+    {
+        fx.setProperty (juce::Identifier ("key"), juce::String (heard), nullptr);
+        INFO (heard);
+        CHECK (document.warnings().empty());
+    }
+
+    fx.setProperty (juce::Identifier ("key"), juce::String (busId), nullptr);
+    auto problems = document.warnings();
+    REQUIRE (problems.size() == 1);
+    INFO (problems[0]);
+    CHECK (problems[0].find ("neither an aux nor an input") != std::string::npos);
+
+    fx.setProperty (juce::Identifier ("key"), "KYGQNE00", nullptr);
+    problems = document.warnings();
+    REQUIRE (problems.size() == 1);
+    CHECK (problems[0].find ("not in this show") != std::string::npos);
+    CHECK (problems[0].find ("@key") != std::string::npos);
+    CHECK (document.validate().empty());
+}
+
 TEST_CASE ("refers: an empty pointer is a resting state and not a dangling one")
 {
     /*  A list with no standby and a fade with no target yet are both things

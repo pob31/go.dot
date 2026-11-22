@@ -112,6 +112,7 @@ namespace wfg::audio
         void setFxParameter (int track, int slot, int parameter, float normalised) override;
         void setBeatClock (const cue::BeatClockState& state) override;
         void setFxShape (int track, int slot, int feed, int back) override;
+        void setFxKey (int track, int slot, const KeySource& key) override;
         void requestFxState (int track, int slot, const std::string& path) override;
         void holdFx (int track, const cue::FxSetting& fx) override;
         void prepareInserts (const std::vector<cue::InsertKind>& kinds) override;

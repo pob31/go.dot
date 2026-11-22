@@ -211,7 +211,7 @@ namespace wfg::plugin
     bool Catalogue::isTestIdentifier (const std::string& identifier) noexcept
     {
         return identifier == testGainIdentifier() || identifier == testMonoIdentifier()
-                 || identifier == testWidenIdentifier();
+                 || identifier == testWidenIdentifier() || identifier == testDuckIdentifier();
     }
 
     Catalogue Catalogue::testFor (const std::string& identifier)
@@ -228,6 +228,11 @@ namespace wfg::plugin
             out.identifier = testWidenIdentifier();
             out.name = "Test widen";
         }
+        else if (identifier == testDuckIdentifier())
+        {
+            out.identifier = testDuckIdentifier();
+            out.name = "Test duck";
+        }
 
         return out;
     }
@@ -240,7 +245,7 @@ namespace wfg::plugin
             surface a real plugin presents - the param nodes, the text nodes,
             the count - is exercised in CI with no plugin installed. */
         for (const auto* identifier : { Catalogue::testGainIdentifier(), Catalogue::testMonoIdentifier(),
-                                        Catalogue::testWidenIdentifier() })
+                                        Catalogue::testWidenIdentifier(), Catalogue::testDuckIdentifier() })
             held[identifier] = std::make_shared<const Catalogue> (Catalogue::testFor (identifier));
     }
 

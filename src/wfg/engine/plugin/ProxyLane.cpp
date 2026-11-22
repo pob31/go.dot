@@ -48,7 +48,7 @@ namespace wfg::plugin
         }
 
         /** Every sample of the first `channels` channels a hundred decibels down or more. */
-        bool isSilence (float* const* channelData, int channels, int numSamples) noexcept
+        bool isSilence (const float* const* channelData, int channels, int numSamples) noexcept
         {
             for (int channel = 0; channel < channels; ++channel)
             {
@@ -84,8 +84,13 @@ namespace wfg::plugin
 
         header = headerToUse;
         audio = audioToUse;
+        keyArea = audioToUse + static_cast<std::size_t> (channels) * static_cast<std::size_t> (maxSamples);
         regionChannels = channels;
         regionMaxSamples = maxSamples;
+
+        //  Whether its cue has a key (§141), for the child that lays the instance out.
+        laneToUse->keyWanted.store (static_cast<std::uint32_t> (keyed.load (std::memory_order_relaxed)),
+                                    std::memory_order_relaxed);
 
         //  What ten seconds is here (BHF); a region that names no rate is taken at 48 kHz.
         const auto rate = headerToUse != nullptr ? headerToUse->sampleRate.load (std::memory_order_relaxed) : 0u;
@@ -113,6 +118,7 @@ namespace wfg::plugin
         resetOwed = false;
         header = nullptr;
         audio = nullptr;
+        keyArea = nullptr;
         regionChannels = 0;
         regionMaxSamples = 0;
     }
@@ -161,6 +167,43 @@ namespace wfg::plugin
             that sees the switch sees the reset asked for before it, and waits
             for it (namespace draft §139, BHC). */
         enabled.store (shouldBeEnabled ? 1 : 0, std::memory_order_release);
+    }
+
+    void ProxyLane::setKeyed (bool shouldBeKeyed) noexcept
+    {
+        const auto now = shouldBeKeyed ? 1 : 0;
+
+        if (keyed.exchange (now, std::memory_order_relaxed) == now)
+            return;
+
+        /*  Stored before the reset is asked, with release by the ask: the
+            child reads it once it sees the count move. A lane not switched in
+            is laid out at the reset its switch-in asks; one switched in now -
+            a key picked under a sounding cue (BHS) - passes as it was while
+            the instance is laid out again. */
+        if (auto* bound = lane.load (std::memory_order_acquire))
+        {
+            bound->keyWanted.store (static_cast<std::uint32_t> (now), std::memory_order_relaxed);
+
+            if (enabled.load (std::memory_order_relaxed) != 0)
+                dryWhileReset.store (askReset(), std::memory_order_relaxed);
+        }
+    }
+
+    bool ProxyLane::isKeyed() const noexcept
+    {
+        return keyed.load (std::memory_order_relaxed) != 0;
+    }
+
+    int ProxyLane::keyOffered() const noexcept
+    {
+        return header != nullptr ? static_cast<int> (header->keyInputs.load (std::memory_order_relaxed)) : 0;
+    }
+
+    int ProxyLane::keyHeld() const noexcept
+    {
+        auto* bound = lane.load (std::memory_order_acquire);
+        return bound != nullptr ? static_cast<int> (bound->keyHeld.load (std::memory_order_acquire)) : 0;
     }
 
     bool ProxyLane::isEnabled() const noexcept
@@ -438,7 +481,13 @@ namespace wfg::plugin
 
     void ProxyLane::process (float* const* channelData, int numChannels, int numSamples) noexcept
     {
-        process (channelData, numChannels, numSamples, nullptr, 0);
+        process (channelData, numChannels, numSamples, nullptr, 0, nullptr, 0);
+    }
+
+    void ProxyLane::process (float* const* channelData, int numChannels, int numSamples,
+                             const BlockClock* clock, std::int64_t blockStart) noexcept
+    {
+        process (channelData, numChannels, numSamples, clock, blockStart, nullptr, 0);
     }
 
     void ProxyLane::publishClock (const cue::BeatClockState& state) noexcept
@@ -465,7 +514,8 @@ namespace wfg::plugin
     }
 
     void ProxyLane::process (float* const* channelData, int numChannels, int numSamples,
-                             const BlockClock* clock, std::int64_t blockStart) noexcept
+                             const BlockClock* clock, std::int64_t blockStart,
+                             const float* const* key, int keyChannels) noexcept
     {
         if (enabled.load (std::memory_order_acquire) == 0 || channelData == nullptr || numSamples <= 0)
             return;
@@ -546,7 +596,13 @@ namespace wfg::plugin
             over and its tail rang out ten seconds ago, so silence in is
             silence out and nobody is asked. Sound arriving wakes it, and is
             played through it in this very block. */
-        const auto silentIn = isSilence (channelData, channels, numSamples);
+        /*  THE KEY (namespace draft §141): as many channels as the region
+            carries, and only to a lane whose plugin was asked for its
+            sidechain - an unkeyed one is sent none, and pays nothing. */
+        const auto keyCount = key != nullptr && keyed.load (std::memory_order_relaxed) != 0
+                                ? std::clamp (keyChannels, 0, region::keyChannelsMax) : 0;
+        const auto silentIn = isSilence (channelData, channels, numSamples)
+                                && (keyCount == 0 || isSilence (key, keyCount, numSamples));
 
         if (silentIn && heardSinceReset && quietSamples >= restAfterSamples)
         {
@@ -633,6 +689,10 @@ namespace wfg::plugin
             for (int channel = 0; channel < channels; ++channel)
                 std::copy_n (channelData[channel] + offset, samples, audio + channel * regionMaxSamples);
 
+            for (int channel = 0; channel < keyCount; ++channel)
+                std::copy_n (key[channel] + offset, samples, keyArea + channel * regionMaxSamples);
+
+            bound->keyChannels.store (static_cast<std::uint32_t> (keyCount), std::memory_order_relaxed);
             bound->numChannels.store (static_cast<std::uint32_t> (channels), std::memory_order_relaxed);
             bound->numSamples.store (static_cast<std::uint32_t> (samples), std::memory_order_relaxed);
             bound->blockStartSample.store (static_cast<std::uint64_t> (std::max<std::int64_t> (0, blockStart + offset)),

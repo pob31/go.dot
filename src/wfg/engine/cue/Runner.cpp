@@ -25987,6 +25987,7 @@ namespace wfg::cue
                 setting.enabled = schema.flag (child, "fx", "enabled");
                 setting.stateFile = schema.text (child, "fx", "stateFile");
                 setting.statePath = statePathOf (setting.stateFile);
+                setting.key = keySourceOf (schema.text (child, "fx", "key"));
 
                 /*  And what rides live over them, under the lock (2026-09-26). */
                 auto values = parseFxValues (schema.text (child, "fx", "values"));
@@ -26034,6 +26035,58 @@ namespace wfg::cue
             }
 
         return out;
+    }
+
+    audio::KeySource Runner::keySourceOf (const std::string& word) const
+    {
+        static const Reader schema;
+        audio::KeySource out;
+
+        if (word.empty())
+            return out;
+
+        if (word == "self")
+        {
+            out.kind = audio::KeySource::Kind::self;
+            return out;
+        }
+
+        const auto audioNode = document.root().getChildWithName ("Audio");
+
+        /*  A NAMED INPUT: the logical inputs it spans as the show packs them
+            now, so a width changed or an input moved before it is followed. */
+        for (const auto input : audioNode.getChildWithName ("Inputs"))
+            if (input.hasType ("Input") && input.getProperty ("id").toString().toStdString() == word)
+            {
+                out.kind = audio::KeySource::Kind::input;
+                out.first = schema.integer (input, "input", "firstChannel");
+                out.width = std::max (1, schema.integer (input, "input", "width"));
+                return out;
+            }
+
+        /*  AN AUX: its place among the show's auxes, in the rack's order -
+            which is the order the graph builds them in (§93). */
+        auto auxIndex = 0;
+
+        for (const auto rack : audioNode)
+            if (rack.hasType ("Rack"))
+                for (const auto channel : rack)
+                {
+                    if (! channel.hasType ("Channel") || schema.text (channel, "rackChannel", "access") != "shared")
+                        continue;
+
+                    if (channel.getProperty ("id").toString().toStdString() == word)
+                    {
+                        out.kind = audio::KeySource::Kind::aux;
+                        out.first = auxIndex;
+                        out.width = 2;
+                        return out;
+                    }
+
+                    ++auxIndex;
+                }
+
+        return {};
     }
 
     int Runner::chainChannelsOf (const juce::ValueTree& cue) const
@@ -26153,6 +26206,10 @@ namespace wfg::cue
 
                         if (last == nullptr || next.feed != last->feed || next.back != last->back)
                             audio->setFxShape (track, next.slot, next.feed, next.back);
+
+                        //  Its key, before the state below asks the reset that lays it out (§141).
+                        if (last == nullptr || next.key != last->key)
+                            audio->setFxKey (track, next.slot, next.key);
 
                         //  Its state, the first time and when the file changed.
                         if (next.enabled && (last == nullptr || ! last->enabled || next.stateFile != last->stateFile))
@@ -26420,6 +26477,11 @@ namespace wfg::cue
                     or out, or a plugin that came up with its buses (2026-09-26). */
                 if (next.feed != last.feed || next.back != last.back)
                     audio->setFxShape (run->track, next.slot, next.feed, next.back);
+
+                /*  ITS KEY, picked, changed or taken off - or an input repacked
+                    under it (namespace draft §141): heard at once (BHS). */
+                if (next.key != last.key)
+                    audio->setFxKey (run->track, next.slot, next.key);
 
                 /*  A NEW STATE ON A CUE THAT HAS NOT LAUNCHED is loaded before
                     it may (an undo in standby, a capture while it waits); on

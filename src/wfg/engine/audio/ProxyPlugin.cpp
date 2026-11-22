@@ -80,10 +80,12 @@ namespace wfg::audio
     }
 
     //==============================================================================
-    void ProxyPlugin::initialise (const te::PluginInitialisationInfo&)
+    void ProxyPlugin::initialise (const te::PluginInitialisationInfo& info)
     {
-        /*  Message thread, and the only place this object allocates. */
+        /*  Message thread, and the only place this object allocates - the
+            key's fold room with the rest (§141). */
         pointers.assign (static_cast<std::size_t> (channels), nullptr);
+        keyReader.prepare (info.blockSizeSamples);
     }
 
     void ProxyPlugin::deinitialise()
@@ -127,7 +129,15 @@ namespace wfg::audio
                 = destination.getWritePointer (channel, context.bufferStartSample);
 
         //  ON THE CLOCK (§123, BEI): this block's first sample, the buffer's offset in.
-        lane->process (pointers.data(), usable, context.bufferNumSamples, boundClock,
-                       boundClock != nullptr ? boundClock->blockStart + context.bufferStartSample : 0);
+        const auto blockStart = boundClock != nullptr ? boundClock->blockStart + context.bufferStartSample : 0;
+
+        /*  AND ITS KEY (namespace draft §141), found only for a lane whose
+            plugin was asked for its sidechain: an unkeyed insert costs what it
+            always did. */
+        const float* key[2] = { nullptr, nullptr };
+        const auto keyChannels = lane->isKeyed() && keyReader.hasKey()
+                                   ? keyReader.read (context.bufferStartSample, context.bufferNumSamples, key) : 0;
+
+        lane->process (pointers.data(), usable, context.bufferNumSamples, boundClock, blockStart, key, keyChannels);
     }
 }

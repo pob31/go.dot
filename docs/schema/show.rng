@@ -4804,6 +4804,12 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="key">
+          <a:documentation>What this insert&apos;s plugin listens to on its sidechain (namespace draft 141, BHL): empty for nothing - its sidechain fed silence and laid out as it always was - self for this cue after its level, or the id of an aux or of a named input. One word and no reference of a single kind, so wfg validate checks it itself; a key naming an aux or an input the show no longer has, or an aux the graph was built without, is silence and a problem mark in words, never a failed run (BHV). An input is heard in the same block, an aux one block late on a cue (BHP). Picked on a sounding cue it is heard at once, the plugin passing the cue as it was for the moment it is laid out again (BHS). Only offered where the plugin has a sidechain (plugin/keyInputs).</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="plugin">
           <a:documentation>Which entry of the show-s set this cue switches in, by the entry-s id - the id and not the scan-s identifier, because a set may hold one plugin twice and a cue must say which. One Fx per entry per cue: a second naming the same one is refused when it is created, because an entry is on the voice once.</a:documentation>
           <data type="string"/>

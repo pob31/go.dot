@@ -48,6 +48,7 @@
 */
 
 #include <wfg/engine/audio/EqSettings.h>
+#include <wfg/engine/audio/KeySource.h>
 #include <wfg/engine/clock/RateClock.h>
 #include <wfg/engine/cue/FadeJob.h>
 #include <wfg/engine/document/LevelLane.h>
@@ -383,12 +384,17 @@ namespace wfg::cue
         int feed = -1;
         int back = -1;
 
+        /*  WHAT ITS PLUGIN LISTENS TO ON ITS SIDECHAIN (namespace draft §141):
+            the insert's `key` as the graph finds it tonight - an input's
+            logical inputs, an aux's row, the cue itself - or none. */
+        audio::KeySource key;
+
         /** Field-wise, the floats by bit pattern (-Wfloat-equal). */
         bool sameAs (const FxSetting& other) const noexcept
         {
             if (slot != other.slot || enabled != other.enabled || fxId != other.fxId
                  || pluginId != other.pluginId || stateFile != other.stateFile || values.size() != other.values.size()
-                 || feed != other.feed || back != other.back)
+                 || feed != other.feed || back != other.back || key != other.key)
                 return false;
 
             for (std::size_t i = 0; i < values.size(); ++i)

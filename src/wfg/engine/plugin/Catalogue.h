@@ -95,7 +95,14 @@ namespace wfg::plugin
         static const char* testMonoIdentifier() noexcept { return "godot:test-mono"; }
         static const char* testWidenIdentifier() noexcept { return "godot:test-widen"; }
 
-        /** Any of the three: built in, needing no scan and no description. */
+        /*  AND A DUCKER (namespace draft §141): the gain, as wide as the voice,
+            with a stereo sidechain input, so CI hears a key. Its output is the
+            input times the gain times one less the key's size, sample by
+            sample - full where the key is silent, nothing where it reaches
+            full scale - so a driver reads both how deep and how late. */
+        static const char* testDuckIdentifier() noexcept { return "godot:test-duck"; }
+
+        /** Any of the four: built in, needing no scan and no description. */
         static bool isTestIdentifier (const std::string& identifier) noexcept;
 
         /** The catalogue of whichever test plugin `identifier` names. */

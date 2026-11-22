@@ -366,18 +366,27 @@ namespace wfg::plugin
             int lookAhead = 0;
             std::vector<float> held;
             std::size_t heldAt = 0;
+
+            /*  ITS SIDECHAIN, for the ducker (namespace draft §141): how wide
+                it is laid out, nought while its cue has no key. Set by a reset,
+                the lane parked. */
+            int keyWidth = 0;
         };
 
         struct TestGainWorker
         {
-            /*  THE THREE TEST PLUGINS (2026-09-26): the gain as wide as the
+            /*  THE FOUR TEST PLUGINS: the ducker (namespace draft §141) as wide as
+                the voice, the gain's own shape with a sidechain beside it; and
+                the three of 2026-09-26: the gain as wide as the
                 voice; the mono, one in and one out; the widener, one in and
                 two out - left the input times the gain, right that at a
                 half. The last two take a block only when the cue is mono
                 (LaneMapping.h), and pass it dry otherwise. */
             TestGainWorker (Lanes& lanesToUse, const std::string& identifier)
                 : lanes (lanesToUse),
-                  inputs (identifier == Catalogue::testGainIdentifier() ? lanesToUse.channels : 1),
+                  duck (identifier == Catalogue::testDuckIdentifier()),
+                  inputs (identifier == Catalogue::testGainIdentifier() || identifier == Catalogue::testDuckIdentifier()
+                            ? lanesToUse.channels : 1),
                   outputs (identifier == Catalogue::testWidenIdentifier() ? 2
                              : identifier == Catalogue::testMonoIdentifier() ? 1 : lanesToUse.channels),
                   work (static_cast<std::size_t> (2 * std::max (1, lanesToUse.maxSamples)), 0.0f)
@@ -391,6 +400,21 @@ namespace wfg::plugin
                     instances[i].restingGain = baseline0;
                     instances[i].answered = lanes.answeredAtStart[i];
                 }
+            }
+
+            /** How wide a sidechain it offers (§141): the ducker's two, none for the others. */
+            int keyOffer() const noexcept { return duck ? 2 : 0; }
+
+            /*  THE SIDECHAIN, switched on or off as the lane's cue wants (§141):
+                the ducker's is a flag. Message thread, the lane parked. */
+            void layKey (int i, bool on)
+            {
+                instances[static_cast<std::size_t> (i)].keyWidth = on ? keyOffer() : 0;
+            }
+
+            int keyHeld (int i) const
+            {
+                return instances[static_cast<std::size_t> (i)].keyWidth;
             }
 
             /*  THE MESSAGE THREAD'S RESET, with the lane parked: a gain holds
@@ -493,11 +517,34 @@ namespace wfg::plugin
                         const auto factor = instance.gain * instance.padFactor;
                         const lanemap::Shape shape { numChannels, inputs, outputs, lanes.channels };
 
+                        /*  THE DUCKER'S KEY (§141): how loud it is, sample by
+                            sample, the louder of its sides. */
+                        const auto keyChannels = duck && instance.keyWidth > 0
+                                                   ? std::min<int> (region::keyChannelsMax,
+                                                                    static_cast<int> (lane->keyChannels.load (std::memory_order_relaxed)))
+                                                   : 0;
+                        const auto* key = region::keyOf (lane, lanes.channels, lanes.maxSamples);
+
                         if (inputs == lanes.channels && outputs == lanes.channels)
                         {
                             for (int channel = 0; channel < numChannels; ++channel)
                             {
                                 auto* samples = audio + channel * lanes.maxSamples;
+
+                                if (keyChannels > 0)
+                                {
+                                    for (int n = 0; n < numSamples; ++n)
+                                    {
+                                        auto level = std::abs (key[n]);
+
+                                        if (keyChannels > 1)
+                                            level = std::max (level, std::abs (key[lanes.maxSamples + n]));
+
+                                        samples[n] *= factor * (1.0f - std::min (1.0f, level));
+                                    }
+
+                                    continue;
+                                }
 
                                 for (int n = 0; n < numSamples; ++n)
                                     samples[n] *= factor;
@@ -559,6 +606,7 @@ namespace wfg::plugin
             }
 
             Lanes& lanes;
+            bool duck = false;
             int inputs, outputs;
             std::vector<float> work;
             std::array<float*, maxLaneChannels> lanePointers {};
@@ -625,6 +673,8 @@ namespace wfg::plugin
                          const juce::File& preset, std::string& problem)
             {
                 addFormatFor (manager, description, bundle);
+                preparedRate = sampleRate;
+                preparedBlock = blockSize;
 
                 for (int i = 0; i < instanceCount; ++i)
                 {
@@ -643,8 +693,44 @@ namespace wfg::plugin
                     instances.push_back (std::move (instance));
                 }
 
+                /*  ROOM FOR A SIDECHAIN (namespace draft §141): every instance
+                    made alike, so the first one's answer holds for all; one
+                    the ladder could not switch off is on from the start. */
+                width = std::max (width, layout.keyedInputs);
+                keyWidth.assign (instances.size(), layout.keyForced ? layout.keyOffer : 0);
+                keyIndex.assign (instances.size(), KeyAt {});
+
+                for (std::size_t i = 0; i < instances.size(); ++i)
+                    keyChannelIndices (*instances[i], keyWidth[i], keyIndex[i].at);
+
                 scratch.setSize (width, blockSize, false, true, true);
                 return true;
+            }
+
+            int keyOffer() const noexcept { return layout.keyOffer; }
+
+            /*  THE SIDECHAIN, switched on or off as the lane's cue wants
+                (namespace draft §141, BHR): MESSAGE THREAD, the lane parked, as
+                a reset is - a VST3 is released, laid out and prepared again,
+                which it takes only there. Nothing to do for a plugin with no
+                sidechain, or one already as asked. */
+            void layKey (int i, bool on)
+            {
+                const auto index = static_cast<std::size_t> (i);
+
+                if (layout.keyOffer <= 0 || layout.keyForced || (keyWidth[index] > 0) == on)
+                    return;
+
+                auto& instance = *instances[index];
+                instance.releaseResources();
+                keyWidth[index] = plugin::layKey (instance, layout, on);
+                instance.prepareToPlay (preparedRate, preparedBlock);
+                keyChannelIndices (instance, keyWidth[index], keyIndex[index].at);
+            }
+
+            int keyHeld (int i) const
+            {
+                return keyWidth[static_cast<std::size_t> (i)];
             }
 
             /** Message thread, after create: what the header carries. */
@@ -658,6 +744,7 @@ namespace wfg::plugin
 
                 header.latencySamples.store (static_cast<std::uint32_t> (std::max (0, first.getLatencySamples())),
                                              std::memory_order_relaxed);
+                header.keyInputs.store (static_cast<std::uint32_t> (std::max (0, layout.keyOffer)), std::memory_order_relaxed);
                 header.paramCount.store (static_cast<std::uint32_t> (count), std::memory_order_relaxed);
 
                 for (int i = 0; i < count; ++i)
@@ -841,6 +928,26 @@ namespace wfg::plugin
                             scratch.clear();
                             lanemap::feedInto (lanePointers.data(), shape, scratch.getArrayOfWritePointers(), numSamples);
 
+                            /*  AND THE KEY INTO ITS SIDECHAIN (namespace draft §141),
+                                when its cue has one and the plugin took it; every
+                                other block its sidechain is the silence above. */
+                            if (const auto sidechain = keyWidth[static_cast<std::size_t> (i)]; sidechain > 0)
+                            {
+                                const auto keyChannels = std::min<int> (region::keyChannelsMax,
+                                                                        static_cast<int> (lane->keyChannels.load (std::memory_order_relaxed)));
+                                const auto& at = keyIndex[static_cast<std::size_t> (i)].at;
+                                auto* key = region::keyOf (lane, lanes.channels, lanes.maxSamples);
+                                const float* keys[2] = { key, key + lanes.maxSamples };
+                                float* into[2] = { nullptr, nullptr };
+                                auto usable = 0;
+
+                                for (int channel = 0; channel < sidechain; ++channel)
+                                    if (at[channel] >= 0 && at[channel] < scratch.getNumChannels())
+                                        into[usable++] = scratch.getWritePointer (at[channel]);
+
+                                lanemap::keyInto (keys, keyChannels, into, usable, numSamples);
+                            }
+
                             /*  A view of the scratch at the block's length: the
                                 plugin sees the width it asked for and the length
                                 the parent sent. */
@@ -874,6 +981,15 @@ namespace wfg::plugin
             juce::MemoryBlock initialState;
             juce::AudioBuffer<float> scratch;
             int width = 0;
+
+            /*  EACH INSTANCE'S SIDECHAIN (§141): how wide it is laid out, and
+                where its channels sit in the buffer - the message thread's to
+                change with the lane parked, the worker's to read. */
+            struct KeyAt { int at[2] = { -1, -1 }; };
+            std::vector<int> keyWidth;
+            std::vector<KeyAt> keyIndex;
+            double preparedRate = 48000.0;
+            int preparedBlock = 512;
         };
 
         /*  A CUE'S WHOLE STATE, LOADED (the author's decision of 2026-09-25).
@@ -893,6 +1009,11 @@ namespace wfg::plugin
         {
             using Load = std::function<std::string (int lane, const std::string& path)>;
             using Reset = std::function<void (int lane)>;
+
+            /*  A RESET IS WHERE A KEY IS LAID OUT (namespace draft §141): the
+                sidechain switched on or off as `keyWanted` says, read after the
+                count it came with, and how wide it is now told back in
+                `keyHeld` before the reset is answered. */
 
             StateLoader (Lanes& lanesToUse, Load loadToUse, Reset resetToUse)
                 : lanes (lanesToUse), load (std::move (loadToUse)), reset (std::move (resetToUse)),
@@ -1205,13 +1326,48 @@ namespace wfg::plugin
 
             return problem;
         },
-        [&testGain, &real] (int lane)
+        [&testGain, &real, &lanes] (int lane)
         {
+            auto& shared = *lanes.laneOf[static_cast<std::size_t> (lane)];
+            const auto keyed = shared.keyWanted.load (std::memory_order_relaxed) != 0;
+
             if (testGain != nullptr)
+            {
+                testGain->layKey (lane, keyed);
                 testGain->resetLane (lane);
+                shared.keyHeld.store (static_cast<std::uint32_t> (testGain->keyHeld (lane)), std::memory_order_relaxed);
+            }
             else
+            {
+                real->layKey (lane, keyed);
                 real->resetLane (lane);
+                shared.keyHeld.store (static_cast<std::uint32_t> (real->keyHeld (lane)), std::memory_order_relaxed);
+            }
         });
+
+        /*  A KEY ALREADY WANTED (namespace draft §141): a child relaunched
+            under a cue that has one, whose instances are fresh and unkeyed -
+            laid out now, before ready, since no reset will come to ask. And
+            what the plugin offers, for the parent's menu. */
+        header.keyInputs.store (static_cast<std::uint32_t> (testGain != nullptr ? testGain->keyOffer() : real->keyOffer()),
+                                std::memory_order_relaxed);
+
+        for (int i = 0; i < lanes.count; ++i)
+        {
+            auto& shared = *lanes.laneOf[static_cast<std::size_t> (i)];
+            const auto keyed = shared.keyWanted.load (std::memory_order_relaxed) != 0;
+
+            if (testGain != nullptr)
+            {
+                testGain->layKey (i, keyed);
+                shared.keyHeld.store (static_cast<std::uint32_t> (testGain->keyHeld (i)), std::memory_order_relaxed);
+            }
+            else if (i < static_cast<int> (real->instances.size()))
+            {
+                real->layKey (i, keyed);
+                shared.keyHeld.store (static_cast<std::uint32_t> (real->keyHeld (i)), std::memory_order_relaxed);
+            }
+        }
 
         header.childReady.store (1, std::memory_order_release);
 

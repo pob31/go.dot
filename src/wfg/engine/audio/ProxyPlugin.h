@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <wfg/engine/audio/KeyReader.h>
 #include <wfg/engine/plugin/ProxyLane.h>
 
 /*  AN audio/-INTERNAL HEADER, for CueOutputPlugin.h's reason: it names
@@ -88,6 +89,17 @@ namespace wfg::audio
         void setTarget (plugin::ProxyLane* lane) noexcept   { targetLane.store (lane, std::memory_order_seq_cst); }
         plugin::ProxyLane* target() const noexcept          { return targetLane.load (std::memory_order_seq_cst); }
 
+        /*  THIS PLACE'S KEY (namespace draft §141): what the plugin lent to
+            it hears on its sidechain, set from the tick thread as one word and
+            read once a block. It belongs to the place and not to the lane - a
+            lane is a pooled copy lent to whichever cue's insert stands here -
+            and a copy lent is asked for its sidechain by what the place holds
+            (`AudioHost`'s claim). The tap an input is read from is bound once,
+            as the clock is. */
+        void setKey (const KeySource& source) noexcept      { keyReader.setSource (source); }
+        KeySource key() const noexcept                       { return keyReader.source(); }
+        void bindTap (const LiveInputTap* tap) noexcept      { keyReader.bindTap (tap); }
+
         int numChannels() const noexcept  { return channels; }
 
         /** Which plugin of the set this is, in `plugins/order`. */
@@ -119,6 +131,7 @@ namespace wfg::audio
         plugin::ProxyLane proxyLane;
         std::atomic<plugin::ProxyLane*> targetLane { &proxyLane };
         const plugin::BlockClock* boundClock = nullptr;
+        KeyReader keyReader;
 
         /*  The channel pointers for one call, sized in initialise() and never
             after. A vector of pointers, not of samples: the buffer is the
