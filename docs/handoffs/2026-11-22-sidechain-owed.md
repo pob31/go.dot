@@ -154,6 +154,13 @@ Two consequences:
   build path). If a fault is found in how Likyū lays out its sidechain, write it up for the Likyū session through
   SendMessage, not as a patch. Likyū's parameter IDs are not frozen: a Go.dot show that saves its state may not
   reopen against a later build.
+- **Done since, on Windows VST3, by the Likyū session (namespace draft §142, 2026-11-22):** Likyū through the child
+  as a real plugin, the keyed case included - `proxy: a real VST3's sidechain, keyed through the child, turns it
+  down when the key is loud` (`WFG_REAL_VST3`, `WFG_REAL_KEYED_STATE`, `WFG_ENGINE_FOLDER`; how to make the state and
+  scan Likyū alone is in §142 and in Likyū's `docs/bench/2026-11-22-godot.md`). The probe found a stereo sidechain,
+  the child laid it out keyed and gave it back unkeyed, and the key cut by exactly the band's range. **Still owed
+  here:** the same on the Mac farm with Likyū's AU, and by ear. And §142's BHZ is the author's: a VST3 wider than
+  eight channels is laid out stereo by the ladder, so a wider cue passes it dry.
 
 ## Also owed, the author's (not this session's)
 

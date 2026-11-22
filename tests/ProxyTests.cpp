@@ -52,6 +52,7 @@
 #include <wfg/engine/plugin/PluginLoad.h>
 #include <wfg/engine/plugin/ProxyHost.h>
 #include <wfg/engine/plugin/ProxyLane.h>
+#include <wfg/engine/plugin/ScratchBlock.h>
 #include <wfg/engine/plugin/SharedRegion.h>
 #include <wfg/engine/plugin/WorkgroupShare.h>
 #include <wfg/engine/rt/RtCheck.h>
@@ -206,6 +207,22 @@ namespace
 
             std::this_thread::sleep_for (std::chrono::milliseconds (2));
         }
+    }
+
+    /*  WHERE A REAL PLUGIN'S CASE READS THE SCAN: the developer's own list, or
+        WFG_ENGINE_FOLDER - a folder of its own, what `wfg plugins
+        --engine-folder=<dir> --scan --retry=<file>` scanned one plugin into,
+        so a plugin from a build tree is measured without entering the real
+        list (namespace draft 142). */
+    std::string realPluginStorage()
+    {
+        const auto chosen = juce::SystemStats::getEnvironmentVariable ("WFG_ENGINE_FOLDER", {});
+
+        if (chosen.isNotEmpty())
+            return juce::File::getCurrentWorkingDirectory().getChildFile (chosen).getFullPathName().toStdString();
+
+        return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                   .getChildFile ("Go.dot").getChildFile ("engine").getFullPathName().toStdString();
     }
 
     struct Block
@@ -2333,8 +2350,7 @@ TEST_CASE ("proxy: a real VST3 from this machine's scan comes up, reports its ca
     const auto identifier = juce::SystemStats::getEnvironmentVariable ("WFG_REAL_VST3", {}).toStdString();
     REQUIRE_MESSAGE (! identifier.empty(), "set WFG_REAL_VST3 to an identifier from wfg plugins --list");
 
-    const auto storage = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                            .getChildFile ("Go.dot").getChildFile ("engine").getFullPathName().toStdString();
+    const auto storage = realPluginStorage();
     const auto xml = plugin::describePlugin (storage, identifier);
     REQUIRE_MESSAGE (! xml.empty(), "the scan does not know " << identifier);
 
@@ -2397,6 +2413,104 @@ TEST_CASE ("proxy: a real VST3 from this machine's scan comes up, reports its ca
         lanes[0].process (block.data(), 2, 256);
         CHECK (lanes[0].misses() == 0);
     }
+
+    host.stop();
+}
+
+/*  A REAL PLUGIN'S SIDECHAIN, KEYED THROUGH THE CHILD (namespace draft 142,
+    what §141's close left owed: "one real sidechain compressor through
+    WFG_REAL_VST3"). The plugin in WFG_REAL_VST3, put by WFG_REAL_KEYED_STATE -
+    a state file as a cue keeps one - where its sidechain turns it down. The
+    lane is keyed, so the child lays a sidechain out in its reset; a quiet tone
+    plays through it under a silent key, then under a loud one, and the loud
+    key must take at least three decibels off it. Unkeyed again, the sidechain
+    is given back. Skipped unless asked for with `--no-skip`. */
+TEST_CASE ("proxy: a real VST3's sidechain, keyed through the child, turns it down when the key is loud"
+           * doctest::skip())
+{
+    const auto identifier = juce::SystemStats::getEnvironmentVariable ("WFG_REAL_VST3", {}).toStdString();
+    const auto stateName = juce::SystemStats::getEnvironmentVariable ("WFG_REAL_KEYED_STATE", {});
+    REQUIRE_MESSAGE (! identifier.empty(), "set WFG_REAL_VST3 to an identifier from wfg plugins --list");
+    REQUIRE_MESSAGE (stateName.isNotEmpty(), "set WFG_REAL_KEYED_STATE to a state of it that its sidechain turns down");
+
+    const auto statePath = juce::File::getCurrentWorkingDirectory().getChildFile (stateName).getFullPathName().toStdString();
+    const auto xml = plugin::describePlugin (realPluginStorage(), identifier);
+    REQUIRE_MESSAGE (! xml.empty(), "the scan does not know " << identifier);
+
+    constexpr int block = 256;
+    Folder folder;
+    plugin::PluginTable table;
+    plugin::ProxyLane lanes[1];
+
+    auto spec = testGainSpec (folder, 1, 2, block);
+    spec.identifier = identifier;
+    spec.name = "real keyed";
+    spec.descriptionXml = xml;
+    plugin::ProxyHost host (spec, { &lanes[0] }, &table);
+
+    std::string problem;
+    REQUIRE (host.start (problem));
+    const auto up = waitForState (host, "loaded", 20000);
+    INFO ("state " << host.status().state << ": " << host.status().problem);
+    REQUIRE (up);
+
+    host.poll();
+    MESSAGE (identifier << ": " << host.status().layout << ", a sidechain of " << lanes[0].keyOffered() << " offered");
+    REQUIRE (lanes[0].keyOffered() > 0);
+
+    lanes[0].setDeadlineMicroseconds (200000);
+    lanes[0].setEnabled (true);
+    lanes[0].wantState (statePath);
+    lanes[0].setKeyed (true);
+    REQUIRE (waitSettled (host, lanes[0], 10000));
+    CHECK (table.statusOf (spec.pluginId).stateProblem.empty());
+    CHECK (lanes[0].keyHeld() == lanes[0].keyOffered());
+
+    Block audio (2, block, 0.0f);
+    std::vector<float> keyLeft (static_cast<std::size_t> (block)), keyRight (static_cast<std::size_t> (block));
+    const float* key[2] = { keyLeft.data(), keyRight.data() };
+    std::int64_t at = 0;
+
+    //  A second of a quiet 2 kHz tone, the key a tone of its own or silence; the last tenth's level, in dB.
+    const auto play = [&] (float keyLevel)
+    {
+        double sum = 0.0;
+        std::size_t count = 0;
+        const auto blocks = 48000 / block;
+
+        for (int b = 0; b < blocks; ++b, at += block)
+        {
+            for (int i = 0; i < block; ++i)
+            {
+                const auto phase = 2.0 * juce::MathConstants<double>::pi * 2000.0 * static_cast<double> (at + i) / 48000.0;
+                audio.storage[static_cast<std::size_t> (i)] = static_cast<float> (0.05 * std::sin (phase));
+                audio.storage[static_cast<std::size_t> (block + i)] = audio.storage[static_cast<std::size_t> (i)];
+                keyLeft[static_cast<std::size_t> (i)] = keyRight[static_cast<std::size_t> (i)]
+                    = static_cast<float> (keyLevel * std::sin (phase * 1.0001));
+            }
+
+            lanes[0].process (audio.data(), 2, block, nullptr, at, key, 2);
+
+            if (b >= blocks - blocks / 10)
+                for (const auto sample : audio.storage)
+                {
+                    sum += static_cast<double> (sample) * sample;
+                    ++count;
+                }
+        }
+
+        return 10.0 * std::log10 (std::max (1.0e-20, sum / static_cast<double> (std::max<std::size_t> (1, count))));
+    };
+
+    const auto quiet = play (0.0f);
+    const auto loud = play (0.5f);
+    MESSAGE ("the tone under a silent key " << juce::String (quiet, 1) << " dB, under a loud one " << juce::String (loud, 1) << " dB");
+    CHECK (loud < quiet - 3.0);
+    CHECK (lanes[0].misses() == 0);
+
+    lanes[0].setKeyed (false);
+    REQUIRE (waitSettled (host, lanes[0], 10000));
+    CHECK (lanes[0].keyHeld() == 0);
 
     host.stop();
 }
@@ -2476,12 +2590,75 @@ TEST_CASE ("proxy: the in-tree LV2 comes up in the child through JUCE's real LV2
     CHECK (lanes[0].answered() >= 1);
     CHECK (block.allEqual (0.125f));
 
+    /*  A SHORTER BLOCK AND A FULL ONE AFTER IT (namespace draft 142): the
+        child fits its scratch to each block's length in place, so a short one
+        is processed whole and the full one after it is full again - at the
+        plugin's gain of a half, so a sample it did not process would show. */
+    std::fill (block.storage.begin(), block.storage.end(), 0.25f);
+    lanes[0].process (block.data(), 2, 37);
+
+    for (int c = 0; c < 2; ++c)
+        for (int i = 0; i < 37; ++i)
+            CHECK (block.storage[static_cast<std::size_t> (c * 64 + i)] == doctest::Approx (0.125f));
+
+    blocksAt (0.25f);
+    CHECK (block.allEqual (0.125f));
+
     lanes[0].setParameter (0, 1.0f);
     blocksAt (0.25f);
     CHECK (block.allEqual (0.25f));
     CHECK (lanes[0].misses() == 0);
 
     host.stop();
+}
+
+/*  THE CHILD'S SCRATCH AT A BLOCK'S LENGTH, IN PLACE (namespace draft 142). A
+    real plugin used to be handed a view built over the scratch every block,
+    and a view of 32 channels or more mallocs its pointer list - through
+    std::malloc, which the counting allocator (rt::, operator new only) does
+    not see. So what is pinned is that nothing moves: fitted to any length up
+    to the one it was made for, the scratch keeps its own pointer list where it
+    was and every channel inside the memory it was made with, each holding what
+    is written to it. A reallocation could not pass that, whoever's allocator. */
+TEST_CASE ("proxy: the child's scratch is fitted to each block's length in place, at any width, with nothing reallocated")
+{
+    constexpr int width = 40;
+    constexpr int longest = 512;
+
+    juce::AudioBuffer<float> scratch;
+    scratch.setSize (width, longest, false, true, true);     // as RealHost::create makes it
+
+    const auto* const list = scratch.getArrayOfReadPointers();
+    const auto* const first = list[0];
+    const auto* const end = list[width - 1] + longest;
+    auto held = true;
+    auto inside = true;
+
+    for (const auto length : { 512, 128, 37, 1, 511, 512, 64, 512 })
+    {
+        plugin::fitScratch (scratch, length);
+        CHECK (scratch.getNumSamples() == length);
+        CHECK (scratch.getNumChannels() == width);
+        CHECK (scratch.getArrayOfReadPointers() == list);
+
+        scratch.clear();
+
+        for (int c = 0; c < width; ++c)
+        {
+            const auto* channel = scratch.getReadPointer (c);
+            inside = inside && channel >= first && channel + length <= end;
+
+            for (int i = 0; i < length; ++i)
+                scratch.getWritePointer (c)[i] = static_cast<float> (c * 1000 + i);
+        }
+
+        for (int c = 0; c < width; ++c)
+            for (int i = 0; i < length; ++i)
+                held = held && scratch.getReadPointer (c)[i] == static_cast<float> (c * 1000 + i);
+    }
+
+    CHECK (inside);
+    CHECK (held);
 }
 
 #if JUCE_MAC
@@ -2616,8 +2793,7 @@ TEST_CASE ("M31: the proxy's round trip at one, eight and sixteen lanes, the wak
            * doctest::skip())
 {
     const auto realIdentifier = juce::SystemStats::getEnvironmentVariable ("WFG_REAL_VST3", {}).toStdString();
-    const auto storage = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                            .getChildFile ("Go.dot").getChildFile ("engine").getFullPathName().toStdString();
+    const auto storage = realPluginStorage();
 
     MESSAGE ("M31 on " << juce::SystemStats::getOperatingSystemName() << ", "
              << juce::SystemStats::getCpuModel() << ", " << juce::SystemStats::getNumCpus() << " cores");
@@ -2840,8 +3016,7 @@ TEST_CASE ("M35: a cue's whole state loaded onto a voice - how long it takes, an
         the misses a busy box has anyway. Run with
         `WFG_REAL_VST3=<identifier> wfg_tests --test-case="M35*" --no-skip`. */
     const auto realIdentifier = juce::SystemStats::getEnvironmentVariable ("WFG_REAL_VST3", {}).toStdString();
-    const auto storage = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                            .getChildFile ("Go.dot").getChildFile ("engine").getFullPathName().toStdString();
+    const auto storage = realPluginStorage();
 
     MESSAGE ("M35 on " << juce::SystemStats::getOperatingSystemName() << ", "
              << juce::SystemStats::getCpuModel() << ", " << juce::SystemStats::getNumCpus() << " cores");
@@ -2906,6 +3081,16 @@ TEST_CASE ("M35: a cue's whole state loaded onto a voice - how long it takes, an
             const auto count = std::max (1, helper.paramCount());
             std::uint32_t seq = 0;
 
+            /*  THE PARAMETER THE HAND MOVES: the first, or WFG_M35_PARAM's - a
+                plugin whose first is a switch (a bypass) is left as it was by
+                0.2, so no new state is kept and nothing is captured (namespace
+                draft 142). */
+            const auto moved = identifier == plugin::Catalogue::testGainIdentifier()
+                                 ? 0
+                                 : std::clamp (juce::SystemStats::getEnvironmentVariable ("WFG_M35_PARAM", "0").getIntValue(),
+                                               0, count - 1);
+            MESSAGE (identifier << ": the hand moves parameter " << moved << " of " << count);
+
             for (const auto value : { 0.2f, 0.8f })
             {
                 std::vector<float> values (static_cast<std::size_t> (count), plugin::editor::restsAtPreset);
@@ -2913,8 +3098,8 @@ TEST_CASE ("M35: a cue's whole state loaded onto a voice - how long it takes, an
                 ++seq;
                 REQUIRE (until ([&] { return helper.subjectTaken() == seq; }, 5000));
 
-                helper.poke (0, value);
-                values[0] = value;
+                helper.poke (moved, value);
+                values[static_cast<std::size_t> (moved)] = value;
                 helper.setLive (values);
 
                 std::optional<plugin::EditorHost::Capture> kept;
@@ -3038,7 +3223,7 @@ namespace
     AllowanceReading driveForAllowance (std::vector<std::unique_ptr<AllowanceChild>>& children,
                                         const std::vector<plugin::ProxyLane*>& order,
                                         plugin::ProxyLane* watched, plugin::ProxyLane* resetLane,
-                                        int block, double seconds)
+                                        int block, double seconds, int channels = 2)
     {
         AllowanceReading reading;
         const auto periodUs = static_cast<double> (block) * 1000000.0 / 48000.0;
@@ -3071,7 +3256,7 @@ namespace
             }
         });
 
-        std::thread driver ([&reading, &order, watched, resetLane, block, blocks, resetEvery, periodUs]
+        std::thread driver ([&reading, &order, watched, resetLane, block, blocks, resetEvery, periodUs, channels]
         {
             app::takeRealtime (app::RealtimeRank::sound, periodUs / 1000.0, periodUs / 2000.0);
 
@@ -3079,7 +3264,7 @@ namespace
             buffers.reserve (order.size());
 
             for (std::size_t i = 0; i < order.size(); ++i)
-                buffers.emplace_back (2, block, 0.0f);
+                buffers.emplace_back (channels, block, 0.0f);
 
             std::uint32_t noise = 0x9e3779b9u;
             const auto missesBefore = watched->misses();
@@ -3136,7 +3321,7 @@ namespace
                     }
 
                     const auto t0 = std::chrono::steady_clock::now();
-                    lane->process (buffers[i].data(), 2, block, &clock, 0);
+                    lane->process (buffers[i].data(), channels, block, &clock, 0);
                     const auto us = std::chrono::duration<double, std::micro> (std::chrono::steady_clock::now() - t0).count();
 
                     if (lane == resetLane && resetting && lane->stateSettled())
@@ -3192,22 +3377,34 @@ TEST_CASE ("M86: what a real plugin needs of a buffer - under a wide limit and t
 {
     const auto realIdentifier = juce::SystemStats::getEnvironmentVariable ("WFG_REAL_VST3", {}).toStdString();
     const auto seconds = std::max (1.0, juce::SystemStats::getEnvironmentVariable ("WFG_M86_SECONDS", "8").getDoubleValue());
-    const auto storage = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-                            .getChildFile ("Go.dot").getChildFile ("engine").getFullPathName().toStdString();
+    const auto storage = realPluginStorage();
     const auto gain = plugin::Catalogue::testGainIdentifier();
+
+    /*  THE WIDTH AND THE STATE (namespace draft 142): a lane of WFG_M86_CHANNELS
+        channels (two by default), and the real plugin's lanes loaded with the
+        state in WFG_REAL_STATE, a file as a cue keeps one - so a plugin is
+        measured doing its work rather than at its preset, which for an EQ
+        with every band off is a copy. */
+    const auto channels = std::clamp (juce::SystemStats::getEnvironmentVariable ("WFG_M86_CHANNELS", "2").getIntValue(), 1, 64);
+    const auto realState = juce::SystemStats::getEnvironmentVariable ("WFG_REAL_STATE", {});
+    const auto statePath = realState.isEmpty() ? std::string {}
+                                               : juce::File::getCurrentWorkingDirectory().getChildFile (realState)
+                                                     .getFullPathName().toStdString();
 
     plugin::shareWorkgroupHandle (nullptr);
 
     MESSAGE ("M86 on " << juce::SystemStats::getOperatingSystemName() << ", "
              << juce::SystemStats::getCpuModel() << ", " << juce::SystemStats::getNumCpus() << " cores, "
-             << seconds << " s a row");
+             << seconds << " s a row, " << channels << " channel(s)"
+             << (statePath.empty() ? std::string() : ", the real plugin in " + statePath));
     MESSAGE ("plugin | block | limit | phase | children | lanes | n | p50 us | p99 | p99.9 | max | over 250 us | over 0.3 period"
              " | misses | starved | longest run | failed | resets | reset p50 us | reset max | first late blocks");
 
     auto childIndex = 0;
+    std::vector<std::string> saidLayout;
 
-    const auto make = [&childIndex] (const std::string& identifier, const std::string& xml,
-                                     int laneCount, int block, std::int64_t limitUs)
+    const auto make = [&childIndex, &saidLayout, &gain, channels, statePath] (const std::string& identifier, const std::string& xml,
+                                                                              int laneCount, int block, std::int64_t limitUs)
     {
         auto child = std::make_unique<AllowanceChild>();
         std::vector<plugin::ProxyLane*> pointers;
@@ -3218,7 +3415,7 @@ TEST_CASE ("M86: what a real plugin needs of a buffer - under a wide limit and t
             pointers.push_back (child->lanes.back().get());
         }
 
-        auto spec = testGainSpec (child->folder, laneCount, 2, block);
+        auto spec = testGainSpec (child->folder, laneCount, channels, block);
         spec.pluginId = "PG7N" + juce::String (++childIndex).paddedLeft ('0', 4).toStdString();
         spec.identifier = identifier;
         spec.descriptionXml = xml;
@@ -3231,16 +3428,33 @@ TEST_CASE ("M86: what a real plugin needs of a buffer - under a wide limit and t
         INFO (child->host->status().state << ": " << child->host->status().problem);
         REQUIRE (up);
 
+        //  What the ladder found, once a plugin: a cue wider than it passes dry.
+        if (std::find (saidLayout.begin(), saidLayout.end(), identifier) == saidLayout.end())
+        {
+            saidLayout.push_back (identifier);
+            MESSAGE (identifier << " on a lane of " << channels << ": " << child->host->status().layout);
+        }
+
         for (auto& lane : child->lanes)
         {
             if (limitUs > 0)
                 lane->setDeadlineMicroseconds (limitUs);
 
             lane->setEnabled (true);
+
+            if (identifier != gain && ! statePath.empty())
+                lane->wantState (statePath);
         }
 
         for (auto& lane : child->lanes)
-            REQUIRE (waitSettled (*child->host, *lane));
+            REQUIRE (waitSettled (*child->host, *lane, 10000));
+
+        if (identifier != gain && ! statePath.empty())
+        {
+            const auto stateProblem = child->table.statusOf (spec.pluginId).stateProblem;
+            INFO ("the state " << statePath << ": " << stateProblem);
+            REQUIRE (stateProblem.empty());
+        }
 
         return child;
     };
@@ -3328,7 +3542,7 @@ TEST_CASE ("M86: what a real plugin needs of a buffer - under a wide limit and t
                     children.push_back (make (identifier, xml, 1, block, limitUs));
                     auto* lane = children[0]->lanes[0].get();
                     say (name, block, limitUs, "a one lane", 1, 1,
-                         driveForAllowance (children, { lane }, lane, nullptr, block, seconds));
+                         driveForAllowance (children, { lane }, lane, nullptr, block, seconds, channels));
 
                    #if JUCE_MAC
                     /*  THE SAME IN A WORKGROUP, a work interval of the test's
@@ -3339,7 +3553,7 @@ TEST_CASE ("M86: what a real plugin needs of a buffer - under a wide limit and t
                     if (interval != nullptr && plugin::shareWorkgroupHandle (interval)
                          && waitForWorkgroup (*children[0]->host, 1, 5000))
                         say (name, block, limitUs, "a in a workgroup", 1, 1,
-                             driveForAllowance (children, { lane }, lane, nullptr, block, seconds));
+                             driveForAllowance (children, { lane }, lane, nullptr, block, seconds, channels));
                     else
                         MESSAGE ("no workgroup joined here; that row is not taken");
 
@@ -3359,7 +3573,7 @@ TEST_CASE ("M86: what a real plugin needs of a buffer - under a wide limit and t
                     auto* first = children[0]->lanes[0].get();
                     auto* second = children[0]->lanes[1].get();
                     say (name, block, limitUs, "b two lanes", 1, 2,
-                         driveForAllowance (children, { first, second }, second, nullptr, block, seconds));
+                         driveForAllowance (children, { first, second }, second, nullptr, block, seconds, channels));
                     stopAll (children);
                 }
 
@@ -3372,7 +3586,7 @@ TEST_CASE ("M86: what a real plugin needs of a buffer - under a wide limit and t
                     auto* sounding = children[0]->lanes[0].get();
                     auto* armed = children[0]->lanes[1].get();
                     say (name, block, limitUs, "c beside a reset", 1, 2,
-                         driveForAllowance (children, { armed, sounding }, sounding, armed, block, seconds));
+                         driveForAllowance (children, { armed, sounding }, sounding, armed, block, seconds, channels));
                     stopAll (children);
                 }
 
@@ -3392,7 +3606,7 @@ TEST_CASE ("M86: what a real plugin needs of a buffer - under a wide limit and t
                         }
 
                         say (name, block, limitUs, "d beside spinning children", children.size(), order.size(),
-                             driveForAllowance (children, order, order.front(), nullptr, block, seconds));
+                             driveForAllowance (children, order, order.front(), nullptr, block, seconds, channels));
                         stopAll (children);
                     }
                 }

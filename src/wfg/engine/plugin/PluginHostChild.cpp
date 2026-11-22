@@ -21,6 +21,7 @@
 #include <wfg/engine/plugin/PluginLoad.h>
 #include <wfg/engine/plugin/ProcessUtil.h>
 #include <wfg/engine/plugin/ProxyLane.h>
+#include <wfg/engine/plugin/ScratchBlock.h>
 #include <wfg/engine/plugin/SharedRegion.h>
 #include <wfg/engine/plugin/TestGainState.h>
 #include <wfg/engine/plugin/WorkgroupShare.h>
@@ -704,6 +705,7 @@ namespace wfg::plugin
                     keyChannelIndices (*instances[i], keyWidth[i], keyIndex[i].at);
 
                 scratch.setSize (width, blockSize, false, true, true);
+                scratchSamples = blockSize;
                 return true;
             }
 
@@ -912,7 +914,7 @@ namespace wfg::plugin
                         }
 
                         const auto numChannels = std::min<int> (lanes.channels, static_cast<int> (lane->numChannels.load (std::memory_order_relaxed)));
-                        const auto numSamples = std::min<int> ({ lanes.maxSamples, scratch.getNumSamples(),
+                        const auto numSamples = std::min<int> ({ lanes.maxSamples, scratchSamples,
                                                                  static_cast<int> (lane->numSamples.load (std::memory_order_relaxed)) });
 
                         /*  BY THE RULES OF LaneMapping.h (2026-09-26): the cue's
@@ -925,6 +927,7 @@ namespace wfg::plugin
                         if (lanemap::takes (shape))
                         {
                             pointersOf (lane, lanes.channels, lanes.maxSamples, lanePointers);
+                            fitScratch (scratch, numSamples);
                             scratch.clear();
                             lanemap::feedInto (lanePointers.data(), shape, scratch.getArrayOfWritePointers(), numSamples);
 
@@ -948,12 +951,12 @@ namespace wfg::plugin
                                 lanemap::keyInto (keys, keyChannels, into, usable, numSamples);
                             }
 
-                            /*  A view of the scratch at the block's length: the
-                                plugin sees the width it asked for and the length
-                                the parent sent. */
-                            juce::AudioBuffer<float> block (scratch.getArrayOfWritePointers(), scratch.getNumChannels(), numSamples);
+                            /*  The scratch itself, fitted above to the block's
+                                length: the plugin sees the width it asked for and
+                                the length the parent sent. Not a view of it - a
+                                view of 32 channels or more allocates (§142). */
                             midi.clear();
-                            instance.processBlock (block, midi);
+                            instance.processBlock (scratch, midi);
 
                             lanemap::backInto (scratch.getArrayOfReadPointers(), shape, lanePointers.data(), numSamples);
                         }
@@ -980,6 +983,7 @@ namespace wfg::plugin
             std::vector<std::vector<float>> laneBaseline;
             juce::MemoryBlock initialState;
             juce::AudioBuffer<float> scratch;
+            int scratchSamples = 0;     ///< the longest block it was made for; it is fitted to each (§142)
             int width = 0;
 
             /*  EACH INSTANCE'S SIDECHAIN (§141): how wide it is laid out, and
