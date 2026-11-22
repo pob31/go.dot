@@ -72,6 +72,200 @@ namespace wfg::import::als
         };
 
         //======================================================================
+        //  LIVE'S DYNAMICS ONTO THE CUE'S STAGE (namespace draft §141, BIC).
+
+        struct DynFit
+        {
+            doc::ShowDocument::Attributes rows;
+            std::vector<std::pair<Note::Kind, std::string>> said;
+        };
+
+        /*  THE NUMBERS AS LIVE SAVES THEM, read from the author's set
+            (2026-11-22, Live 12.4.16): a Compressor's and a Gate's threshold as
+            a linear amplitude, 1 for 0 dB; their times in milliseconds; the
+            Compressor's model 0 peak, 1 RMS, 2 expand; the Glue Compressor's
+            attack, ratio and release as the index of a step on its knob; a
+            Gate's floor in dB as `Gain`. A sidechain filter at mode 5 is the
+            high-pass (the icon on Live's own screen). Each kept inside the
+            stage's range, and said where it was not. */
+        DynFit fitDyn (const DynOut& dyn)
+        {
+            DynFit fit;
+
+            const auto value = [] (const Device& device, const char* path, double fallback)
+            {
+                const auto found = device.values.find (path);
+                return found != device.values.end() ? found->second : fallback;
+            };
+
+            const auto amplitudeDb = [] (double amplitude)
+            {
+                return amplitude > 1.0e-6 ? 20.0 * std::log10 (amplitude) : -120.0;
+            };
+
+            const auto put = [&fit] (const char* row, const char* words, double wanted, double low, double high,
+                                     const char* unit, int decimals)
+            {
+                const auto kept = std::clamp (wanted, low, high);
+
+                if (std::abs (kept - wanted) > 1.0e-6)
+                    fit.said.push_back ({ Note::Kind::approximated,
+                                          std::string (words) + " of " + number (wanted, decimals) + unit
+                                          + " is past the stage's reach: " + number (kept, decimals) + unit });
+
+                fit.rows.push_back ({ row, number (kept, decimals) });
+            };
+
+            /*  THE KEY'S FILTER, Live's on the sidechain: a high-pass is the
+                stage's own; another shape is said and left. */
+            const auto keyFilter = [&] (const Device& device, const char* on, const char* mode, const char* frequency)
+            {
+                if (value (device, on, 0.0) < 0.5)
+                    return;
+
+                if (static_cast<int> (std::lround (value (device, mode, 5.0))) == 5)
+                    put ("dynKeyLowCut", "its sidechain's high-pass", value (device, frequency, 20.0), 20.0, 2000.0, " Hz", 1);
+                else
+                    fit.said.push_back ({ Note::Kind::approximated, "its sidechain filter is not a high-pass, which the "
+                                                                    "stage's key filter is: not carried" });
+            };
+
+            auto compressorOn = false;
+
+            if (const auto* comp = dyn.compressor)
+            {
+                if (comp->kind == "Compressor2")
+                {
+                    const auto model = static_cast<int> (std::lround (value (*comp, "Model", 0.0)));
+
+                    if (model == 2)
+                    {
+                        fit.said.push_back ({ Note::Kind::dropped, "its Compressor is in Expand mode, which the stage's "
+                                                                   "compressor is not: not carried" });
+                    }
+                    else
+                    {
+                        compressorOn = true;
+                        fit.rows.push_back ({ "dynDetector", model == 1 ? "rms" : "peak" });
+                        put ("dynThreshold", "its Compressor's threshold", amplitudeDb (value (*comp, "Threshold", 1.0)),
+                             -60.0, 0.0, " dB", 2);
+                        put ("dynRatio", "its ratio", value (*comp, "Ratio", 4.0), 1.0, 100.0, ":1", 2);
+                        put ("dynAttack", "its attack", value (*comp, "Attack", 10.0), 0.05, 200.0, " ms", 2);
+                        put ("dynRelease", "its release", value (*comp, "Release", 150.0), 5.0, 2000.0, " ms", 1);
+                        put ("dynKnee", "its knee", value (*comp, "Knee", 6.0), 0.0, 24.0, " dB", 2);
+                        put ("dynMakeup", "its output gain", value (*comp, "Gain", 0.0), -24.0, 24.0, " dB", 2);
+
+                        if (value (*comp, "AutoReleaseControlOnOff", 0.0) > 0.5)
+                            fit.said.push_back ({ Note::Kind::approximated, "its Compressor's release is automatic in "
+                                                                            "Live: the stage's is the time it showed" });
+
+                        if (value (*comp, "GainCompensation", 0.0) > 0.5)
+                            fit.said.push_back ({ Note::Kind::approximated, "its Compressor makes up its own gain in "
+                                                                            "Live: the stage's make-up is left at its "
+                                                                            "output gain" });
+
+                        if (value (*comp, "LookAhead", 0.0) > 0.5)
+                            fit.said.push_back ({ Note::Kind::approximated, "its Compressor looks ahead, which the "
+                                                                            "stage does not" });
+
+                        keyFilter (*comp, "SideChainEq_On", "SideChainEq_Mode", "SideChainEq_Freq");
+                    }
+                }
+                else    // GlueCompressor
+                {
+                    static constexpr double attacks[] = { 0.01, 0.1, 0.3, 1.0, 3.0, 10.0, 30.0 };
+                    static constexpr double ratios[] = { 2.0, 4.0, 10.0 };
+                    static constexpr double releases[] = { 100.0, 200.0, 400.0, 600.0, 800.0, 1200.0 };
+
+                    const auto step = [&] (const char* path, int count, int fallback)
+                    {
+                        return std::clamp (static_cast<int> (std::lround (value (*comp, path, fallback))), 0, count - 1);
+                    };
+
+                    compressorOn = true;
+                    fit.rows.push_back ({ "dynDetector", "peak" });
+                    put ("dynThreshold", "its Glue Compressor's threshold", value (*comp, "Threshold", 0.0), -60.0, 0.0,
+                         " dB", 2);
+                    put ("dynRatio", "its ratio", ratios[step ("Ratio", 3, 1)], 1.0, 100.0, ":1", 2);
+                    put ("dynAttack", "its attack", attacks[step ("Attack", 7, 3)], 0.05, 200.0, " ms", 2);
+
+                    if (const auto release = static_cast<int> (std::lround (value (*comp, "Release", 3.0))); release >= 6)
+                    {
+                        put ("dynRelease", "its release", 400.0, 5.0, 2000.0, " ms", 1);
+                        fit.said.push_back ({ Note::Kind::approximated, "its Glue Compressor's release is automatic: "
+                                                                        "the stage's is 400 ms" });
+                    }
+                    else
+                    {
+                        put ("dynRelease", "its release", releases[std::max (release, 0)], 5.0, 2000.0, " ms", 1);
+                    }
+
+                    put ("dynMakeup", "its make-up", value (*comp, "Makeup", 0.0), -24.0, 24.0, " dB", 2);
+
+                    if (value (*comp, "Range", 70.0) < 69.5)
+                        fit.said.push_back ({ Note::Kind::approximated, "its Glue Compressor takes off "
+                                                                        + number (value (*comp, "Range", 70.0), 1)
+                                                                        + " dB at most, where the stage has no such limit" });
+
+                    if (value (*comp, "PeakClipIn", 0.0) > 0.5)
+                        fit.said.push_back ({ Note::Kind::dropped, "its Glue Compressor's soft clip is not carried" });
+
+                    keyFilter (*comp, "SideChainEq/On", "SideChainEq/Mode", "SideChainEq/Freq");
+                }
+
+                if (value (*comp, "DryWet", 1.0) < 0.995)
+                    fit.said.push_back ({ Note::Kind::approximated, "its compressor is mixed at "
+                                                                    + number (value (*comp, "DryWet", 1.0) * 100.0, 0)
+                                                                    + " % in Live; the stage is the whole of it" });
+            }
+
+            auto gateOn = false;
+
+            if (const auto* gate = dyn.gate)
+            {
+                if (value (*gate, "FlipMode", 0.0) > 0.5)
+                {
+                    fit.said.push_back ({ Note::Kind::dropped, "its Gate is flipped - open while the key is quiet - "
+                                                               "which the stage's gate is not: not carried" });
+                }
+                else
+                {
+                    gateOn = true;
+                    put ("dynGateThreshold", "its Gate's threshold", amplitudeDb (value (*gate, "Threshold", 0.0)), -90.0,
+                         0.0, " dB", 2);
+                    put ("dynGateRange", "its floor", value (*gate, "Gain", -40.0), -80.0, 0.0, " dB", 2);
+                    put ("dynGateAttack", "its attack", value (*gate, "Attack", 1.0), 0.05, 200.0, " ms", 2);
+                    put ("dynGateHold", "its hold", value (*gate, "Hold", 50.0), 0.0, 500.0, " ms", 1);
+                    put ("dynGateRelease", "its release", value (*gate, "Release", 150.0), 5.0, 2000.0, " ms", 1);
+
+                    if (value (*gate, "Return", 0.0) > 0.05)
+                        fit.said.push_back ({ Note::Kind::approximated, "its Gate shuts "
+                                                                        + number (value (*gate, "Return", 0.0), 1)
+                                                                        + " dB under where it opens; the stage's opens "
+                                                                          "and shuts at one threshold" });
+
+                    if (value (*gate, "LookAhead", 0.0) > 0.5)
+                        fit.said.push_back ({ Note::Kind::approximated, "its Gate looks ahead, which the stage does not" });
+
+                    if (dyn.compressor == nullptr)
+                        keyFilter (*gate, "SideChainEq/On", "SideChainEq/Mode", "SideChainEq/Freq");
+                }
+            }
+
+            if (compressorOn || gateOn)
+            {
+                fit.rows.push_back ({ "dynOn", "true" });
+                fit.rows.push_back ({ "dynCompOn", compressorOn ? "true" : "false" });
+                fit.rows.push_back ({ "dynGateOn", gateOn ? "true" : "false" });
+                fit.said.push_back ({ Note::Kind::info, std::string ("its ")
+                                                        + (compressorOn && gateOn ? "compressor and gate are"
+                                                           : compressorOn ? "compressor is" : "gate is")
+                                                        + " the cue's own Dynamics (namespace draft §141, BIC)" });
+            }
+
+            return fit;
+        }
+
         //  EQ EIGHT ONTO THE CUE'S EQ (QL).
 
         struct EqFit
@@ -734,6 +928,75 @@ namespace wfg::import::als
         std::map<std::string, std::string> cueOf;       // walk key to cue id
         std::map<std::string, EqFit> eqOf;              // sound key to its EQ's fit
         std::vector<std::string> inputPatch;            // the live inputs' channels of the interface, in their order (BDU)
+
+        /*  WHAT A KEYED STAGE LISTENS TO, as the show's word (§141, BIC): a
+            mix's aux or bus by `busOf` - a bus is an output, heard a block late
+            (BIB) - or an input of the interface, named and patched once for
+            every stage that listens to it. */
+        std::map<std::string, std::string> keyInputOf;  // Live's input, "M3" or "S1", to the Input made for it
+
+        const auto keyWord = [&] (const KeyOut& key, int scene, const std::string& track) -> std::string
+        {
+            if (! key.mix.empty())
+            {
+                const auto bus = busOf.find (key.mix);
+                return bus != busOf.end() ? bus->second : std::string {};
+            }
+
+            if (key.input < 0)
+                return {};
+
+            const auto live = (key.inputStereo ? "S" : "M") + std::to_string (key.input);
+
+            if (const auto made = keyInputOf.find (live); made != keyInputOf.end())
+                return made->second;
+
+            const auto inputId = ids.of ("keyin:" + live);
+
+            if (! document.createInput (key.inputStereo ? 2 : 1, -1, inputId).ok)
+            {
+                said (Note::Kind::dropped, scene, track, "the input its sidechain listens to could not be made");
+                return {};
+            }
+
+            const auto first = key.inputStereo ? 2 * key.input : key.input;
+            write ("/godot/input/" + inputId + "/name",
+                   key.inputStereo ? "Key in " + std::to_string (first + 1) + "/" + std::to_string (first + 2)
+                                   : "Key in " + std::to_string (first + 1), scene);
+
+            inputPatch.push_back (std::to_string (first));
+
+            if (key.inputStereo)
+                inputPatch.push_back (std::to_string (first + 1));
+
+            keyInputOf[live] = inputId;
+            return inputId;
+        };
+
+        /*  EACH AUX'S OWN DYNAMICS (§141, BIC), and what its plugins' sidechains
+            listened to - said, since an aux's plugin carries no key in the show. */
+        for (const auto& [mix, auxId] : auxes)
+        {
+            if (mix->dyn.present())
+            {
+                const auto fit = fitDyn (mix->dyn);
+
+                for (const auto& [row, text] : fit.rows)
+                    write ("/godot/slot/" + auxId + "/" + row, text, -1);
+
+                for (const auto& [kind, text] : fit.said)
+                    said (kind, -1, mix->name, text);
+
+                if (const auto key = keyWord (mix->dyn.key, -1, mix->name); ! key.empty())
+                    write ("/godot/slot/" + auxId + "/dynKey", key, -1);
+            }
+
+            for (std::size_t at = 0; at < mix->plugins.size() && at < mix->pluginKeys.size(); ++at)
+                if (! mix->pluginKeys[at].isNone())
+                    said (Note::Kind::approximated, -1, mix->name,
+                          "its " + mix->plugins[at]->name + "'s sidechain is not carried onto the aux's plugin: "
+                          "pick its key in the Key menu on the aux's FX");
+        }
         std::map<std::string, std::string> portOf;      // Live's MIDI port by name to the Port declared for it (BDV)
 
         //  THE GRID'S TEMPO: the set's, the scenes' own as tempo cues (§121, BDZ; §122).
@@ -990,6 +1253,21 @@ namespace wfg::import::als
                         said (Note::Kind::approximated, step.scene, sound.trackName, "its EQ Eight has " + unfit);
 
                     eqOf[sound.key] = std::move (fit);
+                }
+
+                //  --- Its dynamics (§141, BIC) -------------------------------------
+                if (sound.dyn.present())
+                {
+                    const auto fit = fitDyn (sound.dyn);
+
+                    for (const auto& [row, text] : fit.rows)
+                        write ("/godot/cue/" + cueId + "/" + row, text, step.scene);
+
+                    for (const auto& [kind, text] : fit.said)
+                        said (kind, step.scene, sound.trackName, text);
+
+                    if (const auto key = keyWord (sound.dyn.key, step.scene, sound.trackName); ! key.empty())
+                        write ("/godot/cue/" + cueId + "/dynKey", key, step.scene);
                 }
 
                 //  --- Its sends ---------------------------------------------------

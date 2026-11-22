@@ -38,6 +38,7 @@
 
 #include <juce_core/juce_core.h>
 
+#include <algorithm>
 #include <map>
 #include <memory>
 #include <set>
@@ -746,4 +747,96 @@ TEST_CASE ("als import: a VST3's state is written as JUCE keeps one, an AU's as 
 
     PluginInfo vst2 { "VST", "Verb", "C:/Verb.dll", "1234", { 1 }, {} };
     CHECK (presetBytesOf (vst2).empty());
+}
+
+TEST_CASE ("als import: Live's Compressor and Glue Compressor are the cues' Dynamics, each keyed by an aux fed by the other track - the author's set (namespace draft §141, BIC)")
+{
+    /*  The author's set (2026-11-22): two tracks ducking each other, a
+        Compressor on the first keyed by the second, Post FX, a Glue Compressor
+        on the second keyed by the first. Each sidechain becomes an aux with no
+        output, fed by its track's cue, keying the other cue. */
+    const auto read = readSet (juce::File { juce::String (std::string (WFG_TEST_FIXTURES_DIR)) }
+                                   .getChildFile ("als").getChildFile ("sidechain.als"));
+    REQUIRE (read.set.has_value());
+
+    const auto walked = walk (*read.set, {});
+    std::map<std::string, std::pair<std::string, int>> media;
+    std::map<std::string, std::string> soundOfTrack;
+
+    for (const auto& step : walked.steps)
+        for (const auto& sound : step.sounds)
+        {
+            media[sound.key] = { sound.file.name, 1 };
+            soundOfTrack[sound.trackId] = sound.key;
+        }
+
+    REQUIRE (soundOfTrack.count ("8") == 1u);
+    REQUIRE (soundOfTrack.count ("14") == 1u);
+
+    doc::ShowDocument document;
+    const auto shown = build (*read.set, walked, "Sidechain", media, document);
+
+    INFO ("problems: " << (document.validate().empty() ? std::string ("none") : document.validate().front()));
+    CHECK (document.validate().empty());
+    CHECK (document.warnings().empty());
+
+    //  The two key auxes: shared rack channels with no output, a key nobody hears.
+    const auto keyOf8 = idFor ("aux:key:8");
+    const auto keyOf14 = idFor ("aux:key:14");
+
+    for (const auto& aux : { keyOf8, keyOf14 })
+    {
+        REQUIRE (elementOf (document, aux) == "Channel");
+        CHECK (at (document, "/godot/slot/" + aux + "/access") == "shared");
+        CHECK (at (document, "/godot/slot/" + aux + "/directOut") == "");
+    }
+
+    CHECK (at (document, "/godot/slot/" + keyOf14 + "/name") == "2-808 Oracle 1 key");
+
+    //  The first cue: Live's Compressor as its stage, RMS, keyed by the second track's aux.
+    const auto first = idFor (soundOfTrack["8"]);
+    CHECK (at (document, "/godot/cue/" + first + "/dynOn") == "true");
+    CHECK (at (document, "/godot/cue/" + first + "/dynCompOn") == "true");
+    CHECK (at (document, "/godot/cue/" + first + "/dynGateOn") == "false");
+    CHECK (at (document, "/godot/cue/" + first + "/dynDetector") == "rms");
+    CHECK (at (document, "/godot/cue/" + first + "/dynThreshold") == "0");
+    CHECK (at (document, "/godot/cue/" + first + "/dynRatio") == "4");
+    CHECK (at (document, "/godot/cue/" + first + "/dynAttack") == "1");
+    CHECK (at (document, "/godot/cue/" + first + "/dynRelease") == "30");
+    CHECK (at (document, "/godot/cue/" + first + "/dynKnee") == "6");
+    CHECK (at (document, "/godot/cue/" + first + "/dynKeyLowCut") == "80");
+    CHECK (at (document, "/godot/cue/" + first + "/dynKey") == keyOf14);
+
+    //  The second: the Glue's steps read - 4:1, 1 ms, 0.6 s - peak, keyed by the first's aux.
+    const auto second = idFor (soundOfTrack["14"]);
+    CHECK (at (document, "/godot/cue/" + second + "/dynDetector") == "peak");
+    CHECK (at (document, "/godot/cue/" + second + "/dynRatio") == "4");
+    CHECK (at (document, "/godot/cue/" + second + "/dynAttack") == "1");
+    CHECK (at (document, "/godot/cue/" + second + "/dynRelease") == "600");
+    CHECK (at (document, "/godot/cue/" + second + "/dynKey") == keyOf8);
+
+    //  Each cue feeds the aux made for its track.
+    const auto sendOf = [&] (const std::string& cueId, const std::string& busId)
+    {
+        for (const auto& child : document.findById (cueId))
+            if (child.hasType ("Send") && child.getProperty ("bus").toString().toStdString() == busId)
+                return true;
+
+        return false;
+    };
+
+    CHECK (sendOf (first, keyOf8));
+    CHECK (sendOf (second, keyOf14));
+    CHECK_FALSE (sendOf (first, keyOf14));
+
+    //  And the report says it, and says the Glue's range that has no place.
+    const auto says = [&] (const std::string& part)
+    {
+        const auto in = [&part] (const Note& note) { return note.text.find (part) != std::string::npos; };
+        return std::any_of (walked.notes.begin(), walked.notes.end(), in)
+            || std::any_of (shown.notes.begin(), shown.notes.end(), in);
+    };
+
+    CHECK (says ("listens to \"2-808 Oracle 1\" (Post FX)"));
+    CHECK (says ("the cue's own Dynamics"));
 }
