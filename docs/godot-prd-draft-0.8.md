@@ -1867,7 +1867,8 @@ voice inserts, in three decisions and what they pulled after them:
   its file, and with the insert switched out it sounds exactly as before.
 - **A plugin's buses are asked, not assumed.** The voice's width, then stereo,
   then mono in and stereo out, then mono - never every bus switched on without a
-  word; a sidechain is fed silence. A cue wider than a plugin takes passes it
+  word; a sidechain is fed silence, unless a key is picked for it (below,
+  2026-11-22). A cue wider than a plugin takes passes it
   dry, whole, and the insert says why - never half wet.
 
 *Amended in 0.8, at the author's direction (2026-09-26) — decisions BW, BX, BY, CE and CG, and
@@ -1975,6 +1976,22 @@ else. Off by default, and a show made before it plays as it did. Only the group'
 sound nor picture fires on its tick as before. The delay is read off the plugins loaded on this
 machine when the group's first member is placed; the document holds the toggle and never the
 figure (§4.10). No latency is added anywhere, and nothing outside such a group moves.
+
+*Amended in 0.8, at the author's direction (2026-11-22) - decisions BHL to BHO, the implementer's
+calls BHP to BHW, `docs/godot-namespace-draft-0.1.md` §141.* **An effect may listen to a key** - a
+signal other than the one it changes, a ducker's or a sidechain compressor's.
+
+- **The key is picked from what the show has**: an aux, a named input, or *this cue after its
+  level* (its sound multiplied by its fader, trims and DCAs). An aux with no outputs is a key nobody
+  hears, fed by sends and shaped by its EQ; a console's mix arrives on an input. No bus is made for
+  a key, and no cue is marked as one.
+- **Two things listen**: a plugin's sidechain input - asked for only when a key is picked, so an
+  insert without one loads as it always did - and **a dynamics stage of Go.dot's own** on every
+  sound cue, mic cue and aux, after the EQ: compressor, gate and a filter on the key, built on
+  spatcore's dynamics module, to which the key is added.
+- A key from an input or from the cue itself is heard in the same block; one from an aux reaches a
+  cue a block late. A key that is not there is silence and a problem mark in words, never a failed
+  run.
 
 ### 3.19 Video
 

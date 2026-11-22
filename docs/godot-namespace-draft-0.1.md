@@ -10760,7 +10760,7 @@ decision letter never reads as the plugin format.
 | **AR** | The machine's list is `<engine>/plugins/known.xml`, written only by the scan, read in every mode (§17.7) | implementer's call, from the code |
 | **AS** | **AU on macOS and LV2 everywhere**; AUv3 and `.aupreset` out | yes — the author's |
 | **AT** | **A plugin can make a mono cue stereo**: mono fed into every input, both sides kept; the routing reads the width after the inserts; summed where there is room for one | yes — the author's |
-| **AV** | The layout ladder: the voice's width, 2-2, 1-2, 1-1, each standard and numbered; never every bus on; a sidechain fed silence | implementer's call |
+| **AV** | The layout ladder: the voice's width, 2-2, 1-2, 1-1, each standard and numbered; never every bus on; a sidechain fed silence (reversed for an insert with a key picked, §141 BHR) | implementer's call |
 | **AW** | A cue wider than an insert takes, or one it would make narrower, passes it dry, whole, with a sentence — never half wet | implementer's call |
 | **AX** | **Load now** (`plugin.load`): the graph rebuilt with the set as it stands, on what plays now, only while nothing plays | implementer's call |
 | **AY** | Latency shown — per entry, per cue through its inserts, re-read after each state — and still never compensated *(but where a timeline group asks: §140, BHH-BHK, the author's, 2026-11-20)* | implementer's call |
@@ -36204,3 +36204,120 @@ same sample, and `run/<id>/lineUp` reads 480.
   one plugin whose states differ in look-ahead are lined up as if both had the longer: the one with the shorter
   is then early by the difference. Per copy needs the Runner to know which copy a cue was lent before it is
   placed; owed.
+
+## 141. A key for an effect: a sidechain from an aux, an input, or the cue itself
+
+**Asked 2026-11-22** by the author: "how would we implement routing sidechains for effects? For instance I could
+use a track (audible or not) or a mix of microphone sent from a console to duck the sound of playing cues. I could
+use the cue's sound after DCA on itself to compress when loud and ease off the compression when the DCA brings
+down the level." And: "Should we add a toggle or drop down menu to make a cue or output available as a sidechain
+signal? Or should we create sidechain buses for cues that are temporary?"
+
+What stood until today. A plugin's buses are asked for by a ladder of widths, and every input that is not a main
+one - a sidechain above all - is switched off where the plugin lets it go and fed silence where it does not (AV,
+§17.12's amendment of 2026-09-26). Go.dot has no dynamics of its own: its EQ is the one effect it makes itself
+(AD). A cue's level - its own, its groups' trims, its DCAs', its lane - is one gain at the very end of the cue,
+in the output stage after every insert, so no effect on a cue has ever heard the DCA move. The audio graph is
+built once, when the show opens, and the only road sound takes from one cue to another is an aux (§93).
+
+The word for the signal an effect listens to, in place of the one it changes, is the **key**. This section uses it
+throughout; whether the screen does is the author's (below).
+
+**The author's decisions** (2026-11-22, from options I wrote; the wording of each option is mine):
+
+- **BHL** **A key is picked from what the show already has.** An effect that can listen to a key offers a menu
+  of three kinds of thing: **an aux** (§93), **a named input** (§18), and **this cue after its level**. Nothing
+  is made for it. An aux with no outputs is a key nobody hears: cues and mic cues send into it from the Sends
+  panel as into any aux, several of them mix there, its EQ shapes what the effect listens to, and its level
+  rides it. A console's mix of microphones arrives on an input and is picked as the input. *(Offered as "Aux,
+  input or itself". Declined: a switch on a cue offering it as a key - it is there only while that cue runs,
+  mixes nothing, and points at a cue a copy or a delete leaves behind; a key bus of a new kind beside the
+  auxes; and a bus made at GO and gone at the end, which the graph built once at open does not allow.)*
+- **BHM** **Two things listen to a key**: a plugin's sidechain input, on a sound cue's insert, a mic cue's
+  rack channel or an aux; and **a dynamics stage of Go.dot's own** on every sound cue, mic cue and aux, beside
+  the EQ. *(A DCA that turns itself down while the key is loud - ducking every cue it trims with no plugin -
+  was offered and not chosen.)*
+- **BHN** **The stage of Go.dot's own is spatcore's.** It is built on spatcore's dynamics module, the one
+  WFS-DIY's channels use, and what the module lacks - a key of its own, one gain for every channel - is added
+  **to spatcore**, its present processing left exactly as it is, so WFS-DIY sounds as it did and may take the
+  key later. *(Offered as "Add it to spatcore", over keeping a copy of the law inside Go.dot.)*
+- **BHO** **Its first version is a compressor, a filter on the key and a gate.** Threshold, ratio, attack,
+  release, knee and make-up; a high-pass and a low-pass on what the detector hears, so a ducker can ignore
+  rumble or hiss; spatcore's expander as the gate; a meter of the reduction, in decibels and in words. *(Chosen
+  over my recommendation of the compressor and the filter alone.)*
+
+**My calls**, each open at review:
+
+- **BHP** **When a key is heard.** An input is copied in before the graph runs (§18.4), so a key from an input
+  is heard in the same audio block. A cue's own key is in the same block by construction. A key from an aux
+  goes by the aux's rule (AVW): an aux renders after every voice and rack channel, so a cue or a mic cue hears
+  an aux's key **one block late** - a millisecond and a third at 64 samples, five at 256, at 48 kHz - and an
+  aux lower in the list than the key's aux hears it in the same block. Nothing compensates. A ducker's attack
+  is longer than any of it; a limiter asked to catch a peak from an aux is not.
+- **BHQ** **"After its level" means multiplied by it.** The cue's level is applied after its inserts and not
+  before (above), so a cue's own key is the sound arriving at the effect, multiplied by the gain the output
+  stage is told at that block - its own level, its trims, its DCAs, its lane, followed as the aux tap follows
+  it (§93.2). It is not the sound after the effect: a key fed back from the effect's own output would be a
+  loop inside one block.
+- **BHR** **A plugin's sidechain input is asked for only when a key is picked.** An insert with no key loads
+  and sounds exactly as before: the ladder of AV, every other bus off or fed silence, so a show made before
+  today plays as it did. A pick asks the plugin's process for its main buses as they are and **one** sidechain
+  input, mono or stereo; a plugin that has none offers no key; one that refuses the layout keeps its sound
+  and says the key is not heard. This is AV reversed for a keyed insert and no other.
+- **BHS** **A key picked under a sounding cue is heard at once.** The plugin's process lays the insert out
+  again on its own thread, the insert passing the cue as it did meanwhile (BHC's rule for an insert switched in
+  under a sounding cue) - never a hole, never half wet.
+- **BHT** **A key is one or two channels.** A wider input or cue is folded to two (a half each, §42), never cut
+  to its first two; a mono key into a stereo sidechain is sent to both sides. Go.dot's own stage links its
+  channels by **the louder side**: one gain for every channel, so the picture of a stereo or wide cue does not
+  move.
+- **BHU** **Where Go.dot's own stage sits.** After the EQ and before the inserts, on every voice, rack channel
+  and aux. With no key it listens to what it changes - the cue before its level, as a console's channel
+  compressor does; with one, to the key. Off, it is not called: the cue is the same to the bit.
+- **BHV** **A key that is not there is silent and says so.** A key naming an aux or an input the show no
+  longer has, or an aux the graph was built without, is silence: the effect works on as if nothing played into
+  it, the run never fails for it, and the cue and the strip carry a problem mark in words (§64). Deleting an
+  aux or an input leaves the key as written - `object.delete` repairs nothing referential, by design - and the
+  validate warning names it; the menu keeps it, marked, so it never opens with nothing picked. An aux is
+  not on its own key menu.
+- **BHW** **The document holds the pick, never what it found.** `fx/key` and the stage's `dynKey` hold `self`,
+  an aux's id or an input's id, or nothing; whether the plugin has a sidechain input, and how wide, is a fact of
+  this machine's copy (`plugin/keyInputs`, read only), and the reduction a meter's, never saved.
+
+**The engine.**
+
+- **The key bus.** A second `AuxBus` (§93.2), a stereo row an aux, written by the aux's tap with the aux's
+  level applied - a second small `CueMatrix` in `AuxTapPlugin`, since the level is the output stage's and the
+  tap stands before it - and read by any effect anywhere; a reader looks at the row's silent flag first.
+- **`audio/KeyReader`.** One small resolver shared by the plugin place and Go.dot's own stage: a packed
+  source (none, input n, aux row, self), set from the tick thread as one atomic word, read once a block into at
+  most two channel pointers; a fold or a self key is written into scratch made when the graph is built.
+- **The plugin's road.** The shared region is **version 7**: each lane gains a key area of two channels by
+  the longest block, always laid out, and the channel count of the key the block carries; the header the
+  sidechain width the plugin offers. The key is written beside the audio, in the same request. In the
+  plugin's process the key goes into the channels of its sidechain bus, and silence into them otherwise.
+  Tracktion's own sidechain (`canSidechain`) stays refused everywhere: it would make every node's width
+  "whatever" and add a remapping node (§17).
+- **Rows.** `fx/key` (text, empty, `panic=park`, show scope; no `refers`, since one word is `self` and the
+  rest are of two kinds - a check of its own in validate); `plugin/keyInputs` (read only); the stage's rows on
+  owner `sound`, written with the stage (SC.7).
+
+**Stages.** SC.0 this section; SC.1 an input keys a plugin, heard end to end (region 7, the child's layout,
+`godot:test-duck`, `fx/key`, a served driver); SC.2 the Key menu on the FX panel and the console, the problem
+mark; SC.3 an aux as a key; SC.4 a cue's own key; SC.5 the keyed entry in spatcore; SC.6 Go.dot's own stage,
+pure; SC.7 on every track, with its rows; SC.8 its panel and meter; SC.9 measurements from M87, close-out, the
+guides.
+
+**Words owed to the author** before they ship: "Key" for the menu, "this cue, after its level", the name of the
+stage of Go.dot's own and its button at the foot, and what the problem mark says.
+
+**Owed, later:** fades that move the stage's values (`fade/dyn`, as §26 moves the EQ); the stage on the D700's
+and the Stream Deck's pages; an Ableton Live set's sidechain routing at the import; an output as a key, which
+is summed only after the graph and would come a block late at best.
+
+**Honest limits.**
+
+- **A key from an aux into a cue is a block late** (BHP), and not compensated.
+- **A keyed plugin that rests wakes cold.** An insert heard and then silent in and out for ten seconds rests
+  (BHF); a ducker over a cue that is paused that long, whose key then speaks, starts from a detector at rest.
+- **A plugin's sidechain is one bus.** A plugin offering two (a "duck" and a "trigger") is given the first.

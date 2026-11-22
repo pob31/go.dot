@@ -5676,7 +5676,7 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 5.0, false, "park",
           "",
-          "The two widths in words - stereo in, stereo out; mono in, stereo out - for the Plugins tab and the FX chain. Every other bus the plugin has, a sidechain above all, is fed silence." },
+          "The two widths in words - stereo in, stereo out; mono in, stereo out - for the Plugins tab and the FX chain. Every other bus the plugin has, a sidechain above all, is fed silence - unless a key is picked for the insert (fx/key), when one sidechain input carries it." },
         { "plugin", "latencySamples",
           ValueType::integer, 'i', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "0",
