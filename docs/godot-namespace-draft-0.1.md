@@ -36460,9 +36460,10 @@ NUC at c548636e; the whole unit suite green in C and fr_FR, file by file, at eac
 - **BIG** **The pages' layouts.** The D700's sixteen rotaries hold the whole stage on one page; a Mackie's eight, two.
   The Stream Deck+'s four dials, four pages. Written below as each is built.
 - **BIH** **What an output key is.** The output's channels as sent to the device - after its trim, its DCA and a
-  held show - folded to two at a half each (BHT), read by every effect in the next block. A row is silent when its
-  output sat at nought the whole block. A cue keyed by an output it feeds is a loop one block long: it runs and is
-  said, never refused.
+  held show, before LTC takes a channel - folded to two at a half each (BHT), read by every effect in the next
+  block. An output at nought is a key of noughts, which no detector hears: there is no silent flag of its own, the
+  aux key bus's rule needing none here. A cue keyed by an output it feeds is a loop one block long: it runs and stays
+  finite, never refused.
 
 **Stages.** DO.0 this record; DO.1 the stage rides live; DO.2-DO.3 fades move it (engine, then screen); DO.4 the
 D700's page; DO.5 the Stream Deck+'s; DO.6-DO.7 an output as a key (audio, then show and screen); DO.8 the Android
@@ -36471,6 +36472,63 @@ remote; DO.9-DO.11 Live's dynamics and sidechain (reader, walk, import); DO.12 c
 **Words owed to the author** before they ship: the D700's screen words for the page, the Stream Deck+'s key and
 title, an output's name in the Key menu and the sentence saying it is late, the import report's sentences, the
 tablet's words in English and French.
+
+**Built, after the close** (2026-11-22/23, all pushed to main):
+
+- **DO.1** (416eb514): the stage rides live under the lock (BIE). The door's `isCueRow` gains the `dyn` rows; the
+  published tree lays a riding dyn row over the saved one and lists it among the cue's riding rows; each panel says
+  only its own ("live, not saved"), so a Dynamics or a DCA mark's ride no longer marks the EQ panel.
+- **DO.2** (8c3b5df5): `fade/dyn` (BIF). The thirteen numbers as `row:value` pairs, their ranges the table's (a test
+  holds them to it), each in its domain; the fade's door `moves/dyn/<row>`; a move starts from the lock's ride or the
+  show (`movedValueOf` - without it a dyn move started from nothing and jumped); Doh! puts it back with the EQ's, and
+  its words name it ("Dynamics threshold") - as they now name a send's place, which had none.
+- **DO.3** (03d352f6): on the screen. A fade on a sound opens its target's Dynamics panel with the fade's numbers over
+  it, a tick above each knob, every write through the fade's door - never the target's row; switches, detector, key
+  and Reset take no hand; the meter stays quiet; the fade's mixer lists the moves ("Dynamics threshold -35.0 dB").
+  Picture: `build/sidechain-shots/dyn-fade.png`.
+- **DO.4** (377ee3f6): the D700's page (BIA, BIG). Fourteen controls (`dynControls`): the compressor's six, the
+  gate's five, the key filter's two, the detector - one page on sixteen rotaries, two on a Mackie's eight. A press on
+  a threshold takes its half in and out, on the key filter the whole stage, on the detector peak or RMS (a choice of
+  two, `peak` and `rms` as a band's shape). Three laws: `decibels` (half a decibel a detent, drawn from the left, no
+  plus sign), `time` (an eighth of a doubling, from nought at a millisecond where the range starts at nought),
+  `ratio` (an eighth of a doubling, "4.0:1"). EQ pressed past its last page goes to Dynamics, then to the surface's
+  own; the EQ button stays lit; the screens say "Dyn" or "Dyn out". `surface/page` gains `dyn`; the foot follows it;
+  the remote's tables carry the map and the two detents.
+- **DO.5** (97b6837d): the Stream Deck+'s four pages of four (threshold, ratio, attack, release; knee, make-up and
+  the key filter; the gate's threshold, range, attack, hold; its release and the detector), the EQ key walking on
+  from the EQ's fifth page and from the last back to the EQ's first; every dial dimmed while the stage is out; the
+  key says "Dyn", the strip "Dynamics 1/4". Picture: `build/sidechain-shots/streamdeck-plus-dyn.png`.
+- **6726e54c**, between them: the child's scratch test of §142 compared floats with `==`, which the strict GCC build
+  refuses; `juce::exactlyEqual`, the Likyū session told and agreeing.
+- **DO.6** (0fb9954e): an output as a key, the audio half (BIB, BIH). A key's word gains a fifth kind (three bits of
+  kind, six of width, twenty-three of first; an unknown kind reads as none). The host keeps each logical output's
+  block after the hold, from the first key that names an output; the key reader reads it as the input tap.
+- **DO.7** (0594148e): in the show and on the screen. Outputs after the auxes on every Key menu ("<name> · output"),
+  the tooltips saying a block late; `wfg validate` and the problem marks count an output as a key the show has.
+  Served driver `blackbox.key-output`: a bed keyed by the output a voice plays on is ducked exactly one block after
+  the voice's first sample. On the NUC the strict GCC 15 build and the real-time sanitizer (Clang 21) are clean over
+  the key, dynamics, aux and proxy cases and every key driver.
+- **DO.8** (go.dot-remote 4fd65da): the Android remote (BID). A Dynamics block on the Cues page after the EQ and a
+  Dynamics page on the Surface tab between EQ and Sends - the three switches, the Key menu (outputs included), the
+  fourteen knobs by the three new laws; riding live under the lock. No version change: the author cuts the release.
+- **DO.9** (caa04e2e): Live's sidechains read - `Device::sideChain`, a track with its tap. The author's set is the
+  fixture (`tests/fixtures/als/sidechain.als`).
+- **DO.10** (f7b3a6b6): walked (BIC). A track's first Compressor or Glue Compressor and first Gate are its sound's
+  stage, a return's its aux's. A sidechain from an input keys as that input; from a return as its aux, or the output
+  it is; from the master as its output; from a track as a key aux made for it ("<track> key", no output) fed by every
+  sound of that track at the sidechain's gain - Live's Pre and Post FX taken before its fader, so the cue's level is
+  taken back off that send, Post Mixer following it. A group is said and not carried.
+- **DO.11** (608b5992): imported. The Compressor's threshold from amplitude to decibels, its model to the detector
+  (Expand not carried); the Glue Compressor's knob steps read (automatic release as 400 ms); the Gate's floor as its
+  range, a flipped gate not carried; a sidechain high-pass as the key filter; anything past the stage's reach kept
+  inside it and said. An aux's plugin carries no key in the show: its sidechain is said for a hand to pick. The
+  author's set imports with both cues keyed by each other's aux (`build/import/SC_compressors`).
+- **Not measured**: what keeping the outputs costs a block - a copy of every output channel, made only once a key
+  names an output. The words in this round are mine, owed to the author (above, and the tablet's in en and fr).
+
+**Still owed:** the author's by-ear tries, and the D700 and Stream Deck+ in hand; the tablet try; the Mac farm's AU
+sidechain (Likyū's AU, §142); whether Live's sidechain filter mode 5 is the high-pass (read from the icon on Live's
+screen).
 
 ## 142. A real plugin measured through the child, and the child's buffer at any width
 

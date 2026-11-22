@@ -111,9 +111,12 @@ has stood in front of the thing.
   filter on what they hear and peak or RMS detection. They, and any plugin with
   a sidechain input, listen to a key picked from what the show already has: a
   named input (a console's talkback mix, heard in the same block), an aux the
-  cues send into (heard or not), or the cue itself after its level, so a DCA
-  brought down eases the compression. The stage's keyed entry is spatcore's,
-  shared with WFS-DIY.
+  cues send into (heard or not), an output (a block late, since outputs are
+  mixed last), or the cue itself after its level, so a DCA brought down eases
+  the compression. Fades move the stage's numbers, it rides live under the
+  show lock, the D700, the Stream Deck+ and the Android remote turn it, and an
+  imported Live set's Compressor, Glue Compressor, Gate and their sidechains
+  come over onto it. The stage's keyed entry is spatcore's, shared with WFS-DIY.
 - **Carts and bindings** (namespace draft §74). A cart is a list GO never
   meets, for cues fired out of order - by a trigger, a key, or the Android
   remote's Cart tab - holding any kind of cue, a group being a macro; its

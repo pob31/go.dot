@@ -4,6 +4,10 @@
 `5d065bab`), for the next Claude session in go.dot and for the author. Everything named below was read at that
 commit.*
 
+> **Done (2026-11-22/23, stages DO.0-DO.12, 8e70027d..).** All five features are built and pushed; the record is
+> §141's "After the close" (decisions BIA-BIH, the built list with hashes, what is still owed). The Android part is
+> go.dot-remote 4fd65da, its release left to the author.
+
 ## In one paragraph
 
 §141 is closed. An effect can now listen to a **key**: a plugin with a sidechain input on any cue, mic channel or aux,
