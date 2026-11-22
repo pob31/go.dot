@@ -401,7 +401,7 @@ namespace wfg::client::model
                     || (cueKind == "video" && text (snapshot, "/godot/cue/" + cue + "/source") == "movie");
 
             case Subject::Kind::sends:     return sound;
-            case Subject::Kind::dyn:       return sound;
+            case Subject::Kind::dyn:
             case Subject::Kind::fx:
             case Subject::Kind::eq:        return sound || fadeOnSound;
             case Subject::Kind::take:      return cueKind == "mic";
@@ -662,10 +662,13 @@ namespace wfg::client::model
                 out.notice = out.eq.notice;
         }
 
-        //  A SOUND'S OWN DYNAMICS (namespace draft §141); its reduction is read with the playhead, below.
+        /*  A SOUND'S OWN DYNAMICS (namespace draft §141); its reduction is read
+            with the playhead, below. Or a fade's: its target's, with the numbers
+            the fade moves over it (BIF). */
         if (subject.kind == Subject::Kind::dyn)
         {
-            out.dyn = readDyn (snapshot, out.subject.objectId);
+            out.dyn = out.cueKind == "fade" ? readFadeDyn (snapshot, out.subject.objectId)
+                                            : readDyn (snapshot, out.subject.objectId);
 
             if (! out.dyn.present)
                 out.notice = out.dyn.notice;
@@ -736,7 +739,8 @@ namespace wfg::client::model
                 out.runId = rest.substr (0, slash);
                 out.position = osc::parseDouble (at (run + "position")).value_or (0.0);
 
-                if (subject.kind == Subject::Kind::dyn)
+                //  A fade's own run takes nothing off: the meter is the stage's, never a fade's.
+                if (subject.kind == Subject::Kind::dyn && out.dyn.fadeId.empty())
                 {
                     out.dyn.running = true;
                     out.dyn.reductionDb = osc::parseDouble (at (run + "reduction")).value_or (0.0);

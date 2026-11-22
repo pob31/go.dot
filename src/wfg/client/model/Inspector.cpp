@@ -1721,6 +1721,7 @@ namespace wfg::client::model
             if (aim == "media" || aim == "mic" || aim == "aux")
             {
                 offer ("EQ, the target's bands the fade moves", "eq");
+                offer ("Dynamics, the target's numbers the fade moves", "dyn");
                 offer ("FX, the target's plugin values the fade moves", "fx");
             }
             else if (aim == "video")
@@ -2161,12 +2162,13 @@ namespace wfg::client::model
                                                    != pictureRows().end(); });
 
             /*  AND WHAT ELSE A FADE MOVES IS ITS MIXER'S (namespace draft §26, PG):
-                a send, an EQ number or a plugin value is a strip, a box or a
+                a send, an EQ or dynamics number or a plugin value is a strip, a box or a
                 plugin's own knob with a tick box, and a list of pairs in a text box
                 is not a way to edit any of them. The Mixer opener is the door. */
             if (out.kind == "fade")
                 std::erase_if (decided, [] (const Field& field)
-                                        { return field.name == "sends" || field.name == "eq" || field.name == "fx"; });
+                                        { return field.name == "sends" || field.name == "eq" || field.name == "dyn"
+                                                   || field.name == "fx"; });
 
             /*  AND A SCRIPT'S SOURCE IS ITS EDITOR'S (namespace draft §66, AMO; the
                 author, 2026-10-15: "No need to show the script content in the

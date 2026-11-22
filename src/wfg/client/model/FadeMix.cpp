@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdlib>
+#include <utility>
 
 namespace wfg::client::model
 {
@@ -97,6 +98,32 @@ namespace wfg::client::model
                 return value >= 1000.0 ? fixed (value / 1000.0, 2) + " kHz" : fixed (value, 0) + " Hz";
 
             return "Q " + fixed (value, 2);
+        }
+
+        //  The Dynamics panel's own words for its numbers (§141, BIF), in its order.
+        constexpr std::pair<const char*, const char*> dynWords[] =
+        {
+            { "dynThreshold", "threshold" }, { "dynRatio", "ratio" }, { "dynAttack", "attack" },
+            { "dynRelease", "release" }, { "dynKnee", "knee" }, { "dynMakeup", "make-up" },
+            { "dynGateThreshold", "gate threshold" }, { "dynGateRange", "gate range" },
+            { "dynGateAttack", "gate attack" }, { "dynGateHold", "gate hold" },
+            { "dynGateRelease", "gate release" }, { "dynKeyLowCut", "key high-pass" },
+            { "dynKeyHighCut", "key low-pass" }
+        };
+
+        std::string dynValueText (const std::string& row, double value)
+        {
+            if (row == "dynRatio")
+                return fixed (value, 1) + ":1";
+
+            if (row == "dynKeyLowCut" || row == "dynKeyHighCut")
+                return value >= 1000.0 ? fixed (value / 1000.0, 2) + " kHz" : fixed (value, 0) + " Hz";
+
+            if (row == "dynAttack" || row == "dynRelease" || row == "dynGateAttack"
+                || row == "dynGateHold" || row == "dynGateRelease")
+                return fixed (value, value < 10.0 ? 2 : 0) + " ms";
+
+            return fixed (value, 1) + " dB";
         }
     }
 
@@ -352,6 +379,15 @@ namespace wfg::client::model
         for (const auto band : { '1', '2', '3', '4' })
             for (const auto* suffix : { "Freq", "Gain", "Q" })
                 addEq (std::string ("eqB") + band + suffix);
+
+        //  The dynamics numbers it moves (§141, BIF), in the panel's order.
+        const auto dyn = cue::parseMoveList (text (snapshot, fade + "dyn"));
+
+        for (const auto& [row, words] : dynWords)
+            if (const auto found = dyn.find (row); found != dyn.end())
+                out.moves.push_back ({ std::string ("dyn/") + row, std::string ("Dynamics ") + words,
+                                       dynValueText (row, found->second),
+                                       fadeMoveAddress (fadeId, std::string ("dyn/") + row) });
 
         //  The inserts it can open, and the plugin values it moves, by name.
         const auto chain = readFx (snapshot, out.targetId);

@@ -6436,6 +6436,79 @@ TEST_CASE ("dyn panel: every number on a knob, every turn a row, the key and the
     }
 }
 
+TEST_CASE ("dyn panel: on a fade, a turn and a tick write the fade's entry, never the target's row, and the switches take no hand (§141, BIF)")
+{
+    std::vector<std::pair<std::string, std::string>> sets;
+    std::vector<juce::String> said;
+
+    ui::DynPanelComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& text) { sets.emplace_back (address, text); };
+    actions.say = [&] (const juce::String& words) { said.push_back (words); };
+
+    ui::DynPanelComponent panel (model::Theme {}, actions);
+    panel.setSize (1400, 240);
+
+    //  The target's stage with the fade's threshold over it.
+    auto reading = dynReading (false);
+    reading.dyn.fadeId = "FADE0001";
+    reading.dyn.fadeMoves = { { "dynThreshold", -24.0 } };
+    panel.show (reading);
+
+    REQUIRE (panel.movesFor ("dynThreshold") != nullptr);
+    CHECK (panel.movesFor ("dynThreshold")->isVisible());
+    CHECK (panel.movesFor ("dynThreshold")->getToggleState());
+    CHECK_FALSE (panel.movesFor ("dynRatio")->getToggleState());
+    CHECK_FALSE (panel.stageSwitch().isEnabled());
+    CHECK_FALSE (panel.detectorMenu().isEnabled());
+    CHECK_FALSE (panel.keyMenuBox().isEnabled());
+    CHECK_FALSE (panel.resetButton().isEnabled());
+    CHECK (sets.empty());
+
+    SUBCASE ("a knob turned is the fade's entry")
+    {
+        panel.knobFor ("dynRatio")->setValue (8.0, juce::sendNotificationSync);
+        REQUIRE (sets.size() == 1);
+        CHECK (sets[0].first == "/godot/cue/FADE0001/moves/dyn/dynRatio");
+        CHECK (wfg::osc::parseDouble (sets[0].second).value_or (0.0) == doctest::Approx (8.0));
+    }
+
+    SUBCASE ("a tick cleared takes the entry out")
+    {
+        panel.movesFor ("dynThreshold")->setToggleState (false, juce::dontSendNotification);
+        panel.movesFor ("dynThreshold")->onClick();
+        REQUIRE (sets.size() == 1);
+        CHECK (sets[0] == std::pair<std::string, std::string> { "/godot/cue/FADE0001/moves/dyn/dynThreshold", "" });
+    }
+
+    SUBCASE ("a switch is no fade's: refused in words, nothing written")
+    {
+        panel.compressorSwitch().onClick();
+        CHECK (sets.empty());
+        CHECK (said.size() == 1);
+    }
+
+    SUBCASE ("off a fade the ticks go and the switches come back")
+    {
+        panel.show (dynReading (false));
+        CHECK_FALSE (panel.movesFor ("dynThreshold")->isVisible());
+        CHECK (panel.stageSwitch().isEnabled());
+    }
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        panel.show (reading);
+        const auto picture = panel.createComponentSnapshot (panel.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("dyn-fade.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (picture, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+}
+
 TEST_CASE ("fx panel: a picture of it, when somebody asks for one")
 {
     //  The EQ picture case's shape: with WFG_SNAPSHOT_DIR set, fx-panel.png; skipped otherwise.

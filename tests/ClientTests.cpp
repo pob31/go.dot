@@ -5035,14 +5035,15 @@ TEST_CASE ("client: the inspector offers the panels a kind actually has, and no 
     const auto onFade = model::openersFor ("fade", "B3N8R5TW", {}, "media");
 
     /*  AND SINCE 2026-10-03 ITS MIXER FIRST (namespace draft §26, PG): what
-        the fade moves, then the target's EQ and chain on the fade (§94), then
-        the curve. */
-    REQUIRE (onFade.size() == 4);
+        the fade moves, then the target's EQ, dynamics (§141, BIF) and chain on
+        the fade (§94), then the curve. */
+    REQUIRE (onFade.size() == 5);
     CHECK (onFade[0].value == "fade");
     CHECK (onFade[1].value == "eq");
-    CHECK (onFade[2].value == "fx");
-    CHECK (onFade[3].value == "curve");
-    CHECK_FALSE (onFade[3].writable);
+    CHECK (onFade[2].value == "dyn");
+    CHECK (onFade[3].value == "fx");
+    CHECK (onFade[4].value == "curve");
+    CHECK_FALSE (onFade[4].writable);
 
     //  And the kinds with nothing longer to look at still offer nothing.
     for (const auto* kind : { "wait", "message" })
@@ -11697,6 +11698,7 @@ TEST_CASE ("client: a fade's mixer has a strip per slider, lit where the fade mo
     set ("target", media.id);
     set ("sends", bus.id + ":-30");
     set ("eq", "eqB2Gain:-6");
+    set ("dyn", "dynThreshold:-35 dynRatio:8");
 
     auto mix = model::readFadeMix (*rig.publish (1), fade.id);
     REQUIRE (mix.present);
@@ -11721,10 +11723,18 @@ TEST_CASE ("client: a fade's mixer has a strip per slider, lit where the fade mo
     CHECK (send.leanAddress.empty() == (send.placement == "none"));
     CHECK_FALSE (send.leanMoved);
 
-    REQUIRE (mix.moves.size() == 1u);
+    REQUIRE (mix.moves.size() == 3u);
     CHECK (mix.moves[0].entry == "eq/eqB2Gain");
     CHECK (mix.moves[0].label == "EQ Band 2 gain");
     CHECK (mix.moves[0].valueText == "-6.0 dB");
+
+    //  The dynamics numbers it moves, after the EQ's, in the panel's order and its words (§141, BIF).
+    CHECK (mix.moves[1].entry == "dyn/dynThreshold");
+    CHECK (mix.moves[1].label == "Dynamics threshold");
+    CHECK (mix.moves[1].valueText == "-35.0 dB");
+    CHECK (mix.moves[1].address == "/godot/cue/" + fade.id + "/moves/dyn/dynThreshold");
+    CHECK (mix.moves[2].entry == "dyn/dynRatio");
+    CHECK (mix.moves[2].valueText == "8.0:1");
 
     //  The send cleared from the list: the strip stays, unlit, at the cue's own -10.
     set ("sends", "");
@@ -11740,10 +11750,21 @@ TEST_CASE ("client: a fade's mixer has a strip per slider, lit where the fade mo
     CHECK (eq.fadeMoves.count ("eqB2Gain") == 1u);
     CHECK (eq.settings.band[1].gain == doctest::Approx (-6.0f));
 
+    //  The stage the Dynamics panel draws on the fade: the target's, with the fade's numbers over it.
+    const auto dyn = model::readFadeDyn (*rig.publish (3), fade.id);
+    REQUIRE (dyn.present);
+    CHECK (dyn.fadeId == fade.id);
+    CHECK (dyn.fadeMoves.size() == 2u);
+    CHECK (dyn.settings.thresholdDb == doctest::Approx (-35.0f));
+    CHECK (dyn.settings.ratio == doctest::Approx (8.0f));
+    CHECK (dyn.settings.attackMs == doctest::Approx (10.0f));          // the target's own
+    CHECK (model::dynRowAt (dyn, "dynThreshold") == "/godot/cue/" + media.id + "/dynThreshold");
+
     //  And the lists are the mixer's, not the inspector's.
     const auto panel = model::inspect (*rig.publish (4), fade.id);
     CHECK (rowIn (panel, "sends") == nullptr);
     CHECK (rowIn (panel, "eq") == nullptr);
+    CHECK (rowIn (panel, "dyn") == nullptr);
     CHECK (rowIn (panel, "fx") == nullptr);
 
     //  A plugin window on a fade is routed by an identifier no Fx can have.
@@ -17330,7 +17351,10 @@ TEST_CASE ("client: a fade has its target's panels - a sound's EQ and chain, a p
     CHECK (model::fadeAimKind (snapshot, "MED1").empty());
 
     CHECK (model::panelFits (snapshot, Kind::eq, "FAD1"));
+    CHECK (model::panelFits (snapshot, Kind::dyn, "FAD1"));
     CHECK (model::panelFits (snapshot, Kind::fx, "FAD1"));
+    CHECK_FALSE (model::panelFits (snapshot, Kind::dyn, "FAD2"));
+    CHECK_FALSE (model::panelFits (snapshot, Kind::dyn, "FAD5"));
     CHECK_FALSE (model::panelFits (snapshot, Kind::picture, "FAD1"));
     CHECK (model::panelFits (snapshot, Kind::picture, "FAD2"));
     CHECK_FALSE (model::panelFits (snapshot, Kind::eq, "FAD2"));
@@ -17361,7 +17385,7 @@ TEST_CASE ("client: a fade has its target's panels - a sound's EQ and chain, a p
     };
 
     CHECK (words (model::openersFor ("fade", "FAD2", {}, "video")) == std::vector<std::string> { "fade", "picture", "curve" });
-    CHECK (words (model::openersFor ("fade", "FAD1", {}, "aux")) == std::vector<std::string> { "fade", "eq", "fx", "curve" });
+    CHECK (words (model::openersFor ("fade", "FAD1", {}, "aux")) == std::vector<std::string> { "fade", "eq", "dyn", "fx", "curve" });
     CHECK (words (model::openersFor ("fade", "FAD4")) == std::vector<std::string> { "fade", "curve" });
 
     /*  THE MIXER ON A PICTURE: no level, which a picture does not read - how

@@ -31,6 +31,12 @@
 
     EVERY TURN IS A `node.set` on the cue's own row: a decision the show keeps,
     coalesced by the engine as a drag goes, heard at once on a sounding cue.
+
+    ON A FADE (§141, BIF) it draws the target's stage with the fade's numbers
+    over it, a tick box above each knob: ticked, the fade moves that number to
+    the knob; cleared, it leaves it alone. Every write goes through the fade's
+    door (`moves/dyn/<row>`), never the target's row; the switches, the
+    detector, the key and Reset show the target's and take no hand.
 */
 
 #include <wfg/client/model/Foot.h>
@@ -75,6 +81,7 @@ namespace wfg::client::ui
             row's name ("dynThreshold"), or null; the switches; the menus; and
             what the meter says in words. */
         juce::Slider* knobFor (const std::string& row);
+        juce::ToggleButton* movesFor (const std::string& row);
         juce::ToggleButton& stageSwitch() noexcept      { return inSwitch; }
         juce::ToggleButton& compressorSwitch() noexcept { return compSwitch; }
         juce::ToggleButton& gateSwitch() noexcept       { return gateSwitchButton; }
@@ -88,6 +95,7 @@ namespace wfg::client::ui
 
         int scaled (int base) const;
         void write (const std::string& row, const std::string& text);
+        bool onFade() const noexcept;
         void refreshKey();
 
         model::Theme theme;

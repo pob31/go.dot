@@ -17,10 +17,13 @@
 #include <wfg/client/ui/DynPanelComponent.h>
 
 #include <wfg/client/model/Dyn.h>
+#include <wfg/client/model/FadeMix.h>
 #include <wfg/client/ui/Look.h>
+#include <wfg/engine/cue/FadeMoves.h>
 
 #include <algorithm>
 #include <cmath>
+#include <initializer_list>
 #include <string>
 #include <vector>
 
@@ -29,25 +32,6 @@ namespace wfg::client::ui
     namespace
     {
         enum class Group { compressor, gate, key };
-
-        //  What a knob shows of the stage, by its row.
-        float valueOf (const audio::DynSettings& s, const std::string& row)
-        {
-            if (row == "dynThreshold")     return s.thresholdDb;
-            if (row == "dynRatio")         return s.ratio;
-            if (row == "dynAttack")        return s.attackMs;
-            if (row == "dynRelease")       return s.releaseMs;
-            if (row == "dynKnee")          return s.kneeDb;
-            if (row == "dynMakeup")        return s.makeupDb;
-            if (row == "dynGateThreshold") return s.gateThresholdDb;
-            if (row == "dynGateRange")     return s.gateRangeDb;
-            if (row == "dynGateAttack")    return s.gateAttackMs;
-            if (row == "dynGateHold")      return s.gateHoldMs;
-            if (row == "dynGateRelease")   return s.gateReleaseMs;
-            if (row == "dynKeyLowCut")     return s.keyLowCutHz;
-            if (row == "dynKeyHighCut")    return s.keyHighCutHz;
-            return 0.0f;
-        }
 
         //  The reduction the bar is drawn against: twenty-four decibels down is its foot.
         constexpr double meterFloorDb = -24.0;
@@ -60,6 +44,7 @@ namespace wfg::client::ui
         Group group;
         juce::Label name;
         juce::Slider slider { juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::TextBoxBelow };
+        juce::ToggleButton moves;   ///< on a fade only: whether it moves this number (BIF)
     };
 
     DynPanelComponent::DynPanelComponent (const model::Theme& themeToUse, Actions actionsToUse)
@@ -118,8 +103,27 @@ namespace wfg::client::ui
                     write (row, juce::String (slider->getValue(), std::max (decimals, 2)).toStdString());
             };
 
+            /*  ON A FADE, A TICK BOX ABOVE THE KNOB (§141, BIF), as the EQ
+                panel's beside its numbers: ticked, the fade moves the row to
+                the knob; cleared, it leaves the row alone. Ticking one it did
+                not move starts it at what the target holds now. */
+            knob->moves.setWantsKeyboardFocus (false);
+            knob->moves.setTooltip ("Whether the fade moves " + juce::String (spec.label).toLowerCase()
+                                    + " - clear it to leave the number alone");
+            knob->moves.onClick = [this, row, decimals, slider, moves = &knob->moves]
+            {
+                if (updating)
+                    return;
+
+                if (moves->getToggleState())
+                    write (row, juce::String (slider->getValue(), std::max (decimals, 2)).toStdString());
+                else
+                    write (row, {});
+            };
+
             addAndMakeVisible (knob->name);
             addAndMakeVisible (knob->slider);
+            addChildComponent (knob->moves);
             knobs.push_back (std::move (knob));
         }
 
@@ -216,10 +220,35 @@ namespace wfg::client::ui
         repaint();
     }
 
+    bool DynPanelComponent::onFade() const noexcept
+    {
+        return ! reading.dyn.fadeId.empty();
+    }
+
     void DynPanelComponent::write (const std::string& row, const std::string& text)
     {
-        if (actions.set && reading.dyn.present)
-            actions.set (model::dynRowAt (reading.dyn, row), text);
+        if (! actions.set || ! reading.dyn.present)
+            return;
+
+        /*  ON A FADE, THROUGH THE FADE'S DOOR (§141, BIF): the number becomes
+            one of what the fade moves, and an empty text takes it out - never
+            the target's own row. A switch, the detector or the key is not a
+            fade's to move, and says so. */
+        if (onFade())
+        {
+            if (! cue::isMovableDynRow (row))
+            {
+                if (actions.say)
+                    actions.say ("A fade moves numbers, not switches - set those on the cue itself.");
+
+                return;
+            }
+
+            actions.set (model::fadeMoveAddress (reading.dyn.fadeId, "dyn/" + row), text);
+            return;
+        }
+
+        actions.set (model::dynRowAt (reading.dyn, row), text);
     }
 
     juce::Slider* DynPanelComponent::knobFor (const std::string& row)
@@ -227,6 +256,15 @@ namespace wfg::client::ui
         for (auto& knob : knobs)
             if (knob->row == row)
                 return &knob->slider;
+
+        return nullptr;
+    }
+
+    juce::ToggleButton* DynPanelComponent::movesFor (const std::string& row)
+    {
+        for (auto& knob : knobs)
+            if (knob->row == row)
+                return &knob->moves;
 
         return nullptr;
     }
@@ -251,6 +289,11 @@ namespace wfg::client::ui
         for (auto* child : getChildren())
             child->setVisible (dyn.present);
 
+        //  A FADE MOVES NUMBERS, NOT SWITCHES (BIF): on a fade they show the target's and take no hand.
+        for (auto* control : std::initializer_list<juce::Component*> { &inSwitch, &compSwitch, &gateSwitchButton,
+                                                                       &detector, &keyMenu, &reset })
+            control->setEnabled (! onFade());
+
         inSwitch.setToggleState (s.on, juce::dontSendNotification);
         compSwitch.setToggleState (s.compOn, juce::dontSendNotification);
         gateSwitchButton.setToggleState (s.gateOn, juce::dontSendNotification);
@@ -260,7 +303,23 @@ namespace wfg::client::ui
         {
             //  A knob in a hand is the hand's until it lets go, the send mixer's rule.
             if (! knob->slider.isMouseButtonDown())
-                knob->slider.setValue (valueOf (s, knob->row), juce::dontSendNotification);
+                knob->slider.setValue (model::dynNumberOf (s, knob->row), juce::dontSendNotification);
+
+            /*  ON A FADE, WHAT IT MOVES IS LIT, as the EQ panel's: the name in the
+                accent and its box ticked - the tick the carrier, the colour the
+                help (§4.8). What it leaves alone is the target's, dimmed. */
+            knob->moves.setVisible (dyn.present && onFade());
+
+            if (onFade())
+            {
+                const auto moved = dyn.fadeMoves.count (knob->row) > 0;
+                knob->moves.setToggleState (moved, juce::dontSendNotification);
+                knob->name.setColour (juce::Label::textColourId, Look::colour (theme, moved ? "accent" : "ink-off"));
+                knob->slider.setAlpha (moved ? 1.0f : 0.5f);
+                continue;
+            }
+
+            knob->name.setColour (juce::Label::textColourId, Look::colour (theme, "ink-dim"));
 
             const auto live = knob->group == Group::compressor ? s.compOn
                             : knob->group == Group::gate      ? s.gateOn
@@ -353,7 +412,9 @@ namespace wfg::client::ui
             for (auto* knob : members)
             {
                 auto cell = box.removeFromLeft (width).reduced (scaled (2), 0);
-                knob->name.setBounds (cell.removeFromTop (scaled (16)));
+                auto label = cell.removeFromTop (scaled (16));
+                knob->moves.setBounds (label.removeFromLeft (scaled (18)));   // shown on a fade only
+                knob->name.setBounds (label);
                 knob->slider.setBounds (cell);
             }
         };

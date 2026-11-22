@@ -28,6 +28,7 @@
 #include <wfg/client/model/Fx.h>
 #include <wfg/engine/audio/DynSettings.h>
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -56,6 +57,13 @@ namespace wfg::client::model
             heard and not saved until the window's bar keeps them. */
         std::string live;
 
+        /*  ON A FADE (§141, BIF): the fade the panel writes for, and the numbers
+            it moves with where to. `settings` is then the target's stage with
+            those laid over it - what the fade arrives at. Empty `fadeId` is the
+            cue's own stage. */
+        std::string fadeId;
+        std::map<std::string, double> fadeMoves;
+
         /*  THE REDUCTION of the run sounding it, in dB (`run/reduction`), and
             whether one is: a meter that reads nothing while nothing plays. */
         bool running = false;
@@ -67,6 +75,15 @@ namespace wfg::client::model
 
     /** The stage of a cue or an aux, by its rows. */
     DynReading readDyn (const tree::TreeSnapshot&, const std::string& cueId);
+
+    /** A fade's target's stage with the fade's numbers over it (§141, BIF). */
+    DynReading readFadeDyn (const tree::TreeSnapshot&, const std::string& fadeId);
+
+    /*  One of the stage's thirteen numbers by its row - "dynThreshold" and so
+        on - read from or written into the one value; nought and false for a row
+        that is not one of them. */
+    float dynNumberOf (const audio::DynSettings&, const std::string& row);
+    bool setDynNumber (audio::DynSettings&, const std::string& row, float value);
 
     /** The words the menu says for a key: its label, or the word "not in this show" when it is gone. */
     std::string dynKeyWords (const DynReading&, const std::string& key);

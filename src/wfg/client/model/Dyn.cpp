@@ -17,6 +17,7 @@
 #include <wfg/client/model/Dyn.h>
 
 #include <wfg/client/model/Text.h>
+#include <wfg/engine/cue/FadeMoves.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
@@ -85,6 +86,92 @@ namespace wfg::client::model
 
         for (auto& choice : keySources (snapshot, cueId))
             out.keyChoices.push_back (std::move (choice));
+
+        return out;
+    }
+
+    namespace
+    {
+        //  Each number's place in the one value, by its row.
+        float* fieldOf (audio::DynSettings& s, const std::string& row)
+        {
+            if (row == "dynThreshold")     return &s.thresholdDb;
+            if (row == "dynRatio")         return &s.ratio;
+            if (row == "dynAttack")        return &s.attackMs;
+            if (row == "dynRelease")       return &s.releaseMs;
+            if (row == "dynKnee")          return &s.kneeDb;
+            if (row == "dynMakeup")        return &s.makeupDb;
+            if (row == "dynGateThreshold") return &s.gateThresholdDb;
+            if (row == "dynGateRange")     return &s.gateRangeDb;
+            if (row == "dynGateAttack")    return &s.gateAttackMs;
+            if (row == "dynGateHold")      return &s.gateHoldMs;
+            if (row == "dynGateRelease")   return &s.gateReleaseMs;
+            if (row == "dynKeyLowCut")     return &s.keyLowCutHz;
+            if (row == "dynKeyHighCut")    return &s.keyHighCutHz;
+            return nullptr;
+        }
+    }
+
+    float dynNumberOf (const audio::DynSettings& settings, const std::string& row)
+    {
+        auto copy = settings;
+        const auto* field = fieldOf (copy, row);
+        return field != nullptr ? *field : 0.0f;
+    }
+
+    bool setDynNumber (audio::DynSettings& settings, const std::string& row, float value)
+    {
+        auto* field = fieldOf (settings, row);
+
+        if (field == nullptr)
+            return false;
+
+        *field = value;
+        return true;
+    }
+
+    DynReading readFadeDyn (const tree::TreeSnapshot& snapshot, const std::string& fadeId)
+    {
+        /*  THE TARGET'S STAGE WITH THE FADE'S NUMBERS OVER IT (§141, BIF), as
+            the EQ panel draws a fade's: what it arrives at. Or the aux it moves
+            (§93), which has a stage of its own. */
+        const auto fade = "/godot/cue/" + fadeId + "/";
+        const auto auxId = text (snapshot, fade + "aux");
+        const auto targetId = ! auxId.empty() ? auxId : text (snapshot, fade + "target");
+
+        if (! text (snapshot, fade + "dca").empty())
+        {
+            DynReading out;
+            out.notice = "This fade moves a DCA, which has no dynamics.";
+            return out;
+        }
+
+        if (targetId.empty())
+        {
+            DynReading out;
+            out.notice = "This fade is aimed at nothing yet - pick its target in the inspector.";
+            return out;
+        }
+
+        auto out = readDyn (snapshot, targetId);
+
+        if (! out.present)
+        {
+            out.notice = "This fade's target has no dynamics: only an audio cue, a mic cue or an aux has them.";
+            return out;
+        }
+
+        out.fadeId = fadeId;
+        out.live.clear();
+
+        for (const auto& [row, value] : cue::parseMoveList (text (snapshot, fade + "dyn")))
+        {
+            if (! cue::isMovableDynRow (row))
+                continue;
+
+            out.fadeMoves[row] = value;
+            setDynNumber (out.settings, row, static_cast<float> (value));
+        }
 
         return out;
     }
