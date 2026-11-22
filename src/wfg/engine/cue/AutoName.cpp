@@ -262,7 +262,7 @@ namespace wfg::cue
         {
             return ! flag (fade, "fade", "rateOn")
                 && own (fade, "sends").empty() && own (fade, "eq").empty()
-                && own (fade, "fx").empty() && own (fade, "video").empty();
+                && own (fade, "dyn").empty() && own (fade, "fx").empty() && own (fade, "video").empty();
         }
     }
 

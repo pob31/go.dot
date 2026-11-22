@@ -54,6 +54,8 @@
 #include <wfg/engine/audio/CueMatrix.h>
 #include <wfg/engine/cue/FadeJob.h>
 #include <wfg/engine/cue/FadeMoveRows.h>
+#include <wfg/engine/cue/FadeMoves.h>
+#include <wfg/engine/document/Schema.h>
 #include <wfg/engine/cue/BeatClock.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/RunCommands.h>
@@ -21034,6 +21036,39 @@ TEST_CASE ("go.doh: a level the GO faded comes back and the cue plays on")
     replaysTheSame (rig);
 }
 
+TEST_CASE ("go.doh: a Dynamics number the GO's fade moved comes back, and says so in its words (§141, BIF)")
+{
+    FadeRig rig;
+    const auto media = rig.startMedia();
+
+    rig.setCue (rig.fadeId, "levelOn", "false");
+    rig.setCue (rig.fadeId, "dyn", "dynThreshold:-40");
+
+    parkFor (rig, rig.fadeId);
+    REQUIRE (rig.submitAndTick ("go").rejected == 0);
+
+    for (int n = 0; n < 25; ++n)
+        rig.tickOnce();
+
+    const auto movedTo = rig.runs.find (media)->moved.at ("dyn/dynThreshold");
+    REQUIRE (movedTo < -25.0);
+
+    REQUIRE (doh (rig).rejected == 0);
+
+    //  One job of nobody's, from where the fade had got to back to the show's -20.
+    const auto key = "move:" + media + ":dyn/dynThreshold";
+    const auto jobs = jobsOn (rig, key);
+    REQUIRE (jobs.size() == 1u);
+    CHECK (jobs.front().self.empty());
+    CHECK (jobs.front().toValue == doctest::Approx (-20.0));
+
+    for (int n = 0; n < 55; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runs.find (media)->moved.at ("dyn/dynThreshold") == doctest::Approx (-20.0));
+    CHECK (rig.runs.find (media)->state == cue::runState::playing);
+}
+
 TEST_CASE ("go.doh: a stop the GO's fade was carrying on a sound is called off")
 {
     /*  The design's test 7: a two-second fade-and-stop the GO fired, half a
@@ -22269,6 +22304,95 @@ TEST_CASE ("fade moves: an EQ gain travels in dB and a frequency in its logarith
     CHECK (rig.document.getAttribute ("/godot/cue/" + rig.mediaId + "/eqB2Freq").value_or ("500") == "500");
 }
 
+TEST_CASE ("fade moves: the dynamics list is the stage's thirteen numbers, in the table's ranges, each in its domain (§141, BIF)")
+{
+    const std::string_view numbers[] = { "dynThreshold", "dynRatio", "dynAttack", "dynRelease", "dynKnee",
+                                         "dynMakeup", "dynGateThreshold", "dynGateRange", "dynGateAttack",
+                                         "dynGateHold", "dynGateRelease", "dynKeyLowCut", "dynKeyHighCut" };
+
+    for (const auto name : numbers)
+    {
+        const std::string row { name };
+        INFO (row);
+        CHECK (cue::isMovableDynRow (row));
+
+        //  THE TABLE'S RANGE, so the door refuses what the document would and the job clamps where it does.
+        const doc::AttributeRow* found = nullptr;
+
+        for (const auto* each : doc::Schema::rowsForOwner ("sound"))
+            if (each->name == name)
+                found = each;
+
+        REQUIRE (found != nullptr);
+        REQUIRE (found->hasMin);
+        REQUIRE (found->hasMax);
+
+        double lowest = 0.0, highest = 0.0;
+        cue::dynRowRange (row, lowest, highest);
+        CHECK (lowest == doctest::Approx (found->minimum));
+        CHECK (highest == doctest::Approx (found->maximum));
+
+        //  Decibels where the row is in dB; the rest in their logarithm.
+        CHECK ((cue::dynRowDomain (row) == cue::MoveDomain::decibels) == (found->unit == "dB"));
+    }
+
+    //  Never a switch, the detector or the key: a switch has no middle.
+    for (const auto* row : { "dynOn", "dynCompOn", "dynGateOn", "dynDetector", "dynKey", "eqB1Gain" })
+        CHECK_FALSE (cue::isMovableDynRow (row));
+
+    //  Read off the list: clamped to the range, keyed `dyn/<row>`, what is not a number skipped.
+    const auto moves = cue::readFadeMoves ("", "", "", "", "dynThreshold:-90 dynAttack:40 dynOn:1");
+    REQUIRE (moves.size() == 2u);
+    CHECK (moves[0].entry == "dyn/dynAttack");
+    CHECK (moves[0].value == doctest::Approx (40.0));
+    CHECK (moves[0].domain == cue::MoveDomain::logarithm);
+    CHECK (moves[1].entry == "dyn/dynThreshold");
+    CHECK (moves[1].value == doctest::Approx (-60.0));
+    CHECK (moves[1].domain == cue::MoveDomain::decibels);
+
+    //  And a gate's hold from nought goes straight, a logarithm of nothing being no road.
+    CHECK (cue::moveValueAt (0.0, 100.0, 0.5, false, cue::MoveDomain::logarithm) == doctest::Approx (50.0));
+}
+
+TEST_CASE ("fade moves: a Dynamics threshold travels in dB and an attack in its logarithm, and the voice is given both (§141, BIF)")
+{
+    LaneRig rig;
+    const auto id = rig.launch();
+    const auto track = rig.runs.find (id)->track;
+
+    //  The stage starts at the table's -20 dB and 10 ms; to -40 dB and 40 ms.
+    aimAtTheList (rig, "dyn", "dynThreshold:-40 dynAttack:40 dynOn:true");
+    rig.fire (rig.fadeId);
+
+    //  Two numbers move; the switch is no fade's to move.
+    CHECK (moveJobs (rig) == 2u);
+
+    for (const auto& job : rig.runner.fades())
+        if (job.move == "dyn/dynThreshold")
+            CHECK (job.fromValue == doctest::Approx (-20.0));
+
+    play (rig, 25);
+
+    const auto& moved = rig.runs.find (id)->moved;
+    CHECK (moved.at ("dyn/dynThreshold") == doctest::Approx (-30.0).epsilon (0.03));
+    CHECK (moved.at ("dyn/dynAttack") == doctest::Approx (20.0).epsilon (0.03));
+    CHECK (moved.count ("dyn/dynOn") == 0u);
+
+    //  The voice follows at the tick rate.
+    REQUIRE (rig.audio.dyns.count (track) == 1u);
+    CHECK (rig.audio.dyns[track].thresholdDb < -22.0f);
+
+    const auto fade = rig.runs.all().back().id;
+    CHECK (playUntil (rig, [&] { return rig.runs.find (fade)->isFinished(); }, 40));
+
+    CHECK (rig.audio.dyns[track].thresholdDb == doctest::Approx (-40.0f));
+    CHECK (rig.audio.dyns[track].attackMs == doctest::Approx (40.0f));
+    CHECK_FALSE (rig.audio.dyns[track].on);
+
+    //  The run's, never the cue's: the cue's own stage is where it was.
+    CHECK (rig.document.getAttribute ("/godot/cue/" + rig.mediaId + "/dynThreshold").value_or ("-20") == "-20");
+}
+
 TEST_CASE ("fade moves: a plugin value moves in its 0..1 from the cue's own, keyed by the set entry")
 {
     LaneRig rig;
@@ -22427,6 +22551,18 @@ TEST_CASE ("fade moves: the door sets one entry, an empty text takes it out, and
     CHECK_FALSE (write (fade + "eq/eqB1Gain", "40")->applied);
     CHECK_FALSE (write ("/godot/cue/" + rig.mediaId + "/moves/send/" + bus.id, "-6")->applied);
     CHECK_FALSE (write (fade + "fx/nothing/0", "0.5")->applied);
+
+    //  The dynamics stage's numbers (§141, BIF), the same way - and never its switches, detector or key.
+    REQUIRE (write (fade + "dyn/dynThreshold", "-30")->applied);
+    REQUIRE (write (fade + "dyn/dynRelease", "400")->applied);
+    CHECK (rig.document.getAttribute ("/godot/cue/" + rig.fadeId + "/dyn").value_or ("") == "dynRelease:400 dynThreshold:-30");
+    REQUIRE (write (fade + "dyn/dynRelease", "")->applied);
+    CHECK (rig.document.getAttribute ("/godot/cue/" + rig.fadeId + "/dyn").value_or ("") == "dynThreshold:-30");
+    CHECK_FALSE (write (fade + "dyn/dynOn", "true")->applied);
+    CHECK_FALSE (write (fade + "dyn/dynDetector", "1")->applied);
+    CHECK_FALSE (write (fade + "dyn/dynKey", "1")->applied);
+    CHECK_FALSE (write (fade + "dyn/dynThreshold", "10")->applied);
+    CHECK_FALSE (write (fade + "dyn/dynRatio", "0.5")->applied);
 }
 
 TEST_CASE ("fade moves: the door sets a picture's pair and a send into an aux, and refuses a row a fade cannot move (namespace draft §94)")

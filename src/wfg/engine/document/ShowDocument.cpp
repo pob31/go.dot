@@ -2057,7 +2057,7 @@ namespace wfg::doc
                 return any ({ "target", "verb", "andGo", "range" });
 
             if (element == "Fade")
-                return any ({ "target", "dca", "level", "levelOn", "rateOn", "sends", "eq", "fx", "video",
+                return any ({ "target", "dca", "level", "levelOn", "rateOn", "sends", "eq", "dyn", "fx", "video",
                               "stopWhenDone" });
 
             //  MTC or LTC, from where, for how long (namespace draft §59).

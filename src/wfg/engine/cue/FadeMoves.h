@@ -45,7 +45,7 @@ namespace wfg::cue
 
     struct FadeMove
     {
-        std::string entry;      ///< `send/<bus>`, `eq/<row>`, `fx/<plugin>/<index>`
+        std::string entry;      ///< `send/<bus>`, `eq/<row>`, `dyn/<row>`, `fx/<plugin>/<index>`
         double value = 0.0;
         MoveDomain domain = MoveDomain::linear;
     };
@@ -68,6 +68,19 @@ namespace wfg::cue
     /** The domain of an EQ row: a gain in dB, the rest logarithmic. */
     MoveDomain eqRowDomain (const std::string& row);
 
+    /*  THE DYNAMICS ROWS A FADE MAY MOVE (namespace draft §141, BIF): the
+        stage's thirteen numbers - the compressor's six, the gate's five, the
+        key filter's two - never a switch, the detector or the key. */
+    bool isMovableDynRow (const std::string& row);
+
+    /** The range a dynamics row takes (godot-parameters.csv, sound/dyn*), for the door and the job. */
+    void dynRowRange (const std::string& row, double& lowest, double& highest);
+
+    /*  The domain of a dynamics row: a threshold, the knee, the make-up and the
+        gate's range in dB; the ratio, the times and the key's cuts in their
+        logarithm, so a sweep spends as long on each doubling. */
+    MoveDomain dynRowDomain (const std::string& row);
+
     /*  A SEND'S PLACE A FADE MAY MOVE (namespace draft §113, BCK): its pan,
         its width or its balance - `fade/places`, `<bus>/<row>:value`, the
         entry `place/<bus>/<row>`. The swap is a switch and stays. A pan and a
@@ -75,9 +88,10 @@ namespace wfg::cue
     bool isMovablePlaceRow (const std::string& row);
     void placeRowRange (const std::string& busAndRow, double& lowest, double& highest);
 
-    /** Every entry of the three lists, in a stable order: sends, EQ, plugins. */
+    /** Every entry of the lists, in a stable order: sends, EQ, plugins, places, dynamics. */
     std::vector<FadeMove> readFadeMoves (const std::string& sends, const std::string& eq,
-                                         const std::string& fx, const std::string& places);
+                                         const std::string& fx, const std::string& places,
+                                         const std::string& dyn);
 
     /*  THE PICTURE'S ROWS A FADE MOVES (namespace draft §36, VS; §94): the
         `video` pairs - opacity, scale, offsetX, offsetY, rotation, a movie's
@@ -91,7 +105,7 @@ namespace wfg::cue
         for fx. False for anything else. */
     bool splitMoveEntry (const std::string& entry, std::string& kind, std::string& name, int& index);
 
-    /** The fade attribute an entry kind lives in: sends, eq, fx, video. */
+    /** The fade attribute an entry kind lives in: sends, eq, dyn, fx, video, places. */
     const char* moveListAttribute (const std::string& kind);
 
     /** The value along a move: `progress` 0..1, shaped by `sCurve` when asked. */

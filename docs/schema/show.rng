@@ -2879,6 +2879,12 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="dyn">
+          <a:documentation>The target&apos;s dynamics numbers this fade moves, as row:value pairs space-separated - dynThreshold, dynRatio, dynAttack, dynRelease, dynKnee, dynMakeup, the gate&apos;s dynGateThreshold, dynGateRange, dynGateAttack, dynGateHold and dynGateRelease, and the key filter&apos;s dynKeyLowCut and dynKeyHighCut, in the rows&apos; own units and ranges (namespace draft §141, BIF). A threshold, the knee, the make-up and the gate&apos;s range move straight in dB; the ratio, the times and the cuts straight in their logarithm. The stage&apos;s switches, its detector and its key are not listed: a fade is a move between two numbers. Empty moves nothing.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="enabled">
           <a:documentation>Whether the cue runs at all. A disabled cue is skipped, not deleted.</a:documentation>
           <choice>

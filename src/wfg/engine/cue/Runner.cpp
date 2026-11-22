@@ -7240,7 +7240,8 @@ namespace wfg::cue
             sends, EQ numbers and plugin values, each a job of its own under
             this fade's one report (PC). A DCA has none of them. */
         const auto moves = textOf (cue, "dca").empty()
-                             ? readFadeMoves (textOf (cue, "sends"), textOf (cue, "eq"), textOf (cue, "fx"), textOf (cue, "places"))
+                             ? readFadeMoves (textOf (cue, "sends"), textOf (cue, "eq"), textOf (cue, "fx"), textOf (cue, "places"),
+                                              textOf (cue, "dyn"))
                              : std::vector<FadeMove> {};
 
         if (! levelOn && textOf (cue, "aux").empty()
@@ -7262,7 +7263,8 @@ namespace wfg::cue
         if (const auto auxId = textOf (cue, "aux"); ! auxId.empty())
         {
             beginAuxFade (tick, auxId, runId, levelOn, toDb,
-                          readFadeMoves (textOf (cue, "sends"), textOf (cue, "eq"), textOf (cue, "fx"), textOf (cue, "places")),
+                          readFadeMoves (textOf (cue, "sends"), textOf (cue, "eq"), textOf (cue, "fx"),
+                                         textOf (cue, "places"), textOf (cue, "dyn")),
                           numberOf (cue, "duration"), fadeCurveFrom (textOf (cue, "curve")),
                           std::move (drawn.points));
             return;
@@ -8406,7 +8408,8 @@ namespace wfg::cue
             return rest;
         }
 
-        if (kind == "eq")
+        //  An EQ number or the dynamics stage's (§141, BIF): what the lock rides, then the show's.
+        if (kind == "eq" || kind == "dyn")
         {
             if (liveLayer != nullptr)
                 if (const auto* riding = liveLayer->rowOf (cueId, name))
@@ -8481,6 +8484,33 @@ namespace wfg::cue
 
         if (kind == "fx")
             return deviceLabel ("plugin", name) + " parameter " + std::to_string (index + 1);
+
+        //  A send's place (§113): "pan of the send to Reverb".
+        if (kind == "place")
+        {
+            const auto slash = name.find ('/');
+            return name.substr (slash + 1) + " of the send to " + deviceLabel ("bus", name.substr (0, slash));
+        }
+
+        //  dynThreshold -> "Dynamics threshold" (§141, BIF).
+        if (kind == "dyn")
+        {
+            static constexpr std::pair<std::string_view, std::string_view> words[] =
+            {
+                { "dynThreshold", "threshold" }, { "dynRatio", "ratio" }, { "dynAttack", "attack" },
+                { "dynRelease", "release" }, { "dynKnee", "knee" }, { "dynMakeup", "make-up" },
+                { "dynGateThreshold", "gate threshold" }, { "dynGateRange", "gate range" },
+                { "dynGateAttack", "gate attack" }, { "dynGateHold", "gate hold" },
+                { "dynGateRelease", "gate release" }, { "dynKeyLowCut", "key low cut" },
+                { "dynKeyHighCut", "key high cut" }
+            };
+
+            for (const auto& [row, said] : words)
+                if (name == row)
+                    return "Dynamics " + std::string (said);
+
+            return "Dynamics";
+        }
 
         //  eqB2Gain -> "EQ band 2 gain", eqHpfFreq -> "EQ high-pass frequency".
         if (name == "eqHpfFreq")

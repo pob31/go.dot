@@ -118,6 +118,56 @@ namespace wfg::cue
         return bandRow (row, suffix) && suffix == "Gain" ? MoveDomain::decibels : MoveDomain::logarithm;
     }
 
+    namespace
+    {
+        //  The table's ranges and how each travels (godot-parameters.csv, sound/dyn*; BIF).
+        struct DynRow { const char* row; double lowest; double highest; MoveDomain domain; };
+
+        constexpr DynRow dynRows[] =
+        {
+            { "dynThreshold",     -60.0,    0.0,     MoveDomain::decibels  },
+            { "dynRatio",          1.0,     100.0,   MoveDomain::logarithm },
+            { "dynAttack",         0.05,    200.0,   MoveDomain::logarithm },
+            { "dynRelease",        5.0,     2000.0,  MoveDomain::logarithm },
+            { "dynKnee",           0.0,     24.0,    MoveDomain::decibels  },
+            { "dynMakeup",        -24.0,    24.0,    MoveDomain::decibels  },
+            { "dynGateThreshold", -90.0,    0.0,     MoveDomain::decibels  },
+            { "dynGateRange",     -80.0,    0.0,     MoveDomain::decibels  },
+            { "dynGateAttack",     0.05,    200.0,   MoveDomain::logarithm },
+            { "dynGateHold",       0.0,     500.0,   MoveDomain::logarithm },   // straight from or to nought
+            { "dynGateRelease",    5.0,     2000.0,  MoveDomain::logarithm },
+            { "dynKeyLowCut",      20.0,    2000.0,  MoveDomain::logarithm },
+            { "dynKeyHighCut",     1000.0,  20000.0, MoveDomain::logarithm },
+        };
+
+        const DynRow* dynRowOf (const std::string& row)
+        {
+            for (const auto& entry : dynRows)
+                if (row == entry.row)
+                    return &entry;
+
+            return nullptr;
+        }
+    }
+
+    bool isMovableDynRow (const std::string& row)
+    {
+        return dynRowOf (row) != nullptr;
+    }
+
+    void dynRowRange (const std::string& row, double& lowest, double& highest)
+    {
+        const auto* entry = dynRowOf (row);
+        lowest = entry != nullptr ? entry->lowest : 0.0;
+        highest = entry != nullptr ? entry->highest : 1.0;
+    }
+
+    MoveDomain dynRowDomain (const std::string& row)
+    {
+        const auto* entry = dynRowOf (row);
+        return entry != nullptr ? entry->domain : MoveDomain::linear;
+    }
+
     bool isMovablePlaceRow (const std::string& row)
     {
         return row == "pan" || row == "width" || row == "balance";
@@ -132,7 +182,8 @@ namespace wfg::cue
     }
 
     std::vector<FadeMove> readFadeMoves (const std::string& sends, const std::string& eq,
-                                         const std::string& fx, const std::string& places)
+                                         const std::string& fx, const std::string& places,
+                                         const std::string& dyn)
     {
         std::vector<FadeMove> out;
 
@@ -172,6 +223,17 @@ namespace wfg::cue
             out.push_back ({ "place/" + key, std::clamp (value, lowest, highest), MoveDomain::linear });
         }
 
+        //  The dynamics stage's numbers (§141, BIF), as the EQ's.
+        for (const auto& [row, value] : parseMoveList (dyn))
+        {
+            if (! isMovableDynRow (row))
+                continue;
+
+            double lowest = 0.0, highest = 0.0;
+            dynRowRange (row, lowest, highest);
+            out.push_back ({ "dyn/" + row, std::clamp (value, lowest, highest), dynRowDomain (row) });
+        }
+
         return out;
     }
 
@@ -186,13 +248,17 @@ namespace wfg::cue
         auto rest = entry.substr (slash + 1);
         index = -1;
 
-        if (kind == "send" || kind == "eq" || kind == "video")
+        if (kind == "send" || kind == "eq" || kind == "dyn" || kind == "video")
         {
             if (rest.find ('/') != std::string::npos || rest.find (':') != std::string::npos)
                 return false;
 
             name = rest;
-            return kind == "send" || (kind == "eq" ? isMovableEqRow (rest) : isMovableVideoRow (rest));
+
+            if (kind == "send")  return true;
+            if (kind == "eq")    return isMovableEqRow (rest);
+            if (kind == "dyn")   return isMovableDynRow (rest);
+            return isMovableVideoRow (rest);
         }
 
         /*  A PLACE: `place/<bus>/<row>`, the row one of the three a fade
@@ -237,6 +303,7 @@ namespace wfg::cue
     {
         if (kind == "send") return "sends";
         if (kind == "eq")   return "eq";
+        if (kind == "dyn")  return "dyn";
         if (kind == "fx")   return "fx";
         if (kind == "video") return "video";
         if (kind == "place") return "places";

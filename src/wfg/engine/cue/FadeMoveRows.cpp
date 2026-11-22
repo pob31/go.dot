@@ -129,6 +129,10 @@ namespace wfg::cue
                 {
                     eqRowRange (name, lowest, highest);
                 }
+                else if (kind == "dyn")
+                {
+                    dynRowRange (name, lowest, highest);
+                }
                 else if (kind == "video")
                 {
                     videoRowRange (name, lowest, highest);

@@ -19,9 +19,10 @@
 /*
     ONE ENTRY OF A FADE'S MOVES, BY HAND (namespace draft §26, PF).
 
-    `/godot/cue/<fade>/moves/send/<bus>`, `.../moves/eq/<row>` and
-    `.../moves/fx/<plugin>/<n>`: a number sets that entry of the fade's
-    `sends`, `eq` or `fx` list, and an empty text takes it out - the tick box.
+    `/godot/cue/<fade>/moves/send/<bus>`, `.../moves/eq/<row>`,
+    `.../moves/dyn/<row>` (§141, BIF) and `.../moves/fx/<plugin>/<n>`: a number
+    sets that entry of the fade's `sends`, `eq`, `dyn` or `fx` list, and an empty
+    text takes it out - the tick box.
     FxRows' shape, for its reason: the door reads the list, changes one entry
     and writes the list back through the ordinary door, so the lock, the undo
     step and the coalescing of a drag are the document's - and two entries
@@ -29,8 +30,8 @@
     from a snapshot a pass old could.
 
     WHAT IT REFUSES: `unknown-id` for a cue that is not a fade, a bus or a
-    plugin entry the show has not got; `bad-address` for an EQ row a fade
-    cannot move (a switch, a shape) and, when the catalogue knows the plugin,
+    plugin entry the show has not got; `bad-address` for an EQ or dynamics row
+    a fade cannot move (a switch, a shape, the detector, the key) and, when the catalogue knows the plugin,
     an index past its count; `type-mismatch` for a value that is not a number
     in the row's range.
 */
