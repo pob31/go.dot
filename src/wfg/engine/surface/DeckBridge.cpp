@@ -308,6 +308,7 @@ namespace wfg::surface
             bool fxNone = false;
             bool loopNone = false;
             std::string loopInAt, loopOutAt, loopLengthAt;
+            std::string dynOnAt;            // the aimed cue's dynOn, on the Dynamics pages (§141)
 
             void forgetShown()
             {
@@ -940,7 +941,7 @@ namespace wfg::surface
                 case Page::width:
                     return pageCount (static_cast<int> (wordsOf (textAt (at(), "/godot/audio/mixes")).size()), zones);
                 case Page::fx:   return std::max (1, static_cast<int> (fxPagesOf (aimNow()).size()));
-                case Page::dyn:
+                case Page::dyn:  return deckDynPageCount;
                 case Page::loop:
                 case Page::show: break;
             }
@@ -949,10 +950,22 @@ namespace wfg::surface
         }
 
         /*  A PAGE KEY PRESSED: that page, or its next four again when it is up
-            - round to its first after its last. */
+            - round to its first after its last. The EQ key walks on from the
+            EQ's last page to the cue's dynamics, and from their last back to
+            the EQ's first (namespace draft §141, BIA): no key is free. */
         void turnPage (Deck& deck, Page kind)
         {
-            if (deck.page != kind)
+            if (kind == Page::eq && (deck.page == Page::eq || deck.page == Page::dyn))
+            {
+                if (deck.pageIndex + 1 < countOf (deck))
+                    ++deck.pageIndex;
+                else
+                {
+                    deck.page = deck.page == Page::eq ? Page::dyn : Page::eq;
+                    deck.pageIndex = 0;
+                }
+            }
+            else if (deck.page != kind)
             {
                 deck.page = kind;
                 deck.pageIndex = 0;
@@ -1090,6 +1103,7 @@ namespace wfg::surface
             deck.loopInAt.clear();
             deck.loopOutAt.clear();
             deck.loopLengthAt.clear();
+            deck.dynOnAt.clear();
 
             if (base.empty())
                 return;
@@ -1208,6 +1222,30 @@ namespace wfg::surface
                 return;
             }
 
+            //  The cue's dynamics, four pages of four (`deckDynPages`, §141).
+            if (deck.page == Page::dyn)
+            {
+                const auto& slots = deckDynPages[static_cast<std::size_t> (std::clamp (deck.pageIndex, 0,
+                                                                                    deckDynPageCount - 1))];
+
+                for (int position = 0; position < zones && position < deckEqDials; ++position)
+                {
+                    const auto index = slots[static_cast<std::size_t> (position)];
+                    const auto* found = pageControl (Page::dyn, index);
+
+                    if (found == nullptr)
+                        continue;
+
+                    auto& control = deck.controls[static_cast<std::size_t> (position)];
+                    control.control = index;
+                    control.controlAt = base + std::string (found->row);
+                    control.switchAt = base + std::string (found->switchRow);
+                }
+
+                deck.dynOnAt = base + "dynOn";
+                return;
+            }
+
             //  A band a page, the cuts first (`deckEqPages`), not the D700's run of sixteen.
             const auto& slots = deckEqPages[static_cast<std::size_t> (std::clamp (deck.pageIndex, 0, deckEqPageCount - 1))];
 
@@ -1232,9 +1270,15 @@ namespace wfg::surface
             deck.edited = address;
         }
 
+        //  A dial of the EQ's pages or the dynamics' (§141, BIA): a turn by its law, a press its switch.
         void eqWrite (Deck& deck, const Control& control, int steps, bool pressed, const Submit& submit) const
         {
-            const auto& eq = eqControls[static_cast<std::size_t> (control.control)];
+            const auto* found = pageControl (deck.page, control.control);
+
+            if (found == nullptr)
+                return;
+
+            const auto& eq = *found;
 
             if (pressed)
             {
@@ -1462,13 +1506,13 @@ namespace wfg::surface
 
                 switch (deck.page)
                 {
-                    case Page::eq:   eqWrite (deck, control, steps, pressed, submit);   break;
+                    case Page::eq:
+                    case Page::dyn:  eqWrite (deck, control, steps, pressed, submit);   break;
                     case Page::send: sendWrite (deck, control, steps, pressed, submit); break;
                     case Page::pan:
                     case Page::width: placeWrite (deck, control, steps, pressed, submit); break;
                     case Page::fx:   fxWrite (deck, control, steps, pressed, submit);   break;
                     case Page::loop: loopWrite (deck, control, steps, pressed, submit); break;
-                    case Page::dyn:
                     case Page::show: break;
                 }
             }
@@ -1652,15 +1696,18 @@ namespace wfg::surface
                                     : key.role == DeckRole::pageFx   ? Page::fx
                                                                      : Page::loop;
                     /*  THE SEND KEY IS LIT FOR THE PANS AND WIDTHS TOO (§113), and
-                        says which part is up. */
-                    const auto sendPart = key.role == DeckRole::pageSend
-                                            && (deck.page == Page::pan || deck.page == Page::width);
+                        says which part is up; the EQ key for the dynamics (§141). */
+                    const auto sendPart = (key.role == DeckRole::pageSend
+                                             && (deck.page == Page::pan || deck.page == Page::width))
+                                          || (key.role == DeckRole::pageEq && deck.page == Page::dyn);
                     KeyPicture picture;
                     picture.glyph = key.role == DeckRole::pageSend ? Glyph::pageSend
                                   : key.role == DeckRole::pageEq   ? Glyph::pageEq
                                   : key.role == DeckRole::pageFx   ? Glyph::pageFx
                                                                    : Glyph::pageLoop;
-                    picture.label = pageTitleOf (sendPart ? deck.page : page);
+                    //  "Dynamics" has no room on a key: "Dyn", the D700's word; the strip says it whole.
+                    picture.label = sendPart && deck.page == Page::dyn ? std::string ("Dyn")
+                                                                       : pageTitleOf (sendPart ? deck.page : page);
                     picture.lit = deck.page == page || sendPart;
 
                     if (picture.lit && deck.pageCount > 1)
@@ -1758,11 +1805,21 @@ namespace wfg::surface
                 switch (deck.page)
                 {
                     case Page::eq:
+                    case Page::dyn:
                     {
-                        const auto& eq = eqControls[static_cast<std::size_t> (control.control)];
+                        const auto* found = pageControl (deck.page, control.control);
+
+                        if (found == nullptr)
+                            break;
+
+                        const auto& eq = *found;
                         zone.label = std::string (eq.label);
                         zone.colour = colourOfArgb (audio::eqColours[static_cast<std::size_t> (std::clamp (eq.colour, 0, 5))]);
                         zone.off = soleAt (at(), control.switchAt) != nullptr && ! flagAt (at(), control.switchAt);
+
+                        //  A dynamics stage is out until switched in, and every dial of it with it.
+                        if (deck.page == Page::dyn && ! flagAt (at(), deck.dynOnAt))
+                            zone.off = true;
 
                         if (eq.law == Law::shape)
                         {
@@ -1903,7 +1960,6 @@ namespace wfg::surface
                         break;
                     }
 
-                    case Page::dyn:
                     case Page::show:
                         break;
                 }

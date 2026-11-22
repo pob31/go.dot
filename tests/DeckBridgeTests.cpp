@@ -200,7 +200,8 @@ namespace
             {
                 const std::string name { row->name };
 
-                if (name.rfind ("eq", 0) != 0)
+                //  The EQ's rows and the dynamics stage's (§141), each at the table's default.
+                if (name.rfind ("eq", 0) != 0 && name.rfind ("dyn", 0) != 0)
                     continue;
 
                 if (row->type == doc::ValueType::boolean)
@@ -671,18 +672,36 @@ TEST_CASE ("stream deck bridge: the Stream Deck+'s EQ is five pages - the cuts, 
                                       { "", "B3 freq", "B3 gain", "B3 Q" },
                                       { "B4 shape", "B4 freq", "B4 gain", "B4 Q" } };
 
-    //  The EQ key, and again for each page after; once more is the first again.
-    for (std::size_t page = 0; page <= pages.size(); ++page)
+    const auto eqKey = [&desk]
     {
         desk.host.keysDown ("AL12K1A00001", { 1 });
         desk.step();
         desk.host.keysDown ("AL12K1A00001", {});
         desk.step();
+    };
 
+    //  The EQ key, and again for each page after.
+    for (std::size_t page = 0; page < pages.size(); ++page)
+    {
+        eqKey();
         CAPTURE (page);
-        CHECK (desk.table.pageOf ("SURF0001").index == static_cast<int> (page % pages.size()));
-        CHECK (labels() == pages[page % pages.size()]);
+        CHECK (desk.table.pageOf ("SURF0001").word == "eq");
+        CHECK (desk.table.pageOf ("SURF0001").index == static_cast<int> (page));
+        CHECK (labels() == pages[page]);
     }
+
+    //  Once more walks on to the dynamics' four pages (§141, BIA), and past them the EQ's first again.
+    for (int page = 0; page < surface::deckDynPageCount; ++page)
+    {
+        eqKey();
+        CHECK (desk.table.pageOf ("SURF0001").word == "dyn");
+        CHECK (desk.table.pageOf ("SURF0001").index == page);
+    }
+
+    eqKey();
+    CHECK (desk.table.pageOf ("SURF0001").word == "eq");
+    CHECK (desk.table.pageOf ("SURF0001").index == 0);
+    CHECK (labels() == pages[0]);
 
     //  An empty dial turns nothing; the low-pass is the cuts page's last dial.
     desk.submitted.clear();
@@ -694,6 +713,89 @@ TEST_CASE ("stream deck bridge: the Stream Deck+'s EQ is five pages - the cuts, 
 
     REQUIRE (desk.submitted.size() == 1);
     CHECK (desk.submitted[0].args[0].getString() == "/godot/cue/CUE00001/eqLpfFreq");
+}
+
+TEST_CASE ("stream deck bridge: the Stream Deck+'s dynamics are four pages of four, turned and pressed as the D700's (§141, BIA)")
+{
+    Desk desk ("plus");
+    desk.fake.eqOf ("CUE00001");
+    desk.fake.text ("/godot/surface/aim", "CUE00001");
+    desk.step();
+
+    const auto eqKey = [&desk]
+    {
+        desk.host.keysDown ("AL12K1A00001", { 1 });
+        desk.step();
+        desk.host.keysDown ("AL12K1A00001", {});
+        desk.step();
+    };
+
+    //  The EQ's five pages, then the dynamics' first.
+    for (int n = 0; n < surface::deckEqPageCount + 1; ++n)
+        eqKey();
+
+    REQUIRE (desk.table.pageOf ("SURF0001").word == "dyn");
+    CHECK (desk.table.pageOf ("SURF0001").count == 4);
+    CHECK (desk.host.zones[0].label == "Threshold");
+    CHECK (desk.host.zones[0].value == "-20.0 dB");
+    CHECK (desk.host.zones[1].value == "4.0:1");
+    CHECK (desk.host.zones[3].label == "Release");
+    CHECK (desk.host.zones[0].title.find ("Dynamics 1/4") == 0);
+
+    //  The stage rests out, and every dial of it says so.
+    CHECK (desk.host.zones[0].off);
+    CHECK (desk.host.zones[3].off);
+
+    //  The EQ key is lit for the dynamics, and says which page.
+    CHECK (desk.host.keys[1].lit);
+    CHECK (desk.host.keys[1].label == "Dyn");
+    CHECK (desk.host.keys[1].top == "1/4");
+
+    //  A turn by its law: two detents on the threshold, a decibel up.
+    desk.submitted.clear();
+    surface::DeckInput turn;
+    turn.kind = surface::DeckInput::Kind::dialTurns;
+    turn.detents = { 2, 0, 0, 0 };
+    desk.host.input ("AL12K1A00001", turn);
+    desk.step();
+
+    REQUIRE (desk.submitted.size() == 1);
+    CHECK (desk.submitted[0].args[0].getString() == "/godot/cue/CUE00001/dynThreshold");
+    CHECK (desk.submitted[0].args[1].asDouble() == doctest::Approx (-19.0));
+
+    //  Page two: knee, make-up and the key filter; a click on a key cut switches the whole stage in.
+    eqKey();
+    CHECK (desk.host.zones[2].label == "Key HP");
+    desk.submitted.clear();
+    surface::DeckInput press;
+    press.kind = surface::DeckInput::Kind::dialPresses;
+    press.dialsDown = { false, false, true, false };
+    desk.host.input ("AL12K1A00001", press);
+    press.dialsDown = { false, false, false, false };
+    desk.host.input ("AL12K1A00001", press);
+    desk.step();
+
+    REQUIRE (desk.submitted.size() == 1);
+    CHECK (desk.submitted[0].args[0].getString() == "/godot/cue/CUE00001/dynOn");
+    CHECK (desk.submitted[0].args[1].getBool());
+
+    //  Page four: the gate's release, the detector - pressed, RMS - and two dials left empty.
+    eqKey();
+    eqKey();
+    CHECK (desk.host.zones[1].label == "Detector");
+    CHECK (desk.host.zones[1].value == "Peak");
+    CHECK (desk.host.zones[2].label.empty());
+
+    desk.submitted.clear();
+    press.dialsDown = { false, true, false, false };
+    desk.host.input ("AL12K1A00001", press);
+    press.dialsDown = { false, false, false, false };
+    desk.host.input ("AL12K1A00001", press);
+    desk.step();
+
+    REQUIRE (desk.submitted.size() == 1);
+    CHECK (desk.submitted[0].args[0].getString() == "/godot/cue/CUE00001/dynDetector");
+    CHECK (desk.submitted[0].args[1].getString() == "rms");
 }
 
 TEST_CASE ("stream deck bridge: the Send page makes a send a turn up asks for, and the arrows aim the next cue")
@@ -963,19 +1065,29 @@ TEST_CASE ("stream deck painter: every model's keys drawn the deck's way")
     if (folder.empty())
         return;
 
-    for (const auto word : { "mk2", "xl", "mini", "neo", "plus" })
+    //  And the Stream Deck+ on the dynamics' first page (§141, BIA): "plus-dyn", the EQ key walked on.
+    for (const std::string sheetName : { "mk2", "xl", "mini", "neo", "plus", "plus-dyn" })
     {
+        const auto onDyn = sheetName == "plus-dyn";
+        const auto word = onDyn ? std::string ("plus") : sheetName;
         Desk desk (word, true);
         desk.fake.text ("/godot/list/CRT00001/order", "BNK00001 OSC00001");
         desk.fake.text ("/godot/run/order", "RUN00001");
         desk.fake.text ("/godot/run/RUN00001/cue", "CLP00001");
         desk.fake.text ("/godot/run/RUN00001/state", "playing");
 
-        if (std::string (word) == "plus")
+        if (word == "plus")
         {
             desk.fake.eqOf ("CUE00001");
             desk.fake.text ("/godot/surface/aim", "CUE00001");
-            desk.host.keysDown ("AL12K1A00001", { 1 });
+
+            for (int press = 0; press < (onDyn ? surface::deckEqPageCount + 1 : 1); ++press)
+            {
+                desk.host.keysDown ("AL12K1A00001", { 1 });
+                desk.step();
+                desk.host.keysDown ("AL12K1A00001", {});
+                desk.step();
+            }
         }
 
         desk.step();
@@ -1011,7 +1123,7 @@ TEST_CASE ("stream deck painter: every model's keys drawn the deck's way")
         if (spec.model == surface::DeckModel::neo && desk.host.shown.has_value())
             paste (surface::painter::screen (*desk.host.shown, spec.stripWidth, spec.stripHeight), gap, stripTop);
 
-        CHECK (surface::painter::writePng (sheet, folder + "/streamdeck-" + word + ".png"));
+        CHECK (surface::painter::writePng (sheet, folder + "/streamdeck-" + sheetName + ".png"));
     }
 }
 

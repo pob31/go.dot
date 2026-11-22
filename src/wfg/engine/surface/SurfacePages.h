@@ -178,6 +178,21 @@ namespace wfg::surface
         { 11, 12, 13, 14 },         // band four
     } };
 
+    /*  THE STREAM DECK+'S DYNAMICS, FOUR PAGES (namespace draft §141, BIA, BIG
+        - the layout mine): the compressor's four that move most, then its knee
+        and make-up beside the key filter, then the gate's four, then the gate's
+        release and the detector. Each slot an index of `dynControls`, -1 for a
+        dial left empty. A press on a threshold takes its half in and out, on a
+        key cut the whole stage, on the detector peak or RMS. */
+    inline constexpr int deckDynPageCount = 4;
+
+    inline constexpr std::array<std::array<int, deckEqDials>, deckDynPageCount> deckDynPages { {
+        { 0, 1, 2, 3 },             // threshold, ratio, attack, release
+        { 4, 5, 11, 12 },           // knee, make-up, the key's high-pass and low-pass
+        { 6, 7, 8, 9 },             // the gate's threshold, range, attack, hold
+        { 10, 13, -1, -1 },         // the gate's release, the detector
+    } };
+
     /** How many pages `controls` need on `rotaries` rotaries: one at least. */
     int pageCount (int controls, int rotaries) noexcept;
 
