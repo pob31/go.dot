@@ -2654,7 +2654,7 @@ TEST_CASE ("proxy: the child's scratch is fitted to each block's length in place
 
         for (int c = 0; c < width; ++c)
             for (int i = 0; i < length; ++i)
-                held = held && scratch.getReadPointer (c)[i] == static_cast<float> (c * 1000 + i);
+                held = held && juce::exactlyEqual (scratch.getReadPointer (c)[i], static_cast<float> (c * 1000 + i));
     }
 
     CHECK (inside);
