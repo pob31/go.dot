@@ -156,6 +156,44 @@ namespace wfg::import::als
             bool active = true;         ///< the track activator, as the scenes leave it
         };
 
+        /*  LIVE'S OWN DYNAMICS (namespace draft §141, BIC): its Compressor and
+            Glue Compressor become the cue's compressor, its Gate the gate. */
+        bool isLiveCompressor (const std::string& kind)
+        {
+            return kind == "Compressor2" || kind == "GlueCompressor";
+        }
+
+        bool isLiveGate (const std::string& kind)
+        {
+            return kind == "Gate";
+        }
+
+        //  A device as Live's own screen names it: a plugin by its name, Live's dynamics by theirs.
+        std::string shownName (const Device& device)
+        {
+            if (! device.name.empty())  return device.name;
+            if (device.kind == "Compressor2")     return "Compressor";
+            if (device.kind == "GlueCompressor")  return "Glue Compressor";
+            return device.kind;
+        }
+
+        //  Whether a device's sidechain is switched on and routed somewhere.
+        bool sideChainOn (const Device& device)
+        {
+            const auto on = device.values.find ("SideChain/OnOff");
+            return on != device.values.end() && on->second > 0.5
+                     && device.sideChain.kind != Routing::Kind::none && device.sideChain.kind != Routing::Kind::other;
+        }
+
+        //  Where on a track Live takes a sidechain, as its menu says it.
+        std::string tapWords (const std::string& tap)
+        {
+            if (tap == "PreFxOut")      return "Pre FX";
+            if (tap == "PostFxOut")     return "Post FX";
+            if (tap == "PostMixerOut")  return "Post Mixer";
+            return tap.empty() ? std::string ("its output") : tap;
+        }
+
         struct Graph
         {
             const LiveSet& set;
@@ -249,6 +287,10 @@ namespace wfg::import::als
 
                         if (device.kind == "Eq8")
                             mix.eqs.push_back (&device);
+                        else if (isLiveCompressor (device.kind) && mix.dyn.compressor == nullptr && device.on)
+                            mix.dyn.compressor = &device;   //  the aux's own stage (§141, BIC)
+                        else if (isLiveGate (device.kind) && mix.dyn.gate == nullptr && device.on)
+                            mix.dyn.gate = &device;
                         else if (device.plugin.has_value())
                             mix.plugins.push_back (&device);
                         else
@@ -701,6 +743,20 @@ namespace wfg::import::als
             std::set<std::pair<int, int>> midiFed;
             std::set<std::string> loopbackSaid;
 
+            /*  THE SIDECHAINS (namespace draft §141, BIC): what each keyed device
+                listens to, and each track some sidechain listens to - the key
+                aux its sounds feed, where on the track Live takes it, and the
+                sidechain's own gain. */
+            struct KeySourceOut
+            {
+                std::string mix;
+                std::string tap;
+                double volumeDb = 0.0;
+            };
+
+            std::map<const Device*, KeyOut> keyOfDevice;
+            std::map<std::string, KeySourceOut> keySourceOf;
+
             Walker (const LiveSet& setToUse, const WalkOptions& optionsToUse)
                 : set (setToUse), options (optionsToUse), laws (optionsToUse.laws),
                   graph (setToUse, optionsToUse.laws, out.notes),
@@ -726,6 +782,139 @@ namespace wfg::import::als
                 }
 
                 out.mixes = graph.mixes;
+                planKeys();
+            }
+
+            //==================================================================
+            /*  THE SIDECHAINS, before any scene (namespace draft §141, BIC):
+                every switched-on sidechain of Live's own dynamics, and of a
+                return's plugin, turned into what Go.dot keys from - an input as
+                that input; a return as its aux, or as the output it is; the
+                master as its output; a track as a KEY AUX made for it, with no
+                output, fed by its sounds. A group is not carried. Each said once
+                in the report, on the track whose device listens. */
+            void planKeys()
+            {
+                const auto plan = [this] (const Track& owner, const Device& device)
+                {
+                    if (! sideChainOn (device) || ! (isLiveCompressor (device.kind) || isLiveGate (device.kind)
+                                                      || device.plugin.has_value()))
+                        return;
+
+                    const auto called = shownName (device);
+                    const auto said = [&] (Note::Kind kind, const std::string& text)
+                    {
+                        out.notes.push_back ({ kind, -1, owner.name, called + "'s sidechain " + text });
+                    };
+
+                    if (const auto mix = device.values.find ("SideChain/DryWet");
+                          mix != device.values.end() && mix->second < 0.995)
+                        said (Note::Kind::approximated, "mixes its key at " + osc::formatDouble (std::round (mix->second * 100.0))
+                                                        + " %, where Go.dot's key is the whole of it");
+
+                    const auto& from = device.sideChain;
+                    KeyOut key;
+
+                    if (from.kind == Routing::Kind::external && from.channel >= 0)
+                    {
+                        key.input = from.channel;
+                        key.inputStereo = from.stereo;
+                        said (Note::Kind::info, "listens to the interface's "
+                                                + (from.stereo ? "inputs " + std::to_string (2 * from.channel + 1) + "/"
+                                                                   + std::to_string (2 * from.channel + 2)
+                                                               : "input " + std::to_string (from.channel + 1))
+                                                + ": keyed by that input");
+                    }
+                    else if (from.kind == Routing::Kind::master)
+                    {
+                        if (mixNamed ("master") == nullptr)
+                        {
+                            said (Note::Kind::dropped, "listens to the master, which reaches no output here: not carried");
+                            return;
+                        }
+
+                        key.mix = "master";
+                        said (Note::Kind::info, "listens to the master: keyed by that output, heard a block late "
+                                                "(namespace draft §141, BIB)");
+                    }
+                    else if (from.kind == Routing::Kind::track && graph.returnIndex.count (from.trackId) != 0)
+                    {
+                        key.mix = "return:" + std::to_string (graph.returnIndex.at (from.trackId));
+                        const auto* mix = mixNamed (key.mix);
+                        said (Note::Kind::info, "listens to the return \"" + nameOf (from.trackId) + "\": keyed by "
+                                                + (mix != nullptr && mix->aux ? std::string ("its aux") : std::string ("its output"))
+                                                + ", heard a block late");
+                    }
+                    else if (from.kind == Routing::Kind::track && graph.track (from.trackId) != nullptr
+                               && graph.track (from.trackId)->kind != Track::Kind::group)
+                    {
+                        key.mix = "key:" + from.trackId;
+                        const auto source = nameOf (from.trackId);
+
+                        if (keySourceOf.count (from.trackId) == 0)
+                        {
+                            Mix aux;
+                            aux.key = key.mix;
+                            aux.name = source + " key";
+                            aux.aux = true;
+                            aux.keyAux = true;
+                            out.mixes.push_back (std::move (aux));
+
+                            const auto volume = device.values.find ("SideChain/RoutedInput/Volume");
+                            keySourceOf[from.trackId] = { key.mix, from.tap,
+                                                          volume != device.values.end() ? decibels (volume->second, laws) : 0.0 };
+                        }
+
+                        said (Note::Kind::approximated, "listens to \"" + source + "\" (" + tapWords (from.tap) + "): an aux \""
+                                                        + source + " key\" with no outputs, fed by that track's cues, keys it "
+                                                          "- a block late, as an aux into a cue is (BHP)");
+                    }
+                    else
+                    {
+                        said (Note::Kind::dropped, "listens to "
+                                                   + (from.kind == Routing::Kind::track ? "the group \"" + nameOf (from.trackId) + "\""
+                                                                                        : std::string ("\"") + from.target + "\"")
+                                                   + ", which Go.dot cannot key from: it hears its own sound");
+                        return;
+                    }
+
+                    keyOfDevice[&device] = key;
+                };
+
+                for (const auto& track : set.tracks)
+                    for (const auto& device : track.devices)
+                        plan (track, device);
+
+                for (const auto& ret : set.returns)
+                    for (const auto& device : ret.devices)
+                        plan (ret, device);
+
+                //  An aux's own stage and its plugins listen to what was planned for them.
+                for (auto& mix : out.mixes)
+                {
+                    if (! mix.aux || mix.keyAux)
+                        continue;
+
+                    mix.dyn.key = keyOf (mix.dyn);
+                    mix.pluginKeys.clear();
+
+                    for (const auto* plugin : mix.plugins)
+                    {
+                        const auto found = keyOfDevice.find (plugin);
+                        mix.pluginKeys.push_back (found != keyOfDevice.end() ? found->second : KeyOut {});
+                    }
+                }
+            }
+
+            //  A stage's key: its compressor's sidechain first, else its gate's.
+            KeyOut keyOf (const DynOut& dyn) const
+            {
+                for (const auto* device : { dyn.compressor, dyn.gate })
+                    if (device != nullptr)
+                        if (const auto found = keyOfDevice.find (device); found != keyOfDevice.end())
+                            return found->second;
+
+                return {};
             }
 
             /** The controller an envelope of a MIDI clip sends, or -1. */
@@ -1393,6 +1582,22 @@ namespace wfg::import::als
                     note (Note::Kind::dropped, "\"" + sound.name + "\" reaches no output of the interface: imported "
                                                "with no send, silent");
 
+                /*  A TRACK A SIDECHAIN LISTENS TO (§141, BIC) feeds the key aux
+                    made for it, at the sidechain's gain. Live takes Pre or Post
+                    FX before the track's fader, and a Go.dot send follows the
+                    cue's level, so that level is taken back off; Post Mixer
+                    follows it, as the send does. */
+                if (const auto source = keySourceOf.find (track.id); source != keySourceOf.end())
+                {
+                    SendOut send;
+                    send.mix = source->second.mix;
+                    send.on = true;
+                    const auto beforeFader = source->second.tap != "PostMixerOut";
+                    send.levelDb = clampDb (source->second.volumeDb + (beforeFader ? gainDb - sound.levelDb : 0.0),
+                                            laws.silenceDb);
+                    sound.sends.push_back (std::move (send));
+                }
+
                 //  --- Its devices, and the ones on its path ------------------------
                 std::vector<const Track*> along { &track };
 
@@ -1417,9 +1622,29 @@ namespace wfg::import::als
                         if (device.kind.rfind ("MxDevice", 0) == 0)   // said once for the set (BEA)
                             continue;
 
-                        const auto named = (device.name.empty() ? device.kind : device.name) + " on \""
-                                             + crossed->name + "\"";
+                        const auto named = shownName (device) + " on \"" + crossed->name + "\"";
                         const auto switched = deviceSwitchedOn (clip, launchedHere, *crossed, static_cast<int> (at));
+
+                        /*  LIVE'S OWN DYNAMICS ARE THE CUE'S STAGE (namespace draft
+                            §141, BIC): the first compressor and the first gate on
+                            its path; a second of either is said and left. */
+                        if (isLiveCompressor (device.kind) || isLiveGate (device.kind))
+                        {
+                            if (! device.on && ! switched)
+                                continue;
+
+                            auto& slot = isLiveGate (device.kind) ? sound.dyn.gate : sound.dyn.compressor;
+
+                            if (slot == nullptr)
+                                slot = &device;
+                            else
+                                note (Note::Kind::approximated, named + " is a second "
+                                                                + (isLiveGate (device.kind) ? "gate" : "compressor")
+                                                                + " on its path: the cue's stage has one, the first is "
+                                                                  "carried and this one is not");
+
+                            continue;
+                        }
 
                         if (device.on || switched)
                         {
@@ -1429,6 +1654,8 @@ namespace wfg::import::als
                         }
                     }
                 }
+
+                sound.dyn.key = keyOf (sound.dyn);
 
                 if (! sound.eqs.empty() && sound.eqs.size() > 1)
                     note (Note::Kind::approximated, std::to_string (sound.eqs.size()) + " EQ Eights on its path; "

@@ -1314,3 +1314,163 @@ TEST_CASE ("walk: a loop that ends at the end of time still returns, and a retur
     });
     CHECK (said);
 }
+
+TEST_CASE ("walk: a sidechain is keyed by what Go.dot has - an input, a return's aux, a track's key aux at Post Mixer - and a group's is said and left (namespace draft §141, BIC)")
+{
+    auto set = setOf (1);
+
+    //  The second return carries a reverb: an aux, a key a sidechain may name.
+    Device reverb;
+    reverb.kind = "Reverb";
+    set.returns[1].devices.push_back (reverb);
+
+    const auto compressorKeyedBy = [] (Routing::Kind kind, const std::string& trackId, const std::string& tap)
+    {
+        Device comp;
+        comp.kind = "Compressor2";
+        comp.values["SideChain/OnOff"] = 1.0;
+        comp.values["SideChain/RoutedInput/Volume"] = 0.5011872336;     // -6 dB
+        comp.sideChain.kind = kind;
+        comp.sideChain.trackId = trackId;
+        comp.sideChain.tap = tap;
+        return comp;
+    };
+
+    //  Track 1, keyed by track 2 after its mixer; a second compressor besides.
+    auto bed = trackOf ("1", "bed", 1, 2);
+    bed.sends[0] = 1.0;
+    bed.slots[0].clip = clipOf ("bed", 0.0, 8.0);
+    bed.devices.push_back (compressorKeyedBy (Routing::Kind::track, "2", "PostMixerOut"));
+    Device another;
+    another.kind = "GlueCompressor";
+    bed.devices.push_back (another);
+
+    //  Track 2, the voice: a fader at -6 dB, so a key after its mixer follows it.
+    auto voice = trackOf ("2", "voice", 1, 2);
+    voice.sends[0] = 1.0;
+    voice.volume = 0.5011872336;
+    voice.slots[0].clip = clipOf ("voice", 0.0, 8.0);
+
+    //  Track 3, keyed by the interface's input 3; track 4 by the reverb's return; track 5 by a group.
+    auto third = trackOf ("3", "third", 1, 2);
+    third.sends[0] = 1.0;
+    third.slots[0].clip = clipOf ("third", 0.0, 8.0);
+    Device gate;
+    gate.kind = "Gate";
+    gate.values["SideChain/OnOff"] = 1.0;
+    gate.sideChain.kind = Routing::Kind::external;
+    gate.sideChain.channel = 2;
+    third.devices.push_back (gate);
+
+    auto fourth = trackOf ("4", "fourth", 1, 2);
+    fourth.sends[0] = 1.0;
+    fourth.slots[0].clip = clipOf ("fourth", 0.0, 8.0);
+    fourth.devices.push_back (compressorKeyedBy (Routing::Kind::track, "91", "PostFxOut"));
+
+    Track group = trackOf ("9", "drums", 1, 2);
+    group.kind = Track::Kind::group;
+
+    auto fifth = trackOf ("5", "fifth", 1, 2);
+    fifth.sends[0] = 1.0;
+    fifth.slots[0].clip = clipOf ("fifth", 0.0, 8.0);
+    fifth.devices.push_back (compressorKeyedBy (Routing::Kind::track, "9", "PostFxOut"));
+
+    set.tracks = { bed, voice, third, fourth, group, fifth };
+
+    const auto walked = walk (set);
+    REQUIRE (walked.steps.size() == 1u);
+
+    const auto soundOf = [&walked] (const std::string& trackId) -> const Sound*
+    {
+        for (const auto& sound : walked.steps[0].sounds)
+            if (sound.trackId == trackId)
+                return &sound;
+
+        return nullptr;
+    };
+
+    const auto says = [&walked] (const std::string& part)
+    {
+        return std::any_of (walked.notes.begin(), walked.notes.end(),
+                            [&part] (const Note& note) { return note.text.find (part) != std::string::npos; });
+    };
+
+    //  A key aux for track 2, with no output; none for the others.
+    const auto keyAux = std::find_if (walked.mixes.begin(), walked.mixes.end(),
+                                      [] (const Mix& mix) { return mix.key == "key:2"; });
+    REQUIRE (keyAux != walked.mixes.end());
+    CHECK (keyAux->aux);
+    CHECK (keyAux->keyAux);
+    CHECK (keyAux->pair < 0);
+    CHECK (keyAux->name == "voice key");
+
+    //  The bed: its first compressor the stage, keyed by that aux; the second said.
+    const auto* bedSound = soundOf ("1");
+    REQUIRE (bedSound != nullptr);
+    REQUIRE (bedSound->dyn.compressor != nullptr);
+    CHECK (bedSound->dyn.compressor->kind == "Compressor2");
+    CHECK (bedSound->dyn.key.mix == "key:2");
+    CHECK (says ("is a second compressor"));
+
+    //  The voice feeds it at the sidechain's -6 dB: after its mixer, so following the cue's level.
+    const auto* voiceSound = soundOf ("2");
+    REQUIRE (voiceSound != nullptr);
+    const auto* keySend = sendTo (*voiceSound, "key:2");
+    REQUIRE (keySend != nullptr);
+    CHECK (keySend->levelDb == doctest::Approx (-6.0).epsilon (0.01));
+    CHECK_FALSE (voiceSound->dyn.present());
+
+    //  An input of the interface, as itself.
+    const auto* thirdSound = soundOf ("3");
+    REQUIRE (thirdSound != nullptr);
+    CHECK (thirdSound->dyn.gate != nullptr);
+    CHECK (thirdSound->dyn.key.input == 2);
+    CHECK_FALSE (thirdSound->dyn.key.inputStereo);
+
+    //  A return that is an aux, by its aux.
+    const auto* fourthSound = soundOf ("4");
+    REQUIRE (fourthSound != nullptr);
+    CHECK (fourthSound->dyn.key.mix == "return:1");
+
+    //  A group: said, and the stage hears its own cue.
+    const auto* fifthSound = soundOf ("5");
+    REQUIRE (fifthSound != nullptr);
+    CHECK (fifthSound->dyn.compressor != nullptr);
+    CHECK (fifthSound->dyn.key.isNone());
+    CHECK (says ("the group \"drums\""));
+}
+
+TEST_CASE ("walk: a key taken before the fader comes off the cue's level, so it is the sidechain's gain whatever the fader says (§141, BIC)")
+{
+    auto set = setOf (1);
+
+    Device comp;
+    comp.kind = "Compressor2";
+    comp.values["SideChain/OnOff"] = 1.0;
+    comp.sideChain.kind = Routing::Kind::track;
+    comp.sideChain.trackId = "2";
+    comp.sideChain.tap = "PostFxOut";
+
+    auto bed = trackOf ("1", "bed", 1, 2);
+    bed.sends[0] = 1.0;
+    bed.slots[0].clip = clipOf ("bed", 0.0, 8.0);
+    bed.devices.push_back (comp);
+
+    auto voice = trackOf ("2", "voice", 1, 2);
+    voice.sends[0] = 1.0;
+    voice.volume = 0.5011872336;                                 // -6 dB on the fader
+    voice.slots[0].clip = clipOf ("voice", 0.0, 8.0);
+
+    set.tracks = { bed, voice };
+    const auto walked = walk (set);
+
+    const auto& sounds = walked.steps.at (0).sounds;
+    const auto voiceSound = std::find_if (sounds.begin(), sounds.end(), [] (const Sound& sound) { return sound.trackId == "2"; });
+    REQUIRE (voiceSound != sounds.end());
+    CHECK (voiceSound->levelDb == doctest::Approx (-6.0).epsilon (0.01));
+
+    //  Post FX, before the fader: the send takes the cue's -6 back off - nought at the key.
+    const auto* keySend = sendTo (*voiceSound, "key:2");
+    REQUIRE (keySend != nullptr);
+    CHECK (keySend->levelDb == doctest::Approx (6.0).epsilon (0.01));
+}

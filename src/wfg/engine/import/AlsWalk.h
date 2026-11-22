@@ -110,6 +110,33 @@ namespace wfg::import::als
         std::optional<double> pan;
     };
 
+    /*  WHAT A KEYED EFFECT LISTENS TO (namespace draft §141, BIC), as the walk
+        found it from Live's sidechain: a mix by its key - a key aux made for a
+        track (`key:<track id>`), a return's aux, or a mix or the master, which
+        Go.dot hears as an output - or an input of the interface, from nought.
+        Neither: no key, the effect hearing its own cue. */
+    struct KeyOut
+    {
+        std::string mix;
+        int input = -1;
+        bool inputStereo = false;
+
+        bool isNone() const noexcept { return mix.empty() && input < 0; }
+    };
+
+    /*  LIVE'S OWN DYNAMICS ON A SOUND OR AN AUX (§141, BIC): its first
+        Compressor or Glue Compressor, its first Gate, and what they listen to -
+        the compressor's sidechain first, else the gate's. Go.dot's stage has one
+        key; the import turns the numbers into its rows. */
+    struct DynOut
+    {
+        const Device* compressor = nullptr;
+        const Device* gate = nullptr;
+        KeyOut key;
+
+        bool present() const noexcept { return compressor != nullptr || gate != nullptr; }
+    };
+
     /*  A MIX: a return, or the master, that reaches the interface - what a send
         is aimed at. `pair` is the interface's stereo pair from nought (or the
         mono channel with `mono`) and `effects` every device on it, by name.
@@ -148,6 +175,13 @@ namespace wfg::import::als
         std::vector<std::string> liveDevices;    ///< an aux's devices Go.dot has no equivalent for
         std::vector<SendOut> sends;              ///< an aux's own sends into the other returns
         double levelDb = 0.0;       ///< the return's own fader: an aux's level, or folded into every send to a mix
+
+        DynOut dyn;                             ///< an aux's own Live dynamics (§141, BIC)
+        std::vector<KeyOut> pluginKeys;         ///< what each of `plugins` listens to on its sidechain, in step
+
+        /*  A KEY AUX (§141, BIC): made for a track a sidechain listens to, with
+            no output - a key nobody hears - fed by that track's sounds. */
+        bool keyAux = false;
     };
 
     /*  ONE SOUND: what a media cue is made of. Seconds are the FILE's.
@@ -192,6 +226,8 @@ namespace wfg::import::als
             fit onto the cue's EQ, and the other devices by name for its notes. */
         std::vector<const Device*> eqs;
         std::vector<std::string> effects;
+
+        DynOut dyn;                 ///< Live's own dynamics on its path, for the cue's stage (§141, BIC)
 
         std::string dcaTrack;       ///< the track whose fader a hand rode, when one did (QN)
         int colour = -1;
