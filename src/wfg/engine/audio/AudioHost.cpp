@@ -579,6 +579,11 @@ namespace wfg::audio
             auxBus.prepare (auxTotal > 0 ? voices + static_cast<int> (spec.rack.size()) : 0,
                             auxTotal, current.blockSize);
 
+            /*  THE KEY BUS (namespace draft §141, SC.3): a stereo row an aux,
+                in the order above, which the aux's own tap writes and any
+                effect's key reads. */
+            keyBus.prepare (static_cast<int> (auxOrder.size()), 2, current.blockSize);
+
             for (auto* track : tracks)
             {
                 if (track == nullptr)
@@ -726,6 +731,7 @@ namespace wfg::audio
 
                     proxy->bindClock (&blockClock);
                     proxy->bindTap (&tapView);
+                    proxy->bindKeyBus (&keyBus);
                     trackLanes.back().push_back (&proxy->lane());
                     trackPlaces.back().push_back (proxy);
                     voiceInserts.back().push_back (proxy);
@@ -1572,6 +1578,7 @@ namespace wfg::audio
 
                     proxy->bindClock (&blockClock);
                     proxy->bindTap (&tapView);
+                    proxy->bindKeyBus (&keyBus);
                     trackLanes.back()[slot] = &proxy->lane();
                     trackPlaces.back()[slot] = proxy;
                 }
@@ -1613,6 +1620,11 @@ namespace wfg::audio
             if (! insertAuxTap (track, rackChannels, index,
                                 channel.aux ? auxOrder[channel.id] + 1 : 0))
                 return fail ("the aux tap would not insert on a rack channel");
+
+            //  An aux's own sound, written as a key (§141, SC.3).
+            if (channel.aux && index < static_cast<int> (taps.size()))
+                if (auto* auxTap = taps[static_cast<std::size_t> (index)])
+                    auxTap->bindKey (&keyBus, auxOrder[channel.id], std::clamp (channel.auxWidth, 1, 2));
 
             auto outputPlugin = track.pluginList.insertPlugin (
                 CueOutputPlugin::create (rackChannels, current.outputChannels), -1);
@@ -3329,6 +3341,7 @@ namespace wfg::audio
             aux), every aux's input stage (index - voices, null on a rack
             channel), and each aux's first column and place in the order. */
         AuxBus auxBus;
+        AuxBus keyBus;                      // a stereo row an aux, its own sound as a key (§141)
         std::vector<AuxTapPlugin*> taps;
         std::vector<AuxInputPlugin*> auxInputs;
         std::map<std::string, int> auxColumns;
@@ -3826,6 +3839,25 @@ namespace wfg::audio
     int AudioHost::auxColumnCount() const noexcept
     {
         return impl->auxTotal;
+    }
+
+    int AudioHost::auxKeyOf (const std::string& channelId, float* left, float* right, int samples) const noexcept
+    {
+        const auto found = impl->auxOrder.find (channelId);
+
+        if (found == impl->auxOrder.end() || left == nullptr || right == nullptr
+             || samples <= 0 || samples > impl->keyBus.blockLimit() || impl->keyBus.isSilent (found->second))
+            return 0;
+
+        const auto* fromLeft = impl->keyBus.row (found->second, 0);
+        const auto* fromRight = impl->keyBus.row (found->second, 1);
+
+        if (fromLeft == nullptr || fromRight == nullptr)
+            return 0;
+
+        std::copy_n (fromLeft, samples, left);
+        std::copy_n (fromRight, samples, right);
+        return 2;
     }
 
     bool AudioHost::isAuxTrack (int trackIndex) const noexcept

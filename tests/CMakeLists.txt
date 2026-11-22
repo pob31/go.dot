@@ -2119,6 +2119,19 @@ add_test(NAME blackbox.key-input.fr_FR
 set_tests_properties(blackbox.key-input.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
+# An aux keys a plugin (namespace draft 141, SC.3): a bed through the test
+# ducker keyed by a mono aux with no outputs, and a second cue sending a voice
+# into that aux. The bed at the ducker's gain alone, then ducked one block after
+# the voice's first sample (an aux renders after every voice); the session replays.
+add_test(NAME blackbox.key-aux.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/key_aux.py" --wfg-locale=C)
+set_tests_properties(blackbox.key-aux.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.key-aux.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/key_aux.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.key-aux.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
 # The live rack, stage 9b.2 (namespace draft 18.10): named inputs made over OSC
 # on a hosted interface fed from a WAV, one meter reading a tone and one
 # silence with nothing listening, one input past the interface saying so, and

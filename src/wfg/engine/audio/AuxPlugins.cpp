@@ -85,6 +85,13 @@ namespace wfg::audio
         level = levelOf;
     }
 
+    void AuxTapPlugin::bindKey (AuxBus* keys, int row, int auxWidth) noexcept
+    {
+        keyBus = keys;
+        keyRow = row;
+        keyWidth = std::clamp (auxWidth, 1, 2);
+    }
+
     void AuxTapPlugin::initialise (const te::PluginInitialisationInfo& info)
     {
         /*  Message thread, and the only place this object allocates. A
@@ -98,6 +105,30 @@ namespace wfg::audio
             tap.setLevelDb (level->levelDb());
 
         tap.snapToTargets();
+
+        /*  THE KEY (§141): the aux's channels onto the row's two, side to
+            side, a mono aux onto both. Unity, under the aux's level as the
+            sends are. Set here and never after - nothing moves them. */
+        if (keyBus != nullptr && keyRow >= 0)
+        {
+            keyTap.prepare (inputs, 2, info.sampleRate, info.blockSizeSamples);
+
+            if (keyWidth == 1 || inputs == 1)
+            {
+                keyTap.setGain (0, 0, 1.0f);
+                keyTap.setGain (0, 1, 1.0f);
+            }
+            else
+            {
+                keyTap.setGain (0, 0, 1.0f);
+                keyTap.setGain (1, 1, 1.0f);
+            }
+
+            if (level != nullptr)
+                keyTap.setLevelDb (level->levelDb());
+
+            keyTap.snapToTargets();
+        }
     }
 
     void AuxTapPlugin::deinitialise()
@@ -108,11 +139,25 @@ namespace wfg::audio
     {
         const rt::ScopedRealtimeCheck goDotsOwnPlugin { rt::Region::ours };
 
-        if (bus == nullptr || columns <= 0 || context.destBuffer == nullptr || context.bufferNumSamples <= 0)
+        const auto sends = bus != nullptr && columns > 0;
+        const auto keys = keyBus != nullptr && keyRow >= 0;
+
+        if ((! sends && ! keys) || context.destBuffer == nullptr || context.bufferNumSamples <= 0)
             return;
 
         const auto& source = *context.destBuffer;
         const auto start = context.bufferStartSample;
+        const auto usable = std::min (inputs, source.getNumChannels());
+
+        for (int channel = 0; channel < usable; ++channel)
+            inputPointers[static_cast<std::size_t> (channel)] = source.getReadPointer (channel, start);
+
+        if (keys)
+            writeKey (start, context.bufferNumSamples, usable);
+
+        if (! sends)
+            return;
+
         const auto frames = std::min (context.bufferNumSamples, bus->blockLimit() - start);
 
         if (frames <= 0)
@@ -125,11 +170,6 @@ namespace wfg::audio
         if (level != nullptr)
             tap.setLevelDb (level->levelDb());
 
-        const auto usable = std::min (inputs, source.getNumChannels());
-
-        for (int channel = 0; channel < usable; ++channel)
-            inputPointers[static_cast<std::size_t> (channel)] = source.getReadPointer (channel, start);
-
         for (int column = 0; column < columns; ++column)
         {
             auto* row = bus->row (writer, column);
@@ -138,6 +178,29 @@ namespace wfg::audio
 
         tap.process (inputPointers.data(), usable, rowPointers.data(), columns, frames);
         bus->setSilent (writer, tap.lastBlockSilent());
+    }
+
+    void AuxTapPlugin::writeKey (int start, int samples, int usable) noexcept
+    {
+        /*  The input pointers are this block's, set by the caller. The row is
+            written whole for the span, the level on it; an aux at nought, or a
+            span past the bus, says silent and no reader looks (§141). */
+        const auto frames = std::min (samples, keyBus->blockLimit() - start);
+        auto* left = keyBus->row (keyRow, 0);
+        auto* right = keyBus->row (keyRow, 1);
+
+        if (frames <= 0 || left == nullptr || right == nullptr)
+        {
+            keyBus->setSilent (keyRow, true);
+            return;
+        }
+
+        if (level != nullptr)
+            keyTap.setLevelDb (level->levelDb());
+
+        float* const sides[2] = { left + start, right + start };
+        keyTap.process (inputPointers.data(), usable, sides, 2, frames);
+        keyBus->setSilent (keyRow, keyTap.lastBlockQuiet());
     }
 
     //==============================================================================

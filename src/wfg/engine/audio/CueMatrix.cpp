@@ -144,6 +144,7 @@ namespace wfg::audio
                 levelRamp[static_cast<std::size_t> (n)] = levelSmoother.getNextValue();
 
         const auto steadyLevel = levelIsMoving ? 0.0f : levelSmoother.getCurrentValue();
+        levelWasNought = ! levelIsMoving && juce::exactlyEqual (steadyLevel, 0.0f);
 
         for (int out = 0; out < usableOut; ++out)
         {

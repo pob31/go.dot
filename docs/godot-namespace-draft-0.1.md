@@ -36321,3 +36321,17 @@ is summed only after the graph and would come a block late at best.
 - **A keyed plugin that rests wakes cold.** An insert heard and then silent in and out for ten seconds rests
   (BHF); a ducker over a cue that is paused that long, whose key then speaks, starts from a detector at rest.
 - **A plugin's sidechain is one bus.** A plugin offering two (a "duck" and a "trigger") is given the first.
+
+**Built, as it goes.**
+
+- **SC.1** (5d46eec7): an input keys a plugin, end to end - region 7, the child's keyed layout, `godot:test-duck`,
+  `fx/key`, `plugin/keyInputs`, the validate warning; `tests/blackbox/key_input.py`.
+- **SC.2** (644bd2b4): the Key menu on a plugin's box with a sidechain, the console's fields, the "no key" mark.
+- **SC.3**: an aux as a key. The key bus is a second `AuxBus`, a stereo row an aux in the rack's order; the
+  aux's own tap writes it after the aux's EQ and inserts, under its level by a second `CueMatrix`, a mono aux
+  onto both sides (BHT). A row says it is silent when nothing was written **or the aux's level sat at nought the
+  whole block** (`CueMatrix::lastBlockQuiet`) - so an aux faded out, or shut by a double Esc's sweep, is no key
+  rather than a key of zeros; the aux bus's own rule (a writer whose coefficients are all nought) is untouched.
+  Measured in the served driver `tests/blackbox/key_aux.py`: a bed through the test ducker keyed by a mono aux
+  with no outputs, a second cue sending a voice into it - the bed ducked from exactly one block after the voice's
+  first sample, as BHP says. `AudioHost::auxKeyOf` reads a row between blocks, for tests only.

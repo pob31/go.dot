@@ -332,6 +332,13 @@ namespace wfg::audio
         /** How many aux input channels the graph was built with, in all. */
         int auxColumnCount() const noexcept;
 
+        /*  AN AUX'S OWN SOUND AS A KEY (namespace draft §141, SC.3): its row
+            of the key bus as the last block left it, `samples` from the
+            block's start into `left` and `right`. Answers 2, or nought for an
+            id that is no aux of this graph or a row its aux said is silent.
+            Between blocks only - for tests; no effect reads it this way. */
+        int auxKeyOf (const std::string& channelId, float* left, float* right, int samples) const noexcept;
+
         /** Whether this track is an aux's. Any thread. */
         bool isAuxTrack (int trackIndex) const noexcept;
 

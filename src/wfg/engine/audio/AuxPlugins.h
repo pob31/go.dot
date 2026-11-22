@@ -73,6 +73,15 @@ namespace wfg::audio
             nothing. */
         void bind (AuxBus* auxBus, const CueMatrix* levelOf) noexcept;
 
+        /*  AN AUX'S OWN SOUND AS A KEY (namespace draft §141, SC.3): on an
+            aux's track only, its row of the key bus and how wide the aux is.
+            The tap then also writes the aux - after its EQ and inserts, at its
+            level - into that row, two channels, a mono aux on both sides
+            (BHT). Bound once, with `bind`. A null bus writes no key. */
+        void bindKey (AuxBus* keys, int row, int auxWidth) noexcept;
+
+        int keyRowIndex() const noexcept  { return keyRow; }
+
         /** The sends into the auxes. Any thread; atomics, as an output stage's. */
         CueMatrix& matrix() noexcept              { return tap; }
         const CueMatrix& matrix() const noexcept  { return tap; }
@@ -110,6 +119,14 @@ namespace wfg::audio
         CueMatrix tap;
         std::vector<const float*> inputPointers;
         std::vector<float*> rowPointers;
+
+        //  The aux as a key (§141): its row of the key bus, and the level on it.
+        AuxBus* keyBus = nullptr;
+        int keyRow = -1;
+        int keyWidth = 2;
+        CueMatrix keyTap;
+
+        void writeKey (int start, int samples, int usable) noexcept WFG_AUDIO_THREAD;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (AuxTapPlugin)
     };

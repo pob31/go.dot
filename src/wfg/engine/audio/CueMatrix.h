@@ -138,6 +138,12 @@ namespace wfg::audio
             that sends it nothing. The audio thread's own. */
         bool lastBlockSilent() const noexcept  { return ! wroteLastBlock; }
 
+        /*  OR ITS LEVEL WAS AT NOUGHT THE WHOLE BLOCK, not moving: every output
+            nought however the coefficients stand. What an aux's key says of
+            its row (namespace draft §141), so an aux faded out or shut by a
+            double Esc is no key. The audio thread's own. */
+        bool lastBlockQuiet() const noexcept   { return ! wroteLastBlock || levelWasNought; }
+
     private:
         int index (int input, int output) const noexcept { return input * outputs + output; }
 
@@ -160,6 +166,7 @@ namespace wfg::audio
 
         /** Whether the last process() added any coefficient in. Audio thread. */
         bool wroteLastBlock = false;
+        bool levelWasNought = false;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CueMatrix)
     };

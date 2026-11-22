@@ -121,7 +121,7 @@ namespace
     /*  A rig of one voice, one rack channel `MIC` on input 0, and the auxes
         named - each stereo - and six outputs: the mic's direct out on 0 and
         each aux's own out on the pair after it. */
-    void buildRig (HostRig& rig, const std::vector<std::string>& auxes, int outputs = 6)
+    void buildRig (HostRig& rig, const std::vector<std::string>& auxes, int outputs = 6, int auxWidth = 2)
     {
         audio::HostSettings settings;
         settings.sampleRate = rate;
@@ -145,7 +145,7 @@ namespace
             aux.id = id;
             aux.name = "Aux " + id;
             aux.aux = true;
-            aux.auxWidth = 2;
+            aux.auxWidth = auxWidth;
             spec.rack.push_back (aux);
         }
 
@@ -357,6 +357,95 @@ TEST_CASE ("aux: a double Esc's sweep shuts an aux, and opening it again lets it
 
         CHECK (sink.peak (2) == doctest::Approx (1.0f));
     }
+}
+
+TEST_CASE ("key: an aux's own sound is written as a key, at its level, with no outputs at all")
+{
+    /*  Namespace draft 141, SC.3 (BHL): an aux with no outputs is a key nobody
+        hears. Its tap writes it - after its EQ and inserts, at its level - into
+        its row of the key bus, two channels; a row at nought says silent. */
+    HostRig rig;
+    buildRig (rig, { "AX000001" });
+
+    const auto mic = rig.host.rackTrackOf ("MC000001");
+    const auto aux = rig.host.rackTrackOf ("AX000001");
+    const auto column = static_cast<double> (rig.host.auxColumnOf ("AX000001"));
+
+    //  The mic into the aux's left at a half; the aux routed nowhere.
+    rig.host.setTrackRouting (mic, 0.0, Coefficients { { 0, column, 0.5 } });
+    rig.host.setRackSource (mic, 0, 1);
+    rig.host.openRackGate (mic, -1);
+
+    std::vector<float> left (block, 0.0f), right (block, 0.0f);
+
+    SUBCASE ("at the aux's level: unity, then six decibels down")
+    {
+        rig.host.setTrackRouting (aux, 0.0, Coefficients {});
+        pump (rig, 20, 19 * block + 10);
+
+        REQUIRE (rig.host.auxKeyOf ("AX000001", left.data(), right.data(), block) == 2);
+        CHECK (left[10] == doctest::Approx (0.5f));
+        CHECK (left[9] == 0.0f);
+        CHECK (left[11] == 0.0f);
+        CHECK (right[10] == 0.0f);                   // a stereo aux: side to side
+
+        rig.host.setTrackRouting (aux, -6.0206, Coefficients {});
+        const auto start = static_cast<int> (rig.host.clock().samplesElapsed());
+        pump (rig, 20, start + 19 * block + 10);
+
+        REQUIRE (rig.host.auxKeyOf ("AX000001", left.data(), right.data(), block) == 2);
+        CHECK (left[10] == doctest::Approx (0.25f).epsilon (0.001));
+    }
+
+    SUBCASE ("an aux at nought is no key")
+    {
+        rig.host.setTrackRouting (aux, static_cast<double> (audio::CueMatrix::silenceDb), Coefficients {});
+        pump (rig, 20, 19 * block + 10);
+        CHECK (rig.host.auxKeyOf ("AX000001", left.data(), right.data(), block) == 0);
+    }
+
+    SUBCASE ("a double Esc's sweep shuts it: no key, until it opens again")
+    {
+        rig.host.setTrackRouting (aux, 0.0, Coefficients {});
+        rig.host.resetEffects ({});
+        pump (rig, 20, 10 * block + 3);
+        CHECK (rig.host.auxKeyOf ("AX000001", left.data(), right.data(), block) == 0);
+
+        rig.host.openAux (aux);
+        rig.host.trackMatrix (aux)->setLevelDb (0.0f);
+        const auto start = static_cast<int> (rig.host.clock().samplesElapsed());
+        pump (rig, 20, start + 19 * block + 10);
+
+        REQUIRE (rig.host.auxKeyOf ("AX000001", left.data(), right.data(), block) == 2);
+        CHECK (left[10] == doctest::Approx (0.5f));
+    }
+
+    //  Not a key of what is no aux.
+    CHECK (rig.host.auxKeyOf ("MC000001", left.data(), right.data(), block) == 0);
+    CHECK (rig.host.auxKeyOf ("AX000009", left.data(), right.data(), block) == 0);
+}
+
+TEST_CASE ("key: a mono aux is a key on both sides")
+{
+    //  Namespace draft 141 (BHT): a mono key into a stereo sidechain is sent to both sides.
+    HostRig rig;
+    buildRig (rig, { "AX000001" }, 6, 1);
+
+    const auto mic = rig.host.rackTrackOf ("MC000001");
+    const auto aux = rig.host.rackTrackOf ("AX000001");
+    const auto column = static_cast<double> (rig.host.auxColumnOf ("AX000001"));
+    CHECK (rig.host.auxColumnCount() == 1);
+
+    rig.host.setTrackRouting (mic, 0.0, Coefficients { { 0, column, 0.5 } });
+    rig.host.setTrackRouting (aux, 0.0, Coefficients {});
+    rig.host.setRackSource (mic, 0, 1);
+    rig.host.openRackGate (mic, -1);
+    pump (rig, 20, 19 * block + 33);
+
+    std::vector<float> left (block, 0.0f), right (block, 0.0f);
+    REQUIRE (rig.host.auxKeyOf ("AX000001", left.data(), right.data(), block) == 2);
+    CHECK (left[33] == doctest::Approx (0.5f));
+    CHECK (right[33] == doctest::Approx (0.5f));
 }
 
 TEST_CASE ("aux: a show with no aux builds no tap, no aux send and no column")

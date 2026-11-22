@@ -18,6 +18,7 @@
 
 /*  AN audio/-INTERNAL HEADER: it reads the live input tap, which names JUCE's
     buffer. Only files under src/wfg/engine/audio/ and their tests include it. */
+#include <wfg/engine/audio/AuxBus.h>
 #include <wfg/engine/audio/KeySource.h>
 #include <wfg/engine/audio/LiveInputPlugin.h>
 
@@ -39,8 +40,13 @@
         (LiveInputTap): heard in the same block (BHP). One or two channels are
         pointed at where they are; a wider input is folded to two at a half
         per pair into scratch made before any block runs (BHT).
-      - AN AUX and THIS CUE come with their stages (SC.3, SC.4); until then
-        they are no key.
+      - AN AUX is its row of the key bus, which the aux's own tap writes after
+        its EQ and inserts, at its level (SC.3): two channels, read where they
+        are. When the aux has run before the reader - an aux lower in the list -
+        the row is this block's; when it runs after - a cue, a mic channel, an
+        aux higher up - it is the block before's (BHP). A row its writer said
+        is silent is no key.
+      - THIS CUE comes with its stage (SC.4); until then it is no key.
       - NO KEY, or one past what the tap holds - an input the interface does
         not give tonight - is nought channels: the caller feeds silence (BHV).
 
@@ -54,6 +60,9 @@ namespace wfg::audio
     public:
         /** The tap an input is read from, bound once before blocks run. Null reads no input. */
         void bindTap (const LiveInputTap* tap) noexcept     { boundTap = tap; }
+
+        /** The key bus an aux is read from (§141, SC.3), bound once. Null reads no aux. */
+        void bindKeyBus (const AuxBus* keys) noexcept       { boundKeys = keys; }
 
         /** Message thread, before blocks run: room for a folded key of this many samples. */
         void prepare (int maxBlockSamples)
@@ -89,10 +98,32 @@ namespace wfg::audio
             if (wanted.kind == KeySource::Kind::input)
                 return readInput (wanted, start, samples, out);
 
+            if (wanted.kind == KeySource::Kind::aux)
+                return readAux (wanted, start, samples, out);
+
             return 0;
         }
 
     private:
+        int readAux (const KeySource& key, int start, int samples, const float* (&out)[2]) const noexcept
+        {
+            const auto* keys = boundKeys;
+
+            if (keys == nullptr || key.first >= keys->writerCount() || keys->columnCount() < 2
+                 || start < 0 || samples <= 0 || start + samples > keys->blockLimit() || keys->isSilent (key.first))
+                return 0;
+
+            const auto* left = keys->row (key.first, 0);
+            const auto* right = keys->row (key.first, 1);
+
+            if (left == nullptr || right == nullptr)
+                return 0;
+
+            out[0] = left + start;
+            out[1] = right + start;
+            return 2;
+        }
+
         int readInput (const KeySource& key, int start, int samples, const float* (&out)[2]) noexcept
         {
             const auto* tap = boundTap;
@@ -137,6 +168,7 @@ namespace wfg::audio
 
         std::atomic<std::uint32_t> packed { 0 };
         const LiveInputTap* boundTap = nullptr;
+        const AuxBus* boundKeys = nullptr;
         std::vector<float> scratch;
         int scratchSamples = 0;
     };
