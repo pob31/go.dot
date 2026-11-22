@@ -769,6 +769,7 @@ namespace wfg::audio
                 matrices.push_back (&output->matrix());
                 plugins.push_back (output);
                 bindAuxTap (index, output->matrix());
+                bindKeyLevel (output->matrix());
 
                 /*  Routed once, to the one wide device. This is the structural
                     edit that never happens again. */
@@ -1636,6 +1637,7 @@ namespace wfg::audio
             matrices.push_back (&output->matrix());
             plugins.push_back (output);
             bindAuxTap (index, output->matrix());
+            bindKeyLevel (output->matrix());
 
             if (auto& manager = engine->getDeviceManager(); manager.getNumWaveOutDevices() > 0)
                 if (auto* wide = manager.getWaveOutDevice (0))
@@ -1688,6 +1690,19 @@ namespace wfg::audio
 
             if (auto* auxTap = taps[static_cast<std::size_t> (index)])
                 auxTap->bind (&auxBus, &level);
+        }
+
+        /*  A CUE'S OWN KEY IS UNDER ITS LEVEL (namespace draft §141, SC.4):
+            every plugin place on the track just built follows the level its
+            output stage is told. */
+        void bindKeyLevel (const CueMatrix& level)
+        {
+            if (trackPlaces.empty())
+                return;
+
+            for (auto* place : trackPlaces.back())
+                if (place != nullptr)
+                    place->bindLevel (&level);
         }
 
         /*  AN AUX'S RETURN: Tracktion's, on the bus the tracks before it send

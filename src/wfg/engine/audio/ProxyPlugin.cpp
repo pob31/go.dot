@@ -136,7 +136,9 @@ namespace wfg::audio
             always did. */
         const float* key[2] = { nullptr, nullptr };
         const auto keyChannels = lane->isKeyed() && keyReader.hasKey()
-                                   ? keyReader.read (context.bufferStartSample, context.bufferNumSamples, key) : 0;
+                                   ? keyReader.read (context.bufferStartSample, context.bufferNumSamples, key,
+                                                     pointers.data(), usable)
+                                   : 0;
 
         lane->process (pointers.data(), usable, context.bufferNumSamples, boundClock, blockStart, key, keyChannels);
     }

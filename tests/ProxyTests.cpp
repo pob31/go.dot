@@ -37,6 +37,7 @@
 #include <wfg/engine/audio/CueMatrix.h>
 #include <wfg/engine/audio/EqSettings.h>
 #include <wfg/engine/audio/HostPlayer.h>
+#include <wfg/engine/audio/KeyReader.h>
 #include <wfg/engine/audio/Looper.h>
 #include <wfg/engine/plugin/BlockFence.h>
 #include <wfg/engine/plugin/Catalogue.h>
@@ -5220,4 +5221,74 @@ TEST_CASE ("key: the test ducker hears its key through its child, and only when 
     }
 
     host.stop();
+}
+
+TEST_CASE ("key: this cue after its level - its own sound under the level its output stage is told, ramped, folded")
+{
+    /*  Namespace draft 141, SC.4 (BHQ, BHT): a cue's own key is the sound
+        arriving at the effect times the gain its output stage is told - its
+        level, trims, DCAs and lane as one number - ramped from the last
+        block's gain to this one's across the block. Wider than two, folded;
+        a level at nought on both ends, no key. */
+    constexpr int samples = 64;
+
+    audio::CueMatrix level;
+    level.prepare (1, 1, 48000.0, samples);
+    level.setLevelDb (0.0f);
+
+    audio::KeyReader reader;
+    reader.prepare (samples);
+    reader.bindLevel (&level);
+
+    audio::KeySource self;
+    self.kind = audio::KeySource::Kind::self;
+    reader.setSource (self);
+    REQUIRE (reader.hasKey());
+
+    std::vector<float> left (samples, 0.5f), right (samples, -0.25f);
+    const float* own[] { left.data(), right.data() };
+    const float* key[2] {};
+
+    //  None handed in: no key.
+    CHECK (reader.read (0, samples, key) == 0);
+
+    //  At unity: the sound itself, side to side.
+    REQUIRE (reader.read (0, samples, key, own, 2) == 2);
+    CHECK (key[0][0] == doctest::Approx (0.5f));
+    CHECK (key[1][samples - 1] == doctest::Approx (-0.25f));
+
+    //  Six decibels down: a ramp from unity to a half across the block, then steady.
+    level.setLevelDb (-6.0206f);
+    REQUIRE (reader.read (0, samples, key, own, 2) == 2);
+    CHECK (key[0][0] > 0.49f);
+    CHECK (key[0][samples / 2 - 1] == doctest::Approx (0.375f).epsilon (0.01));
+    CHECK (key[0][samples - 1] == doctest::Approx (0.25f).epsilon (0.001));
+
+    REQUIRE (reader.read (0, samples, key, own, 2) == 2);
+    CHECK (key[0][0] == doctest::Approx (0.25f).epsilon (0.001));
+    CHECK (key[1][0] == doctest::Approx (-0.125f).epsilon (0.001));
+
+    //  A mono cue: one side.
+    CHECK (reader.read (0, samples, key, own, 1) == 1);
+
+    //  Four channels: folded to two at a half each, 0 and 2 left, 1 and 3 right.
+    std::vector<float> third (samples, 0.5f), fourth (samples, -0.25f);
+    const float* wide[] { left.data(), right.data(), third.data(), fourth.data() };
+    level.setLevelDb (0.0f);
+    reader.read (0, samples, key, own, 2);                      // the ramp back to unity, spent
+    REQUIRE (reader.read (0, samples, key, wide, 4) == 2);
+    CHECK (key[0][10] == doctest::Approx (0.5f));
+    CHECK (key[1][10] == doctest::Approx (-0.25f));
+
+    //  At nought, once the ramp down is spent: no key.
+    level.setLevelDb (audio::CueMatrix::silenceDb);
+    CHECK (reader.read (0, samples, key, own, 2) == 2);         // unity down to nought, across this block
+    CHECK (key[0][samples - 1] == doctest::Approx (0.0f));
+    CHECK (reader.read (0, samples, key, own, 2) == 0);
+
+    //  Longer than it was prepared for: no key, never past the scratch.
+    level.setLevelDb (0.0f);
+    std::vector<float> longer (2 * samples, 0.5f);
+    const float* tooLong[] { longer.data() };
+    CHECK (reader.read (0, 2 * samples, key, tooLong, 1) == 0);
 }

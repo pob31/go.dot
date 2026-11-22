@@ -2132,6 +2132,19 @@ add_test(NAME blackbox.key-aux.fr_FR
 set_tests_properties(blackbox.key-aux.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
+# A cue keys its own effect after its level (namespace draft 141, SC.4): one
+# cue on a DCA through the test ducker keyed by "self". Brought down six
+# decibels on the DCA, it is ducked by half of itself - less than a key deaf to
+# the DCA would duck it; the session replays.
+add_test(NAME blackbox.key-self.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/key_self.py" --wfg-locale=C)
+set_tests_properties(blackbox.key-self.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.key-self.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/key_self.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.key-self.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
 # The live rack, stage 9b.2 (namespace draft 18.10): named inputs made over OSC
 # on a hosted interface fed from a WAV, one meter reading a tone and one
 # silence with nothing listening, one input past the interface saying so, and

@@ -1,0 +1,22 @@
+<Show>
+  <Lists goDebounce="0">
+    <List id="KS000001" name="Sound">
+      <Media id="KS000002" channels="1" dca="KS000010" directOut="KS000004" file="tone.wav" name="Its own ducker" number="1">
+        <Fx id="KS000005" key="self" plugin="KS000006"/>
+      </Media>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="1">
+    <Bus id="KS000004" name="Main L/R" width="2"/>
+    <Plugins>
+      <Plugin id="KS000006" format="VST3" identifier="godot:test-duck" name="Test duck"/>
+    </Plugins>
+  </Audio>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces/>
+  <Dcas>
+    <Dca id="KS000010" name="Band" shortName="Band"/>
+  </Dcas>
+</Show>

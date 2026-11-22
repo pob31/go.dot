@@ -36327,7 +36327,7 @@ is summed only after the graph and would come a block late at best.
 - **SC.1** (5d46eec7): an input keys a plugin, end to end - region 7, the child's keyed layout, `godot:test-duck`,
   `fx/key`, `plugin/keyInputs`, the validate warning; `tests/blackbox/key_input.py`.
 - **SC.2** (644bd2b4): the Key menu on a plugin's box with a sidechain, the console's fields, the "no key" mark.
-- **SC.3**: an aux as a key. The key bus is a second `AuxBus`, a stereo row an aux in the rack's order; the
+- **SC.3** (40d30171): an aux as a key. The key bus is a second `AuxBus`, a stereo row an aux in the rack's order; the
   aux's own tap writes it after the aux's EQ and inserts, under its level by a second `CueMatrix`, a mono aux
   onto both sides (BHT). A row says it is silent when nothing was written **or the aux's level sat at nought the
   whole block** (`CueMatrix::lastBlockQuiet`) - so an aux faded out, or shut by a double Esc's sweep, is no key
@@ -36335,3 +36335,11 @@ is summed only after the graph and would come a block late at best.
   Measured in the served driver `tests/blackbox/key_aux.py`: a bed through the test ducker keyed by a mono aux
   with no outputs, a second cue sending a voice into it - the bed ducked from exactly one block after the voice's
   first sample, as BHP says. `AudioHost::auxKeyOf` reads a row between blocks, for tests only.
+
+- **SC.4**: this cue after its level. Every plugin place on a track follows the level its output stage is told
+  (`KeyReader::bindLevel`, bound beside the aux tap); a `self` key is the sound arriving at the effect, before the
+  effect touches it, times that gain, ramped from the last block's gain to this one's across the block, folded to
+  two past two channels. A level at nought on both ends of a block is no key. Measured in the served driver
+  `tests/blackbox/key_self.py`, at the author's own example: a cue on a DCA through the test ducker keyed by itself
+  - six decibels down on the DCA, it is ducked by half of itself and comes down by less than six decibels, louder
+  than a key deaf to the DCA would leave it.

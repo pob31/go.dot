@@ -100,6 +100,7 @@ namespace wfg::audio
         KeySource key() const noexcept                       { return keyReader.source(); }
         void bindTap (const LiveInputTap* tap) noexcept      { keyReader.bindTap (tap); }
         void bindKeyBus (const AuxBus* keys) noexcept        { keyReader.bindKeyBus (keys); }
+        void bindLevel (const CueMatrix* levelOf) noexcept   { keyReader.bindLevel (levelOf); }
 
         int numChannels() const noexcept  { return channels; }
 
