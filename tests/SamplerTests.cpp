@@ -80,7 +80,11 @@ namespace
         int slotCount() const override                       { return 1; }
         int sampleRate() const override                      { return 48000; }
 
-        void requestArm (const cue::ArmRequest& request) override { arms.push_back (request); }
+        void requestArm (const cue::ArmRequest& request) override
+        {
+            arms.push_back (request);
+            everyArm.push_back (request);
+        }
 
         bool launchAtSample (int track, int, std::int64_t) override
         {
@@ -100,6 +104,15 @@ namespace
         void setRouting (int, const std::vector<cue::Coefficient>&) override {}
         bool isPlaying (int track) const override               { return playing.count (track) > 0; }
         bool isArmReady (int track) const override              { return ready.count (track) > 0; }
+
+        //  Go.dot's own dynamics stage (namespace draft §141): what each track was told, and what it took off.
+        void setDyn (int track, const audio::DynSettings& settings) override { dynSet[track] = settings; }
+        void setDynKey (int track, const audio::KeySource& key) override    { dynKeys[track] = key; }
+        float dynReductionDb (int track) override
+        {
+            const auto found = reductions.find (track);
+            return found != reductions.end() ? found->second : 0.0f;
+        }
 
         //  What left each track since the last take, as the output stage's peak: taken, so nought after.
         float takeOutputPeak (int track) override
@@ -131,6 +144,11 @@ namespace
         std::set<int> playing;
         std::set<int> ready;
         std::map<int, float> peaks;
+
+        std::vector<cue::ArmRequest> everyArm;
+        std::map<int, audio::DynSettings> dynSet;
+        std::map<int, audio::KeySource> dynKeys;
+        std::map<int, float> reductions;
     };
 
     struct Rig
@@ -3248,4 +3266,80 @@ TEST_CASE ("cart: a hold member pressed by name or by a trigger stops when it is
     rig.send ("trigger.release", { osc::Value::string (trigger.id) });
     REQUIRE (rig.liveRunOf (pads.sound) != nullptr);
     CHECK (rig.liveRunOf (pads.sound)->stopAsked);
+}
+
+TEST_CASE ("dyn: a cue's own dynamics ride its arm, follow an edit while it sounds, and its run says what they took off")
+{
+    /*  Namespace draft 141, SC.7: the stage's rows read through the schema
+        as the EQ's, carried by the arm with their key resolved as an insert's,
+        pushed again when an edit moves them under a sounding cue; and
+        run/reduction, a meter's readout, published a tick at a time. */
+    Rig rig;
+    const auto& members = rig.membersOf[rig.bankA];
+    const auto cue = members[0];
+    const auto input = rig.document.createInput (1).id;
+
+    rig.set ("/godot/cue/" + cue + "/dynOn", "true");
+    rig.set ("/godot/cue/" + cue + "/dynThreshold", "-30");
+    rig.set ("/godot/cue/" + cue + "/dynGateOn", "true");
+    rig.set ("/godot/cue/" + cue + "/dynKey", input);
+
+    rig.arm (rig.bankA);
+
+    const auto armed = std::find_if (rig.audio.everyArm.begin(), rig.audio.everyArm.end(),
+                                     [&rig, &cue] (const cue::ArmRequest& request)
+                                     {
+                                         const auto* run = rig.runs.find (request.runId);
+                                         return run != nullptr && run->cue == cue;
+                                     });
+    REQUIRE (armed != rig.audio.everyArm.end());
+    CHECK (armed->dyn.on);
+    CHECK (armed->dyn.gateOn);
+    CHECK (armed->dyn.thresholdDb == doctest::Approx (-30.0f));
+    CHECK (armed->dyn.ratio == doctest::Approx (4.0f));                 // the table's, never written
+    CHECK (armed->dynKey.kind == audio::KeySource::Kind::input);
+
+    //  The other members, never touched: off, and no key.
+    for (const auto& request : rig.audio.everyArm)
+        if (const auto* run = rig.runs.find (request.runId); run != nullptr && run->cue != cue)
+        {
+            CHECK_FALSE (request.dyn.on);
+            CHECK (request.dynKey.isNone());
+        }
+
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]), osc::Value::int32 (100) });
+    rig.sound (cue);
+
+    const auto* run = rig.liveRunOf (cue);
+    REQUIRE (run != nullptr);
+    const auto runId = run->id;
+    const auto track = run->track;
+
+    //  An edit under the sounding cue: its numbers and its key pushed.
+    rig.set ("/godot/cue/" + cue + "/dynThreshold", "-10");
+    rig.set ("/godot/cue/" + cue + "/dynKey", "self");
+    rig.tickOnce();
+    REQUIRE (rig.audio.dynSet.count (track) == 1);
+    CHECK (rig.audio.dynSet[track].thresholdDb == doctest::Approx (-10.0f));
+    CHECK (rig.audio.dynKeys[track].kind == audio::KeySource::Kind::self);
+
+    //  What it took off, a tick at a time, to a tenth.
+    rig.audio.reductions[track] = -6.54f;
+    rig.tickOnce();
+    CHECK (rig.runs.find (runId)->reduction == doctest::Approx (-6.54).epsilon (1e-3));
+    CHECK (osc::parseDouble (rig.published ("/godot/run/" + runId + "/reduction")).value_or (0.0) == doctest::Approx (-6.5));
+
+    //  dyn.reset: the stage off, every number the table's - and its key kept.
+    CHECK (rig.send ("dyn.reset", { osc::Value::string (cue) }).applied == 1);
+    CHECK (rig.published ("/godot/cue/" + cue + "/dynOn") == "false");
+    CHECK (osc::parseDouble (rig.published ("/godot/cue/" + cue + "/dynThreshold")).value_or (0.0) == doctest::Approx (-20.0));
+    CHECK (rig.published ("/godot/cue/" + cue + "/dynGateOn") == "false");
+    CHECK (rig.published ("/godot/cue/" + cue + "/dynKey") == "self");
+    rig.tickOnce();
+    CHECK_FALSE (rig.audio.dynSet[track].on);
+
+    //  (One step of the history: UndoTests, whose rig opens a transaction per command.)
+
+    //  And dyn.reset refuses what has no stage.
+    CHECK (rig.send ("dyn.reset", { osc::Value::string (rig.bankA) }).rejected == 1);
 }

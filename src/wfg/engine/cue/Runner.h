@@ -47,6 +47,7 @@
     the same commands are applied, and only the sound is missing.
 */
 
+#include <wfg/engine/audio/DynSettings.h>
 #include <wfg/engine/audio/EqSettings.h>
 #include <wfg/engine/audio/EditRenderTable.h>
 #include <wfg/engine/audio/MediaInfo.h>
@@ -309,6 +310,11 @@ namespace wfg::cue
             the reason everything else here is one. */
         audio::EqSettings eq;
 
+        /*  Go.dot's own dynamics (namespace draft §141), and what it listens
+            to, resolved as an insert's key is: snapped at the arm with the EQ. */
+        audio::DynSettings dyn;
+        audio::KeySource dynKey;
+
         /*  And its inserts, one per entry of the set in chain order (PR
             9a.8): switched in or not, and the values the cue sets. */
         std::vector<FxSetting> fx;
@@ -562,6 +568,14 @@ namespace wfg::cue
             is armed or sounding, or an input repacked under it. Tick thread;
             a word on the audio side. A no-op by default. */
         virtual void setFxKey (int, int, const audio::KeySource&) {}
+
+        /*  A sounding cue's dynamics stage of Go.dot's own (namespace draft
+            §141), its settings and its key changed under it, as setEq; and the
+            deepest reduction it applied over its last block, a meter's, taken
+            a tick at a time. No-ops and nought by default, as setEq. */
+        virtual void setDyn (int, const audio::DynSettings&) {}
+        virtual void setDynKey (int, const audio::KeySource&) {}
+        virtual float dynReductionDb (int) { return 0.0f; }
 
         /*  A cue's whole state for one entry changed after its arm and before
             its launch (the author's decision of 2026-09-25): load that one
@@ -2260,6 +2274,13 @@ namespace wfg::cue
             flat EQ - which the writer omits - reads as flat. */
         audio::EqSettings eqOf (const juce::ValueTree& cue,
                                 const std::map<std::string, double>* moved = nullptr) const;
+
+        /*  The cue's dynamics stage of Go.dot's own (namespace draft §141),
+            through the schema for eqOf's reason, a lock's ride and a fade's
+            numbers first as the EQ's; and its key, resolved as an insert's. */
+        audio::DynSettings dynOf (const juce::ValueTree& cue,
+                                  const std::map<std::string, double>* moved = nullptr) const;
+        audio::KeySource dynKeyOf (const juce::ValueTree& cue) const;
 
         /*  The cue's inserts against the show's set, in chain order: one
             FxSetting per entry, disabled and empty where the cue has no Fx

@@ -47,6 +47,7 @@
     several runs make "which one" a real question.
 */
 
+#include <wfg/engine/audio/DynSettings.h>
 #include <wfg/engine/audio/EqSettings.h>
 #include <wfg/engine/audio/KeySource.h>
 #include <wfg/engine/clock/RateClock.h>
@@ -766,6 +767,13 @@ namespace wfg::cue
             what changed for THIS run and push only that, and a tick with no
             edit compares nothing at all. Never logged: the rows are. */
         audio::EqSettings eq;
+
+        /*  Its dynamics stage and key as last given (namespace draft §141), as
+            `eq`; and the deepest reduction the stage applied over the last
+            tick, in dB - a READOUT like `meter`, never logged. */
+        audio::DynSettings dyn;
+        audio::KeySource dynKey;
+        double reduction = 0.0;
 
         /*  THE INSERTS THE VOICE WAS LAST GIVEN (Phase 9a, PR 9a.8): one per
             entry of the show's set in chain order, as the arm carried them and

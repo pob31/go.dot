@@ -667,6 +667,156 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="dynAttack">
+          <a:documentation>How fast the compressor takes level off once its detector goes over.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0.05</param>
+            <param name="maxInclusive">200</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynCompOn">
+          <a:documentation>Whether the stage&apos;s compressor is in while the stage is: off leaves the gate and the make-up alone.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynGateAttack">
+          <a:documentation>How fast the gate opens.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0.05</param>
+            <param name="maxInclusive">200</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynGateHold">
+          <a:documentation>How long the gate stays open after what it listens to falls under its threshold, so it does not chatter.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">500</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynGateOn">
+          <a:documentation>Whether the stage&apos;s gate is in while the stage is: under its threshold the cue goes down by its range (spatcore&apos;s expander at a ratio of a hundred).</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynGateRange">
+          <a:documentation>How far the gate takes the cue down when it is shut.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-80</param>
+            <param name="maxInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynGateRelease">
+          <a:documentation>How fast the gate shuts once its hold is over.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">5</param>
+            <param name="maxInclusive">2000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynGateThreshold">
+          <a:documentation>Where the gate opens, in decibels below full scale, by what the stage listens to - a key under it shuts the cue however loud the cue is.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-90</param>
+            <param name="maxInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynKey">
+          <a:documentation>What the stage listens to (namespace draft 141, BHL), as an insert&apos;s key: empty for the cue itself before its level, as a console channel compressor; self for this cue after its level; the id of an aux or of a named input. A key naming what the show has not got is silence and a problem mark in words, never a failed run (BHV) - its compressor rests and its gate shuts.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynKeyHighCut">
+          <a:documentation>A low-pass on what the compressor and the gate hear, never on the sound, held under the rate&apos;s Nyquist. 20 kHz is as good as off.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">1000</param>
+            <param name="maxInclusive">20000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynKeyLowCut">
+          <a:documentation>A high-pass on what the compressor and the gate hear, never on the sound: so a ducker ignores the rumble of its key (BHO). 20 Hz is as good as off.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">20</param>
+            <param name="maxInclusive">2000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynKnee">
+          <a:documentation>How wide the bend at the threshold is: nought is a hard corner, wider eases the ratio in.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">24</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynMakeup">
+          <a:documentation>A fixed gain after the compressor and the gate, to give back what the compressor took.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-24</param>
+            <param name="maxInclusive">24</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynOn">
+          <a:documentation>Whether Go.dot&apos;s own dynamics stage is in the signal (namespace draft 141, BHM): after the EQ and before the inserts. Off it is not called at all - the cue the same to the bit (BHU) - and that is its resting state.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynRatio">
+          <a:documentation>How hard it compresses above the threshold: so many decibels in for one out. One is no compression; a hundred is a limiter.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">1</param>
+            <param name="maxInclusive">100</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynRelease">
+          <a:documentation>How fast it gives the level back once its detector falls under: slow, and a ducker breathes back in; fast, and it pumps.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">5</param>
+            <param name="maxInclusive">2000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynThreshold">
+          <a:documentation>Where the compressor starts to take level off, in decibels below full scale, read by a peak detector on what the stage listens to (the cue itself before its level, or its key).</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-60</param>
+            <param name="maxInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="editSource">
           <a:documentation>The file this cue&apos;s edit was made from while the edit is FROZEN - bounced to a new file by media.freeze and the cue pointed at it - and empty otherwise (namespace draft 55, ADN). So file names what the cue plays whatever its state: a frozen cue is a plain sound cue to everything that reads file, and this row is what media.unfreeze points file back at. Non-empty with no sections is a show somebody edited by hand, and a warning.</a:documentation>
           <data type="string"/>
@@ -1193,6 +1343,156 @@
         <attribute name="directOut">
           <a:documentation>The direct out this cue-s channels land on, by identifier; empty routes it nowhere by this road and is what every cue starts as. A mono cue feeds every channel of a stereo out; a stereo cue onto a mono out is folded, each side at half (2026-10-08); any other cue wider than its out fails the run as bad-route, because which side a third channel belongs to is a layout somebody has to say. Chosen among the outputs whose kind is direct - a mix channel is reached through a Send, at a level, which is the whole difference between the two.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynAttack">
+          <a:documentation>How fast the compressor takes level off once its detector goes over.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0.05</param>
+            <param name="maxInclusive">200</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynCompOn">
+          <a:documentation>Whether the stage&apos;s compressor is in while the stage is: off leaves the gate and the make-up alone.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynGateAttack">
+          <a:documentation>How fast the gate opens.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0.05</param>
+            <param name="maxInclusive">200</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynGateHold">
+          <a:documentation>How long the gate stays open after what it listens to falls under its threshold, so it does not chatter.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">500</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynGateOn">
+          <a:documentation>Whether the stage&apos;s gate is in while the stage is: under its threshold the cue goes down by its range (spatcore&apos;s expander at a ratio of a hundred).</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynGateRange">
+          <a:documentation>How far the gate takes the cue down when it is shut.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-80</param>
+            <param name="maxInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynGateRelease">
+          <a:documentation>How fast the gate shuts once its hold is over.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">5</param>
+            <param name="maxInclusive">2000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynGateThreshold">
+          <a:documentation>Where the gate opens, in decibels below full scale, by what the stage listens to - a key under it shuts the cue however loud the cue is.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-90</param>
+            <param name="maxInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynKey">
+          <a:documentation>What the stage listens to (namespace draft 141, BHL), as an insert&apos;s key: empty for the cue itself before its level, as a console channel compressor; self for this cue after its level; the id of an aux or of a named input. A key naming what the show has not got is silence and a problem mark in words, never a failed run (BHV) - its compressor rests and its gate shuts.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynKeyHighCut">
+          <a:documentation>A low-pass on what the compressor and the gate hear, never on the sound, held under the rate&apos;s Nyquist. 20 kHz is as good as off.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">1000</param>
+            <param name="maxInclusive">20000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynKeyLowCut">
+          <a:documentation>A high-pass on what the compressor and the gate hear, never on the sound: so a ducker ignores the rumble of its key (BHO). 20 Hz is as good as off.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">20</param>
+            <param name="maxInclusive">2000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynKnee">
+          <a:documentation>How wide the bend at the threshold is: nought is a hard corner, wider eases the ratio in.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">24</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynMakeup">
+          <a:documentation>A fixed gain after the compressor and the gate, to give back what the compressor took.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-24</param>
+            <param name="maxInclusive">24</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynOn">
+          <a:documentation>Whether Go.dot&apos;s own dynamics stage is in the signal (namespace draft 141, BHM): after the EQ and before the inserts. Off it is not called at all - the cue the same to the bit (BHU) - and that is its resting state.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynRatio">
+          <a:documentation>How hard it compresses above the threshold: so many decibels in for one out. One is no compression; a hundred is a limiter.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">1</param>
+            <param name="maxInclusive">100</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynRelease">
+          <a:documentation>How fast it gives the level back once its detector falls under: slow, and a ducker breathes back in; fast, and it pumps.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">5</param>
+            <param name="maxInclusive">2000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynThreshold">
+          <a:documentation>Where the compressor starts to take level off, in decibels below full scale, read by a peak detector on what the stage listens to (the cue itself before its level, or its key).</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-60</param>
+            <param name="maxInclusive">0</param>
+          </data>
         </attribute>
       </optional>
       <optional>
@@ -4333,6 +4633,156 @@
         <attribute name="directOut">
           <a:documentation>The direct out this cue-s channels land on, by identifier; empty routes it nowhere by this road and is what every cue starts as. A mono cue feeds every channel of a stereo out; a stereo cue onto a mono out is folded, each side at half (2026-10-08); any other cue wider than its out fails the run as bad-route, because which side a third channel belongs to is a layout somebody has to say. Chosen among the outputs whose kind is direct - a mix channel is reached through a Send, at a level, which is the whole difference between the two.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynAttack">
+          <a:documentation>How fast the compressor takes level off once its detector goes over.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0.05</param>
+            <param name="maxInclusive">200</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynCompOn">
+          <a:documentation>Whether the stage&apos;s compressor is in while the stage is: off leaves the gate and the make-up alone.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynGateAttack">
+          <a:documentation>How fast the gate opens.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0.05</param>
+            <param name="maxInclusive">200</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynGateHold">
+          <a:documentation>How long the gate stays open after what it listens to falls under its threshold, so it does not chatter.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">500</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynGateOn">
+          <a:documentation>Whether the stage&apos;s gate is in while the stage is: under its threshold the cue goes down by its range (spatcore&apos;s expander at a ratio of a hundred).</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynGateRange">
+          <a:documentation>How far the gate takes the cue down when it is shut.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-80</param>
+            <param name="maxInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynGateRelease">
+          <a:documentation>How fast the gate shuts once its hold is over.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">5</param>
+            <param name="maxInclusive">2000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynGateThreshold">
+          <a:documentation>Where the gate opens, in decibels below full scale, by what the stage listens to - a key under it shuts the cue however loud the cue is.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-90</param>
+            <param name="maxInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynKey">
+          <a:documentation>What the stage listens to (namespace draft 141, BHL), as an insert&apos;s key: empty for the cue itself before its level, as a console channel compressor; self for this cue after its level; the id of an aux or of a named input. A key naming what the show has not got is silence and a problem mark in words, never a failed run (BHV) - its compressor rests and its gate shuts.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynKeyHighCut">
+          <a:documentation>A low-pass on what the compressor and the gate hear, never on the sound, held under the rate&apos;s Nyquist. 20 kHz is as good as off.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">1000</param>
+            <param name="maxInclusive">20000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynKeyLowCut">
+          <a:documentation>A high-pass on what the compressor and the gate hear, never on the sound: so a ducker ignores the rumble of its key (BHO). 20 Hz is as good as off.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">20</param>
+            <param name="maxInclusive">2000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynKnee">
+          <a:documentation>How wide the bend at the threshold is: nought is a hard corner, wider eases the ratio in.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">24</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynMakeup">
+          <a:documentation>A fixed gain after the compressor and the gate, to give back what the compressor took.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-24</param>
+            <param name="maxInclusive">24</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynOn">
+          <a:documentation>Whether Go.dot&apos;s own dynamics stage is in the signal (namespace draft 141, BHM): after the EQ and before the inserts. Off it is not called at all - the cue the same to the bit (BHU) - and that is its resting state.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynRatio">
+          <a:documentation>How hard it compresses above the threshold: so many decibels in for one out. One is no compression; a hundred is a limiter.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">1</param>
+            <param name="maxInclusive">100</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynRelease">
+          <a:documentation>How fast it gives the level back once its detector falls under: slow, and a ducker breathes back in; fast, and it pumps.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">5</param>
+            <param name="maxInclusive">2000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynThreshold">
+          <a:documentation>Where the compressor starts to take level off, in decibels below full scale, read by a peak detector on what the stage listens to (the cue itself before its level, or its key).</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-60</param>
+            <param name="maxInclusive">0</param>
+          </data>
         </attribute>
       </optional>
       <optional>

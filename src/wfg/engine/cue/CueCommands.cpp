@@ -183,6 +183,61 @@ namespace wfg::cue
             are the table's own, read off the rows, so this can never disagree
             with what a fresh cue is - every band's switch back on with the
             rest (2026-09-25). */
+        /*  THE DYNAMICS STAGE'S RESET (namespace draft §141): eq.reset's
+            shape, for its reasons - every number back to the table's, the stage
+            off, one transaction. Its KEY STAYS: what the stage listens to is a
+            pick of routing, not a setting of the sound, and a reset that
+            unpicked it would be a second edit hiding in the first. */
+        registry.add ({ "dyn.reset",
+                        "Puts a cue's own dynamics stage back to rest: off, every number at the"
+                        " table's default; what it listens to stays. One transaction, so Undo"
+                        " takes the whole reset back at once.",
+                        { { "cue", 's', false } },
+                        true,
+                        [&document, live] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args[0].getString();
+                            const auto cue = document.findById (id);
+
+                            if (! cue.isValid())
+                                return Outcome::rejected (reason::unknownId);
+
+                            if (! cue.hasType ("Media") && ! cue.hasType ("Mic") && ! cue.hasType ("Channel"))
+                                return Outcome::rejected (reason::badValue);
+
+                            const auto base = cue.hasType ("Channel") ? "/godot/slot/" + id + "/" : "/godot/cue/" + id + "/";
+
+                            for (const auto* row : doc::Schema::rowsForOwner ("sound"))
+                            {
+                                const std::string name { row->name };
+
+                                if (name.rfind ("dyn", 0) != 0 || name == "dynKey")
+                                    continue;
+
+                                if (live != nullptr && document.isLocked())
+                                {
+                                    const auto saved = document.getAttribute (base + name);
+
+                                    if (saved.value_or (std::string {}) == row->defaultText)
+                                        live->dropRow (id, name);
+                                    else
+                                        live->setRow (id, name, std::string (row->defaultText));
+
+                                    continue;
+                                }
+
+                                if (live != nullptr)
+                                    live->dropRow (id, name);
+
+                                const auto edit = document.setAttribute (base + name, std::string (row->defaultText));
+
+                                if (! edit.ok)
+                                    return Outcome::rejected (edit.reason);
+                            }
+
+                            return Outcome::ok (args);
+                        } });
+
         registry.add ({ "eq.reset",
                         "Puts a media cue's EQ back to flat: every band in and at nought, both"
                         " filters out, on. One transaction, so Undo takes the whole reset back at"

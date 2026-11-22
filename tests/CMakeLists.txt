@@ -2146,6 +2146,18 @@ add_test(NAME blackbox.key-self.fr_FR
 set_tests_properties(blackbox.key-self.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
+# Go.dot's own dynamics (namespace draft 141, SC.7): from the rows alone, a gate
+# keyed by a talkback input shut until the talkback speaks, and a compressor
+# hearing its own cue, four to one over minus twenty; the session replays.
+add_test(NAME blackbox.dyn.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase_dyn.py" --wfg-locale=C)
+set_tests_properties(blackbox.dyn.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.dyn.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase_dyn.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.dyn.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
 # The live rack, stage 9b.2 (namespace draft 18.10): named inputs made over OSC
 # on a hosted interface fed from a WAV, one meter reading a tone and one
 # silence with nothing listening, one input past the interface saying so, and

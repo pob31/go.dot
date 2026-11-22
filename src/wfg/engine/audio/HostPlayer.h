@@ -113,6 +113,9 @@ namespace wfg::audio
         void setBeatClock (const cue::BeatClockState& state) override;
         void setFxShape (int track, int slot, int feed, int back) override;
         void setFxKey (int track, int slot, const KeySource& key) override;
+        void setDyn (int track, const DynSettings& settings) override;
+        void setDynKey (int track, const KeySource& key) override;
+        float dynReductionDb (int track) override;
         void requestFxState (int track, int slot, const std::string& path) override;
         void holdFx (int track, const cue::FxSetting& fx) override;
         void prepareInserts (const std::vector<cue::InsertKind>& kinds) override;

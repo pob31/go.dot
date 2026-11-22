@@ -7492,24 +7492,32 @@ namespace wfg::doc
             std::vector<std::string>& problems;
             const ShowDocument& document;
 
+            void check (const juce::ValueTree& node, const char* attribute)
+            {
+                const auto key = node[attribute].toString().toStdString();
+
+                if (key.empty() || key == "self")
+                    return;
+
+                const auto target = document.findById (key);
+                const auto here = "/Show/.../" + node.getType().toString().toStdString() + "["
+                                + node[idProperty].toString().toStdString() + "]/@" + attribute;
+
+                if (! target.isValid())
+                    problems.push_back (here + ": names \"" + key + "\", which is not in this show");
+                else if (! target.hasType ("Input")
+                          && ! (target.hasType ("Channel") && target["access"].toString() == "shared"))
+                    problems.push_back (here + ": names \"" + key + "\", which is neither an aux nor an input");
+            }
+
             void visit (const juce::ValueTree& node)
             {
                 if (node.hasType ("Fx"))
-                {
-                    const auto key = node["key"].toString().toStdString();
+                    check (node, "key");
 
-                    if (! key.empty() && key != "self")
-                    {
-                        const auto target = document.findById (key);
-                        const auto here = "/Show/.../Fx[" + node[idProperty].toString().toStdString() + "]/@key";
-
-                        if (! target.isValid())
-                            problems.push_back (here + ": names \"" + key + "\", which is not in this show");
-                        else if (! target.hasType ("Input")
-                                  && ! (target.hasType ("Channel") && target["access"].toString() == "shared"))
-                            problems.push_back (here + ": names \"" + key + "\", which is neither an aux nor an input");
-                    }
-                }
+                //  And the key of a sound's own dynamics stage (§141), the same word.
+                if (node.hasProperty ("dynKey"))
+                    check (node, "dynKey");
 
                 for (const auto& child : node)
                     visit (child);

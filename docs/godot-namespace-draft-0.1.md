@@ -36336,10 +36336,41 @@ is summed only after the graph and would come a block late at best.
   with no outputs, a second cue sending a voice into it - the bed ducked from exactly one block after the voice's
   first sample, as BHP says. `AudioHost::auxKeyOf` reads a row between blocks, for tests only.
 
-- **SC.4**: this cue after its level. Every plugin place on a track follows the level its output stage is told
+- **SC.4** (b1f9646f): this cue after its level. Every plugin place on a track follows the level its output stage is told
   (`KeyReader::bindLevel`, bound beside the aux tap); a `self` key is the sound arriving at the effect, before the
   effect touches it, times that gain, ramped from the last block's gain to this one's across the block, folded to
   two past two channels. A level at nought on both ends of a block is no key. Measured in the served driver
   `tests/blackbox/key_self.py`, at the author's own example: a cue on a DCA through the test ducker keyed by itself
   - six decibels down on the DCA, it is ducked by half of itself and comes down by less than six decibels, louder
   than a key deaf to the DCA would leave it.
+
+- **SC.5** (spatcore PR #37, merged by the author 2026-11-22; Go.dot's pin 3f9eb41e): `DynamicsModule::processKeyed` -
+  every channel under one gain, a key of at most two sides each through the stage's own sidechain filters (a second
+  pair per stage), the louder filtered side heard, no key a silent key, no lookahead; `process()` unchanged to the bit,
+  proved in spatcore's suite and on the NUC under GCC 15 and Clang 21 at -O0 and -O2. With it, `EffectsTypes.h`'s
+  missing `<cstddef>`.
+
+- **SC.6** (9860260b): `audio/CueDyn` and `audio/DynSettings`, pure. Mine, overrulable: a peak detector; the gate is
+  spatcore's expander at a ratio of a hundred (spatcore's own gate); one key filter pair for both stages; no lookahead
+  and no detector delay - nothing delays the audio and nothing is reported as latency. With no key picked, the stage
+  hears its own track - one or two channels where they are, wider folded to two (BHT); switched on again or reset, it
+  starts from a cleared detector at unity.
+
+- **SC.7**: on every track. `DynPlugin` after the EQ and before the inserts on every voice, rack channel and aux (BHU),
+  its key read as an insert's place reads one (input, aux, or this cue after its level). Seventeen rows on owner
+  `sound` - `dynOn`, `dynCompOn`, the compressor's six (`dynThreshold`, `dynRatio`, `dynAttack`, `dynRelease`,
+  `dynKnee`, `dynMakeup`), the gate's (`dynGateOn`, `dynGateThreshold`, `dynGateRange`, `dynGateAttack`, `dynGateHold`,
+  `dynGateRelease`), the key filter's two (`dynKeyLowCut`, `dynKeyHighCut`) and `dynKey` - all `panic=park`, read
+  through the schema as the EQ's are (a lock's ride and a fade's numbers first). Carried by the arm with the EQ,
+  pushed again by `applyEq`'s pass under a sounding cue and by the rack's per-tick pass for an aux. `run/reduction`, a
+  readout beside `run/meter`, never logged. `dyn.reset`: one transaction, every number back and the stage off - its key
+  stays, mine: a pick of routing is not a setting of the sound. `wfg validate` warns of a `dynKey` naming neither an aux
+  nor an input, as of an insert's. Not yet: its part in the foot's copy and paste, its problem mark and its panel (SC.8).
+  Served driver `tests/blackbox/phase_dyn.py`: a gate keyed by a silent talkback shut to its range, then open; a
+  compressor hearing itself four to one; the session replays.
+
+- **A correction of the record.** The subjects of the SC.2 and SC.6 commits (644bd2b4, 9860260b) quote, in quotation
+  marks after "the author's pick(s)", the labels of options **I** wrote for the author's choice ("an aux, a named input,
+  or this cue after its level", "Go.dot's own compressor", "Add it to spatcore", "Compressor, filter and gate"). They
+  are the author's picks, not the author's words; this section's BHL-BHO already says so, and the commits stand as
+  pushed.

@@ -341,6 +341,8 @@ add_library(wfg_engine STATIC
     wfg/engine/audio/DynSettings.h
     wfg/engine/audio/CueDyn.h
     wfg/engine/audio/CueDyn.cpp
+    wfg/engine/audio/DynPlugin.h
+    wfg/engine/audio/DynPlugin.cpp
     wfg/engine/audio/EqPlugin.h
     wfg/engine/audio/EqPlugin.cpp
     wfg/engine/audio/LiveInputPlugin.h

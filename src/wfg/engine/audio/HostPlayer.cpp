@@ -200,6 +200,11 @@ namespace wfg::audio
             previous cue's tail is not in them (Phase 9a). */
         audioHost.snapTrackEq (request.track, request.eq);
 
+        /*  And Go.dot's own dynamics (namespace draft §141), its key first,
+            snapped with the EQ and cleared at the next block for its reason. */
+        audioHost.setTrackDynKey (request.track, request.dynKey);
+        audioHost.snapTrackDyn (request.track, request.dyn);
+
         /*  And its inserts: each entry switched in or out with the values
             the cue sets, the instance reset before its next block (Phase
             9a, PR 9a.8). */
@@ -611,6 +616,21 @@ namespace wfg::audio
     void HostPlayer::setFxKey (int track, int slot, const KeySource& key)
     {
         audioHost.setTrackFxKey (track, slot, key);
+    }
+
+    void HostPlayer::setDyn (int track, const DynSettings& settings)
+    {
+        audioHost.setTrackDyn (track, settings);
+    }
+
+    void HostPlayer::setDynKey (int track, const KeySource& key)
+    {
+        audioHost.setTrackDynKey (track, key);
+    }
+
+    float HostPlayer::dynReductionDb (int track)
+    {
+        return audioHost.trackDynReduction (track);
     }
 
     /*  ANY SLOT, as the Player's contract says (2026-09-26). This asked slot

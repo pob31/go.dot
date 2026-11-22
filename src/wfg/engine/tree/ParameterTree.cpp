@@ -4192,7 +4192,7 @@ namespace wfg::tree
             warning, asserted, seekable, roundFrom, roundLength, strip, held, solo, error,
             processState, processLate, processDropped, said, ports, iteration, iterations,
             round, pruned, seed, range, rangeIteration, timecode, chaseError, chaseState,
-            launchSample, joinDb, lineUp,
+            launchSample, joinDb, lineUp, reduction,
 
             /*  A row this publish does not know, which reads its default - a
                 row added to the table before anybody wrote its reading. */
@@ -4237,7 +4237,7 @@ namespace wfg::tree
                     { "rangeIteration", RunRow::rangeIteration }, { "timecode", RunRow::timecode },
                     { "chaseError", RunRow::chaseError }, { "chaseState", RunRow::chaseState },
                     { "launchSample", RunRow::launchSample }, { "joinDb", RunRow::joinDb },
-                    { "lineUp", RunRow::lineUp }
+                    { "lineUp", RunRow::lineUp }, { "reduction", RunRow::reduction }
                 };
 
                 std::vector<RunRowEntry> entries;
@@ -5715,6 +5715,8 @@ namespace wfg::tree
 
                     //  What left the track after the fader, to a tenth, as the envelope is.
                     case RunRow::meter:     text = osc::formatDouble (std::round (run.meter * 10.0) / 10.0); break;
+                    //  What its own dynamics took off, to a tenth (namespace draft §141).
+                    case RunRow::reduction: text = osc::formatDouble (std::round (run.reduction * 10.0) / 10.0); break;
                     case RunRow::level:     text = osc::formatDouble (run.level); break;
                     //  The speed it plays at now (namespace draft §22), to a thousandth.
                     case RunRow::rate:      text = osc::formatDouble (std::round (run.rateNow * 1000.0) / 1000.0); break;

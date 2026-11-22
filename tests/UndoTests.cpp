@@ -1695,3 +1695,30 @@ TEST_CASE ("undo: a hold breaks an inspector's drag as it always did, and anothe
         CHECK (rig.drainUndoSteps() == 4);
     }
 }
+
+TEST_CASE ("undo: dyn.reset is one step - every row of a cue's own dynamics back at once, its key untouched")
+{
+    //  Namespace draft 141, SC.7: eq.reset's shape for Go.dot's own dynamics stage.
+    Rig rig;
+
+    REQUIRE (rig.apply (0, "list.create", { text ("Main"), text (mainList) }).applied == 1);
+    REQUIRE (rig.apply (1, "cue.create", { text (mainList), osc::Value::int32 (0),
+                                           text ("media"), text ("Bed"), text (firstCue) }).applied == 1);
+
+    const auto row = [&] (const char* name) { return "/godot/cue/" + firstCue + "/" + name; };
+
+    REQUIRE (rig.apply (10, "node.set", { text (row ("dynOn")), text ("true") }).applied == 1);
+    REQUIRE (rig.apply (200, "node.set", { text (row ("dynThreshold")), text ("-10") }).applied == 1);
+    REQUIRE (rig.apply (400, "node.set", { text (row ("dynKey")), text ("self") }).applied == 1);
+
+    REQUIRE (rig.apply (600, "dyn.reset", { text (firstCue) }).applied == 1);
+    CHECK (rig.document.getAttribute (row ("dynOn")) == std::string ("false"));
+    CHECK (rig.document.getAttribute (row ("dynThreshold")) == std::string ("-20"));
+    CHECK (rig.document.getAttribute (row ("dynKey")) == std::string ("self"));
+    CHECK (rig.undoName() == "dyn.reset");
+
+    REQUIRE (rig.apply (800, "undo").applied == 1);
+    CHECK (rig.document.getAttribute (row ("dynOn")) == std::string ("true"));
+    CHECK (rig.document.getAttribute (row ("dynThreshold")) == std::string ("-10"));
+    CHECK (rig.document.getAttribute (row ("dynKey")) == std::string ("self"));
+}

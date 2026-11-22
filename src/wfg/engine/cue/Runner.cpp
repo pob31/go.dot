@@ -851,6 +851,69 @@ namespace wfg::cue
         return out;
     }
 
+    audio::DynSettings Runner::dynOf (const juce::ValueTree& cue,
+                                      const std::map<std::string, double>* moved) const
+    {
+        //  eqOf's reasons, line for line: the schema's defaults, a lock's ride, a fade's numbers.
+        static const Reader schema;
+
+        const auto cueId = cue.getProperty ("id").toString().toStdString();
+        const auto riding = [&] (const char* name) -> const std::string*
+        {
+            return liveLayer != nullptr ? liveLayer->rowOf (cueId, name) : nullptr;
+        };
+        const auto flag = [&] (const char* name)
+        {
+            if (const auto* held = riding (name))
+                return *held == "true";
+
+            return schema.flag (cue, "sound", name);
+        };
+        const auto number = [&] (const char* name)
+        {
+            if (moved != nullptr)
+                if (const auto faded = moved->find (std::string ("dyn/") + name); faded != moved->end())
+                    return static_cast<float> (faded->second);
+
+            if (const auto* held = riding (name))
+                if (const auto value = osc::parseDouble (*held))
+                    return static_cast<float> (*value);
+
+            return static_cast<float> (schema.number (cue, "sound", name));
+        };
+
+        audio::DynSettings out;
+        out.on = flag ("dynOn");
+        out.compOn = flag ("dynCompOn");
+        out.thresholdDb = number ("dynThreshold");
+        out.ratio = number ("dynRatio");
+        out.attackMs = number ("dynAttack");
+        out.releaseMs = number ("dynRelease");
+        out.kneeDb = number ("dynKnee");
+        out.makeupDb = number ("dynMakeup");
+        out.gateOn = flag ("dynGateOn");
+        out.gateThresholdDb = number ("dynGateThreshold");
+        out.gateRangeDb = number ("dynGateRange");
+        out.gateAttackMs = number ("dynGateAttack");
+        out.gateHoldMs = number ("dynGateHold");
+        out.gateReleaseMs = number ("dynGateRelease");
+        out.keyLowCutHz = number ("dynKeyLowCut");
+        out.keyHighCutHz = number ("dynKeyHighCut");
+        return out;
+    }
+
+    audio::KeySource Runner::dynKeyOf (const juce::ValueTree& cue) const
+    {
+        static const Reader schema;
+        const auto cueId = cue.getProperty ("id").toString().toStdString();
+
+        if (liveLayer != nullptr)
+            if (const auto* held = liveLayer->rowOf (cueId, "dynKey"))
+                return keySourceOf (*held);
+
+        return keySourceOf (schema.text (cue, "sound", "dynKey"));
+    }
+
     //==============================================================================
     std::string Runner::arm (Engine& engine, std::int64_t tick, const std::string& cueId,
                              const std::string& runId)
@@ -4945,6 +5008,10 @@ namespace wfg::cue
             what changed later. */
         request.eq = eqOf (cue);
         run.eq = request.eq;
+        request.dyn = dynOf (cue);
+        run.dyn = request.dyn;
+        request.dynKey = dynKeyOf (cue);
+        run.dynKey = request.dynKey;
         request.fx = fxOf (cue);
         run.fx = request.fx;
 
@@ -23564,6 +23631,7 @@ namespace wfg::cue
             if (run->isFinished())
             {
                 run->meter = Run::silentDb;
+                run->reduction = 0.0;
                 continue;
             }
 
@@ -23622,6 +23690,9 @@ namespace wfg::cue
 
                 run->meter = peak > 0.0 ? std::max (Run::silentDb, 20.0 * std::log10 (peak))
                                         : Run::silentDb;
+
+                //  And what its own dynamics took off (namespace draft §141), a meter's too.
+                run->reduction = static_cast<double> (audio->dynReductionDb (run->track));
             }
 
             /*  AT A SPEED (namespace draft §22.4) the file moves by the run's
@@ -26185,6 +26256,8 @@ namespace wfg::cue
                 {
                     state.eqAt = revision;
                     audio->setEq (track, eqOf (channel, &state.moved));
+                    audio->setDyn (track, dynOf (channel, &state.moved));
+                    audio->setDynKey (track, dynKeyOf (channel));
                 }
 
                 if (state.fxAt != revision)
@@ -26569,11 +26642,26 @@ namespace wfg::cue
 
             const auto wanted = eqOf (cue, &run->moved);
 
-            if (wanted.sameAs (run->eq))
-                continue;
+            if (! wanted.sameAs (run->eq))
+            {
+                run->eq = wanted;
+                audio->setEq (run->track, wanted);
+            }
 
-            run->eq = wanted;
-            audio->setEq (run->track, wanted);
+            //  And its own dynamics and their key (namespace draft §141), the same way.
+            const auto dynWanted = dynOf (cue, &run->moved);
+
+            if (! dynWanted.sameAs (run->dyn))
+            {
+                run->dyn = dynWanted;
+                audio->setDyn (run->track, dynWanted);
+            }
+
+            if (const auto keyWanted = dynKeyOf (cue); ! (keyWanted == run->dynKey))
+            {
+                run->dynKey = keyWanted;
+                audio->setDynKey (run->track, keyWanted);
+            }
         }
     }
 

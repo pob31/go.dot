@@ -1,0 +1,20 @@
+<Show>
+  <Lists goDebounce="0">
+    <List id="DY000001" name="Sound">
+      <Media id="DY000002" channels="1" directOut="DY000004" dynCompOn="false" dynGateOn="true" dynGateRange="-40" dynGateRelease="20" dynKey="DY000021" dynOn="true" file="sine.wav" name="Behind the talkback" number="1"/>
+      <Media id="DY000003" channels="1" directOut="DY000005" dynAttack="1" dynKnee="0" dynOn="true" dynRelease="500" file="sine.wav" name="Its own compressor" number="2"/>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="2">
+    <Bus id="DY000004" name="Main L/R" width="2"/>
+    <Bus id="DY000005" firstChannel="2" name="Monitor" width="2"/>
+    <Inputs>
+      <Input id="DY000021" name="Talkback"/>
+    </Inputs>
+  </Audio>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces/>
+  <Dcas/>
+</Show>

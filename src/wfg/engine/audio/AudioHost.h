@@ -16,6 +16,7 @@
 #pragma once
 
 #include <wfg/engine/audio/CueMatrix.h>
+#include <wfg/engine/audio/DynSettings.h>
 #include <wfg/engine/audio/EqSettings.h>
 #include <wfg/engine/audio/KeySource.h>
 #include <wfg/engine/audio/LoopVoice.h>
@@ -61,6 +62,7 @@
 */
 namespace wfg::audio
 {
+    class CueDyn;
     class CueEq;
     class Looper;
 
@@ -928,6 +930,18 @@ namespace wfg::audio
             cleared at the next block, while the voice is silent. Message
             thread, beside setTrackRouting. */
         void snapTrackEq (int trackIndex, const EqSettings& settings) noexcept;
+
+        /*  A track's dynamics stage of Go.dot's own (namespace draft §141),
+            after its EQ: what a cue's dyn* rows write, as the EQ's. Null for
+            an index no track answers to. Set on an edit, snapped (set and
+            cleared) at an arm; its key a word, as an insert's. */
+        CueDyn* trackDyn (int trackIndex) noexcept;
+        void setTrackDyn (int trackIndex, const DynSettings& settings) noexcept;
+        void snapTrackDyn (int trackIndex, const DynSettings& settings) noexcept;
+        void setTrackDynKey (int trackIndex, const KeySource& key) noexcept;
+
+        /** The deepest reduction its last block applied, in dB, nought or below. Any thread. */
+        float trackDynReduction (int trackIndex) const noexcept;
 
         //======================================================================
         /*  THE SANDBOX (Phase 9a, §17.6). One proxy per set entry on every

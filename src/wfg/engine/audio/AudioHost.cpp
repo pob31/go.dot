@@ -21,6 +21,7 @@
 #include <wfg/engine/audio/AuxPlugins.h>
 #include <wfg/engine/audio/CueOutputPlugin.h>
 #include <wfg/engine/audio/EqPlugin.h>
+#include <wfg/engine/audio/DynPlugin.h>
 #include <wfg/engine/audio/LiveInputPlugin.h>
 #include <wfg/engine/audio/Looper.h>
 #include <wfg/engine/audio/LooperPlugin.h>
@@ -348,6 +349,7 @@ namespace wfg::audio
                 PluginManager::initialise has already run inside it. */
             engine->getPluginManager().createBuiltInType<CueOutputPlugin>();
             engine->getPluginManager().createBuiltInType<EqPlugin>();
+            engine->getPluginManager().createBuiltInType<DynPlugin>();
             engine->getPluginManager().createBuiltInType<ProxyPlugin>();
             engine->getPluginManager().createBuiltInType<LiveInputPlugin>();
             engine->getPluginManager().createBuiltInType<LooperPlugin>();
@@ -482,6 +484,7 @@ namespace wfg::audio
             edit.reset();
             matrices.clear();
             eqs.clear();
+            dynStages.clear();
             plugins.clear();
             liveInputs.clear();
             rackTracks.clear();
@@ -676,6 +679,7 @@ namespace wfg::audio
                     trackPlaces.clear();
                     voiceInserts.clear();
                     eqs.clear();
+                    dynStages.clear();
                     return false;
                 }
 
@@ -698,10 +702,35 @@ namespace wfg::audio
                     trackPlaces.clear();
                     voiceInserts.clear();
                     eqs.clear();
+                    dynStages.clear();
                     return false;
                 }
 
                 eqs.push_back (&eqStage->eq());
+
+                /*  GO.DOT'S OWN DYNAMICS (namespace draft §141, BHU): after
+                    the EQ and before the inserts, on every voice, off - and so
+                    not called, the voice the same to the bit - until a cue
+                    switches it on. Its key read as an insert's is. */
+                auto dynPlugin = track->pluginList.insertPlugin (DynPlugin::create (spec.channelsPerTrack), -1);
+                auto* dynStage = dynamic_cast<DynPlugin*> (dynPlugin.get());
+
+                if (dynStage == nullptr)
+                {
+                    error = "the dynamics stage would not insert";
+                    edit.reset();
+                    matrices.clear();
+                    trackLanes.clear();
+                    trackPlaces.clear();
+                    voiceInserts.clear();
+                    eqs.clear();
+                    dynStages.clear();
+                    return false;
+                }
+
+                dynStage->bindTap (&tapView);
+                dynStage->bindKeyBus (&keyBus);
+                dynStages.push_back (dynStage);
                 trackLanes.emplace_back();
                 trackPlaces.emplace_back();
                 voiceInserts.emplace_back();
@@ -726,6 +755,7 @@ namespace wfg::audio
                         edit.reset();
                         matrices.clear();
                         eqs.clear();
+                        dynStages.clear();
                         return false;
                     }
 
@@ -746,6 +776,7 @@ namespace wfg::audio
                     edit.reset();
                     matrices.clear();
                     eqs.clear();
+                    dynStages.clear();
                     return false;
                 }
 
@@ -763,6 +794,7 @@ namespace wfg::audio
                     trackPlaces.clear();
                     voiceInserts.clear();
                     eqs.clear();
+                    dynStages.clear();
                     return false;
                 }
 
@@ -809,6 +841,7 @@ namespace wfg::audio
                 trackPlaces.clear();
                 voiceInserts.clear();
                 eqs.clear();
+                dynStages.clear();
                 return false;
             }
 
@@ -1509,6 +1542,7 @@ namespace wfg::audio
                 trackPlaces.clear();
                 voiceInserts.clear();
                 eqs.clear();
+                dynStages.clear();
                 liveInputs.clear();
                 clearAuxes();
                 return false;
@@ -1612,6 +1646,17 @@ namespace wfg::audio
 
             eqs.push_back (&eqStage->eq());
 
+            //  Go.dot's own dynamics, after the EQ (§141, BHU), as on a voice.
+            auto dynPlugin = track.pluginList.insertPlugin (DynPlugin::create (rackChannels), -1);
+            auto* dynStage = dynamic_cast<DynPlugin*> (dynPlugin.get());
+
+            if (dynStage == nullptr)
+                return fail ("the dynamics stage would not insert on a rack channel");
+
+            dynStage->bindTap (&tapView);
+            dynStage->bindKeyBus (&keyBus);
+            dynStages.push_back (dynStage);
+
             if (! insertProxies (false))
                 return fail ("the plugin proxy would not insert on a rack channel");
 
@@ -1703,6 +1748,10 @@ namespace wfg::audio
             for (auto* place : trackPlaces.back())
                 if (place != nullptr)
                     place->bindLevel (&level);
+
+            //  And the track's own dynamics stage, the last one made.
+            if (! dynStages.empty() && dynStages.back() != nullptr)
+                dynStages.back()->bindLevel (&level);
         }
 
         /*  AN AUX'S RETURN: Tracktion's, on the bus the tracks before it send
@@ -2026,6 +2075,7 @@ namespace wfg::audio
             edit.reset();
             matrices.clear();
             eqs.clear();
+            dynStages.clear();
             plugins.clear();
             handles.clear();
 
@@ -3282,6 +3332,7 @@ namespace wfg::audio
         std::unique_ptr<te::Edit> edit;
         std::vector<CueMatrix*> matrices;
         std::vector<CueEq*> eqs;
+        std::vector<DynPlugin*> dynStages;  // every track's own dynamics (§141), by its index
         std::vector<CueOutputPlugin*> plugins;
 
         /*  THE SANDBOX'S HALF (Phase 9a): every track's lanes, in the order of
@@ -3713,6 +3764,9 @@ namespace wfg::audio
         if (auto* eq = trackEq (trackIndex))
             eq->reset();
 
+        if (auto* dyn = trackDyn (trackIndex))
+            dyn->reset();
+
         for (auto* lane : impl->trackLanes[static_cast<std::size_t> (trackIndex)])
             if (lane != nullptr)
                 lane->requestReset();
@@ -3747,6 +3801,9 @@ namespace wfg::audio
 
         if (auto* eq = trackEq (trackIndex))
             eq->reset();
+
+        if (auto* dyn = trackDyn (trackIndex))
+            dyn->reset();
 
         /*  THE INSERTS ONLY ON A VOICE STILL HEARD (2026-10-01, namespace draft
             §23.6, GE). One child serves a plugin's lane on every voice and runs
@@ -3813,6 +3870,9 @@ namespace wfg::audio
 
             if (auto* eq = trackEq (track))
                 eq->reset();
+
+            if (auto* dyn = trackDyn (track))
+                dyn->reset();
 
             /*  A VOICE'S INSERTS ARE LEFT TO ITS SILENCE AND ITS NEXT ARM
                 (2026-10-01, namespace draft §23.6, GE). One child serves a
@@ -3907,6 +3967,9 @@ namespace wfg::audio
             if (auto* eq = trackEq (trackIndex))
                 eq->reset();
 
+            if (auto* dyn = trackDyn (trackIndex))
+                dyn->reset();
+
             for (auto* lane : impl->trackLanes[static_cast<std::size_t> (trackIndex)])
                 if (lane != nullptr)
                     lane->requestReset();
@@ -3985,6 +4048,46 @@ namespace wfg::audio
     {
         if (auto* eq = trackEq (trackIndex))
             eq->set (settings);
+    }
+
+    CueDyn* AudioHost::trackDyn (int trackIndex) noexcept
+    {
+        if (trackIndex < 0 || trackIndex >= static_cast<int> (impl->dynStages.size()))
+            return nullptr;
+
+        auto* stage = impl->dynStages[static_cast<std::size_t> (trackIndex)];
+        return stage != nullptr ? &stage->dyn() : nullptr;
+    }
+
+    void AudioHost::setTrackDyn (int trackIndex, const DynSettings& settings) noexcept
+    {
+        if (auto* dyn = trackDyn (trackIndex))
+            dyn->set (settings);
+    }
+
+    void AudioHost::snapTrackDyn (int trackIndex, const DynSettings& settings) noexcept
+    {
+        if (auto* dyn = trackDyn (trackIndex))
+        {
+            dyn->set (settings);
+            dyn->reset();
+        }
+    }
+
+    void AudioHost::setTrackDynKey (int trackIndex, const KeySource& key) noexcept
+    {
+        if (trackIndex >= 0 && trackIndex < static_cast<int> (impl->dynStages.size()))
+            if (auto* stage = impl->dynStages[static_cast<std::size_t> (trackIndex)])
+                stage->setKey (key);
+    }
+
+    float AudioHost::trackDynReduction (int trackIndex) const noexcept
+    {
+        if (trackIndex < 0 || trackIndex >= static_cast<int> (impl->dynStages.size()))
+            return 0.0f;
+
+        const auto* stage = impl->dynStages[static_cast<std::size_t> (trackIndex)];
+        return stage != nullptr ? stage->dyn().reductionDb() : 0.0f;
     }
 
     void AudioHost::snapTrackEq (int trackIndex, const EqSettings& settings) noexcept

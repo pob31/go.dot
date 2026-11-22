@@ -526,7 +526,7 @@ namespace wfg::cue
     bool isLiveEdit (const std::string& commandName, const std::vector<osc::Value>& args,
                      const doc::ShowDocument& document, const LiveEdits& live)
     {
-        if (commandName == "send.create" || commandName == "eq.reset")
+        if (commandName == "send.create" || commandName == "eq.reset" || commandName == "dyn.reset")
             return document.isLocked();
 
         /*  A SET OF VALUES (namespace draft §30.11) rides when every one of

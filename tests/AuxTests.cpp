@@ -31,6 +31,7 @@
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
 #include <wfg/engine/audio/AudioHost.h>
+#include <wfg/engine/audio/CueDyn.h>
 #include <wfg/engine/audio/CueMatrix.h>
 
 #include <juce_core/juce_core.h>
@@ -540,4 +541,95 @@ TEST_CASE ("M83: what four stereo auxes cost a block of a 64-voice graph")
              << 1.0e6 * block / rate << " us)");
 
     CHECK (with > 0.0);
+}
+
+TEST_CASE ("dyn: a mic channel's own stage in the graph - off to the bit, a compressor on itself, a gate keyed by a silent input")
+{
+    /*  Namespace draft 141, SC.7: Go.dot's own dynamics after the EQ on every
+        track, here a rack channel's, fed a 1 kHz sine at a half on input 0. */
+    HostRig rig;
+    buildRig (rig, {});
+
+    const auto mic = rig.host.rackTrackOf ("MC000001");
+    rig.host.setTrackRouting (mic, 0.0, Coefficients { { 0, 0, 1.0 } });
+    rig.host.setRackSource (mic, 0, 1);
+    rig.host.openRackGate (mic, -1);
+
+    //  Blocks of the sine on input 0; what left on output 0 in the last of them.
+    const auto play = [&rig] (int blocks)
+    {
+        std::vector<float> first (block, 0.0f), second (block, 0.0f);
+        const float* inputs[] { first.data(), second.data() };
+        RecordingSink sink { 6, blocks * block };
+        rig.host.setBlockSink (&sink);
+
+        for (int b = 0; b < blocks; ++b)
+        {
+            const auto start = rig.host.clock().samplesElapsed();
+
+            for (int n = 0; n < block; ++n)
+                first[static_cast<std::size_t> (n)]
+                    = 0.5f * static_cast<float> (std::sin (2.0 * 3.141592653589793 * 1000.0
+                                                           * static_cast<double> (start + n) / rate));
+
+            rig.host.processBlock (inputs, 2);
+        }
+
+        rig.host.setBlockSink (nullptr);
+
+        auto loudest = 0.0f;
+
+        for (int n = (blocks - 20) * block; n < blocks * block; ++n)
+            loudest = std::max (loudest, std::abs (sink.at (0, n)));
+
+        return loudest;
+    };
+
+    REQUIRE (rig.host.trackDyn (mic) != nullptr);
+    CHECK_FALSE (rig.host.trackDyn (mic)->isOn());
+
+    SUBCASE ("off: the sine as it came in")
+    {
+        CHECK (play (100) == doctest::Approx (0.5f).epsilon (0.001));
+        CHECK (rig.host.trackDynReduction (mic) == 0.0f);
+    }
+
+    SUBCASE ("a compressor hearing itself: four to one over minus twenty")
+    {
+        audio::DynSettings s;
+        s.on = true;
+        s.thresholdDb = -20.0f;
+        s.ratio = 4.0f;
+        s.attackMs = 1.0f;
+        s.releaseMs = 500.0f;
+        s.kneeDb = 0.0f;
+        rig.host.snapTrackDyn (mic, s);
+
+        CHECK (play (200) == doctest::Approx (0.5f * 0.30f).epsilon (0.1));
+        CHECK (rig.host.trackDynReduction (mic) == doctest::Approx (-10.5f).epsilon (0.1));
+    }
+
+    SUBCASE ("a gate keyed by input 1, which is silent: shut to its range")
+    {
+        audio::DynSettings s;
+        s.on = true;
+        s.compOn = false;
+        s.gateOn = true;
+        s.gateRangeDb = -40.0f;
+        s.gateReleaseMs = 20.0f;
+        rig.host.snapTrackDyn (mic, s);
+
+        audio::KeySource key;
+        key.kind = audio::KeySource::Kind::input;
+        key.first = 1;
+        key.width = 1;
+        rig.host.setTrackDynKey (mic, key);
+
+        CHECK (play (200) == doctest::Approx (0.005f).epsilon (0.05));
+
+        //  Keyed by its own input instead: open.
+        key.first = 0;
+        rig.host.setTrackDynKey (mic, key);
+        CHECK (play (200) == doctest::Approx (0.5f).epsilon (0.001));
+    }
 }
