@@ -84,6 +84,11 @@ namespace wfg::client::model
         lists identifiers - the page's tree.ids() does the same split. */
     std::vector<std::string> words (std::string_view line);
 
+    /*  The words of a line that begin with a prefix, space-separated again: a
+        cue's `live` row names every row riding on it - the EQ's, the dynamics',
+        a DCA mark's - and each panel says only its own (§141, BIE). */
+    std::string wordsStartingWith (std::string_view line, std::string_view prefix);
+
     /*  A SPEED AS THE WINDOW WRITES IT (namespace draft §22.7): "×0.5", to the
         thousandth and in no locale's spelling - and nothing at all at one,
         which is not worth a word beside every run. */

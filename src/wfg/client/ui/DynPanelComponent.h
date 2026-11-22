@@ -100,7 +100,7 @@ namespace wfg::client::ui
         std::vector<std::string> keyValues;
 
         std::vector<std::unique_ptr<Knob>> knobs;
-        juce::Rectangle<int> compArea, gateArea, keyArea, meterArea, keyWordArea;
+        juce::Rectangle<int> compArea, gateArea, keyArea, meterArea, keyWordArea, liveWordArea;
 
         bool updating = false;
 

@@ -73,6 +73,15 @@ namespace wfg::cue
             return parts.owner == "cue" && parts.row.rfind ("eq", 0) == 0;
         }
 
+        /*  THE DYNAMICS STAGE RIDES AS THE EQ DOES (namespace draft §141,
+            BIE): its numbers, its switches, its detector and its key - the
+            stage after the EQ, turned by the same hands in a show. Its reset
+            already rode; a single turn of it did not. */
+        bool isDynRow (const Parts& parts)
+        {
+            return parts.owner == "cue" && parts.row.rfind ("dyn", 0) == 0;
+        }
+
         bool isSendRow (const Parts& parts)
         {
             return parts.owner == "send"
@@ -115,10 +124,10 @@ namespace wfg::cue
             return "cue";
         }
 
-        //  An object's own row held live: a cue's EQ's or its DCA mark's, an output's trim, a canvas's curve.
+        //  An object's own row held live: a cue's EQ's, its dynamics' or its DCA mark's, an output's trim, a canvas's curve.
         bool isCueRow (const Parts& parts)
         {
-            return isEqRow (parts) || isMarkRow (parts);
+            return isEqRow (parts) || isDynRow (parts) || isMarkRow (parts);
         }
 
         const doc::AttributeRow* rowFor (std::string_view owner, std::string_view name)

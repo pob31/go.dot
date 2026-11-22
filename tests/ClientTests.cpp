@@ -10453,6 +10453,16 @@ TEST_CASE ("client: a sound's own dynamics are read as the voice is given them, 
                              [] (const model::Field& field) { return field.name.rfind ("dyn", 0) == 0; }));
 }
 
+TEST_CASE ("client: a cue's riding rows are said by the panel they belong to, the EQ's by the EQ and the dynamics' by the Dynamics (§141, BIE)")
+{
+    const std::string live = "eqB2Gain dynThreshold dcaOffset dynOn eqB2On";
+
+    CHECK (model::wordsStartingWith (live, "eq") == "eqB2Gain eqB2On");
+    CHECK (model::wordsStartingWith (live, "dyn") == "dynThreshold dynOn");
+    CHECK (model::wordsStartingWith ("dcaOffset", "dyn").empty());
+    CHECK (model::wordsStartingWith ("", "eq").empty());
+}
+
 TEST_CASE ("client: the input list reads the named inputs, names the patch rows, and says which regime it is in")
 {
     /*  Phase 9b (namespace draft §18.2): the output list's twin, made through

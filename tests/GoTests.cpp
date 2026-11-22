@@ -32,6 +32,8 @@
 #include "TestSupport.h"
 
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/audio/DynSettings.h>
+#include <wfg/engine/audio/KeySource.h>
 #include <wfg/engine/clock/TickClock.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/tree/Mount.h>
@@ -206,6 +208,22 @@ namespace
 
         std::map<int, audio::EqSettings> eqs;
         int eqPushes = 0;
+
+        //  Its own dynamics and their key (namespace draft §141), for the same reason.
+        void setDyn (int track, const audio::DynSettings& settings) override
+        {
+            dyns[track] = settings;
+            ++dynPushes;
+        }
+
+        void setDynKey (int track, const audio::KeySource& key) override
+        {
+            dynKeys[track] = key;
+        }
+
+        std::map<int, audio::DynSettings> dyns;
+        std::map<int, audio::KeySource> dynKeys;
+        int dynPushes = 0;
 
         /*  The inserts, for the EQ's reason (Phase 9a, PR 9a.8): what was
             switched and what moved, in order, so a test can say an edit
@@ -14716,6 +14734,70 @@ TEST_CASE ("live: under the lock an EQ turn is heard, written to nothing, and no
         CHECK (rig.live.rowOf (rig.mediaId, "eqB2Gain") == nullptr);
         CHECK (rig.live.rowOf (rig.mediaId, "eqB2On") != nullptr);
         CHECK (rig.steps() == steps + 1);
+    }
+}
+
+TEST_CASE ("live: under the lock a Dynamics turn rides as an EQ turn does - heard, written to nothing, kept or let go on unlock (§141, BIE)")
+{
+    LiveRig rig;
+    const auto run = rig.play();
+    const auto track = rig.runs.find (run)->track;
+    REQUIRE (track >= 0);
+
+    rig.lock (true);
+    const auto steps = rig.steps();
+
+    //  A number, a switch, the detector and the key: each applied, each heard on the next tick.
+    CHECK (rig.set (rig.eq ("dynThreshold"), osc::Value::float64 (-30.0)).applied == 1);
+    CHECK (rig.set (rig.eq ("dynOn"), osc::Value::boolean (true)).applied == 1);
+    CHECK (rig.set (rig.eq ("dynDetector"), osc::Value::string ("rms")).applied == 1);
+    CHECK (rig.set (rig.eq ("dynKey"), osc::Value::string ("self")).applied == 1);
+    rig.tickOnce();
+
+    CHECK (rig.audio.dyns[track].on);
+    CHECK (rig.audio.dyns[track].rms);
+    CHECK (rig.audio.dyns[track].thresholdDb == doctest::Approx (-30.0f));
+    CHECK (rig.audio.dynKeys[track].kind == audio::KeySource::Kind::self);
+
+    //  WRITTEN TO NOTHING: the show still says what it said, and nothing is on its history.
+    CHECK (rig.saved (rig.eq ("dynThreshold")) == "-20");
+    CHECK (rig.saved (rig.eq ("dynOn")) == "false");
+    CHECK (rig.steps() == steps);
+
+    //  What a client sees: the value heard at the saved value's address, and the four riding.
+    CHECK (rig.published (rig.eq ("dynThreshold")) == "-30");
+    CHECK (rig.published ("/godot/document/live") == "4");
+
+    SUBCASE ("a bad value is refused as the show would refuse it")
+    {
+        CHECK (rig.set (rig.eq ("dynThreshold"), osc::Value::float64 (12.0)).rejected == 1);
+        CHECK (rig.set (rig.eq ("dynDetector"), osc::Value::string ("loud")).rejected == 1);
+    }
+
+    SUBCASE ("Keep, once unlocked, is one undo step")
+    {
+        rig.lock (false);
+        CHECK (rig.submitAndTick ("live.keep").applied == 1);
+
+        CHECK (rig.saved (rig.eq ("dynThreshold")) == "-30");
+        CHECK (rig.saved (rig.eq ("dynOn")) == "true");
+        CHECK (rig.saved (rig.eq ("dynDetector")) == "rms");
+        CHECK (rig.saved (rig.eq ("dynKey")) == "self");
+        CHECK (rig.live.empty());
+        CHECK (rig.steps() == steps + 1);
+    }
+
+    SUBCASE ("Discard lets the cue go back to its saved stage")
+    {
+        rig.lock (false);
+        CHECK (rig.submitAndTick ("live.drop").applied == 1);
+        rig.tickOnce();
+
+        CHECK (rig.live.empty());
+        CHECK_FALSE (rig.audio.dyns[track].on);
+        CHECK (rig.audio.dyns[track].thresholdDb == doctest::Approx (-20.0f));
+        CHECK (rig.audio.dynKeys[track].isNone());
+        CHECK (rig.steps() == steps);
     }
 }
 

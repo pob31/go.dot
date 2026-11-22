@@ -1446,8 +1446,8 @@ namespace wfg::tree
                 if (name == word)
                     return which;
 
-            //  An EQ row: what a locked show rides, where it rides one.
-            if (name.substr (0, 2) == "eq")
+            //  An EQ row, or its dynamics' (§141, BIE): what a locked show rides, where it rides one.
+            if (name.substr (0, 2) == "eq" || name.substr (0, 3) == "dyn")
                 return CueRow::eq;
 
             return CueRow::stored;
@@ -1881,15 +1881,16 @@ namespace wfg::tree
                             break;
                         }
 
-                        /*  THE EQ'S ROWS ONLY: what the EQ panel says is riding.
-                            A DCA mark held live (namespace draft §50) is the
+                        /*  THE EQ'S ROWS AND THE DYNAMICS' (§141, BIE): what
+                            each panel says is riding, each taking its own. A
+                            DCA mark held live (namespace draft §50) is the
                             knob's, and the window's bar counts it. */
                         if (live != nullptr)
                         {
                             std::istringstream words (live->rowsOf (id));
 
                             for (std::string word; words >> word;)
-                                if (word.rfind ("eq", 0) == 0)
+                                if (word.rfind ("eq", 0) == 0 || word.rfind ("dyn", 0) == 0)
                                     text += (text.empty() ? "" : " ") + word;
                         }
 
@@ -1927,7 +1928,7 @@ namespace wfg::tree
                         text = walkBulk().rows != nullptr ? walkBulk().rows->curvesOf (id) : curvesOf (node);
                         break;
 
-                    /*  The EQ as a locked show is riding it, where it rides one;
+                    /*  The EQ and the dynamics as a locked show is riding them, where it rides one;
                         and what a DCA mark carries, held live, on every kind that
                         has one (§50, ABQ). */
                     case CueRow::eq:

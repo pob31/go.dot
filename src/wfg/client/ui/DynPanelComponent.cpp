@@ -320,6 +320,7 @@ namespace wfg::client::ui
         top.removeFromRight (scaled (8));
         keyWordArea = top.removeFromLeft (scaled (32));
         keyMenu.setBounds (top.removeFromLeft (std::min (top.getWidth(), scaled (260))));
+        liveWordArea = top.reduced (scaled (8), 0);
 
         area.removeFromTop (scaled (6));
         meterArea = area.removeFromRight (scaled (70));
@@ -384,6 +385,11 @@ namespace wfg::client::ui
         g.drawText ("Key", keyWordArea, juce::Justification::centredLeft);
         g.drawText ("Key filter", keyArea.withHeight (scaled (22)).reduced (scaled (6), 0),
                     juce::Justification::centredLeft);
+
+        /*  RIDING LIVE ON A LOCKED SHOW (§141, BIE): heard, and not saved until
+            the window's bar keeps it - said in words, as the EQ panel says it. */
+        if (! reading.dyn.live.empty())
+            g.drawText ("live, not saved", liveWordArea, juce::Justification::centredRight, true);
 
         //  THE REDUCTION: a bar down from nought, and its number - never the colour alone.
         auto meter = meterArea;

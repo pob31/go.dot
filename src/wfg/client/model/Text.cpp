@@ -179,4 +179,15 @@ namespace wfg::client::model
 
         return result;
     }
+
+    std::string wordsStartingWith (std::string_view line, std::string_view prefix)
+    {
+        std::string out;
+
+        for (const auto& word : words (line))
+            if (word.rfind (prefix, 0) == 0)
+                out += (out.empty() ? "" : " ") + word;
+
+        return out;
+    }
 }

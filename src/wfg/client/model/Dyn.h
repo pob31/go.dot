@@ -52,6 +52,10 @@ namespace wfg::client::model
             aux's /godot/slot/<id>/ (§93). */
         std::string base;
 
+        /*  ITS ROWS RIDING LIVE on a locked show (§141, BIE), space-separated:
+            heard and not saved until the window's bar keeps them. */
+        std::string live;
+
         /*  THE REDUCTION of the run sounding it, in dB (`run/reduction`), and
             whether one is: a meter that reads nothing while nothing plays. */
         bool running = false;

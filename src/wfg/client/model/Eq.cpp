@@ -139,7 +139,7 @@ namespace wfg::client::model
         s.band[0].shape = eqShapeFor (text (snapshot, rowAt ("eqB1Shape")));
         s.band[3].shape = eqShapeFor (text (snapshot, rowAt ("eqB4Shape")));
 
-        out.live = text (snapshot, rowAt ("live"));
+        out.live = wordsStartingWith (text (snapshot, rowAt ("live")), "eq");
 
         return out;
     }

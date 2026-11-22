@@ -74,6 +74,7 @@ namespace wfg::client::model
         s.gateReleaseMs = number ("dynGateRelease", s.gateReleaseMs);
         s.keyLowCutHz = number ("dynKeyLowCut", s.keyLowCutHz);
         s.keyHighCutHz = number ("dynKeyHighCut", s.keyHighCutHz);
+        out.live = wordsStartingWith (text (snapshot, rowAt ("live")), "dyn");
 
         /*  WHAT IT MAY LISTEN TO (§141): with no key, the cue itself before its
             level (BHU) - which is why the empty word reads so here, where an
