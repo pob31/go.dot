@@ -36384,7 +36384,7 @@ is summed only after the graph and would come a block late at best.
   the stage's first key choice, "this cue, before its level" (its no-key, BHU, where an insert's reads "no key"), are
   mine, written after that answer - open at review.
 
-- **SC.8**: the Dynamics panel at the foot - a new subject (`dyn`) following the pick as the EQ does, fitting an audio
+- **SC.8** (ab22b658): the Dynamics panel at the foot - a new subject (`dyn`) following the pick as the EQ does, fitting an audio
   or mic cue, opened from the inspector's bar between the EQ and the FX; its rows taken off the inspector's list by
   prefix, as the EQ's. Across its top the stage's switch, the detector, the Key menu (what the stage listens to, a key
   naming what the show has not got kept and said) and Reset (`dyn.reset`); three framed groups of knobs - the
@@ -36394,3 +36394,33 @@ is summed only after the graph and would come a block late at best.
   carries the part `dyn` (its eighteen rows, the key with them), and a cue template carries it after the EQ. A
   `dynKey` naming what the show has not got is the cue's "no key" mark, as an insert's. The console lists the rows
   after the EQ's. Picture: `build/sidechain-shots/dyn-panel.png`.
+
+- **SC.9**: measurements, the guides, this close-out. Release on the NUC (Ubuntu 24.04, GCC, x86-64; a8783537), three
+  passes within a per cent of each other; Debug on the Windows box reads three to five times more.
+  - **M87** (`CueDynTests`), the stage alone on one voice's block of 128 at 48 kHz: **off 0.01 µs** - nothing, as BHU
+    says; a compressor 4.5 µs; a compressor and a gate **7.0 µs**; the same keyed by a stereo key 6.9 µs; sixteen
+    channels, a compressor and a gate 7.7 µs - the detector runs once whatever the width, the gain is one multiply a
+    channel. Against a budget of 2,667 µs: a quarter of a per cent a voice.
+  - **M88** (`AuxTests`), the real graph, 32 rack channels sounding: **29 µs** a block with the stage off, **256 µs**
+    with a compressor and a gate on every channel (seven microseconds a channel, as M87 says), 225 µs keyed by an input
+    (the key read where it is rather than the channel folded). M83, run beside it, reads what it read before the stage
+    existed (119 µs without auxes, 159 µs with four): an idle stage costs nothing measurable.
+  - **When a key is heard** is exact rather than measured, and pinned by the served drivers: an input in the same block
+    (`key_input.py`), a cue's own in the same block (`key_self.py`), an aux one block late on a cue (`key_aux.py`) -
+    BHP's rule, to the sample.
+  - **The guides** (English and French) gain a Dynamics row after the EQ and the Key menu on a plugin with a sidechain;
+    the README its line.
+
+**Closed 2026-11-22.** SC.0-SC.9 pushed; the strict GCC 15 build and the real-time sanitizer (Clang 21) green on the
+NUC at c548636e; the whole unit suite green in C and fr_FR, file by file, at each stage.
+
+**Owed, after the close:**
+
+- **By ear, on a Release build, the author's:** a console's mix on an input ducking cues through a plugin with a
+  sidechain; a silent aux fed by a track keying another cue; a cue's own compressor easing as its DCA comes down; the
+  keyed gate; peak against RMS.
+- **On the Mac farm:** an AU's sidechain laid out by the child, and one real sidechain compressor through
+  `WFG_REAL_VST3=<id> --no-skip` (the four `PickyProcessor` cases pin the probe, not a vendor's plugin).
+- **Later, as listed above:** fades that move the stage's numbers (`fade/dyn`); the stage on the D700's and the Stream
+  Deck's pages; an Ableton Live set's sidechain routing at the import; an output as a key; the stage on the Android
+  remote.
