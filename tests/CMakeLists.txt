@@ -90,6 +90,7 @@ add_executable(wfg_tests
     AuxRunTests.cpp
     CueMatrixTests.cpp
     CueEqTests.cpp
+    CueDynTests.cpp
     LooperTests.cpp
     MountTests.cpp
     PresetTests.cpp
