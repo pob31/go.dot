@@ -1,0 +1,22 @@
+<Show>
+  <Lists goDebounce="0">
+    <List id="KQ000001" name="Sound">
+      <Media id="KQ000002" channels="1" directOut="KQ000004" file="tone.wav" name="The bed" number="1">
+        <Fx id="KQ000005" key="KQ000007" plugin="KQ000008"/>
+      </Media>
+      <Media id="KQ000003" channels="1" directOut="KQ000007" file="voice.wav" name="The voice" number="2"/>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="2">
+    <Bus id="KQ000004" name="Main L/R" width="2"/>
+    <Bus id="KQ000007" firstChannel="2" name="Monitor" width="2"/>
+    <Plugins>
+      <Plugin id="KQ000008" format="VST3" identifier="godot:test-duck" name="Test duck"/>
+    </Plugins>
+  </Audio>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces/>
+  <Dcas/>
+</Show>

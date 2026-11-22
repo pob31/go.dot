@@ -749,7 +749,7 @@
       </optional>
       <optional>
         <attribute name="dynKey">
-          <a:documentation>What the stage listens to (namespace draft 141, BHL), as an insert&apos;s key: empty for the cue itself before its level, as a console channel compressor; self for this cue after its level; the id of an aux or of a named input. A key naming what the show has not got is silence and a problem mark in words, never a failed run (BHV) - its compressor rests and its gate shuts.</a:documentation>
+          <a:documentation>What the stage listens to (namespace draft 141, BHL), as an insert&apos;s key: empty for the cue itself before its level, as a console channel compressor; self for this cue after its level; the id of an aux, of a named input or of an output (BIB). A key naming what the show has not got is silence and a problem mark in words, never a failed run (BHV) - its compressor rests and its gate shuts.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>
@@ -1437,7 +1437,7 @@
       </optional>
       <optional>
         <attribute name="dynKey">
-          <a:documentation>What the stage listens to (namespace draft 141, BHL), as an insert&apos;s key: empty for the cue itself before its level, as a console channel compressor; self for this cue after its level; the id of an aux or of a named input. A key naming what the show has not got is silence and a problem mark in words, never a failed run (BHV) - its compressor rests and its gate shuts.</a:documentation>
+          <a:documentation>What the stage listens to (namespace draft 141, BHL), as an insert&apos;s key: empty for the cue itself before its level, as a console channel compressor; self for this cue after its level; the id of an aux, of a named input or of an output (BIB). A key naming what the show has not got is silence and a problem mark in words, never a failed run (BHV) - its compressor rests and its gate shuts.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>
@@ -4742,7 +4742,7 @@
       </optional>
       <optional>
         <attribute name="dynKey">
-          <a:documentation>What the stage listens to (namespace draft 141, BHL), as an insert&apos;s key: empty for the cue itself before its level, as a console channel compressor; self for this cue after its level; the id of an aux or of a named input. A key naming what the show has not got is silence and a problem mark in words, never a failed run (BHV) - its compressor rests and its gate shuts.</a:documentation>
+          <a:documentation>What the stage listens to (namespace draft 141, BHL), as an insert&apos;s key: empty for the cue itself before its level, as a console channel compressor; self for this cue after its level; the id of an aux, of a named input or of an output (BIB). A key naming what the show has not got is silence and a problem mark in words, never a failed run (BHV) - its compressor rests and its gate shuts.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>
@@ -5288,7 +5288,7 @@
       </optional>
       <optional>
         <attribute name="key">
-          <a:documentation>What this insert&apos;s plugin listens to on its sidechain (namespace draft 141, BHL): empty for nothing - its sidechain fed silence and laid out as it always was - self for this cue after its level, or the id of an aux or of a named input. One word and no reference of a single kind, so wfg validate checks it itself; a key naming an aux or an input the show no longer has, or an aux the graph was built without, is silence and a problem mark in words, never a failed run (BHV). An input is heard in the same block, an aux one block late on a cue (BHP). Picked on a sounding cue it is heard at once, the plugin passing the cue as it was for the moment it is laid out again (BHS). Only offered where the plugin has a sidechain (plugin/keyInputs).</a:documentation>
+          <a:documentation>What this insert&apos;s plugin listens to on its sidechain (namespace draft 141, BHL): empty for nothing - its sidechain fed silence and laid out as it always was - self for this cue after its level, or the id of an aux, of a named input or of an output (BIB). One word and no reference of a single kind, so wfg validate checks it itself; a key naming an aux or an input the show no longer has, or an aux the graph was built without, is silence and a problem mark in words, never a failed run (BHV). An input is heard in the same block, an aux one block late on a cue (BHP), an output one block late always - what it sent the device the block before (BIB). Picked on a sounding cue it is heard at once, the plugin passing the cue as it was for the moment it is laid out again (BHS). Only offered where the plugin has a sidechain (plugin/keyInputs).</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>

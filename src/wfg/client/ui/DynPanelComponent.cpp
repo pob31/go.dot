@@ -157,7 +157,8 @@ namespace wfg::client::ui
 
         //  WHAT IT LISTENS TO (§141, BHL, BHU).
         keyMenu.setWantsKeyboardFocus (false);
-        keyMenu.setTooltip ("What the stage listens to: this cue before or after its level, an input, or an aux");
+        keyMenu.setTooltip ("What the stage listens to: this cue before or after its level, an input, an aux,"
+                            " or an output - an output heard a block late, after the whole show is mixed");
         keyMenu.onChange = [this]
         {
             const auto picked = keyMenu.getSelectedId() - 1;

@@ -678,3 +678,27 @@ TEST_CASE ("problems: a sound's own dynamics keyed by what the show has not got 
     CHECK (marks.count ("SND1") == 1);
     CHECK (marks.count ("SND2") == 0);
 }
+
+TEST_CASE ("problems: an output is a key the show has - an insert's or a stage's, no mark for it (§141, BIB)")
+{
+    const auto snapshot = snapshotOf ({
+        { "/godot/audio/status", word ("running") },
+        { "/godot/bus/BUS1/name", word ("Main L/R") },
+        { "/godot/bus/BUS1/width", word ("2") },
+        { "/godot/cue/SND1/kind", word ("media") },
+        { "/godot/cue/SND1/dynKey", word ("BUS1") },
+        { "/godot/cue/SND1/fx", word ("FX1") },
+        { "/godot/fx/FX1/plugin", word ("PL1") },
+        { "/godot/fx/FX1/key", word ("BUS1") },
+        { "/godot/plugin/order", word ("PL1") },
+        { "/godot/plugin/PL1/name", word ("Ducker") },
+        { "/godot/plugin/PL1/state", word ("loaded") },
+    });
+
+    const auto index = model::indexObjects (snapshot);
+    REQUIRE (index.audioOutputs.size() == 1u);
+
+    const auto needs = model::needsOf (snapshot, { cueRow ("SND1", "media") }, index);
+    CHECK (needs.lostKeys.empty());
+    CHECK (model::fileProblems (snapshot, needs).empty());
+}

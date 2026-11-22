@@ -90,6 +90,7 @@ namespace wfg::client::model
         std::string revision;       ///< `/godot/document/revision` it was read at
 
         std::vector<Named> ports, serials, inputs, devices, surfaces;
+        std::vector<Named> audioOutputs {}; ///< the show's outputs, each a key an effect may hear (§141, BIB)
         std::vector<Named> videoOutputs, videoInputs, videoInserts;
 
         //  The plugins of the set, and those of each rack channel, with the channel's name.

@@ -16,6 +16,7 @@
 
 #include <wfg/client/model/Fx.h>
 #include <wfg/client/model/InputList.h>
+#include <wfg/client/model/OutputList.h>
 #include <wfg/client/model/Rack.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/cue/FadeMoves.h>
@@ -239,6 +240,10 @@ namespace wfg::client::model
         for (const auto& channel : readRack (snapshot).channels)
             if (channel.aux && channel.id != cueId)
                 out.push_back ({ channel.id, channel.name + " \xc2\xb7 aux" });
+
+        //  And each output (§141, BIB): what it sent the device, heard a block late.
+        for (const auto& output : readOutputs (snapshot))
+            out.push_back ({ output.id, (output.name.empty() ? output.id : output.name) + " \xc2\xb7 output" });
 
         return out;
     }

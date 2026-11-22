@@ -10371,11 +10371,14 @@ TEST_CASE ("client: an insert's key is picked from what the show has, by name, a
         labels.push_back (choice.label);
     }
 
-    CHECK (values == std::vector<std::string> { "", "self", "KN000001", "KA000001" });
+    //  And the show's outputs after the auxes (§141, BIB): what each sent the device, a block late.
+    CHECK (values == std::vector<std::string> { "", "self", "KN000001", "KA000001", "J3MT5XYA", "K4NV6ZB1" });
     CHECK (labels[0] == "no key");
     CHECK (labels[1] == "this cue, after its level");
     CHECK (labels[2] == "Talkback · input");
     CHECK (labels[3] == "Duck bus · aux");
+    CHECK (labels[4] == "Main L/R · output");
+    CHECK (labels[5] == "Foldback · output");
 
     //  Picked: the insert's row, by node.set, as every value.
     const auto fxId = reading.strips[0].fxId;
@@ -10427,11 +10430,14 @@ TEST_CASE ("client: a sound's own dynamics are read as the voice is given them, 
     CHECK (model::dynRowAt (reading, "dynRatio") == "/godot/cue/" + cue + "/dynRatio");
 
     //  No key is the cue itself before its level (BHU); then the cue after it, then what the show has.
-    REQUIRE (reading.keyChoices.size() == 3u);
+    REQUIRE (reading.keyChoices.size() == 5u);
     CHECK (reading.keyChoices[0].value.empty());
     CHECK (reading.keyChoices[0].label == "this cue, before its level");
     CHECK (reading.keyChoices[1].label == "this cue, after its level");
     CHECK (reading.keyChoices[2].value == "KN000001");
+    CHECK (reading.keyChoices[3].value == "J3MT5XYA");      // the outputs (§141, BIB)
+
+    CHECK (model::dynKeyWords (reading, "K4NV6ZB1") == "Foldback · output");
 
     //  A key naming what was deleted stays said.
     REQUIRE (rig.apply (6, "window", "node.set",

@@ -26192,6 +26192,17 @@ namespace wfg::cue
                     ++auxIndex;
                 }
 
+        /*  AN OUTPUT (§141, BIB): its logical channels as the show packs them
+            now, what it sent the device a block ago. */
+        for (const auto bus : audioNode)
+            if (bus.hasType ("Bus") && bus.getProperty ("id").toString().toStdString() == word)
+            {
+                out.kind = audio::KeySource::Kind::output;
+                out.first = schema.integer (bus, "bus", "firstChannel");
+                out.width = std::max (1, schema.integer (bus, "bus", "width"));
+                return out;
+            }
+
         return {};
     }
 

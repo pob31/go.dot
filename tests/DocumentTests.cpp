@@ -2161,18 +2161,20 @@ TEST_CASE ("key: an insert's key naming nothing it could hear is a warning, neve
 
     auto fx = add (document.findById (cueId), "Fx", document.ids().generate());
 
-    for (const auto& heard : { std::string ("self"), inputId, auxId, std::string() })
+    //  An output is a key too since §141's BIB.
+    for (const auto& heard : { std::string ("self"), inputId, auxId, busId, std::string() })
     {
         fx.setProperty (juce::Identifier ("key"), juce::String (heard), nullptr);
         INFO (heard);
         CHECK (document.warnings().empty());
     }
 
-    fx.setProperty (juce::Identifier ("key"), juce::String (busId), nullptr);
+    //  A cue is none of them.
+    fx.setProperty (juce::Identifier ("key"), juce::String (cueId), nullptr);
     auto problems = document.warnings();
     REQUIRE (problems.size() == 1);
     INFO (problems[0]);
-    CHECK (problems[0].find ("neither an aux nor an input") != std::string::npos);
+    CHECK (problems[0].find ("not an aux, an input or an output") != std::string::npos);
 
     fx.setProperty (juce::Identifier ("key"), "KYGQNE00", nullptr);
     problems = document.warnings();

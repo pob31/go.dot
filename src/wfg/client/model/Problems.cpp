@@ -118,8 +118,10 @@ namespace wfg::client::model
                         continue;
                     }
 
+                    //  An aux is there; so is an output (§141, BIB).
                     if (std::any_of (index.rackChannels.begin(), index.rackChannels.end(),
-                                     [&isTheKey] (const auto& channel) { return isTheKey (channel.first); }))
+                                     [&isTheKey] (const auto& channel) { return isTheKey (channel.first); })
+                        || std::any_of (index.audioOutputs.begin(), index.audioOutputs.end(), isTheKey))
                         continue;
 
                     addOnce (keys, "key:" + fxId);
@@ -141,7 +143,8 @@ namespace wfg::client::model
                     if (std::any_of (index.inputs.begin(), index.inputs.end(), isTheKey))
                         addOnce (keys, "input:" + key);
                     else if (std::none_of (index.rackChannels.begin(), index.rackChannels.end(),
-                                           [&isTheKey] (const auto& channel) { return isTheKey (channel.first); }))
+                                           [&isTheKey] (const auto& channel) { return isTheKey (channel.first); })
+                             && std::none_of (index.audioOutputs.begin(), index.audioOutputs.end(), isTheKey))
                     {
                         const auto stage = "dyn:" + id;
                         addOnce (keys, "key:" + stage);
@@ -313,7 +316,11 @@ namespace wfg::client::model
             out.rackChannels.push_back ({ { channel.id, channel.name, true }, std::move (chain) });
         }
 
-        out.outputChannels = outputChannelCount (readOutputs (snapshot));
+        const auto outputs = readOutputs (snapshot);
+        out.outputChannels = outputChannelCount (outputs);
+
+        for (const auto& row : outputs)
+            out.audioOutputs.push_back ({ row.id, row.name, true });
 
         /*  THE CUES THAT CAN HAVE OUTGROWN THE GRAPH'S SLOTS: the audio is
             never built with fewer than eight (Console.cpp's `slotFloor`), so

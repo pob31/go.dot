@@ -2133,6 +2133,19 @@ add_test(NAME blackbox.key-aux.fr_FR
 set_tests_properties(blackbox.key-aux.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
+# An output keys a plugin (namespace draft 141, BIB, DO.7): a bed on the main
+# pair through the test ducker keyed by the output "Monitor", a voice played on
+# Monitor. Ducked one block after the voice's first sample - an output is a key a
+# block late, always; the session replays.
+add_test(NAME blackbox.key-output.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/key_output.py" --wfg-locale=C)
+set_tests_properties(blackbox.key-output.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.key-output.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/key_output.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.key-output.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
 # A cue keys its own effect after its level (namespace draft 141, SC.4): one
 # cue on a DCA through the test ducker keyed by "self". Brought down six
 # decibels on the DCA, it is ducked by half of itself - less than a key deaf to

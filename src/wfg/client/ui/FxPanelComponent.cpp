@@ -355,7 +355,8 @@ namespace wfg::client::ui
             const auto at = std::find (keyValues.begin(), keyValues.end(), strip.key) - keyValues.begin();
             keyMenu.setSelectedId (static_cast<int> (at) + 1, juce::dontSendNotification);
             keyMenu.setTooltip ("What " + juce::String (strip.name) + " listens to on its sidechain: an input, an aux,"
-                                " or this cue after its level. No key, and it listens to nothing there.");
+                                " an output - heard a block late, after the whole show is mixed - or this cue after"
+                                " its level. No key, and it listens to nothing there.");
         }
 
         juce::Rectangle<int> inner() const
