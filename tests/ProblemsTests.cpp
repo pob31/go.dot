@@ -600,3 +600,52 @@ TEST_CASE ("problems: the real-time class refused is said on This computer, and 
         CHECK (model::machineProblems (fine, model::indexObjects (fine)).empty());
     }
 }
+
+TEST_CASE ("problems: an insert's key that names what the show has not got marks its cue, and an input's own problem is the key's (namespace draft 141)")
+{
+    /*  BHV. A key is silence when what it names is not there: an input the
+        interface does not give tonight is that input's problem, already said
+        on its page; an aux or an input deleted since is the cue's own, "no
+        key". `self` names nothing that can go. */
+    const auto snapshot = snapshotOf ({
+        { "/godot/audio/status", word ("running") },
+        { "/godot/cue/SND1/kind", word ("media") },
+        { "/godot/cue/SND1/fx", word ("FX1 FX2 FX3") },
+        { "/godot/fx/FX1/plugin", word ("PL1") },
+        { "/godot/fx/FX1/name", word ("Ducker") },
+        { "/godot/fx/FX1/key", word ("GONE0001") },
+        { "/godot/fx/FX2/plugin", word ("PL1") },
+        { "/godot/fx/FX2/key", word ("IN1") },
+        { "/godot/fx/FX3/plugin", word ("PL1") },
+        { "/godot/fx/FX3/key", word ("self") },
+        { "/godot/plugin/order", word ("PL1") },
+        { "/godot/plugin/PL1/name", word ("Ducker") },
+        { "/godot/plugin/PL1/state", word ("loaded") },
+        { "/godot/input/IN1/name", word ("Talkback") },
+        { "/godot/input/IN1/problem", word ("the input lies past the last channel the interface gives.") },
+    });
+
+    const auto index = model::indexObjects (snapshot);
+    const std::vector<model::Row> rows { cueRow ("SND1", "media") };
+    const auto needs = model::needsOf (snapshot, rows, index);
+
+    REQUIRE (needs.lostKeys.size() == 1);
+    CHECK (needs.lostKeys[0].fxId == "FX1");
+    CHECK (needs.lostKeys[0].key == "GONE0001");
+
+    const auto& keys = needs.keysOf.at ("SND1");
+    CHECK (std::find (keys.begin(), keys.end(), "key:FX1") != keys.end());
+    CHECK (std::find (keys.begin(), keys.end(), "input:IN1") != keys.end());
+    CHECK (std::find (keys.begin(), keys.end(), "key:FX3") == keys.end());
+
+    const auto own = model::fileProblems (snapshot, needs);
+    REQUIRE (own.size() == 1);
+    CHECK (own[0].key == "key:FX1");
+    CHECK (own[0].word == "no key");
+    CHECK (anySays (own, "Ducker listens to GONE0001, which this show has not got"));
+
+    auto problems = model::machineProblems (snapshot, index);
+    problems.insert (problems.end(), own.begin(), own.end());
+    const auto marks = model::cueProblems (needs, problems);
+    REQUIRE (marks.count ("SND1") == 1);
+}

@@ -6248,6 +6248,84 @@ TEST_CASE ("fx panel: on a media cue's own chain a plugin's box carries Remove, 
     }
 }
 
+TEST_CASE ("fx panel: a plugin with a sidechain carries a Key menu of what the show has, and a pick sets its insert's key")
+{
+    /*  Namespace draft 141 (BHL, BHV): the key is picked from what the show
+        already has - no key, this cue after its level, an input, an aux. The
+        menu is on a box whose plugin offers a sidechain, never on a fade; a
+        key naming what the show has not got stays listed and picked. */
+    std::vector<std::pair<std::string, std::string>> sets;
+
+    ui::FxPanelComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& text) { sets.emplace_back (address, text); };
+
+    ui::FxPanelComponent panel (model::Theme {}, actions);
+    panel.setSize (1400, 250);
+
+    auto reading = chainReading ("CUE00001");
+    reading.fx.keyChoices = { { "", "no key" }, { "self", "this cue, after its level" },
+                              { "IN000001", "Talkback \xc2\xb7 input" } };
+    reading.fx.strips[1].keyInputs = 2;                  // Verb: a stereo sidechain
+    reading.fx.strips[1].key = "IN000001";
+
+    const auto menus = [&panel]
+    {
+        std::vector<juce::ComboBox*> out;
+        std::function<void (juce::Component&)> walk = [&out, &walk] (juce::Component& under)
+        {
+            for (auto* child : under.getChildren())
+            {
+                if (auto* box = dynamic_cast<juce::ComboBox*> (child);
+                    box != nullptr && box->isVisible() && box->getTextWhenNothingSelected() == "no key")
+                    out.push_back (box);
+
+                walk (*child);
+            }
+        };
+
+        walk (panel);
+        return out;
+    };
+
+    panel.show (reading);
+    REQUIRE (menus().size() == 1);
+    CHECK (menus()[0]->getNumItems() == 3);
+    CHECK (menus()[0]->getText() == juce::String::fromUTF8 ("Talkback \xc2\xb7 input"));
+    CHECK_FALSE (menus()[0]->getWantsKeyboardFocus());
+
+    SUBCASE ("a pick is the insert's row, set")
+    {
+        menus()[0]->setSelectedId (2, juce::sendNotificationSync);
+        REQUIRE (sets.size() == 1);
+        CHECK (sets[0].first == model::fxAddress ("FX7N0001", "key"));
+        CHECK (sets[0].second == "self");
+    }
+
+    SUBCASE ("a key the show has not got stays listed and picked")
+    {
+        reading.fx.strips[1].key = "IN000009";
+        panel.show (reading);
+        REQUIRE (menus().size() == 1);
+        CHECK (menus()[0]->getNumItems() == 4);
+        CHECK (menus()[0]->getText() == juce::String::fromUTF8 (model::keyWords (reading.fx, "IN000009").c_str()));
+        CHECK (sets.empty());
+    }
+
+    SUBCASE ("not on a plugin with no sidechain")
+    {
+        reading.fx.strips[1].keyInputs = 0;
+        panel.show (reading);
+        CHECK (menus().empty());
+    }
+
+    SUBCASE ("not on a fade, which switches nothing")
+    {
+        reading.fx.fadeId = "FADE0001";
+        panel.show (reading);
+        CHECK (menus().empty());
+    }
+}
+
 TEST_CASE ("fx panel: a picture of it, when somebody asks for one")
 {
     //  The EQ picture case's shape: with WFG_SNAPSHOT_DIR set, fx-panel.png; skipped otherwise.
@@ -6272,6 +6350,12 @@ TEST_CASE ("fx panel: a picture of it, when somebody asks for one")
 
     for (std::size_t i = 0; i < reading.fx.strips.size(); ++i)
         reading.fx.strips[i].index = static_cast<int> (i);
+
+    //  The verb with a sidechain, keyed by a talkback input (namespace draft 141).
+    reading.fx.keyChoices = { { "", "no key" }, { "self", "this cue, after its level" },
+                              { "IN000001", "Talkback \xc2\xb7 input" }, { "AX000001", "Duck bus \xc2\xb7 aux" } };
+    reading.fx.strips[0].keyInputs = 2;
+    reading.fx.strips[0].key = "IN000001";
 
     panel.setEditorWords ({ { "PG7N0002", "its window is open" } });
     panel.show (reading);

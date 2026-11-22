@@ -10318,6 +10318,74 @@ TEST_CASE ("client: a click on a number puts it on the master dial, and the wind
     CHECK (model::dialLine (*rig.publish (11)).rfind (name + ": initial level ", 0) == 0);
 }
 
+TEST_CASE ("client: an insert's key is picked from what the show has, by name, and one naming what it has not got stays said (namespace draft 141)")
+{
+    /*  BHL: no key, this cue after its level, every named input, every aux -
+        nothing made for a key. BHV: a key left naming what was deleted stays
+        on the menu, said, so it never opens on nothing. */
+    Rig rig ("first-sound");
+    const std::string cue = "B3N8R5TW";
+
+    REQUIRE (rig.apply (1, "window", "plugin.create", { osc::Value::string ("Test duck"),
+                                                        osc::Value::string ("godot:test-duck"),
+                                                        osc::Value::string ("VST3"), osc::Value::string ("") }).applied == 1);
+    REQUIRE (rig.apply (2, "window", "input.create",
+                        { osc::Value::int32 (1), osc::Value::int32 (-1), osc::Value::string ("KN000001") }).applied == 1);
+    REQUIRE (rig.apply (3, "window", "node.set",
+                        { osc::Value::string ("/godot/input/KN000001/name"), osc::Value::string ("Talkback") }).applied == 1);
+    REQUIRE (rig.apply (4, "window", "aux.create",
+                        { osc::Value::string ("stereo"), osc::Value::string ("KA000001") }).applied == 1);
+    REQUIRE (rig.apply (5, "window", "node.set",
+                        { osc::Value::string ("/godot/slot/KA000001/name"), osc::Value::string ("Duck bus") }).applied == 1);
+
+    auto snapshot = rig.publish (5);
+    const auto set = model::readPluginSet (*snapshot);
+    REQUIRE (set.size() == 1u);
+
+    REQUIRE (rig.apply (6, "window", "fx.create", { osc::Value::string (cue), osc::Value::string (set[0].id) }).applied == 1);
+    snapshot = rig.publish (6);
+
+    auto reading = model::readFx (*snapshot, cue);
+    REQUIRE (reading.strips.size() == 1u);
+    CHECK (reading.strips[0].key.empty());
+
+    std::vector<std::string> values, labels;
+
+    for (const auto& choice : reading.keyChoices)
+    {
+        values.push_back (choice.value);
+        labels.push_back (choice.label);
+    }
+
+    CHECK (values == std::vector<std::string> { "", "self", "KN000001", "KA000001" });
+    CHECK (labels[0] == "no key");
+    CHECK (labels[1] == "this cue, after its level");
+    CHECK (labels[2] == "Talkback · input");
+    CHECK (labels[3] == "Duck bus · aux");
+
+    //  Picked: the insert's row, by node.set, as every value.
+    const auto fxId = reading.strips[0].fxId;
+    REQUIRE (rig.apply (7, "window", "node.set",
+                        { osc::Value::string (model::fxAddress (fxId, "key")), osc::Value::string ("KN000001") }).applied == 1);
+    snapshot = rig.publish (7);
+    reading = model::readFx (*snapshot, cue);
+    CHECK (reading.strips[0].key == "KN000001");
+    CHECK (model::keyWords (reading, reading.strips[0].key) == "Talkback · input");
+
+    //  An aux is not on its own menu.
+    const auto auxReading = model::readFx (*snapshot, "KA000001");
+    CHECK (std::none_of (auxReading.keyChoices.begin(), auxReading.keyChoices.end(),
+                         [] (const model::KeyChoice& choice) { return choice.value == "KA000001"; }));
+
+    //  The input deleted: the key is left as written, and said.
+    REQUIRE (rig.apply (8, "window", "object.delete", { osc::Value::string ("KN000001") }).applied == 1);
+    snapshot = rig.publish (8);
+    reading = model::readFx (*snapshot, cue);
+    CHECK (reading.strips[0].key == "KN000001");
+    CHECK_FALSE (model::keyIsThere (reading, "KN000001"));
+    CHECK (model::keyWords (reading, "KN000001").find ("not in this show") != std::string::npos);
+}
+
 TEST_CASE ("client: the input list reads the named inputs, names the patch rows, and says which regime it is in")
 {
     /*  Phase 9b (namespace draft §18.2): the output list's twin, made through

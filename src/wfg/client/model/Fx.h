@@ -108,6 +108,13 @@ namespace wfg::client::model
             plugin, by name, in the order the plugin lists them. */
         std::vector<std::string> fadeMoves;
 
+        /*  ITS KEY (namespace draft §141): how wide a sidechain the plugin
+            offers - nought, and there is no key to pick - and what this cue's
+            insert listens to on it, as the document holds it: empty, `self`,
+            an aux's id or an input's. */
+        int keyInputs = 0;
+        std::string key;
+
         bool present() const noexcept { return ! fxId.empty(); }
     };
 
@@ -121,11 +128,24 @@ namespace wfg::client::model
         std::string path;
     };
 
+    /*  ONE THING A KEY MAY NAME (namespace draft §141, BHL): the value the
+        document takes, and the words the menu says it in. */
+    struct KeyChoice
+    {
+        std::string value;
+        std::string label;
+    };
+
     struct FxReading
     {
         bool present = false;
         std::vector<FxStrip> strips;
         std::string notice;
+
+        /*  WHAT A KEY ON THIS CUE'S INSERTS MAY BE (§141): no key, this cue
+            after its level, every named input, every aux but the one whose
+            chain this is - each by name. The same for every strip. */
+        std::vector<KeyChoice> keyChoices;
 
         /*  THE CUE THROUGH ITS INSERTS (2026-09-26): its file's width, how
             wide it comes out, and how many samples late - read off the cue's
@@ -230,6 +250,14 @@ namespace wfg::client::model
 
     /** `/godot/fx/<id>/<leaf>`. */
     std::string fxAddress (const std::string& fxId, const std::string& leaf);
+
+    /*  A KEY IN WORDS (§141): its choice's label, or - for one naming what the
+        show has not got any more - that, so the menu never opens on nothing
+        and the strip says why it hears silence (BHV). */
+    std::string keyWords (const FxReading&, const std::string& key);
+
+    /** Whether `key` names something the show has: empty and `self` always do. */
+    bool keyIsThere (const FxReading&, const std::string& key);
 
     /** `/godot/fx/<id>/p<n>`. */
     std::string fxParameterAddress (const std::string& fxId, int index);

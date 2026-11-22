@@ -154,9 +154,9 @@ const KIND_ORDER = {
   // A cue's insert and an entry of the show's plugin set (Phase 9a): the row a hand
   // reads first is the one that says which plugin, then the switch, then the values -
   // one sparse row here; the p<n> nodes beneath it are the door a rotary takes.
-  fx:      ["plugin", "enabled", "values", "stateFile", "name", "index"],
+  fx:      ["plugin", "enabled", "key", "values", "stateFile", "name", "index"],
   plugin:  ["name", "identifier", "format", "path", "preset", "state", "problem",
-            "late", "lateBlocks", "latencySamples", "paramCount", "stateLoadMs", "stateProblem"],
+            "late", "lateBlocks", "latencySamples", "keyInputs", "paramCount", "stateLoadMs", "stateProblem"],
   // A media cue's send into one mix channel: which, how loud, whether it is in (2026-09-25),
   // where it sits - a pan, a width, a balance, a swap, and the shape that says which are heard
   // (namespace draft §113) - and the curve over the file it follows (§28), a plain row as the cue's is.

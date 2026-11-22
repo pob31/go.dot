@@ -151,6 +151,21 @@ namespace wfg::client::model
 
         std::map<std::string, Ranged> ranged;
 
+        /*  AN INSERT'S KEY THAT NAMES WHAT THE SHOW HAS NOT GOT (namespace
+            draft §141, BHV): the cue, the insert, the plugin's name and the
+            word the key holds. Silent, and said on the cue's row. */
+        struct LostKey
+        {
+            std::string cue;
+            std::string fxId;
+            std::string plugin;
+            std::string key;
+
+            bool operator== (const LostKey&) const = default;
+        };
+
+        std::vector<LostKey> lostKeys;
+
         bool operator== (const CueNeeds&) const = default;
     };
 
@@ -162,7 +177,9 @@ namespace wfg::client::model
         AXT), keyed `range:<cue>`: a range that begins at or past the end plays
         nothing ("outside the file"); one that only ends past it by more than a
         millisecond plays to the end, and says so ("past the end") - never for
-        a sound locked to its movie, a few frames shorter by nature. */
+        a sound locked to its movie, a few frames shorter by nature. AND AN
+        INSERT'S KEY THAT NAMES WHAT THE SHOW HAS NOT GOT (namespace draft
+        §141, BHV), keyed `key:<fx>`: it listens to silence ("no key"). */
     std::vector<Problem> fileProblems (const tree::TreeSnapshot&, const CueNeeds&);
 
     /*  EVERY CUE OF THE SHOW WHOSE FILE IS MISSING, every list and every depth

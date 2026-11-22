@@ -92,12 +92,43 @@ namespace wfg::client::model
                     addOnce (keys, prefix + target);
             };
 
-            //  The plugins its FX switches in, each by the set's identifier.
-            const auto inserts = [&snapshot, &base, &keys]
+            /*  The plugins its FX switches in, each by the set's identifier - and
+                what each listens to (namespace draft §141): an input's own
+                problem is the key's, and a key naming what the show has not
+                got is a problem of the cue's (BHV). */
+            const auto inserts = [&snapshot, &base, &keys, &index, &needs, &id]
             {
                 for (const auto& fxId : words (text (snapshot, base + "fx")))
-                    if (const auto plugin = text (snapshot, "/godot/fx/" + fxId + "/plugin"); ! plugin.empty())
+                {
+                    const auto fxBase = "/godot/fx/" + fxId + "/";
+
+                    if (const auto plugin = text (snapshot, fxBase + "plugin"); ! plugin.empty())
                         addOnce (keys, "plugin:" + plugin);
+
+                    const auto key = text (snapshot, fxBase + "key");
+
+                    if (key.empty() || key == "self")
+                        continue;
+
+                    const auto isTheKey = [&key] (const ObjectIndex::Named& thing) { return thing.id == key; };
+
+                    if (std::any_of (index.inputs.begin(), index.inputs.end(), isTheKey))
+                    {
+                        addOnce (keys, "input:" + key);
+                        continue;
+                    }
+
+                    if (std::any_of (index.rackChannels.begin(), index.rackChannels.end(),
+                                     [&isTheKey] (const auto& channel) { return isTheKey (channel.first); }))
+                        continue;
+
+                    addOnce (keys, "key:" + fxId);
+
+                    //  Once, though a shut group's member is read twice - as its row and under the group.
+                    if (std::none_of (needs.lostKeys.begin(), needs.lostKeys.end(),
+                                      [&fxId] (const CueNeeds::LostKey& lost) { return lost.fxId == fxId; }))
+                        needs.lostKeys.push_back ({ id, fxId, text (snapshot, fxBase + "name"), key });
+                }
             };
 
             const auto file = [&snapshot, &base, &keys, &needs, &id]
@@ -648,6 +679,13 @@ namespace wfg::client::model
     std::vector<Problem> fileProblems (const tree::TreeSnapshot& snapshot, const CueNeeds& needs)
     {
         std::vector<Problem> out;
+
+        //  A KEY NAMING WHAT THE SHOW HAS NOT GOT (§141, BHV). Words mine, owed the author's.
+        for (const auto& lost : needs.lostKeys)
+            out.push_back ({ {}, "key:" + lost.fxId, "no key",
+                             "No key: " + (lost.plugin.empty() ? std::string ("an insert") : lost.plugin)
+                               + " listens to " + lost.key + ", which this show has not got - it hears silence"
+                                 " there until its key names an aux or an input" });
 
         for (const auto& [cue, file] : needs.files)
         {

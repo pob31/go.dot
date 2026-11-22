@@ -22,7 +22,9 @@
 
 #include <algorithm>
 #include <cmath>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace wfg::client::ui
 {
@@ -171,6 +173,26 @@ namespace wfg::client::ui
 
                 /*  OFF THIS CUE, AND NO OTHER (namespace draft 133, the author,
                     2026-11-18). One undo brings it back with what was set. */
+                /*  WHAT IT LISTENS TO (namespace draft §141, BHL): the key,
+                    picked from what the show already has. Only where the
+                    plugin has a sidechain to hear it on, and never on a fade,
+                    which moves numbers and switches nothing. */
+                keyMenu.setWantsKeyboardFocus (false);
+                keyMenu.setTextWhenNothingSelected ("no key");
+                keyMenu.onChange = [this]
+                {
+                    const auto picked = keyMenu.getSelectedId() - 1;
+
+                    if (picked < 0 || picked >= static_cast<int> (keyValues.size()) || ! strip.present() || owner.onFade())
+                        return;
+
+                    const auto& value = keyValues[static_cast<std::size_t> (picked)];
+
+                    if (value != strip.key && owner.actions.set)
+                        owner.actions.set (model::fxAddress (strip.fxId, "key"), value);
+                };
+                addChildComponent (keyMenu);
+
                 remove.setButtonText ("Remove");
                 remove.setWantsKeyboardFocus (false);
                 remove.onClick = [this]
@@ -267,6 +289,7 @@ namespace wfg::client::ui
                                   + " after the plugin now behind it");
 
                 remove.setVisible (owner.offersRemove() && strip.present());
+                refreshKey();
                 remove.setTooltip ("Take " + juce::String (strip.name) + " off this cue, with what was set on it."
                                    " No other cue is touched; Undo brings it back.");
             }
@@ -285,6 +308,54 @@ namespace wfg::client::ui
             }
 
             repaint();
+        }
+
+        /*  THE KEY MENU, as the reading has it: every choice, and one naming
+            what the show has not got any more kept at the end and picked, so
+            it never opens on nothing (BHV). */
+        bool showsKey() const
+        {
+            return kind == Kind::plugin && strip.present() && strip.keyInputs > 0 && ! owner.onFade();
+        }
+
+        void refreshKey()
+        {
+            keyMenu.setVisible (showsKey());
+
+            if (! showsKey())
+                return;
+
+            const auto& fx = owner.reading.fx;
+            std::vector<std::string> values, labels;
+
+            for (const auto& choice : fx.keyChoices)
+            {
+                values.push_back (choice.value);
+                labels.push_back (choice.label);
+            }
+
+            if (! model::keyIsThere (fx, strip.key))
+            {
+                values.push_back (strip.key);
+                labels.push_back (model::keyWords (fx, strip.key));
+            }
+
+            /*  REBUILT ONLY WHEN WHAT IT OFFERS CHANGED: every snapshot
+                refreshes the box, and a menu cleared under the hand closes. */
+            if (values != keyValues || labels != keyLabels)
+            {
+                keyValues = std::move (values);
+                keyLabels = std::move (labels);
+                keyMenu.clear (juce::dontSendNotification);
+
+                for (std::size_t i = 0; i < keyLabels.size(); ++i)
+                    keyMenu.addItem (juce::String::fromUTF8 (keyLabels[i].c_str()), static_cast<int> (i) + 1);
+            }
+
+            const auto at = std::find (keyValues.begin(), keyValues.end(), strip.key) - keyValues.begin();
+            keyMenu.setSelectedId (static_cast<int> (at) + 1, juce::dontSendNotification);
+            keyMenu.setTooltip ("What " + juce::String (strip.name) + " listens to on its sidechain: an input, an aux,"
+                                " or this cue after its level. No key, and it listens to nothing there.");
         }
 
         juce::Rectangle<int> inner() const
@@ -312,6 +383,10 @@ namespace wfg::client::ui
             auto foot = area.removeFromBottom (owner.scaled (24));
             door.setBounds (foot.removeFromLeft (owner.scaled (90)));
             remove.setBounds (foot.removeFromRight (owner.scaled (70)));
+
+            //  The key, just above the door (§141).
+            area.removeFromBottom (owner.scaled (4));
+            keyMenu.setBounds (area.removeFromBottom (owner.scaled (22)));
         }
 
         void paint (juce::Graphics& g) override
@@ -374,6 +449,10 @@ namespace wfg::client::ui
 
             area.removeFromTop (owner.scaled (22));                          // the switch
             area.removeFromBottom (owner.scaled (28));                       // the door
+
+            if (showsKey())
+                area.removeFromBottom (owner.scaled (26));                   // the key (§141)
+
             area.removeFromTop (owner.scaled (4));
 
             /*  THE WORDS, under the switch: what it is doing, then anything
@@ -462,6 +541,9 @@ namespace wfg::client::ui
         juce::TextButton load;      // the add box's Load now (§105)
         juce::TextButton remove;    // a plugin's, on a media cue: off this cue (§133)
         juce::TextButton earlier, later;    // and its place in the cue's own chain (stage 4)
+        juce::ComboBox keyMenu;             // what a plugin with a sidechain listens to (§141)
+        std::vector<std::string> keyValues; // the menu's items, as the document writes them
+        std::vector<std::string> keyLabels; // and as the menu says them
     };
 
     //==============================================================================

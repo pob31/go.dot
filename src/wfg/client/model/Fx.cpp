@@ -15,6 +15,7 @@
 */
 
 #include <wfg/client/model/Fx.h>
+#include <wfg/client/model/InputList.h>
 #include <wfg/client/model/Rack.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/cue/FadeMoves.h>
@@ -212,6 +213,23 @@ namespace wfg::client::model
         return std::string (fxPrefix) + fxId + "/" + leaf;
     }
 
+    bool keyIsThere (const FxReading& reading, const std::string& key)
+    {
+        return std::any_of (reading.keyChoices.begin(), reading.keyChoices.end(),
+                            [&key] (const KeyChoice& choice) { return choice.value == key; });
+    }
+
+    std::string keyWords (const FxReading& reading, const std::string& key)
+    {
+        for (const auto& choice : reading.keyChoices)
+            if (choice.value == key)
+                return choice.label;
+
+        /*  GONE (namespace draft §141, BHV): an aux or an input deleted, the
+            key left as written - silence until it names something again. */
+        return key + " \xc2\xb7 not in this show: silent";
+    }
+
     std::string fxParameterAddress (const std::string& fxId, int index)
     {
         return fxAddress (fxId, "p" + std::to_string (index));
@@ -267,6 +285,19 @@ namespace wfg::client::model
         }
 
         out.present = true;
+
+        /*  WHAT A KEY MAY BE (namespace draft §141, BHL): what the show
+            already has, by name - nothing is made for a key. An aux is not
+            on its own menu (BHV): `self` is that. */
+        out.keyChoices.push_back ({ "", "no key" });
+        out.keyChoices.push_back ({ "self", "this cue, after its level" });
+
+        for (const auto& input : readInputs (snapshot))
+            out.keyChoices.push_back ({ input.id, input.name + " \xc2\xb7 input" });
+
+        for (const auto& channel : readRack (snapshot).channels)
+            if (channel.aux && channel.id != cueId)
+                out.keyChoices.push_back ({ channel.id, channel.name + " \xc2\xb7 aux" });
 
         /*  HIDE UNUSED is a mic cue's now: a media cue's chain is its own
             (§133) and has nothing of another cue's to hide. Its row stays in
@@ -416,6 +447,7 @@ namespace wfg::client::model
             strip.lateBlocks = integer (snapshot, base + "lateBlocks");
             strip.latencySamples = integer (snapshot, base + "latencySamples");
             strip.layout = text (snapshot, base + "layout");
+            strip.keyInputs = integer (snapshot, base + "keyInputs");
 
             if (out.recorder)
                 strip.side = text (snapshot, base + "side") == "before" ? "before" : "after";
@@ -428,6 +460,7 @@ namespace wfg::client::model
                 strip.fxId = found->second.id;
                 strip.enabled = found->second.enabled;
                 strip.dryWhy = text (snapshot, fxAddress (strip.fxId, "problem"));
+                strip.key = text (snapshot, fxAddress (strip.fxId, "key"));
             }
 
             const auto count = integer (snapshot, base + "paramCount");
