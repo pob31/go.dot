@@ -761,6 +761,10 @@ namespace wfg::client::model
         if (pageWord == "eq")
             return { Subject::Kind::eq, aim };
 
+        //  The Dynamics page (namespace draft §141, BIA): the stage at the foot.
+        if (pageWord == "dyn")
+            return { Subject::Kind::dyn, aim };
+
         //  The pan and width pages (namespace draft §113) are the sends' too.
         if (pageWord == "send" || pageWord == "pan" || pageWord == "width")
             return { Subject::Kind::sends, aim };

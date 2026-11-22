@@ -224,6 +224,7 @@ namespace wfg::surface
                 case Page::loop: return "Loop";
                 case Page::pan:  return "Pan";
                 case Page::width: return "Width";
+                case Page::dyn:  return "Dynamics";
                 case Page::show: break;
             }
 
@@ -939,6 +940,7 @@ namespace wfg::surface
                 case Page::width:
                     return pageCount (static_cast<int> (wordsOf (textAt (at(), "/godot/audio/mixes")).size()), zones);
                 case Page::fx:   return std::max (1, static_cast<int> (fxPagesOf (aimNow()).size()));
+                case Page::dyn:
                 case Page::loop:
                 case Page::show: break;
             }
@@ -1466,6 +1468,7 @@ namespace wfg::surface
                     case Page::width: placeWrite (deck, control, steps, pressed, submit); break;
                     case Page::fx:   fxWrite (deck, control, steps, pressed, submit);   break;
                     case Page::loop: loopWrite (deck, control, steps, pressed, submit); break;
+                    case Page::dyn:
                     case Page::show: break;
                 }
             }
@@ -1900,6 +1903,7 @@ namespace wfg::surface
                         break;
                     }
 
+                    case Page::dyn:
                     case Page::show:
                         break;
                 }

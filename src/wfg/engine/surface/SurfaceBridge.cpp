@@ -683,7 +683,7 @@ namespace wfg::surface
             bool loopNone = false;
 
             //  The aimed cue's rows every rotary of the page reads.
-            std::string eqOnAt, aimShortAt, aimNameAt, aimAutoAt, aimColourAt, aimSendsAt;
+            std::string eqOnAt, dynOnAt, aimShortAt, aimNameAt, aimAutoAt, aimColourAt, aimSendsAt;
         };
 
         struct Surface
@@ -1095,6 +1095,7 @@ namespace wfg::surface
             paging.loopNone = false;
 
             paging.eqOnAt = base.empty() ? std::string {} : base + "eqOn";
+            paging.dynOnAt = base.empty() ? std::string {} : base + "dynOn";
             paging.aimShortAt = base.empty() ? std::string {} : base + "shortName";
             paging.aimNameAt = base.empty() ? std::string {} : base + "name";
             paging.aimAutoAt = base.empty() ? std::string {} : base + "autoName";
@@ -1261,17 +1262,19 @@ namespace wfg::surface
                 return;
             }
 
-            if (paging.page != Page::eq)
+            //  The EQ's map, or the dynamics' (§141, BIA): the same rotaries, the same presses.
+            if (paging.page != Page::eq && paging.page != Page::dyn)
                 return;
 
             for (int position = 0; position < rotaries; ++position)
             {
                 const auto index = paging.index * rotaries + position;
+                const auto* found = pageControl (paging.page, index);
 
-                if (index >= eqControlCount)
+                if (found == nullptr)
                     break;
 
-                const auto& control = eqControls[static_cast<std::size_t> (index)];
+                const auto& control = *found;
                 auto& strip = box.strips[box.firstShown() + static_cast<std::size_t> (position)];
                 strip.control = index;
                 strip.controlAt = base + std::string (control.row);
@@ -1279,12 +1282,12 @@ namespace wfg::surface
             }
         }
 
-        /*  How many controls a kind of page has: the EQ's sixteen, or one a
-            mix channel of the show. */
+        /*  How many controls a kind of page has: the EQ's sixteen, the
+            dynamics' fourteen, or one a mix channel of the show. */
         int controlsOf (Page page) const
         {
-            if (page == Page::eq)
-                return eqControlCount;
+            if (page == Page::eq || page == Page::dyn)
+                return pageControlCount (page);
 
             if (isSendKind (page))
                 return static_cast<int> (wordsOf (textAt (published.get(), mixesAddress())).size());
@@ -1362,6 +1365,29 @@ namespace wfg::surface
                     showPage (box, page, box.paging.index + 1, bank);
                 else if (page == Page::pan && hasStereoSend (aimNow()))
                     showPage (box, Page::width, 0, bank);
+                else
+                    showPage (box, Page::show, 0, bank);
+
+                return;
+            }
+
+            /*  EQ WALKS ON TO THE DYNAMICS (namespace draft §141, BIA): the EQ's
+                pages, then the dynamics' - one on sixteen rotaries, two on eight
+                - and then the surface's own page. Neither surface has a button
+                to spare, so the stage after the EQ in the chain is the press
+                after the EQ's. */
+            if (kind == Page::eq)
+            {
+                const auto page = box.paging.page;
+                const auto here = page == Page::eq || page == Page::dyn;
+                const auto count = pageCount (controlsOf (page), box.rotaries());
+
+                if (! here)
+                    showPage (box, Page::eq, 0, bank);
+                else if (box.paging.index + 1 < count)
+                    showPage (box, page, box.paging.index + 1, bank);
+                else if (page == Page::eq)
+                    showPage (box, Page::dyn, 0, bank);
                 else
                     showPage (box, Page::show, 0, bank);
 
@@ -2243,7 +2269,7 @@ namespace wfg::surface
 
                     moved = true;
 
-                    if (box.paging.page == Page::eq)
+                    if (box.paging.page == Page::eq || box.paging.page == Page::dyn)
                         eqWrite (box, strip, steps, pressed, submit);
                     else if (box.paging.page == Page::send)
                         sendWrite (box, strip, steps, pressed, submit);
@@ -2442,10 +2468,18 @@ namespace wfg::surface
             return out;
         }
 
+        /*  A ROTARY OF THE EQ PAGE OR THE DYNAMICS' (§141, BIA): a turn by its
+            law, a press its switch or its choice of two. Under the lock both
+            ride live (BIE). */
         void eqWrite (Surface& box, const Strip& strip, int steps, bool pressed, const Submit& submit) const
         {
             const auto* at = published.get();
-            const auto& control = eqControls[static_cast<std::size_t> (strip.control)];
+            const auto* found = pageControl (box.paging.page, strip.control);
+
+            if (found == nullptr)
+                return;
+
+            const auto& control = *found;
 
             const auto write = [&] (const std::string& address, osc::Value value)
             {
@@ -3211,7 +3245,9 @@ namespace wfg::surface
             const auto here = bank == box.paging.bank;
             const auto lit = pageButtonLit (box.paging.index, box.paging.count, tick);
 
-            const auto eq = here && box.paging.page == Page::eq && lit ? Led::on : Led::off;
+            //  The EQ button lit on the dynamics too: its press walked there (BIA).
+            const auto eq = here && (box.paging.page == Page::eq || box.paging.page == Page::dyn) && lit
+                              ? Led::on : Led::off;
             const auto sends = here && box.paging.page == Page::send && lit ? Led::on : Led::off;
             const auto fx = here && box.paging.page == Page::fx && lit ? Led::on : Led::off;
             const auto loop = here && box.paging.page == Page::loop && lit ? Led::on : Led::off;
@@ -3700,10 +3736,14 @@ namespace wfg::surface
             Ring ring { 0, ringFillMode };
             Rgb colour {};
 
-            if (strip.control >= 0 && paging.page == Page::eq)
+            if (strip.control >= 0 && (paging.page == Page::eq || paging.page == Page::dyn)
+                && pageControl (paging.page, strip.control) != nullptr)
             {
-                const auto& control = eqControls[static_cast<std::size_t> (strip.control)];
-                const auto eqIn = soleAt (at, paging.eqOnAt) == nullptr || flagAt (at, paging.eqOnAt);
+                /*  The EQ's or the dynamics': out while the whole is out or its
+                    half is - a dynamics stage is out until it is switched in. */
+                const auto& control = *pageControl (paging.page, strip.control);
+                const auto& wholeAt = paging.page == Page::dyn ? paging.dynOnAt : paging.eqOnAt;
+                const auto eqIn = soleAt (at, wholeAt) == nullptr || flagAt (at, wholeAt);
                 const auto out = ! eqIn || ! flagAt (at, strip.switchAt);
 
                 labelScratch.assign (native ? control.label : control.shortLabel);
@@ -3926,13 +3966,16 @@ namespace wfg::surface
                     {
                         const auto eqOut = paging.page == Page::eq
                                              && soleAt (at, paging.eqOnAt) != nullptr && ! flagAt (at, paging.eqOnAt);
+                        const auto dynOut = paging.page == Page::dyn
+                                              && soleAt (at, paging.dynOnAt) != nullptr && ! flagAt (at, paging.dynOnAt);
                         pageScratch.assign (paging.page == Page::send ? "Send"
                                             : paging.page == Page::loop ? "Loop"
                                             : paging.page == Page::pan ? "Pan"
                                             : paging.page == Page::width ? "Width"
+                                            : paging.page == Page::dyn ? (dynOut ? "Dyn out" : "Dyn")
                                             : eqOut ? "EQ out" : "EQ");
 
-                        if (! eqOut && paging.count > 1)
+                        if (! eqOut && ! dynOut && paging.count > 1)
                         {
                             pageScratch.push_back (' ');
                             pageScratch.append (std::to_string (paging.index + 1));

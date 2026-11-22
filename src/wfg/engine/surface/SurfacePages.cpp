@@ -145,6 +145,9 @@ namespace wfg::surface
             return std::clamp (std::copysign (std::round (speed * scale) / scale, rung), minimum, maximum);
         }
 
+        //  The least a time turned up from nought becomes, and the line under which one turned down is nought.
+        constexpr double timeFloorMs = 1.0;
+
         /*  Where a value stands between its ends, nought to one: evenly in
             ratio for a frequency and a width, evenly in decibels for a gain,
             along the fader for a level. */
@@ -154,12 +157,26 @@ namespace wfg::surface
             {
                 case Law::frequency:
                 case Law::width:
+                case Law::ratio:
                     if (! (minimum > 0.0) || ! (maximum > minimum) || ! (value > 0.0))
                         return 0.0;
 
                     return std::clamp (std::log (value / minimum) / std::log (maximum / minimum), 0.0, 1.0);
 
+                /*  A TIME in ratios too; one whose range starts at nought (a
+                    gate's hold) is drawn from a millisecond, nought an empty ring. */
+                case Law::time:
+                {
+                    const auto low = minimum > 0.0 ? minimum : timeFloorMs;
+
+                    if (! (maximum > low) || ! (value > 0.0))
+                        return 0.0;
+
+                    return std::clamp (std::log (value / low) / std::log (maximum / low), 0.0, 1.0);
+                }
+
                 case Law::gain:
+                case Law::decibels:
                 case Law::pan:
                 case Law::stereoWidth:
                     if (! (maximum > minimum))
@@ -190,9 +207,24 @@ namespace wfg::surface
             case Page::loop: return "loop";
             case Page::pan:  return "pan";
             case Page::width: return "width";
+            case Page::dyn:  return "dyn";
         }
 
         return "show";
+    }
+
+    int pageControlCount (Page page) noexcept
+    {
+        return page == Page::eq ? eqControlCount : page == Page::dyn ? dynControlCount : 0;
+    }
+
+    const EqControl* pageControl (Page page, int index) noexcept
+    {
+        if (index < 0 || index >= pageControlCount (page))
+            return nullptr;
+
+        return page == Page::eq ? &eqControls[static_cast<std::size_t> (index)]
+                                : &dynControls[static_cast<std::size_t> (index)];
     }
 
     int pageCount (int controls, int rotaries) noexcept
@@ -221,7 +253,35 @@ namespace wfg::surface
             }
 
             case Law::gain:
+            case Law::decibels:
                 return std::clamp (roundedTo (value + detents * pageGainStepDb, 0.1), minimum, maximum);
+
+            case Law::ratio:
+            {
+                const auto moved = std::clamp (std::max (value, minimum)
+                                                 * std::exp2 (detents * pageRatioDoublingsPerDetent),
+                                               minimum, maximum);
+                return std::clamp (roundedTo (moved, moved < 10.0 ? 0.1 : 1.0), minimum, maximum);
+            }
+
+            /*  A TIME: in ratios, kept to what a hand tells apart - a hundredth
+                of a millisecond under one, a tenth under a hundred, then whole
+                ones. From nought it starts at a millisecond, and under one it
+                goes back to nought, where the range allows nought. */
+            case Law::time:
+            {
+                if (! (value > 0.0) && steps > 0)
+                    return std::clamp (std::max (timeFloorMs, minimum), minimum, maximum);
+
+                const auto moved = std::max (value, minimum > 0.0 ? minimum : 0.0)
+                                     * std::exp2 (detents * pageTimeDoublingsPerDetent);
+
+                if (! (minimum > 0.0) && moved < timeFloorMs)
+                    return minimum;
+
+                const auto grain = moved < 1.0 ? 0.01 : moved < 100.0 ? 0.1 : 1.0;
+                return std::clamp (roundedTo (moved, grain), minimum, maximum);
+            }
 
             case Law::width:
             {
@@ -526,6 +586,34 @@ namespace wfg::surface
                 out.push_back ('%');
                 return;
 
+            //  A threshold, a knee, a range: no sign but its own (§141, BIG).
+            case Law::decibels:
+                fixed (value, 1, out);
+                out.append (space);
+                out.append ("dB");
+                return;
+
+            //  "10.0 ms", "150 ms", "1.20 s" - a second and over reads in seconds.
+            case Law::time:
+                if (value >= 999.5)
+                {
+                    fixed (value / 1000.0, 2, out);
+                    out.append (space);
+                    out.push_back ('s');
+                    return;
+                }
+
+                fixed (value, value < 1.0 ? 2 : value < 100.0 ? 1 : 0, out);
+                out.append (space);
+                out.append ("ms");
+                return;
+
+            //  "4.0:1", "20:1".
+            case Law::ratio:
+                fixed (value, value < 9.95 ? 1 : 0, out);
+                out.append (":1");
+                return;
+
             case Law::shape:
                 break;
         }
@@ -535,6 +623,7 @@ namespace wfg::surface
     {
         if (shape == "lowShelf")    return compact ? "LoShelf" : "Lo shelf";
         if (shape == "highShelf")   return compact ? "HiShelf" : "Hi shelf";
+        if (shape == "rms")         return "RMS";      // the dynamics' detector (§141)
 
         return "Peak";
     }

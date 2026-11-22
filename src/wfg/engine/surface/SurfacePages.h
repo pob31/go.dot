@@ -54,17 +54,19 @@ namespace wfg::surface
     /*  What a surface's rotaries show. `fx` since 2026-09-26: the aimed cue's
         inserts, their parameters in each plugin's own order (the author's
         decision), the inserts walked in chain order. `loop` since Phase 9c:
-        the aimed mic cue's take, on Pan. */
-    enum class Page { show, eq, send, fx, loop, pan, width };
+        the aimed mic cue's take, on Pan. `dyn` since namespace draft §141
+        (BIA): the aimed cue's own dynamics, reached by EQ walking on past its
+        last page. */
+    enum class Page { show, eq, send, fx, loop, pan, width, dyn };
 
-    /** The word `surface/page` publishes: show, eq, send, fx, loop, pan or width. */
+    /** The word `surface/page` publishes: show, eq, send, fx, loop, pan, width or dyn. */
     std::string_view pageWord (Page page) noexcept;
 
     /*  HOW A CONTROL MOVES AND READS. A frequency and a width are turned in
         ratios and drawn on a logarithmic ring; a gain in decibels, drawn from
         the centre; a shape is a choice of two; a send's level moves along the
         fader's own law, so its ring is where a fader would be. */
-    enum class Law { frequency, gain, width, shape, level, pan, stereoWidth };
+    enum class Law { frequency, gain, width, shape, level, pan, stereoWidth, decibels, time, ratio };
 
     /*  THE PAN PAGES (namespace draft §113, the author 2026-10-25): where the
         aimed cue's sends sit in their mixes, one rotary a mix channel as the
@@ -73,7 +75,13 @@ namespace wfg::surface
         the centre; then, Pan again, the widths of the sends two channels wide
         into two, in 0..1 and pressed to swap the sides. `Law::pan` is a lean,
         drawn from the centre; `Law::stereoWidth` a width, drawn from the left
-        (`Law::width` is the EQ's Q). Both turn `pagePlacePerDetent` a detent. */
+        (`Law::width` is the EQ's Q). Both turn `pagePlacePerDetent` a detent.
+
+        THE DYNAMICS PAGE'S (§141, BIG): `decibels` a threshold, a knee or a
+        range - half a decibel a detent like a gain, but drawn from the left
+        and with no plus sign, since it is no boost; `time` milliseconds in
+        ratios, from nought where the range allows it (a gate's hold); `ratio`
+        so many to one, in ratios. */
     inline constexpr double placeLeanMin = -1.0;
     inline constexpr double placeLeanMax = 1.0;
     inline constexpr double placeWidthMin = 0.0;
@@ -118,6 +126,39 @@ namespace wfg::surface
         { "eqB4Q",     "B4 Q",     "B4 Q",    Law::width,     0.1,   10.0,    4, "eqB4On", Press::none,         {} },
         { "eqLpfFreq", "LP freq",  "LP Frq",  Law::frequency, 1000.0, 20000.0, 5, "eqLpf", Press::toggleSwitch, {} },
     } };
+
+    /*  THE DYNAMICS PAGE (namespace draft §141, BIA, BIG - the layout mine):
+        the compressor's six, the gate's five, the key filter's two and the
+        detector - fourteen, so the D700's sixteen rotaries hold the whole stage
+        and a Mackie's eight two pages. A press on a threshold takes its half
+        in and out; on the key filter, the whole stage; on the detector, peak or
+        RMS - a choice of two as a band's shape is, "peak" one side and "rms"
+        the other. Every control dims while what it belongs to is out. The
+        ranges are the parameter table's; a test holds them to it. */
+    inline constexpr int dynControlCount = 14;
+
+    inline constexpr std::array<EqControl, dynControlCount> dynControls { {
+        { "dynThreshold",     "Threshold",    "Thresh",  Law::decibels, -60.0, 0.0,     1, "dynCompOn", Press::toggleSwitch, {} },
+        { "dynRatio",         "Ratio",        "Ratio",   Law::ratio,    1.0,   100.0,   1, "dynCompOn", Press::none,         {} },
+        { "dynAttack",        "Attack",       "Attack",  Law::time,     0.05,  200.0,   1, "dynCompOn", Press::none,         {} },
+        { "dynRelease",       "Release",      "Release", Law::time,     5.0,   2000.0,  1, "dynCompOn", Press::none,         {} },
+        { "dynKnee",          "Knee",         "Knee",    Law::decibels, 0.0,   24.0,    1, "dynCompOn", Press::none,         {} },
+        { "dynMakeup",        "Make-up",      "Makeup",  Law::gain,     -24.0, 24.0,    1, "dynCompOn", Press::none,         {} },
+        { "dynGateThreshold", "Gate thresh",  "G Thrsh", Law::decibels, -90.0, 0.0,     3, "dynGateOn", Press::toggleSwitch, {} },
+        { "dynGateRange",     "Gate range",   "G Range", Law::decibels, -80.0, 0.0,     3, "dynGateOn", Press::none,         {} },
+        { "dynGateAttack",    "Gate attack",  "G Att",   Law::time,     0.05,  200.0,   3, "dynGateOn", Press::none,         {} },
+        { "dynGateHold",      "Gate hold",    "G Hold",  Law::time,     0.0,   500.0,   3, "dynGateOn", Press::none,         {} },
+        { "dynGateRelease",   "Gate release", "G Rel",   Law::time,     5.0,   2000.0,  3, "dynGateOn", Press::none,         {} },
+        { "dynKeyLowCut",     "Key HP",       "Key HP",  Law::frequency, 20.0, 2000.0,  0, "dynOn",     Press::toggleSwitch, {} },
+        { "dynKeyHighCut",    "Key LP",       "Key LP",  Law::frequency, 1000.0, 20000.0, 0, "dynOn",   Press::toggleSwitch, {} },
+        { "dynDetector",      "Detector",     "Detect",  Law::shape,    0.0,   0.0,     5, "dynOn",     Press::toggleShape,  "rms" },
+    } };
+
+    /*  A PAGE'S CONTROLS by its kind: the EQ's sixteen or the dynamics'
+        fourteen; none for a page whose controls are the show's (sends, pans,
+        plugins, a take). `pageControl` is null past the end. */
+    int pageControlCount (Page page) noexcept;
+    const EqControl* pageControl (Page page, int index) noexcept;
 
     /*  THE STREAM DECK+'S EQ, A BAND A PAGE (the author, 2026-10-22: "On the
         Streamdeck+ EQ layout, I would have 5 pages, one with the Low cut left

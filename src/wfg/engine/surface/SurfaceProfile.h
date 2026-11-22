@@ -207,6 +207,13 @@ namespace wfg::surface
     inline constexpr double pageLevelTravelPerDetent = 1.0 / 127.0;
     inline constexpr double pagePlacePerDetent = 0.02;      // a pan, a balance or a width: fifty detents end to end (§113)
 
+    /*  THE DYNAMICS PAGE'S (namespace draft §141, BIG): a time, an eighth of a
+        doubling - 10 ms to 20 ms in eight detents, the attack's whole range in
+        about a hundred; a ratio, the same - 4:1 to 8:1 in eight. A threshold
+        moves as a gain does, half a decibel. */
+    inline constexpr double pageTimeDoublingsPerDetent = 1.0 / 8.0;
+    inline constexpr double pageRatioDoublingsPerDetent = 1.0 / 8.0;
+
     /*  A PLUGIN PARAMETER'S DETENT on the FX page (2026-09-26): a hundred and
         twenty-eighth of its travel, a ring's resolution - a fast turn arrives
         as several detents at once, so the whole travel is a spin or two. A

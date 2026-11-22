@@ -618,6 +618,94 @@ TEST_CASE ("surface pages: a loop point turns ten milliseconds a detent, fifty w
 }
 
 //==============================================================================
+TEST_CASE ("surface pages: the Dynamics map is the stage's fourteen, every row the table's, and its laws read and turn as a hand expects (§141, BIG)")
+{
+    using surface::dynControls;
+    using surface::Law;
+
+    REQUIRE (dynControls.size() == 14u);
+    CHECK (surface::pageControlCount (surface::Page::dyn) == 14);
+    CHECK (surface::pageControlCount (surface::Page::eq) == 16);
+    CHECK (surface::pageControlCount (surface::Page::send) == 0);
+    CHECK (surface::pageControl (surface::Page::dyn, 0)->row == "dynThreshold");
+    CHECK (surface::pageControl (surface::Page::dyn, 14) == nullptr);
+    CHECK (surface::pageControl (surface::Page::eq, 15)->row == "eqLpfFreq");
+    CHECK (surface::pageWord (surface::Page::dyn) == "dyn");
+
+    //  Sixteen rotaries hold it on one page; eight need two; the Stream Deck+'s four, four.
+    CHECK (surface::pageCount (14, 16) == 1);
+    CHECK (surface::pageCount (14, 8) == 2);
+
+    for (const auto& control : dynControls)
+    {
+        INFO (std::string (control.row));
+        CHECK (control.label.size() <= 12u);
+        CHECK (control.shortLabel.size() <= 7u);
+
+        const auto* row = soundRow (control.row);
+        REQUIRE (row != nullptr);
+
+        if (control.law != Law::shape)
+        {
+            REQUIRE (row->hasMin);
+            REQUIRE (row->hasMax);
+            CHECK (near (control.minimum, row->minimum));
+            CHECK (near (control.maximum, row->maximum));
+        }
+
+        const auto* switchRow = soundRow (control.switchRow);
+        REQUIRE (switchRow != nullptr);
+        CHECK (switchRow->type == doc::ValueType::boolean);
+    }
+
+    //  The detector is a choice of two: turned or pressed, peak and rms, the table's words.
+    CHECK (surface::pressedShape ("peak", "rms") == "rms");
+    CHECK (surface::pressedShape ("rms", "rms") == "peak");
+    CHECK (surface::turnedShape ("peak", 1, "rms") == "rms");
+    CHECK (surface::shapeText ("rms", true) == "RMS");
+    CHECK (surface::shapeText ("peak", false) == "Peak");
+
+    const auto faderLaw = surface::FaderLaw::generic;
+
+    //  A threshold: half a decibel a detent, drawn from the left, with no plus sign.
+    CHECK (surface::turned (Law::decibels, -20.0, 2, -60.0, 0.0, faderLaw) == doctest::Approx (-19.0));
+    CHECK (surface::turned (Law::decibels, -0.5, 4, -60.0, 0.0, faderLaw) == doctest::Approx (0.0));
+    CHECK (surface::d700RingFor (Law::decibels, -60.0, -60.0, 0.0, faderLaw).mode == 2);
+
+    std::string text;
+    surface::valueText (Law::decibels, 6.0, false, text);
+    CHECK (text == "6.0 dB");
+
+    //  A time in ratios: eight detents double it, kept to a grain a hand tells apart.
+    CHECK (surface::turned (Law::time, 10.0, 8, 0.05, 200.0, faderLaw) == doctest::Approx (20.0));
+    CHECK (surface::turned (Law::time, 150.0, -8, 5.0, 2000.0, faderLaw) == doctest::Approx (75.0));
+    CHECK (surface::turned (Law::time, 200.0, 8, 0.05, 200.0, faderLaw) == doctest::Approx (200.0));
+
+    //  A hold from nought starts at a millisecond, and under one goes back to nought.
+    CHECK (surface::turned (Law::time, 0.0, 1, 0.0, 500.0, faderLaw) == doctest::Approx (1.0));
+    CHECK (surface::turned (Law::time, 1.0, -1, 0.0, 500.0, faderLaw) == doctest::Approx (0.0));
+    CHECK (surface::turned (Law::time, 0.0, -3, 0.0, 500.0, faderLaw) == doctest::Approx (0.0));
+
+    surface::valueText (Law::time, 10.0, false, text);
+    CHECK (text == "10.0 ms");
+    surface::valueText (Law::time, 150.0, true, text);
+    CHECK (text == "150ms");
+    surface::valueText (Law::time, 1200.0, false, text);
+    CHECK (text == "1.20 s");
+    surface::valueText (Law::time, 0.5, false, text);
+    CHECK (text == "0.50 ms");
+
+    //  A ratio in ratios: "4.0:1", then whole numbers from ten.
+    CHECK (surface::turned (Law::ratio, 4.0, 8, 1.0, 100.0, faderLaw) == doctest::Approx (8.0));
+    CHECK (surface::turned (Law::ratio, 1.0, -8, 1.0, 100.0, faderLaw) == doctest::Approx (1.0));
+    surface::valueText (Law::ratio, 4.0, false, text);
+    CHECK (text == "4.0:1");
+    surface::valueText (Law::ratio, 20.0, false, text);
+    CHECK (text == "20:1");
+    CHECK (surface::d700RingFor (Law::ratio, 100.0, 1.0, 100.0, faderLaw).value == 127);
+}
+
+//==============================================================================
 TEST_CASE ("surface pages: the remote's copy of the tables is these headers' (namespace draft §68, A.7)")
 {
     /*  The Android remote draws the EQ page and its faders from
@@ -643,6 +731,9 @@ TEST_CASE ("surface pages: the remote's copy of the tables is these headers' (na
             case surface::Law::level:     return "level";
             case surface::Law::pan:       return "pan";
             case surface::Law::stereoWidth: return "stereoWidth";
+            case surface::Law::decibels:  return "decibels";
+            case surface::Law::time:      return "time";
+            case surface::Law::ratio:     return "ratio";
         }
 
         return {};
@@ -660,30 +751,37 @@ TEST_CASE ("surface pages: the remote's copy of the tables is these headers' (na
         return {};
     };
 
-    const auto* controls = parsed.value->find ("eqControls");
-    REQUIRE (controls != nullptr);
-    REQUIRE (controls->asArray().size() == surface::eqControls.size());
-
-    for (std::size_t at = 0; at < surface::eqControls.size(); ++at)
+    //  The EQ page's controls, and the Dynamics page's (namespace draft §141, BIG), each as its list.
+    const auto check = [&] (const char* listName, const auto& table)
     {
-        const auto& control = surface::eqControls[at];
-        const auto& copy = controls->asArray()[at];
-        INFO ("control " << at << ": " << control.row);
+        const auto* controls = parsed.value->find (listName);
+        REQUIRE (controls != nullptr);
+        REQUIRE (controls->asArray().size() == table.size());
 
-        const auto word = [&copy] (const char* key) { return copy.find (key) != nullptr ? copy.find (key)->asString() : std::string {}; };
-        const auto number = [&copy] (const char* key) { return copy.find (key) != nullptr ? copy.find (key)->asNumber() : -1.0e9; };
+        for (std::size_t at = 0; at < table.size(); ++at)
+        {
+            const auto& control = table[at];
+            const auto& copy = controls->asArray()[at];
+            INFO ("control " << at << ": " << control.row);
 
-        CHECK (word ("row") == control.row);
-        CHECK (word ("label") == control.label);
-        CHECK (word ("short") == control.shortLabel);
-        CHECK (word ("law") == lawWord (control.law));
-        CHECK (near (number ("min"), control.minimum));
-        CHECK (near (number ("max"), control.maximum));
-        CHECK (static_cast<int> (number ("colour")) == control.colour);
-        CHECK (word ("switch") == control.switchRow);
-        CHECK (word ("press") == pressWord (control.press));
-        CHECK (word ("shelf") == control.shelf);
-    }
+            const auto word = [&copy] (const char* key) { return copy.find (key) != nullptr ? copy.find (key)->asString() : std::string {}; };
+            const auto number = [&copy] (const char* key) { return copy.find (key) != nullptr ? copy.find (key)->asNumber() : -1.0e9; };
+
+            CHECK (word ("row") == control.row);
+            CHECK (word ("label") == control.label);
+            CHECK (word ("short") == control.shortLabel);
+            CHECK (word ("law") == lawWord (control.law));
+            CHECK (near (number ("min"), control.minimum));
+            CHECK (near (number ("max"), control.maximum));
+            CHECK (static_cast<int> (number ("colour")) == control.colour);
+            CHECK (word ("switch") == control.switchRow);
+            CHECK (word ("press") == pressWord (control.press));
+            CHECK (word ("shelf") == control.shelf);
+        }
+    };
+
+    check ("eqControls", surface::eqControls);
+    check ("dynControls", surface::dynControls);
 
     const auto* detent = parsed.value->find ("detent");
     REQUIRE (detent != nullptr);
@@ -692,6 +790,8 @@ TEST_CASE ("surface pages: the remote's copy of the tables is these headers' (na
     CHECK (near (detent->find ("widthDoublingsPerDetent")->asNumber(), surface::pageWidthDoublingsPerDetent));
     CHECK (near (detent->find ("levelTravelPerDetent")->asNumber(), surface::pageLevelTravelPerDetent));
     CHECK (near (detent->find ("placePerDetent")->asNumber(), surface::pagePlacePerDetent));
+    CHECK (near (detent->find ("timeDoublingsPerDetent")->asNumber(), surface::pageTimeDoublingsPerDetent));
+    CHECK (near (detent->find ("ratioDoublingsPerDetent")->asNumber(), surface::pageRatioDoublingsPerDetent));
 
     const auto* fader = parsed.value->find ("fader");
     REQUIRE (fader != nullptr);

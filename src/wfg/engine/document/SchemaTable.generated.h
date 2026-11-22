@@ -116,7 +116,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_rackChannel_take[] = { "empty", "recording", "looping", "overdubbing", "held" };
     inline constexpr std::string_view enum_send_placement[] = { "none", "pan", "stereo", "fold" };
     inline constexpr std::string_view enum_surface_profile[] = { "virtual", "mcu", "d700", "midiPads", "streamDeck" };
-    inline constexpr std::string_view enum_surface_page[] = { "show", "eq", "send", "fx", "loop", "pan", "width" };
+    inline constexpr std::string_view enum_surface_page[] = { "show", "eq", "send", "fx", "loop", "pan", "width", "dyn" };
     inline constexpr std::string_view enum_strip_role[] = { "sampler", "dca" };
     inline constexpr std::string_view enum_strip_endpoint[] = { "absolute", "gate" };
     inline constexpr std::string_view enum_strip_word[] = { "free", "dca", "unassigned", "armed", "pending", "playing", "held", "stopping", "closing", "lane", "rec", "off", "recording" };
@@ -5594,10 +5594,10 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "show",
           false, 0.0, false, 0.0,
-          enum_surface_page, 7,
+          enum_surface_page, 8,
           "", 50.0, false, "park",
           "",
-          "What this surface-s rotaries are showing: show is its normal page, eq the aimed cue-s EQ, send its send levels (author, 2026-09-25), fx the parameters of its inserts, walked in chain order (2026-09-26), loop the take of the aimed mic cue-s channel - in, out, a slide of both and the cue-s level (Phase 9c; on the Loop button since namespace draft 113), pan where the aimed cue-s sends sit in their mixes - a pan or a balance a mix channel - and width how wide its stereo sends are, with their sides swapped on a press (author, 2026-10-25). The surface-s own, changed by its EQ, Send, FX, Pan, Loop and star buttons and by no command - which page a controller shows is where its hands are looking, like the window-s selection. Published so the window can open the foot panel on the aimed cue while a surface adjusts it." },
+          "What this surface-s rotaries are showing: show is its normal page, eq the aimed cue-s EQ, send its send levels (author, 2026-09-25), fx the parameters of its inserts, walked in chain order (2026-09-26), loop the take of the aimed mic cue-s channel - in, out, a slide of both and the cue-s level (Phase 9c; on the Loop button since namespace draft 113), pan where the aimed cue-s sends sit in their mixes - a pan or a balance a mix channel - and width how wide its stereo sends are, with their sides swapped on a press (author, 2026-10-25), dyn the aimed cue-s own dynamics, reached by pressing EQ past its last page (namespace draft 141, BIA). The surface-s own, changed by its EQ, Send, FX, Pan, Loop and star buttons and by no command - which page a controller shows is where its hands are looking, like the window-s selection. Published so the window can open the foot panel on the aimed cue while a surface adjusts it." },
         { "surface", "pageIndex",
           ValueType::integer, 'i', false, Access::read, Kind::state, Persist::none, Scope::show,
           true, "0",

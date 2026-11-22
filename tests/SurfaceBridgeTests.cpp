@@ -559,7 +559,8 @@ namespace
             {
                 const std::string name { row->name };
 
-                if (name.rfind ("eq", 0) != 0)
+                //  The EQ's rows and the dynamics stage's (§141), each at the table's default.
+                if (name.rfind ("eq", 0) != 0 && name.rfind ("dyn", 0) != 0)
                     continue;
 
                 if (row->type == doc::ValueType::boolean)
@@ -3822,7 +3823,9 @@ TEST_CASE ("surface bridge: EQ puts the aimed cue's EQ on sixteen rotaries at on
     CHECK (contains (first, surface::led (0x2c, surface::Led::on)));
     CHECK_FALSE (contains (second, surface::led (0x2c, surface::Led::on)));
 
-    //  EQ AGAIN, and the surface is back on its own page, EQ dark.
+    //  EQ AGAIN walks on to the cue's dynamics (§141, BIA), EQ still lit; a third time, its own page, EQ dark.
+    desk.press ("PORTBNK1", 0x2c);
+    CHECK (desk.page().word == "dyn");
     desk.sink.sent.clear();
     desk.press ("PORTBNK1", 0x2c);
     CHECK (desk.page().word == "show");
@@ -3851,7 +3854,13 @@ TEST_CASE ("surface bridge: on eight rotaries the EQ is two pages, then the surf
     CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::lcdCell (0x14, 0, 7, "LP Frq")));
     CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::lcdCell (0x14, 1, 7, "off")));
 
-    //  And a third is the surface's own page again.
+    //  And a third walks on to the dynamics, two pages of them (§141, BIA), then the surface's own page.
+    desk.press ("PORTBNK1", 0x2c);
+    CHECK (desk.page().word == "dyn");
+    CHECK (desk.page().index == 0);
+    CHECK (desk.page().count == 2);
+    desk.press ("PORTBNK1", 0x2c);
+    CHECK (desk.page().index == 1);
     desk.press ("PORTBNK1", 0x2c);
     CHECK (desk.page().word == "show");
 
@@ -3931,6 +3940,77 @@ TEST_CASE ("surface bridge: a turn on the EQ page writes the aimed cue's row by 
     CHECK (desk.submitted.empty());
     desk.press ("PORTBNK1", 0x23);
     CHECK (desk.writes() == std::vector<std::string> { "strip.press STRIP004", "strip.release STRIP004" });
+}
+
+TEST_CASE ("surface bridge: EQ walks on to the aimed cue's dynamics - the whole stage on sixteen rotaries, a turn by its law, a press its switch (§141, BIA)")
+{
+    PageDesk desk;
+    desk.aimAt ("CUE00001");
+    desk.press ("PORTBNK1", 0x2c);
+    REQUIRE (desk.page().word == "eq");
+
+    desk.sink.sent.clear();
+    desk.press ("PORTBNK1", 0x2c);
+    CHECK (desk.page().word == "dyn");
+    CHECK (desk.page().index == 0);
+    CHECK (desk.page().count == 1);
+
+    desk.settle();
+
+    const auto first = sentOn (desk.sink, "PORTBNK1");
+    const auto second = sentOn (desk.sink, "PORTBNK2");
+
+    /*  THE STAGE ACROSS BOTH BANKS, out as a cue's stage rests: the
+        compressor's six from the first rotary, the gate's from the seventh,
+        the key filter and the detector on the second bank. */
+    CHECK (contains (first, surface::d700DisplayRow (0, 0, "Threshold off")));
+    CHECK (contains (first, surface::d700DisplayRow (0, 1, "-20.0 dB")));
+    CHECK (contains (first, surface::d700DisplayRow3 (0, "Dyn out")));
+    CHECK (contains (first, surface::d700DisplayRow (1, 1, "4.0:1")));
+    CHECK (contains (first, surface::d700DisplayRow (2, 1, "10.0 ms")));
+    CHECK (contains (first, surface::d700DisplayRow (5, 1, "0.0 dB")));
+    CHECK (contains (first, surface::d700DisplayRow (6, 0, "Gate thresh off")));
+    CHECK (contains (second, surface::d700DisplayRow (3, 0, "Key HP off")));
+    CHECK (contains (second, surface::d700DisplayRow (5, 0, "Detector off")));
+    CHECK (contains (second, surface::d700DisplayRow (5, 1, "Peak")));
+
+    //  The EQ button stays lit: its press walked here.
+    CHECK (contains (first, surface::led (0x2c, surface::Led::on)));
+
+    /*  A TURN by its law: two detents on the threshold, a decibel up; eight on
+        the ratio, twice as hard; eight on the release, half as long. */
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x10, 0x01 } },
+                  { "PORTBNK1", { 0xb0, 0x10, 0x01 } },
+                  { "PORTBNK1", { 0xb0, 0x11, 0x08 } },
+                  { "PORTBNK1", { 0xb0, 0x13, 0x48 } } });
+
+    CHECK (desk.writes() == std::vector<std::string> { "node.set /godot/cue/CUE00001/dynThreshold -19.0",
+                                                       "node.set /godot/cue/CUE00001/dynRatio 8.0",
+                                                       "node.set /godot/cue/CUE00001/dynRelease 75.0" });
+    CHECK (desk.submitted[0].origin == "surface:SURF0001");
+
+    /*  A PRESS: on the threshold the compressor out, on the gate's the gate in,
+        on the key filter the whole stage in, on the detector RMS; and a press
+        on a time does nothing. */
+    desk.submitted.clear();
+    desk.press ("PORTBNK1", 0x20);
+    desk.press ("PORTBNK1", 0x26);
+    desk.press ("PORTBNK2", 0x23);
+    desk.press ("PORTBNK2", 0x25);
+    desk.press ("PORTBNK1", 0x22);
+
+    CHECK (desk.writes() == std::vector<std::string> { "node.set /godot/cue/CUE00001/dynCompOn false",
+                                                       "node.set /godot/cue/CUE00001/dynGateOn true",
+                                                       "node.set /godot/cue/CUE00001/dynOn true",
+                                                       "node.set /godot/cue/CUE00001/dynDetector rms" });
+
+    //  Switched in, the stage says so.
+    desk.fake.flag ("/godot/cue/CUE00001/dynOn", true);
+    desk.sink.sent.clear();
+    desk.settle();
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "Dyn")));
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow (0, 0, "Threshold")));
 }
 
 TEST_CASE ("surface bridge: every page key and every hand on a page is counted, the same rotary again included (§101)")
@@ -4896,9 +4976,9 @@ TEST_CASE ("surface bridge: a page change answers the hand first - its key's lig
     desk.settle();
     CHECK (hasBandColour (sentOn (desk.sink, "PORTBNK1"), 0x23, audio::eqBand1Colour, surface::pageOffLight));
 
-    //  LEAVING, the same: the key dark before anything else.
+    //  LEAVING, the same (by `*`: EQ again walks on to the dynamics, §141): the key dark before anything else.
     desk.sink.sent.clear();
-    desk.press ("PORTBNK1", 0x2c);
+    desk.press ("PORTBNK1", 0x36);
     REQUIRE (desk.page().word == "show");
     desk.publish();
     REQUIRE_FALSE (desk.sink.sent.empty());

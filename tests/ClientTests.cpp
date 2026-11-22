@@ -10092,11 +10092,18 @@ TEST_CASE ("client: a surface's page holds the foot on the aimed cue from the pr
     CHECK (model::footForSurface (page.up, page.word, page.aim)
              == model::Subject { model::Subject::Kind::take, cue });
 
+    //  The Dynamics page (namespace draft §141, BIA), the moment it is up: the stage at the foot.
+    surfaces.setPage (surfaceId, { "dyn", 0, 1, "", 0 });
+    page = model::readSurfacePage (*rig.publish (10));
+    CHECK (page.up);
+    CHECK (model::footForSurface (page.up, page.word, page.aim)
+             == model::Subject { model::Subject::Kind::dyn, cue });
+
     /*  THE PAGE DOWN, the foot the window's own again (the window puts back
         what it showed, Client.cpp); and with the aim let go there is no cue
         for a page to be of. */
     surfaces.setPage (surfaceId, { "show", 0, 1, "", 0 });
-    page = model::readSurfacePage (*rig.publish (10));
+    page = model::readSurfacePage (*rig.publish (11));
     CHECK_FALSE (page.up);
     CHECK_FALSE (model::footForSurface (page.up, page.word, page.aim).isOpen());
     CHECK_FALSE (model::footForSurface (true, "eq", "").isOpen());

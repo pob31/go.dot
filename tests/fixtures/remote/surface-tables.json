@@ -1,5 +1,5 @@
 {
-  "about": "The surface's tables as the Android remote carries them (namespace draft §68, A.7): the EQ page's sixteen controls (src/wfg/engine/surface/SurfacePages.h), how far a detent turns each law (SurfaceProfile.h), and the fader the virtual panel draws (FaderCurve.h, the generic law). SurfacePagesTests holds this file to those headers; go.dot-remote vendors a copy and holds its own tables to it. Change the headers, and this file, and the app's copy, together.",
+  "about": "The surface's tables as the Android remote carries them (namespace draft §68, A.7): the EQ page's sixteen controls and the Dynamics page's fourteen (src/wfg/engine/surface/SurfacePages.h), how far a detent turns each law (SurfaceProfile.h), and the fader the virtual panel draws (FaderCurve.h, the generic law). SurfacePagesTests holds this file to those headers; go.dot-remote vendors a copy and holds its own tables to it. Change the headers, and this file, and the app's copy, together.",
   "eqControls": [
     { "row": "eqHpfFreq", "label": "HP freq",  "short": "HP Frq",  "law": "frequency", "min": 20.0,   "max": 2000.0,  "colour": 0, "switch": "eqHpf",  "press": "toggleSwitch", "shelf": "" },
     { "row": "eqB1Shape", "label": "B1 shape", "short": "B1 Shp",  "law": "shape",     "min": 0.0,    "max": 0.0,     "colour": 1, "switch": "eqB1On", "press": "toggleShape",  "shelf": "lowShelf" },
@@ -18,12 +18,30 @@
     { "row": "eqB4Q",     "label": "B4 Q",     "short": "B4 Q",    "law": "width",     "min": 0.1,    "max": 10.0,    "colour": 4, "switch": "eqB4On", "press": "none",         "shelf": "" },
     { "row": "eqLpfFreq", "label": "LP freq",  "short": "LP Frq",  "law": "frequency", "min": 1000.0, "max": 20000.0, "colour": 5, "switch": "eqLpf",  "press": "toggleSwitch", "shelf": "" }
   ],
+  "dynControls": [
+    { "row": "dynThreshold", "label": "Threshold", "short": "Thresh", "law": "decibels", "min": -60.0, "max": 0.0, "colour": 1, "switch": "dynCompOn", "press": "toggleSwitch", "shelf": "" },
+    { "row": "dynRatio", "label": "Ratio", "short": "Ratio", "law": "ratio", "min": 1.0, "max": 100.0, "colour": 1, "switch": "dynCompOn", "press": "none", "shelf": "" },
+    { "row": "dynAttack", "label": "Attack", "short": "Attack", "law": "time", "min": 0.05, "max": 200.0, "colour": 1, "switch": "dynCompOn", "press": "none", "shelf": "" },
+    { "row": "dynRelease", "label": "Release", "short": "Release", "law": "time", "min": 5.0, "max": 2000.0, "colour": 1, "switch": "dynCompOn", "press": "none", "shelf": "" },
+    { "row": "dynKnee", "label": "Knee", "short": "Knee", "law": "decibels", "min": 0.0, "max": 24.0, "colour": 1, "switch": "dynCompOn", "press": "none", "shelf": "" },
+    { "row": "dynMakeup", "label": "Make-up", "short": "Makeup", "law": "gain", "min": -24.0, "max": 24.0, "colour": 1, "switch": "dynCompOn", "press": "none", "shelf": "" },
+    { "row": "dynGateThreshold", "label": "Gate thresh", "short": "G Thrsh", "law": "decibels", "min": -90.0, "max": 0.0, "colour": 3, "switch": "dynGateOn", "press": "toggleSwitch", "shelf": "" },
+    { "row": "dynGateRange", "label": "Gate range", "short": "G Range", "law": "decibels", "min": -80.0, "max": 0.0, "colour": 3, "switch": "dynGateOn", "press": "none", "shelf": "" },
+    { "row": "dynGateAttack", "label": "Gate attack", "short": "G Att", "law": "time", "min": 0.05, "max": 200.0, "colour": 3, "switch": "dynGateOn", "press": "none", "shelf": "" },
+    { "row": "dynGateHold", "label": "Gate hold", "short": "G Hold", "law": "time", "min": 0.0, "max": 500.0, "colour": 3, "switch": "dynGateOn", "press": "none", "shelf": "" },
+    { "row": "dynGateRelease", "label": "Gate release", "short": "G Rel", "law": "time", "min": 5.0, "max": 2000.0, "colour": 3, "switch": "dynGateOn", "press": "none", "shelf": "" },
+    { "row": "dynKeyLowCut", "label": "Key HP", "short": "Key HP", "law": "frequency", "min": 20.0, "max": 2000.0, "colour": 0, "switch": "dynOn", "press": "toggleSwitch", "shelf": "" },
+    { "row": "dynKeyHighCut", "label": "Key LP", "short": "Key LP", "law": "frequency", "min": 1000.0, "max": 20000.0, "colour": 0, "switch": "dynOn", "press": "toggleSwitch", "shelf": "" },
+    { "row": "dynDetector", "label": "Detector", "short": "Detect", "law": "shape", "min": 0.0, "max": 0.0, "colour": 5, "switch": "dynOn", "press": "toggleShape", "shelf": "rms" }
+  ],
   "detent": {
     "octavesPerDetent": 0.0625,
     "gainStepDb": 0.5,
     "widthDoublingsPerDetent": 0.125,
     "levelTravelPerDetent": 0.007874015748031496,
-    "placePerDetent": 0.02
+    "placePerDetent": 0.02,
+    "timeDoublingsPerDetent": 0.125,
+    "ratioDoublingsPerDetent": 0.125
   },
   "fader": {
     "silenceDb": -120.0,
