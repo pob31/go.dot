@@ -36423,4 +36423,65 @@ NUC at c548636e; the whole unit suite green in C and fr_FR, file by file, at eac
   `WFG_REAL_VST3=<id> --no-skip` (the four `PickyProcessor` cases pin the probe, not a vendor's plugin).
 - **Later, as listed above:** fades that move the stage's numbers (`fade/dyn`); the stage on the D700's and the Stream
   Deck's pages; an Ableton Live set's sidechain routing at the import; an output as a key; the stage on the Android
-  remote.
+  remote. The author asked for all five to be closed next (2026-11-22): the handoff is
+  `docs/handoffs/2026-11-22-sidechain-owed.md`, with the questions each needs and Likyū as the real sidechain plugin
+  to bench.
+
+## 142. A real plugin measured through the child, and the child's buffer at any width
+
+**Asked 2026-11-22** by the author, of the Likyu repository's session: "the round of optimisations between Likyu and
+Go.dot editing both sides". Likyu, the author's dynamic EQ (VST3, AU, LV2, any width up to 64), was put through the
+real-plugin cases of `ProxyTests` - the smoke case, M35, M86 - for the first time, and the child's hosting read against
+it. Its figures are in Likyu's `docs/bench/2026-11-22-godot.md`; what changed here is below.
+
+- **BHX** **The plugin's block at any width, with nothing allocated.** The worker handed a real plugin a view of its
+  scratch every block - `juce::AudioBuffer<float> block (scratch.getArrayOfWritePointers(), ...)` - and JUCE keeps a
+  view's pointer list inside the buffer only up to 31 channels: from 32 it mallocs it. A lane that wide (a 31-channel
+  plugin with a stereo key is one) allocated on the worker every block, against §4.2. The scratch itself is now
+  fitted to the block's length in place (`plugin/ScratchBlock.h`, `fitScratch`: `setSize` with `avoidReallocating`,
+  its content not kept - every block clears and fills it) and handed to the plugin; the block's length is bounded by
+  what the scratch was made for (`scratchSamples`), not by its current length. *(Mine.)*
+- **The counter did not see it.** JUCE's `HeapBlock` calls `std::malloc`; the counting allocator replaces `operator
+  new` only (`rt/RtAllocatorHook.cpp`), and the child's worker has no region of its own. So the test pins what a
+  reallocation could not pass whoever's allocator: fitted to any length up to the one it was made for, the scratch
+  keeps its pointer list where it was and every channel inside its own memory. The real-time sanitizer (Clang 21, the
+  NUC) sees `malloc`, but runs no real plugin through the child. *(That a counter of `malloc` too is worth having is
+  open.)*
+- **BHY** **A real plugin's cases, measurable from a build tree and in a state.** `WFG_ENGINE_FOLDER` names the
+  machine folder the real-plugin cases read the scan from, so a plugin scanned alone - `wfg plugins
+  --engine-folder=<dir> --scan=vst3 --retry=<file>` - is measured without entering the developer's list.
+  `WFG_REAL_STATE` loads a cue's state file onto M86's real lanes (an EQ at its preset is a copy), and
+  `WFG_M86_CHANNELS` sets their width; M86 says the layout the ladder found. `WFG_M35_PARAM` is the parameter M35's
+  hand moves on the real plugin: Likyu's first is its bypass, which 0.2 leaves off, so no state changed, none was
+  captured and the case failed waiting. And the case §141 left owed: **a real plugin's sidechain keyed through the
+  child** (`WFG_REAL_KEYED_STATE`, a state the plugin's key turns it down in) - Likyu offered a stereo sidechain, the
+  child laid it out when the lane was keyed and gave it back unkeyed, and a 2 kHz tone at -26 dBFS read -29.0 dB under
+  a silent key and -41.0 dB under a loud one, its band's range to a tenth, with no block missed. *(Mine.)*
+- **A state file is the host's own bytes.** A JUCE host keeps a VST3's state as `copyXmlToBinary` of
+  `<VST3PluginState><IComponent>`, in JUCE's base64. A plugin's own bytes handed over as a state are refused by the
+  instance without a word, and `stateProblem` stays empty - M86's first run with Likyu measured an empty plugin. A cue
+  never does that (its states are the editing helper's captures); a hand-made file for a case must be written as the
+  host keeps it.
+
+**For the author: a VST3 wider than eight channels.** The ladder asks `{w, w}` as the standard set for `w` and then as
+discrete channels. JUCE's VST3 host has no speaker arrangement for a discrete set beyond its first channel, and past
+eight channels `canonicalChannelSet` is a discrete set: from 9 to 64 channels both rungs fail, the plugin is laid out
+stereo, and a cue that wide passes it dry (measured with Likyu at 16, 24 and 34; 6 and 8 lay out wide). Every VST3 is
+in the same case; AU and LV2 take discrete sets. REAPER reaches Likyu's 64 by asking for 7th-order Ambisonics.
+- **BHZ** *(open, the author's)*: whether the ladder, for a VST3, asks next for a set it can express at that width -
+  the Ambisonic order whose channel count it is (9, 16, 25, 36, 49, 64), or as many named speakers in VST3's order -
+  knowing that a plugin that reads a layout's names would treat a show's numbered channels as a surround or an
+  Ambisonic field; or keeps the rule as it is and says, on the plugin, that it is stereo here.
+
+**Measured** (Windows, Core Ultra 7 255H, Release, 48 kHz; Likyu's eight bands in Dynamic and Track): one lane under the
+shipped limit, 168 µs a block at 512 and 45 µs at 128 in stereo, 216 and 58 µs at 8 channels, no block missed; the late
+ones beside twelve spinning children are the machine's, as the test gain's in the same rows. A state of 8,319 bytes
+loaded in 0.46 ms at the median, 1.4 ms at worst, the other voice missing nothing. An arm's reset beside a sounding lane
+took 10.9 ms at 512, as the test gain's: Go.dot's 5 ms timer and the block's grain, not the plugin's.
+
+**Tests**: *the child's scratch is fitted to each block's length in place, at any width, with nothing reallocated*; the
+in-tree LV2 given a short block then a full one, each processed whole; *a real VST3's sidechain, keyed through the
+child, turns it down when the key is loud* (skipped unless asked for).
+
+**Owed.** BHZ. The same cases on the Mac farm with Likyu's AU, whose discrete layouts reach the 32-channel line BHX is
+about, and on the NUC with its LV2.
