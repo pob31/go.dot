@@ -521,6 +521,62 @@ TEST_CASE ("als: the file as Live writes it, gzipped, reads the same as the XML"
     CHECK (gzipped.set->scenes[0].annotation == plain.scenes[0].annotation);
 }
 
+TEST_CASE ("als: Live's Compressor, Glue Compressor and Gate read with their sidechains - the author's set (namespace draft §141, BIC)")
+{
+    /*  The author's own set, made for this (Live 12.4.16, 2026-11-22): "1-808
+        Huge G" with a Compressor keyed by "2-808 Oracle 1" Post FX, that track
+        with a Glue Compressor keyed back by the first, and "3-Audio" with a Gate
+        whose sidechain is off. */
+    const auto read = readSet (fixture ("sidechain.als"));
+    REQUIRE (read.set.has_value());
+
+    const auto deviceOf = [&read] (const std::string& trackId, const std::string& kind) -> const Device*
+    {
+        for (const auto& track : read.set->tracks)
+            if (track.id == trackId)
+                for (const auto& device : track.devices)
+                    if (device.kind == kind)
+                        return &device;
+
+        return nullptr;
+    };
+
+    const auto value = [] (const Device& device, const char* path)
+    {
+        const auto found = device.values.find (path);
+        REQUIRE (found != device.values.end());
+        return found->second;
+    };
+
+    const auto* comp = deviceOf ("8", "Compressor2");
+    REQUIRE (comp != nullptr);
+    CHECK (comp->sideChain.kind == Routing::Kind::track);
+    CHECK (comp->sideChain.trackId == "14");
+    CHECK (comp->sideChain.tap == "PostFxOut");
+    CHECK (value (*comp, "SideChain/OnOff") == doctest::Approx (1.0));
+    CHECK (value (*comp, "Threshold") == doctest::Approx (1.0));           // linear: 0 dB
+    CHECK (value (*comp, "Ratio") == doctest::Approx (4.0));
+    CHECK (value (*comp, "Attack") == doctest::Approx (1.0));
+    CHECK (value (*comp, "Release") == doctest::Approx (30.0));
+    CHECK (value (*comp, "Model") == doctest::Approx (1.0));               // RMS, lit on Live's screen
+    CHECK (value (*comp, "SideChainEq_Freq") == doctest::Approx (80.0));
+
+    const auto* glue = deviceOf ("14", "GlueCompressor");
+    REQUIRE (glue != nullptr);
+    CHECK (glue->sideChain.trackId == "8");
+    CHECK (value (*glue, "Ratio") == doctest::Approx (1.0));                // the second step: 4:1
+    CHECK (value (*glue, "Attack") == doctest::Approx (3.0));               // the fourth: 1 ms
+    CHECK (value (*glue, "Range") == doctest::Approx (70.0));
+
+    const auto* gate = deviceOf ("15", "Gate");
+    REQUIRE (gate != nullptr);
+    CHECK (gate->sideChain.kind == Routing::Kind::none);
+    CHECK (value (*gate, "SideChain/OnOff") == doctest::Approx (0.0));
+    CHECK (value (*gate, "Threshold") == doctest::Approx (0.2511886358));   // -12 dB
+    CHECK (value (*gate, "Gain") == doctest::Approx (-40.0));               // its floor
+    CHECK (value (*gate, "Return") == doctest::Approx (3.0));
+}
+
 TEST_CASE ("als: the author's own sets read whole, when WFG_ALS_CORPUS names a folder of them")
 {
     /*  REAL SHOWS, NOT COMMITTED: their media is gigabytes and their notes are

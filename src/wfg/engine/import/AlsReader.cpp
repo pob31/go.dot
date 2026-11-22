@@ -234,6 +234,7 @@ namespace wfg::import::als
                 out.kind = Routing::Kind::track;
                 const auto end = rest.find ('/', 6);
                 out.trackId = rest.substr (6, end == std::string::npos ? std::string::npos : end - 6);
+                out.tap = end == std::string::npos ? std::string {} : rest.substr (end + 1);
             }
             else if (rest == "Master" || rest == "Main")
             {
@@ -471,6 +472,12 @@ namespace wfg::import::als
                     }
 
                     device.plugin = pluginOf (element);
+
+                    //  ITS SIDECHAIN'S SOURCE (§141, BIC): Live's own dynamics' and a plugin's alike.
+                    if (const auto routed = text (element, "SideChain/RoutedInput/Routable/Target"); ! routed.empty())
+                        device.sideChain = routingOf (routed);
+                    else
+                        device.sideChain.kind = Routing::Kind::none;
 
                     const auto deviceIndex = index++;
 

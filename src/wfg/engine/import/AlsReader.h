@@ -196,6 +196,22 @@ namespace wfg::import::als
         std::vector<std::uint8_t> controllerState;
     };
 
+    /*  WHERE A TRACK'S SOUND GOES OR COMES FROM, in Live's words: `None`, a
+        track (`Track.27` - its Id), the master, a group, or the interface
+        (`External/S0` - the first stereo pair, `M17` the eighteenth mono
+        output). `target` is the string as written; the rest is it parsed.
+        A device's sidechain names a track the same way, with where on it the
+        sound is taken (`Track.14/PostFxOut`): `tap`. */
+    struct Routing
+    {
+        std::string target;
+        enum class Kind { none, track, master, group, external, other } kind = Kind::other;
+        std::string trackId;        ///< with `track`
+        std::string tap;            ///< with `track`: what follows its Id - `PreFxOut`, `PostFxOut`, `PostMixerOut`, `TrackIn`...
+        bool stereo = false;        ///< with `external`: a pair, not one channel
+        int channel = -1;           ///< with `external`: the pair's or the channel's index from nought
+    };
+
     struct Device
     {
         std::string kind;           ///< Live's element: `Eq8`, `Reverb`, `PluginDevice`, `MxDeviceAudioEffect`...
@@ -204,19 +220,13 @@ namespace wfg::import::als
         std::map<std::string, double> values;   ///< every automatable number by its path, as saved
         std::vector<EqBand> bands;  ///< an EQ Eight's eight, empty for anything else
         std::optional<PluginInfo> plugin;       ///< a third-party plugin's, empty for Live's own
-    };
 
-    /*  WHERE A TRACK'S SOUND GOES OR COMES FROM, in Live's words: `None`, a
-        track (`Track.27` - its Id), the master, a group, or the interface
-        (`External/S0` - the first stereo pair, `M17` the eighteenth mono
-        output). `target` is the string as written; the rest is it parsed. */
-    struct Routing
-    {
-        std::string target;
-        enum class Kind { none, track, master, group, external, other } kind = Kind::other;
-        std::string trackId;        ///< with `track`
-        bool stereo = false;        ///< with `external`: a pair, not one channel
-        int channel = -1;           ///< with `external`: the pair's or the channel's index from nought
+        /*  WHAT ITS SIDECHAIN LISTENS TO (namespace draft §141, BIC), as Live
+            routed it (`SideChain/RoutedInput/Routable/Target`); kind `none` for
+            a device with no sidechain or one routed to nothing. Whether it is
+            on, its gain and its mix are numbers among `values`:
+            `SideChain/OnOff`, `SideChain/RoutedInput/Volume`, `SideChain/DryWet`. */
+        Routing sideChain;
     };
 
     struct Track

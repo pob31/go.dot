@@ -150,5 +150,6 @@ patches/JUCE-local/series   text eol=lf
 # .ico that happens to look like text to its heuristic.
 *.svg  text eol=lf
 *.png  binary
+*.als  binary
 *.icns binary
 *.ico  binary
