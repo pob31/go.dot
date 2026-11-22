@@ -65,6 +65,7 @@ namespace wfg::audio
 
         auto& c = control;
         c.on.store (next.on ? 1 : 0, std::memory_order_relaxed);
+        c.rms.store (next.rms ? 1 : 0, std::memory_order_relaxed);
         c.compOn.store (next.compOn ? 1 : 0, std::memory_order_relaxed);
         c.gateOn.store (next.gateOn ? 1 : 0, std::memory_order_relaxed);
         c.thresholdDb.store (next.thresholdDb, std::memory_order_relaxed);
@@ -90,6 +91,7 @@ namespace wfg::audio
         const auto& c = control;
         DynSettings out;
         out.on = c.on.load (std::memory_order_relaxed) != 0;
+        out.rms = c.rms.load (std::memory_order_relaxed) != 0;
         out.compOn = c.compOn.load (std::memory_order_relaxed) != 0;
         out.gateOn = c.gateOn.load (std::memory_order_relaxed) != 0;
         out.thresholdDb = c.thresholdDb.load (std::memory_order_relaxed);
@@ -129,7 +131,7 @@ namespace wfg::audio
         fx::EffectChannelParams params;
         auto& d = params.dyn[0];
         d.bypass = 0;
-        d.detector = 0;
+        d.detector = s.rms ? 1 : 0;
         d.autoMakeup = 0;
         d.lookaheadMs = 0.0f;
         d.compOn = s.compOn ? 1 : 0;
@@ -152,7 +154,13 @@ namespace wfg::audio
         d.expScLoCutHz = s.keyLowCutHz;
         d.expScHiCutHz = s.keyHighCutHz;
 
-        module->applyParams (params, 0);
+        /*  A DETECTOR SWITCHED (peak or RMS) is a variant to spatcore, which a
+            chain commits once its slot has gone quiet. Here it is committed at
+            once: the detectors start again on the new reading, the gain the
+            cue is under carries on - so a switch on a sounding cue moves no
+            level in a step, it only lets the detector settle anew. */
+        if (module->applyParams (params, 0).variantPending)
+            module->commitPendingVariant();
     }
 
     void CueDyn::process (float* const* channelData, int numChannelsToProcess, int numSamples,

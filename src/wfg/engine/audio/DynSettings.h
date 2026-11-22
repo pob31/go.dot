@@ -24,8 +24,10 @@
     WHAT IS HERE AND WHAT IS NOT. The numbers the author chose to have (BHO):
     the compressor's threshold, ratio, attack, release, knee and make-up; the
     gate's threshold, range, attack, hold and release; the key filter's
-    high-pass and low-pass. What is fixed, and mine to flag (§141): the
-    detector is a peak follower; the gate is spatcore's expander at a ratio of
+    high-pass and low-pass; and whether the detector reads peaks or RMS (the
+    author's question of 2026-11-22: "Can the detection have a toggle to switch
+    between peak and RMS?" - peak by default). What is fixed, and mine to flag
+    (§141): the gate is spatcore's expander at a ratio of
     a hundred, which spatcore calls a gate; one filter pair shapes what both
     stages hear; nothing delays the audio (no lookahead, no reported latency).
     Where the key comes from is not
@@ -49,6 +51,9 @@ namespace wfg::audio
     struct DynSettings
     {
         bool on = false;
+
+        //  What the detector reads: the peak of each sample, or RMS over ten milliseconds (spatcore's window).
+        bool rms = false;
 
         //  The compressor.
         bool compOn = true;
@@ -84,7 +89,7 @@ namespace wfg::audio
 
         bool sameAs (const DynSettings& o) const noexcept
         {
-            return on == o.on && compOn == o.compOn && gateOn == o.gateOn
+            return on == o.on && rms == o.rms && compOn == o.compOn && gateOn == o.gateOn
                 && sameFloat (thresholdDb, o.thresholdDb) && sameFloat (ratio, o.ratio)
                 && sameFloat (attackMs, o.attackMs) && sameFloat (releaseMs, o.releaseMs)
                 && sameFloat (kneeDb, o.kneeDb) && sameFloat (makeupDb, o.makeupDb)

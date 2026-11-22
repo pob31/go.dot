@@ -55,6 +55,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_timed_chase[] = { "free", "jump", "varispeed", "timestretch" };
     inline constexpr std::string_view enum_sound_eqB1Shape[] = { "peak", "lowShelf" };
     inline constexpr std::string_view enum_sound_eqB4Shape[] = { "peak", "highShelf" };
+    inline constexpr std::string_view enum_sound_dynDetector[] = { "peak", "rms" };
     inline constexpr std::string_view enum_mic_onGo[] = { "wait", "loop", "clear" };
     inline constexpr std::string_view enum_trigger_kind[] = { "osc", "midi", "clock", "key", "deck" };
     inline constexpr std::string_view enum_trigger_type[] = { "noteOn", "noteOff", "programChange", "controlChange" };
@@ -1685,6 +1686,14 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "",
           "Whether Go.dot's own dynamics stage is in the signal (namespace draft 141, BHM): after the EQ and before the inserts. Off it is not called at all - the cue the same to the bit (BHU) - and that is its resting state." },
+        { "sound", "dynDetector",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "peak",
+          false, 0.0, false, 0.0,
+          enum_sound_dynDetector, 2,
+          "", 50.0, false, "park",
+          "",
+          "What the stage's detector reads, for the compressor and the gate alike (the author's question of 2026-11-22): peak, each sample's size - quick, and the default; or rms, the power over ten milliseconds - steadier, closer to how loud it sounds. Switched on a sounding cue, the detector starts again on the new reading while the gain the cue is under carries on." },
         { "sound", "dynCompOn",
           ValueType::boolean, 'T', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           true, "true",

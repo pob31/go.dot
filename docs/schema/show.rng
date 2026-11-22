@@ -685,6 +685,15 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="dynDetector">
+          <a:documentation>What the stage&apos;s detector reads, for the compressor and the gate alike (the author&apos;s question of 2026-11-22): peak, each sample&apos;s size - quick, and the default; or rms, the power over ten milliseconds - steadier, closer to how loud it sounds. Switched on a sounding cue, the detector starts again on the new reading while the gain the cue is under carries on.</a:documentation>
+          <choice>
+            <value>peak</value>
+            <value>rms</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="dynGateAttack">
           <a:documentation>How fast the gate opens.</a:documentation>
           <data type="double">
@@ -1360,6 +1369,15 @@
           <choice>
             <value>true</value>
             <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynDetector">
+          <a:documentation>What the stage&apos;s detector reads, for the compressor and the gate alike (the author&apos;s question of 2026-11-22): peak, each sample&apos;s size - quick, and the default; or rms, the power over ten milliseconds - steadier, closer to how loud it sounds. Switched on a sounding cue, the detector starts again on the new reading while the gain the cue is under carries on.</a:documentation>
+          <choice>
+            <value>peak</value>
+            <value>rms</value>
           </choice>
         </attribute>
       </optional>
@@ -4650,6 +4668,15 @@
           <choice>
             <value>true</value>
             <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="dynDetector">
+          <a:documentation>What the stage&apos;s detector reads, for the compressor and the gate alike (the author&apos;s question of 2026-11-22): peak, each sample&apos;s size - quick, and the default; or rms, the power over ten milliseconds - steadier, closer to how loud it sounds. Switched on a sounding cue, the detector starts again on the new reading while the gain the cue is under carries on.</a:documentation>
+          <choice>
+            <value>peak</value>
+            <value>rms</value>
           </choice>
         </attribute>
       </optional>

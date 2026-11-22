@@ -108,7 +108,7 @@ namespace wfg::audio
         //  The settings as atomics, and the revision that says they moved.
         struct Control
         {
-            std::atomic<int> on { 0 }, compOn { 1 }, gateOn { 0 };
+            std::atomic<int> on { 0 }, rms { 0 }, compOn { 1 }, gateOn { 0 };
             std::atomic<float> thresholdDb { -20.0f }, ratio { 4.0f }, attackMs { 10.0f }, releaseMs { 150.0f },
                                kneeDb { 6.0f }, makeupDb { 0.0f };
             std::atomic<float> gateThresholdDb { -50.0f }, gateRangeDb { -40.0f }, gateAttackMs { 1.0f },

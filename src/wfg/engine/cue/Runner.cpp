@@ -884,6 +884,11 @@ namespace wfg::cue
 
         audio::DynSettings out;
         out.on = flag ("dynOn");
+
+        {
+            const auto* held = riding ("dynDetector");
+            out.rms = (held != nullptr ? *held : schema.text (cue, "sound", "dynDetector")) == "rms";
+        }
         out.compOn = flag ("dynCompOn");
         out.thresholdDb = number ("dynThreshold");
         out.ratio = number ("dynRatio");

@@ -192,6 +192,7 @@ sound,eqB4Freq,d,rw,8000,20..20000,Hz,state,50,no,park,show,,"The centre of band
 sound,eqB4Gain,d,rw,0,-24..24,dB,state,50,no,park,show,,"The gain of band four; nought is out."
 sound,eqB4Q,d,rw,0.7,0.1..10,,state,50,no,park,show,,"The width of band four, or the steepness of its shelf."
 sound,dynOn,T,rw,false,,,state,50,no,park,show,,"Whether Go.dot's own dynamics stage is in the signal (namespace draft 141, BHM): after the EQ and before the inserts. Off it is not called at all - the cue the same to the bit (BHU) - and that is its resting state."
+sound,dynDetector,s,rw,peak,peak|rms,,state,50,no,park,show,,"What the stage's detector reads, for the compressor and the gate alike (the author's question of 2026-11-22): peak, each sample's size - quick, and the default; or rms, the power over ten milliseconds - steadier, closer to how loud it sounds. Switched on a sounding cue, the detector starts again on the new reading while the gain the cue is under carries on."
 sound,dynCompOn,T,rw,true,,,state,50,no,park,show,,"Whether the stage's compressor is in while the stage is: off leaves the gate and the make-up alone."
 sound,dynThreshold,d,rw,-20,-60..0,dB,state,50,no,park,show,,"Where the compressor starts to take level off, in decibels below full scale, read by a peak detector on what the stage listens to (the cue itself before its level, or its key)."
 sound,dynRatio,d,rw,4,1..100,,state,50,no,park,show,,"How hard it compresses above the threshold: so many decibels in for one out. One is no compression; a hundred is a limiter."

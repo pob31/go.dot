@@ -366,3 +366,42 @@ TEST_CASE ("dyn: at a low rate the key filter holds, and nothing comes out that 
     CHECK (std::isfinite (dyn.reductionDb()));
     CHECK (steadyGain (channels[0], loud) == doctest::Approx (0.30f).epsilon (0.1));
 }
+
+TEST_CASE ("dyn: the detector reads peaks or RMS - a sine at a half, four to one over minus twenty, either way")
+{
+    /*  The author's question of 2026-11-22: "Can the detection have a toggle
+        to switch between peak and RMS?" Peak reads the sine's -6 dBFS peaks,
+        fourteen decibels over: -10.5 dB off. RMS reads -9.03 dBFS, eleven
+        over: -8.23 dB off, 0.388 - spatcore's own law test's number. */
+    const auto loud = sine (48000, 1000.0f, 0.5f);
+
+    auto s = compressor();
+    s.attackMs = 5.0f;
+    s.releaseMs = 50.0f;
+
+    audio::CueDyn peak;
+    peak.prepare (1, rate, block);
+    peak.set (s);
+    std::vector<std::vector<float>> byPeak { loud };
+    run (peak, byPeak);
+
+    s.rms = true;
+    audio::CueDyn rms;
+    rms.prepare (1, rate, block);
+    rms.set (s);
+    std::vector<std::vector<float>> byRms { loud };
+    run (rms, byRms);
+
+    CHECK (steadyGain (byRms[0], loud) == doctest::Approx (0.388f).epsilon (0.02));
+    CHECK (steadyGain (byPeak[0], loud) < steadyGain (byRms[0], loud) - 0.03f);
+    CHECK (rms.settings().rms);
+
+    //  Switched back on the sounding stage: no step in the level, and it settles on the peak law.
+    s.rms = false;
+    rms.set (s);
+    std::vector<std::vector<float>> again { loud };
+    run (rms, again);
+    //  Sample 12 and sample 47988 are both a sine's peak (a 48-sample period).
+    CHECK (again[0][12] / loud[12] == doctest::Approx (byRms[0][47988] / loud[47988]).epsilon (0.05));
+    CHECK (steadyGain (again[0], loud) == doctest::Approx (steadyGain (byPeak[0], loud)).epsilon (0.02));
+}
