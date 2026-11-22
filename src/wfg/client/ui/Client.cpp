@@ -805,6 +805,10 @@ namespace wfg::client
                 footActions.resetEq = [this] (const std::string& cueId)
                                       { send (gesture::eqReset (cueId)); };
 
+                //  And the Dynamics panel's Reset (§141): one command, one step to undo.
+                footActions.resetDyn = [this] (const std::string& cueId)
+                                       { send (gesture::dynReset (cueId)); };
+
                 /*  COPY AND PASTE OF THE PART THE FOOT SHOWS (namespace draft
                     §38): its EQ, sends, chain, or time and loops. */
                 footActions.copyPart = [this] (const std::string& part) { copyPartShown (part); };
@@ -2277,6 +2281,7 @@ namespace wfg::client
             static juce::String partWords (const std::string& part)
             {
                 if (part == "eq")    return "EQ";
+                if (part == "dyn")   return "dynamics";
                 if (part == "sends") return "sends";
                 if (part == "fx")    return "effects";
                 if (part == "time")  return "time and loops";

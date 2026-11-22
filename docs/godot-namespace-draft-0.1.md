@@ -36356,7 +36356,7 @@ is summed only after the graph and would come a block late at best.
   hears its own track - one or two channels where they are, wider folded to two (BHT); switched on again or reset, it
   starts from a cleared detector at unity.
 
-- **SC.7**: on every track. `DynPlugin` after the EQ and before the inserts on every voice, rack channel and aux (BHU),
+- **SC.7** (c548636e): on every track. `DynPlugin` after the EQ and before the inserts on every voice, rack channel and aux (BHU),
   its key read as an insert's place reads one (input, aux, or this cue after its level). Seventeen rows on owner
   `sound` - `dynOn`, `dynCompOn`, the compressor's six (`dynThreshold`, `dynRatio`, `dynAttack`, `dynRelease`,
   `dynKnee`, `dynMakeup`), the gate's (`dynGateOn`, `dynGateThreshold`, `dynGateRange`, `dynGateAttack`, `dynGateHold`,
@@ -36374,3 +36374,23 @@ is summed only after the graph and would come a block late at best.
   or this cue after its level", "Go.dot's own compressor", "Add it to spatcore", "Compressor, filter and gate"). They
   are the author's picks, not the author's words; this section's BHL-BHO already says so, and the commits stand as
   pushed.
+
+- **The detector** (c04d5f8e), at the author's question of 2026-11-22: "Can the detection have a toggle to switch
+  between peak and RMS?" - `dynDetector`, peak (the default) or rms, spatcore's ten-millisecond RMS follower, for the
+  compressor and the gate alike. Switched on a sounding cue the detector starts again while the gain carries on.
+
+- **The words.** Asked, the author answered "Okay with the wording" (2026-11-22) of the words put to him: "Key", "no
+  key", "this cue, after its level", and the problem mark's sentence. The stage's own name on screen, "Dynamics", and
+  the stage's first key choice, "this cue, before its level" (its no-key, BHU, where an insert's reads "no key"), are
+  mine, written after that answer - open at review.
+
+- **SC.8**: the Dynamics panel at the foot - a new subject (`dyn`) following the pick as the EQ does, fitting an audio
+  or mic cue, opened from the inspector's bar between the EQ and the FX; its rows taken off the inspector's list by
+  prefix, as the EQ's. Across its top the stage's switch, the detector, the Key menu (what the stage listens to, a key
+  naming what the show has not got kept and said) and Reset (`dyn.reset`); three framed groups of knobs - the
+  compressor and the gate each with its switch, the key filter - every number written under its knob in its unit;
+  at the right the reduction, a bar down from nought and its number in decibels or a dash while nothing sounds
+  (PRD §4.8), read from `run/reduction`. Every turn is a `node.set` on the cue's row. Copy and paste on the foot
+  carries the part `dyn` (its eighteen rows, the key with them), and a cue template carries it after the EQ. A
+  `dynKey` naming what the show has not got is the cue's "no key" mark, as an insert's. The console lists the rows
+  after the EQ's. Picture: `build/sidechain-shots/dyn-panel.png`.

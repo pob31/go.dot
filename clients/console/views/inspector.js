@@ -118,7 +118,12 @@ const KIND_ORDER = {
             "eqB1On", "eqB1Shape", "eqB1Freq", "eqB1Gain", "eqB1Q",
             "eqB2On", "eqB2Freq", "eqB2Gain", "eqB2Q",
             "eqB3On", "eqB3Freq", "eqB3Gain", "eqB3Q",
-            "eqB4On", "eqB4Shape", "eqB4Freq", "eqB4Gain", "eqB4Q"],
+            "eqB4On", "eqB4Shape", "eqB4Freq", "eqB4Gain", "eqB4Q",
+            // Its own dynamics after the EQ, as the sound goes (namespace draft 141): the
+            // switch and the detector, the compressor, the gate, the key filter, the key.
+            "dynOn", "dynDetector", "dynCompOn", "dynThreshold", "dynRatio", "dynAttack", "dynRelease",
+            "dynKnee", "dynMakeup", "dynGateOn", "dynGateThreshold", "dynGateRange", "dynGateAttack",
+            "dynGateHold", "dynGateRelease", "dynKeyLowCut", "dynKeyHighCut", "dynKey"],
   // A video cue (Phase 8a) in the desktop's order - and last, as a sound's, what a hand on its
   // strip does (namespace draft §49).
   video:   ["source", "canvas", "videoInput", "file",

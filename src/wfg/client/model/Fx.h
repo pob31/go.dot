@@ -259,6 +259,16 @@ namespace wfg::client::model
     /** Whether `key` names something the show has: empty and `self` always do. */
     bool keyIsThere (const FxReading&, const std::string& key);
 
+    /*  The same two over any menu of keys - an insert's or a dynamics
+        stage's (§141), whose first two choices differ in their words. */
+    std::string keyWords (const std::vector<KeyChoice>&, const std::string& key);
+    bool keyIsThere (const std::vector<KeyChoice>&, const std::string& key);
+
+    /*  WHAT A KEY MAY NAME BESIDES THE CUE ITSELF (§141, BHL): every named
+        input, then every aux but `cueId` (an aux is never its own key, BHV),
+        each by name. */
+    std::vector<KeyChoice> keySources (const tree::TreeSnapshot&, const std::string& cueId);
+
     /** `/godot/fx/<id>/p<n>`. */
     std::string fxParameterAddress (const std::string& fxId, int index);
 

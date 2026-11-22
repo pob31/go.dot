@@ -30,6 +30,7 @@
 #include <wfg/client/model/Icons.h>
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/ui/CurveEditorComponent.h>
+#include <wfg/client/ui/DynPanelComponent.h>
 #include <wfg/client/ui/EqPanelComponent.h>
 #include <wfg/client/ui/FadeMixerComponent.h>
 #include <wfg/client/ui/CurveLaneComponent.h>
@@ -151,6 +152,9 @@ namespace wfg::client::ui
 
             /** `eq.reset` on a media cue, from the EQ panel's Flat button. */
             std::function<void (const std::string& cueId)> resetEq;
+
+            /** `dyn.reset` on a sound, from the Dynamics panel's Reset button (§141). */
+            std::function<void (const std::string& cueId)> resetDyn;
 
             /** `fx.create`, when an entry of the set is first switched in on a cue. */
             std::function<void (const std::string& cueId, const std::string& pluginId)> createFx;
@@ -319,6 +323,7 @@ namespace wfg::client::ui
         std::unique_ptr<TimelineComponent> timeline;
         std::unique_ptr<CurveEditorComponent> curve;
         std::unique_ptr<EqPanelComponent> eq;
+        std::unique_ptr<DynPanelComponent> dyn;
         std::unique_ptr<FadeMixerComponent> fadeMixer;
         std::unique_ptr<OscMessagesComponent> messages;
         std::unique_ptr<CurveLaneComponent> curves;

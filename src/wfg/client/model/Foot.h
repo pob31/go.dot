@@ -49,6 +49,7 @@
 #include <vector>
 
 #include <wfg/client/model/Curve.h>
+#include <wfg/client/model/Dyn.h>
 #include <wfg/client/model/Eq.h>
 #include <wfg/client/model/FadeMix.h>
 #include <wfg/client/model/Fx.h>
@@ -74,7 +75,7 @@ namespace wfg::client::model
     {
         /*  One per editor. `none` is the panel shut; every other value is an
             editor that exists, so a kind is added here when its editor is. */
-        enum class Kind { none, waveform, sends, timeline, curve, eq, fx, take, fade, messages, picture, patch, code };
+        enum class Kind { none, waveform, sends, timeline, curve, eq, fx, take, fade, messages, picture, patch, code, dyn };
 
         Kind kind = Kind::none;
         std::string objectId;
@@ -314,6 +315,11 @@ namespace wfg::client::model
             the lead's is `eq`, drawn; the rest are what a gain moved by hand
             moves each from. */
         std::vector<EqReading> eqs;
+
+        /*  THE CUE'S OWN DYNAMICS (namespace draft §141), filled only when
+            they are what is open: the stage's rows as one value, its key and
+            what it may be, and the reduction of the run sounding it. */
+        DynReading dyn;
 
         /*  THE CUE'S SIGNAL CHAIN, filled only when the FX panel is what is
             open (author, 2026-09-25): the show's plugins in the order the

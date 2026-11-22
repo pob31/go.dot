@@ -82,6 +82,13 @@ namespace wfg::doc::parts
                     "curveLuma", "curveRed", "curveGreen", "curveBlue",
                     "useAlpha", "key", "keyColour", "keyLevel", "keySoftness", "keyInvert", "keySpill", "blur",
                     "shape", "feather", "invert" }, {}, {} },
+
+                /*  A sound's own dynamics (namespace draft §141), its key with
+                    it - what it listens to is part of how it compresses. */
+                { Part::dyn, "dyn", { "Media", "Mic" },
+                  { "dynOn", "dynDetector", "dynCompOn", "dynThreshold", "dynRatio", "dynAttack", "dynRelease",
+                    "dynKnee", "dynMakeup", "dynGateOn", "dynGateThreshold", "dynGateRange", "dynGateAttack",
+                    "dynGateHold", "dynGateRelease", "dynKeyLowCut", "dynKeyHighCut", "dynKey" }, {}, {} },
             };
 
             return entries;
@@ -167,7 +174,7 @@ namespace wfg::doc::parts
     std::vector<Part> templatePartsFor (std::string_view element)
     {
         if (element == "Media")
-            return { Part::mix, Part::play, Part::eq, Part::sends, Part::fx, Part::speed };
+            return { Part::mix, Part::play, Part::eq, Part::dyn, Part::sends, Part::fx, Part::speed };
 
         if (element == "Video")
             return { Part::mix, Part::play, Part::picture, Part::speed };

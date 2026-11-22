@@ -860,6 +860,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/FadeMix.cpp
     wfg/client/model/Eq.h
     wfg/client/model/Eq.cpp
+    wfg/client/model/Dyn.h
+    wfg/client/model/Dyn.cpp
     wfg/client/model/Fx.h
     wfg/client/model/Fx.cpp
     wfg/client/model/Rack.h
@@ -1019,6 +1021,8 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/PicturePanelComponent.cpp
     wfg/client/ui/EqPanelComponent.h
     wfg/client/ui/EqPanelComponent.cpp
+    wfg/client/ui/DynPanelComponent.h
+    wfg/client/ui/DynPanelComponent.cpp
     wfg/client/ui/FxPanelComponent.h
     wfg/client/ui/FxPanelComponent.cpp
     wfg/client/ui/TakePanelComponent.h

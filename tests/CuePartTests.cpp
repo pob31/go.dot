@@ -205,7 +205,7 @@ TEST_CASE ("cue parts: the words, and which kinds of cue each part fits")
     /*  Every row of every part is one some kind it fits carries, and writable:
         a misspelt row would be passed over in silence where it is used. */
     for (const auto part : { Part::eq, Part::sends, Part::fx, Part::time, Part::speed,
-                             Part::mix, Part::play, Part::picture })
+                             Part::mix, Part::play, Part::picture, Part::dyn })
     {
         for (const auto row : doc::parts::rowsOf (part))
         {
@@ -230,7 +230,8 @@ TEST_CASE ("cue parts: the words, and which kinds of cue each part fits")
     }
 
     /*  WP: a template carries everything but what is bound to the file. */
-    CHECK (doc::parts::templatePartsFor ("Media").size() == 6);
+    CHECK (doc::parts::templatePartsFor ("Media").size() == 7);       // with the dynamics (§141)
+    CHECK (doc::parts::rowsOf (Part::dyn).size() == 18);
     CHECK (doc::parts::templatePartsFor ("Video").size() == 4);
     CHECK (doc::parts::templatePartsFor ("Mic").empty());
 }
@@ -545,7 +546,7 @@ TEST_CASE ("cue templates: a cue's settings kept under a name, stamped into a cu
     REQUIRE (made.ok);
 
     const auto parts = document.getAttribute ("/godot/cueTemplate/" + made.id + "/parts").value_or ("");
-    CHECK (parts.rfind ("<Fragment part=\"mix play eq sends fx speed\">", 0) == 0);
+    CHECK (parts.rfind ("<Fragment part=\"mix play eq dyn sends fx speed\">", 0) == 0);
     CHECK (parts.find ("file=") == std::string::npos);
     CHECK (parts.find ("<Range") == std::string::npos);
     CHECK (document.getAttribute ("/godot/cueTemplate/" + made.id + "/kind") == std::string ("media"));

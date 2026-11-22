@@ -7,6 +7,7 @@
 #include <wfg/client/ui/ListTabsComponent.h>
 #include <wfg/client/ui/MenuHold.h>
 #include <wfg/client/ui/EqPanelComponent.h>
+#include <wfg/client/ui/DynPanelComponent.h>
 #include <wfg/client/ui/FxPanelComponent.h>
 #include <wfg/client/ui/PicturePanelComponent.h>
 #include <wfg/client/ui/TakePanelComponent.h>
@@ -6323,6 +6324,115 @@ TEST_CASE ("fx panel: a plugin with a sidechain carries a Key menu of what the s
         reading.fx.fadeId = "FADE0001";
         panel.show (reading);
         CHECK (menus().empty());
+    }
+}
+
+namespace
+{
+    model::FootReading dynReading (bool running)
+    {
+        model::FootReading reading;
+        reading.subject = { model::Subject::Kind::dyn, "CUE00001" };
+        reading.cueName = "The bed";
+        reading.cueKind = "media";
+        reading.dyn.present = true;
+        reading.dyn.base = "/godot/cue/CUE00001/";
+        reading.dyn.settings.on = true;
+        reading.dyn.settings.gateOn = true;
+        reading.dyn.settings.thresholdDb = -24.0f;
+        reading.dyn.key = "IN000001";
+        reading.dyn.keyChoices = { { "", "this cue, before its level" }, { "self", "this cue, after its level" },
+                                   { "IN000001", "Talkback \xc2\xb7 input" }, { "AX000001", "Duck bus \xc2\xb7 aux" } };
+        reading.dyn.running = running;
+        reading.dyn.reductionDb = -6.54;
+        return reading;
+    }
+}
+
+TEST_CASE ("dyn panel: every number on a knob, every turn a row, the key and the detector picked, and what it takes off said in decibels")
+{
+    //  Namespace draft 141, SC.8: the Dynamics panel at the foot.
+    std::vector<std::pair<std::string, std::string>> sets;
+    std::vector<std::string> resets;
+
+    ui::DynPanelComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& text) { sets.emplace_back (address, text); };
+    actions.reset = [&] (const std::string& cue) { resets.push_back (cue); };
+
+    ui::DynPanelComponent panel (model::Theme {}, actions);
+    panel.setSize (1400, 240);
+
+    auto reading = dynReading (true);
+    panel.show (reading);
+
+    //  Shown, and writing nothing for being shown.
+    REQUIRE (panel.knobFor ("dynThreshold") != nullptr);
+    CHECK (panel.knobFor ("dynThreshold")->getValue() == doctest::Approx (-24.0));
+    CHECK (panel.knobFor ("dynRatio")->getValue() == doctest::Approx (4.0));
+    CHECK (panel.stageSwitch().getToggleState());
+    CHECK (panel.gateSwitch().getToggleState());
+    CHECK (panel.detectorMenu().getSelectedId() == 1);
+    CHECK (panel.keyMenuBox().getText() == juce::String::fromUTF8 ("Talkback \xc2\xb7 input"));
+    CHECK (sets.empty());
+
+    //  What it took off, in words: never the colour alone.
+    CHECK (panel.meterWords() == "6.5 dB");
+
+    SUBCASE ("a knob turned writes its row")
+    {
+        panel.knobFor ("dynRatio")->setValue (8.0, juce::sendNotificationSync);
+        REQUIRE (sets.size() == 1);
+        CHECK (sets[0].first == "/godot/cue/CUE00001/dynRatio");
+        CHECK (wfg::osc::parseDouble (sets[0].second).value_or (0.0) == doctest::Approx (8.0));
+    }
+
+    SUBCASE ("the detector, the key and the switches write theirs")
+    {
+        panel.detectorMenu().setSelectedId (2, juce::sendNotificationSync);
+        panel.keyMenuBox().setSelectedId (2, juce::sendNotificationSync);
+        panel.compressorSwitch().setToggleState (false, juce::dontSendNotification);
+        panel.compressorSwitch().onClick();
+
+        REQUIRE (sets.size() == 3);
+        CHECK (sets[0] == std::pair<std::string, std::string> { "/godot/cue/CUE00001/dynDetector", "rms" });
+        CHECK (sets[1] == std::pair<std::string, std::string> { "/godot/cue/CUE00001/dynKey", "self" });
+        CHECK (sets[2] == std::pair<std::string, std::string> { "/godot/cue/CUE00001/dynCompOn", "false" });
+    }
+
+    SUBCASE ("Reset is the command, on the cue")
+    {
+        panel.resetButton().onClick();
+        REQUIRE (resets.size() == 1);
+        CHECK (resets[0] == "CUE00001");
+    }
+
+    SUBCASE ("nothing sounding: the meter says so")
+    {
+        panel.show (dynReading (false));
+        CHECK (panel.meterWords() == juce::String::fromUTF8 ("\xe2\x80\x93"));
+    }
+
+    SUBCASE ("a key naming what the show has not got stays listed and picked")
+    {
+        reading.dyn.key = "IN000009";
+        panel.show (reading);
+        CHECK (panel.keyMenuBox().getNumItems() == 5);
+        CHECK (panel.keyMenuBox().getText().contains ("not in this show"));
+    }
+
+    //  And a picture of it, when somebody asks for one.
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        panel.show (dynReading (true));
+        const auto picture = panel.createComponentSnapshot (panel.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("dyn-panel.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (picture, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
     }
 }
 

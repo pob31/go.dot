@@ -215,13 +215,37 @@ namespace wfg::client::model
 
     bool keyIsThere (const FxReading& reading, const std::string& key)
     {
-        return std::any_of (reading.keyChoices.begin(), reading.keyChoices.end(),
+        return keyIsThere (reading.keyChoices, key);
+    }
+
+    bool keyIsThere (const std::vector<KeyChoice>& choices, const std::string& key)
+    {
+        return std::any_of (choices.begin(), choices.end(),
                             [&key] (const KeyChoice& choice) { return choice.value == key; });
     }
 
     std::string keyWords (const FxReading& reading, const std::string& key)
     {
-        for (const auto& choice : reading.keyChoices)
+        return keyWords (reading.keyChoices, key);
+    }
+
+    std::vector<KeyChoice> keySources (const tree::TreeSnapshot& snapshot, const std::string& cueId)
+    {
+        std::vector<KeyChoice> out;
+
+        for (const auto& input : readInputs (snapshot))
+            out.push_back ({ input.id, input.name + " \xc2\xb7 input" });
+
+        for (const auto& channel : readRack (snapshot).channels)
+            if (channel.aux && channel.id != cueId)
+                out.push_back ({ channel.id, channel.name + " \xc2\xb7 aux" });
+
+        return out;
+    }
+
+    std::string keyWords (const std::vector<KeyChoice>& choices, const std::string& key)
+    {
+        for (const auto& choice : choices)
             if (choice.value == key)
                 return choice.label;
 
@@ -292,12 +316,8 @@ namespace wfg::client::model
         out.keyChoices.push_back ({ "", "no key" });
         out.keyChoices.push_back ({ "self", "this cue, after its level" });
 
-        for (const auto& input : readInputs (snapshot))
-            out.keyChoices.push_back ({ input.id, input.name + " \xc2\xb7 input" });
-
-        for (const auto& channel : readRack (snapshot).channels)
-            if (channel.aux && channel.id != cueId)
-                out.keyChoices.push_back ({ channel.id, channel.name + " \xc2\xb7 aux" });
+        for (auto& choice : keySources (snapshot, cueId))
+            out.keyChoices.push_back (std::move (choice));
 
         /*  HIDE UNUSED is a mic cue's now: a media cue's chain is its own
             (§133) and has nothing of another cue's to hide. Its row stays in

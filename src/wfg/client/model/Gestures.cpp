@@ -220,6 +220,11 @@ namespace wfg::client::gesture
         return { origin::window, "eq.reset", { osc::Value::string (cueId) } };
     }
 
+    Event dynReset (const std::string& cueId)
+    {
+        return { origin::window, "dyn.reset", { osc::Value::string (cueId) } };
+    }
+
     Event takePress (const std::string& verb, const std::string& channelId)
     {
         return { origin::window, "take." + verb, { osc::Value::string (channelId) } };

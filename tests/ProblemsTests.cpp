@@ -649,3 +649,32 @@ TEST_CASE ("problems: an insert's key that names what the show has not got marks
     const auto marks = model::cueProblems (needs, problems);
     REQUIRE (marks.count ("SND1") == 1);
 }
+
+TEST_CASE ("problems: a sound's own dynamics keyed by what the show has not got marks its cue (namespace draft 141)")
+{
+    //  BHV for the stage of Go.dot's own, as for an insert: silence, and "no key" in words.
+    const auto snapshot = snapshotOf ({
+        { "/godot/audio/status", word ("running") },
+        { "/godot/cue/SND1/kind", word ("media") },
+        { "/godot/cue/SND1/dynKey", word ("GONE0002") },
+        { "/godot/cue/SND2/kind", word ("media") },
+        { "/godot/cue/SND2/dynKey", word ("self") },
+    });
+
+    const auto index = model::indexObjects (snapshot);
+    const std::vector<model::Row> rows { cueRow ("SND1", "media"), cueRow ("SND2", "media") };
+    const auto needs = model::needsOf (snapshot, rows, index);
+
+    REQUIRE (needs.lostKeys.size() == 1);
+    CHECK (needs.lostKeys[0].cue == "SND1");
+    CHECK (needs.lostKeys[0].key == "GONE0002");
+
+    const auto own = model::fileProblems (snapshot, needs);
+    REQUIRE (own.size() == 1);
+    CHECK (own[0].word == "no key");
+    CHECK (anySays (own, "its dynamics listens to GONE0002, which this show has not got"));
+
+    const auto marks = model::cueProblems (needs, own);
+    CHECK (marks.count ("SND1") == 1);
+    CHECK (marks.count ("SND2") == 0);
+}

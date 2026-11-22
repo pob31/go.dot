@@ -4993,19 +4993,25 @@ TEST_CASE ("client: the inspector offers the panels a kind actually has, and no 
     CHECK (onMedia[1].value == "eq");
     CHECK (onMedia[1].address == "B3N8R5TW");
     CHECK (onMedia[1].label.find ("EQ") != std::string::npos);
+    //  Its own dynamics after the EQ, as the sound goes through them (namespace draft §141).
     CHECK (onMedia[2].control == model::Control::opener);
-    CHECK (onMedia[2].value == "fx");
-    CHECK (onMedia[2].address == "B3N8R5TW");
-    CHECK (onMedia[2].label.find ("FX") != std::string::npos);
+    CHECK (onMedia[2].value == "dyn");
+    CHECK (onMedia[2].label.find ("Dynamics") != std::string::npos);
     CHECK_FALSE (onMedia[2].writable);
+    REQUIRE (onMedia.size() >= 4);
+    CHECK (onMedia[3].control == model::Control::opener);
+    CHECK (onMedia[3].value == "fx");
+    CHECK (onMedia[3].address == "B3N8R5TW");
+    CHECK (onMedia[3].label.find ("FX") != std::string::npos);
+    CHECK_FALSE (onMedia[3].writable);
 
     /*  AND THE SEND LEVELS, since the panels became a bar at the head of the
         inspector (2026-09-30): every panel a cue has, in the order its sound
         goes - where it is sent last. */
-    REQUIRE (onMedia.size() == 4);
-    CHECK (onMedia[3].control == model::Control::opener);
-    CHECK (onMedia[3].value == "sends");
-    CHECK (onMedia[3].label.find ("Sends") != std::string::npos);
+    REQUIRE (onMedia.size() == 5);
+    CHECK (onMedia[4].control == model::Control::opener);
+    CHECK (onMedia[4].value == "sends");
+    CHECK (onMedia[4].label.find ("Sends") != std::string::npos);
 
     //  An opener is a door and not a decision: it writes nothing.
     CHECK_FALSE (onMedia[0].writable);
@@ -10386,6 +10392,67 @@ TEST_CASE ("client: an insert's key is picked from what the show has, by name, a
     CHECK (model::keyWords (reading, "KN000001").find ("not in this show") != std::string::npos);
 }
 
+TEST_CASE ("client: a sound's own dynamics are read as the voice is given them, keyed from what the show has, and opened at the foot (namespace draft 141)")
+{
+    Rig rig ("first-sound");
+    const std::string cue = "B3N8R5TW";
+
+    REQUIRE (rig.apply (1, "window", "input.create",
+                        { osc::Value::int32 (1), osc::Value::int32 (-1), osc::Value::string ("KN000001") }).applied == 1);
+    REQUIRE (rig.apply (2, "window", "node.set",
+                        { osc::Value::string ("/godot/input/KN000001/name"), osc::Value::string ("Talkback") }).applied == 1);
+    REQUIRE (rig.apply (3, "window", "node.set",
+                        { osc::Value::string ("/godot/cue/" + cue + "/dynOn"), osc::Value::string ("true") }).applied == 1);
+    REQUIRE (rig.apply (4, "window", "node.set",
+                        { osc::Value::string ("/godot/cue/" + cue + "/dynDetector"), osc::Value::string ("rms") }).applied == 1);
+    REQUIRE (rig.apply (5, "window", "node.set",
+                        { osc::Value::string ("/godot/cue/" + cue + "/dynThreshold"), osc::Value::string ("-30") }).applied == 1);
+
+    auto snapshot = rig.publish (5);
+    auto reading = model::readDyn (*snapshot, cue);
+
+    REQUIRE (reading.present);
+    CHECK (reading.settings.on);
+    CHECK (reading.settings.rms);
+    CHECK (reading.settings.thresholdDb == doctest::Approx (-30.0f));
+    CHECK (reading.settings.ratio == doctest::Approx (4.0f));                // the table's
+    CHECK (model::dynRowAt (reading, "dynRatio") == "/godot/cue/" + cue + "/dynRatio");
+
+    //  No key is the cue itself before its level (BHU); then the cue after it, then what the show has.
+    REQUIRE (reading.keyChoices.size() == 3u);
+    CHECK (reading.keyChoices[0].value.empty());
+    CHECK (reading.keyChoices[0].label == "this cue, before its level");
+    CHECK (reading.keyChoices[1].label == "this cue, after its level");
+    CHECK (reading.keyChoices[2].value == "KN000001");
+
+    //  A key naming what was deleted stays said.
+    REQUIRE (rig.apply (6, "window", "node.set",
+                        { osc::Value::string ("/godot/cue/" + cue + "/dynKey"), osc::Value::string ("GONE0001") }).applied == 1);
+    snapshot = rig.publish (6);
+    reading = model::readDyn (*snapshot, cue);
+    CHECK (model::dynKeyWords (reading, "GONE0001").find ("not in this show") != std::string::npos);
+
+    //  At the foot, by its word; and nothing that is not a sound has it.
+    CHECK (model::subjectKindFor ("dyn") == model::Subject::Kind::dyn);
+    CHECK (model::wordFor (model::Subject::Kind::dyn) == "dyn");
+    CHECK (model::partForPanel (model::Subject::Kind::dyn) == "dyn");
+    CHECK (model::panelFits (*snapshot, model::Subject::Kind::dyn, cue));
+
+    const auto foot = model::readFoot (*snapshot, { model::Subject::Kind::dyn, cue });
+    CHECK (foot.dyn.present);
+    CHECK (foot.notice.empty());
+    CHECK_FALSE (foot.dyn.running);
+
+    //  The inspector opens it, and lists none of its rows: its panel is their editor.
+    const auto inspection = model::inspect (*snapshot, cue);
+    CHECK (std::any_of (inspection.panels.begin(), inspection.panels.end(),
+                        [] (const model::Field& field) { return field.value == "dyn"; }));
+
+    for (const auto& block : inspection.blocks)
+        CHECK (std::none_of (block.fields.begin(), block.fields.end(),
+                             [] (const model::Field& field) { return field.name.rfind ("dyn", 0) == 0; }));
+}
+
 TEST_CASE ("client: the input list reads the named inputs, names the patch rows, and says which regime it is in")
 {
     /*  Phase 9b (namespace draft §18.2): the output list's twin, made through
@@ -12546,7 +12613,7 @@ TEST_CASE ("client: either line of a movie and its sound shows both halves, each
 
         CHECK (panels == std::vector<std::pair<std::string, std::string>> {
                              { "waveform", movie.id }, { "picture", movie.id },
-                             { "eq", sound.id }, { "fx", sound.id }, { "sends", sound.id } });
+                             { "eq", sound.id }, { "dyn", sound.id }, { "fx", sound.id }, { "sends", sound.id } });
     }
 
     //  A cue that is not half of a pair is inspected as it always was.

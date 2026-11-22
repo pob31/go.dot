@@ -60,6 +60,9 @@ namespace wfg::client::ui
         if (eq != nullptr)
             eq->applyTheme (theme);
 
+        if (dyn != nullptr)
+            dyn->applyTheme (theme);
+
         if (fadeMixer != nullptr)
             fadeMixer->applyTheme (theme);
 
@@ -198,6 +201,7 @@ namespace wfg::client::ui
         timeline.reset();
         curve.reset();
         eq.reset();
+        dyn.reset();
         fadeMixer.reset();
         messages.reset();
         curves.reset();
@@ -436,6 +440,24 @@ namespace wfg::client::ui
                 break;
             }
 
+            case model::Subject::Kind::dyn:
+            {
+                /*  A SOUND'S OWN DYNAMICS (namespace draft §141): a compressor,
+                    a gate, the filter on what they hear and the key. */
+                DynPanelComponent::Actions dynamics;
+                dynamics.set = actions.set;
+                dynamics.reset = actions.resetDyn;
+                dynamics.say = [this] (const juce::String& sentence)
+                {
+                    note = sentence;
+                    repaint();
+                };
+
+                dyn = std::make_unique<DynPanelComponent> (theme, std::move (dynamics));
+                addAndMakeVisible (*dyn);
+                break;
+            }
+
             case model::Subject::Kind::eq:
             {
                 EqPanelComponent::Actions shaping;
@@ -613,6 +635,10 @@ namespace wfg::client::ui
                 wanted = "EQ";
                 break;
 
+            case model::Subject::Kind::dyn:
+                wanted = "Dynamics";
+                break;
+
             case model::Subject::Kind::fx:
                 wanted = "FX";
                 break;
@@ -683,6 +709,9 @@ namespace wfg::client::ui
 
         if (eq != nullptr)
             eq->show (reading);
+
+        if (dyn != nullptr)
+            dyn->show (reading);
 
         if (fadeMixer != nullptr)
             fadeMixer->show (reading);
@@ -921,6 +950,9 @@ namespace wfg::client::ui
 
         if (eq != nullptr)
             eq->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));
+
+        if (dyn != nullptr)
+            dyn->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));
 
         if (fadeMixer != nullptr)
             fadeMixer->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));

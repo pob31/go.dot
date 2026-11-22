@@ -47,6 +47,7 @@ namespace wfg::client::model
             case Subject::Kind::picture:   return "picture";
             case Subject::Kind::patch:     return "patch";
             case Subject::Kind::code:      return "code";
+            case Subject::Kind::dyn:       return "dyn";
             case Subject::Kind::none:      break;
         }
 
@@ -58,7 +59,8 @@ namespace wfg::client::model
         for (const auto kind : { Subject::Kind::waveform, Subject::Kind::sends, Subject::Kind::timeline,
                                  Subject::Kind::curve, Subject::Kind::eq, Subject::Kind::fx,
                                  Subject::Kind::take, Subject::Kind::fade, Subject::Kind::messages,
-                                 Subject::Kind::picture, Subject::Kind::patch, Subject::Kind::code })
+                                 Subject::Kind::picture, Subject::Kind::patch, Subject::Kind::code,
+                                 Subject::Kind::dyn })
             if (wordFor (kind) == word)
                 return kind;
 
@@ -129,6 +131,9 @@ namespace wfg::client::model
 
             //  AND A SCRIPT CUE'S CODE (namespace draft §66), as a patch.
             case Subject::Kind::code:      return true;
+
+            //  AND A SOUND'S OWN DYNAMICS (namespace draft §141), for the EQ's reason.
+            case Subject::Kind::dyn:       return true;
             case Subject::Kind::none:      break;
         }
 
@@ -174,6 +179,7 @@ namespace wfg::client::model
             case Subject::Kind::sends:     return "sends";
             case Subject::Kind::eq:        return "eq";
             case Subject::Kind::fx:        return "fx";
+            case Subject::Kind::dyn:       return "dyn";
 
             //  How a picture lies on its canvas, and its colour (§38's part, §47's panel).
             case Subject::Kind::picture:   return "picture";
@@ -264,7 +270,7 @@ namespace wfg::client::model
             const auto sound = element == "Media" || element == "Mic";
             const auto timed = element == "Media" || element == "Video";
 
-            if ((part == "eq" || part == "sends") && ! sound)
+            if ((part == "eq" || part == "sends" || part == "dyn") && ! sound)
                 return false;
 
             //  WU: a chain only between cues of one kind.
@@ -331,6 +337,7 @@ namespace wfg::client::model
             case Subject::Kind::eq:
             case Subject::Kind::fx:
             case Subject::Kind::sends:
+            case Subject::Kind::dyn:
                 return dual.sound;
 
             case Subject::Kind::waveform:
@@ -394,6 +401,7 @@ namespace wfg::client::model
                     || (cueKind == "video" && text (snapshot, "/godot/cue/" + cue + "/source") == "movie");
 
             case Subject::Kind::sends:     return sound;
+            case Subject::Kind::dyn:       return sound;
             case Subject::Kind::fx:
             case Subject::Kind::eq:        return sound || fadeOnSound;
             case Subject::Kind::take:      return cueKind == "mic";
@@ -654,6 +662,15 @@ namespace wfg::client::model
                 out.notice = out.eq.notice;
         }
 
+        //  A SOUND'S OWN DYNAMICS (namespace draft §141); its reduction is read with the playhead, below.
+        if (subject.kind == Subject::Kind::dyn)
+        {
+            out.dyn = readDyn (snapshot, out.subject.objectId);
+
+            if (! out.dyn.present)
+                out.notice = out.dyn.notice;
+        }
+
         if (subject.kind == Subject::Kind::fx)
         {
             /*  OR A FADE'S: its target's chain, each plugin with the values the
@@ -718,6 +735,13 @@ namespace wfg::client::model
                 out.running = true;
                 out.runId = rest.substr (0, slash);
                 out.position = osc::parseDouble (at (run + "position")).value_or (0.0);
+
+                if (subject.kind == Subject::Kind::dyn)
+                {
+                    out.dyn.running = true;
+                    out.dyn.reductionDb = osc::parseDouble (at (run + "reduction")).value_or (0.0);
+                }
+
                 break;
             }
         }

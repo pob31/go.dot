@@ -259,6 +259,9 @@ namespace wfg::client::gesture
     /** `eq.reset`: a media cue's EQ back to flat, one transaction (Phase 9a). */
     Event eqReset (const std::string& cueId);
 
+    /** `dyn.reset`: a sound's own dynamics back to rest, its key kept, one transaction (§141). */
+    Event dynReset (const std::string& cueId);
+
     /*  `take.<verb> <channel>`: a press on a sampling channel's take from the
         take panel (Phase 9c) - record, loop, overdub, undo or clear, the same
         five the D700's Rec and a transport cue press. */

@@ -62,7 +62,8 @@ namespace wfg::doc::parts
         speed,      ///< speed and how it is applied, alone            - media, video
         mix,        ///< level, DCA, colour, where it plays            - media, video
         play,       ///< how a sample answers a hand on a strip        - media
-        picture     ///< canvas, layer, blend, geometry, grade, mask   - video
+        picture,    ///< canvas, layer, blend, geometry, grade, mask   - video
+        dyn         ///< the 18 rows of the sound's own dynamics       - media, mic (namespace draft §141)
     };
 
     /** The word a part is spelt with on the wire and in a fragment. */

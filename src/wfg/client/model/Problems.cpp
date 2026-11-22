@@ -129,6 +129,28 @@ namespace wfg::client::model
                                       [&fxId] (const CueNeeds::LostKey& lost) { return lost.fxId == fxId; }))
                         needs.lostKeys.push_back ({ id, fxId, text (snapshot, fxBase + "name"), key });
                 }
+
+                /*  AND ITS OWN DYNAMICS' KEY (namespace draft §141), the same
+                    way: an input's problems are its own, an aux is there, and a
+                    word naming neither is a lost key - its compressor rests and
+                    its gate shuts. */
+                if (const auto key = text (snapshot, base + "dynKey"); ! key.empty() && key != "self")
+                {
+                    const auto isTheKey = [&key] (const ObjectIndex::Named& thing) { return thing.id == key; };
+
+                    if (std::any_of (index.inputs.begin(), index.inputs.end(), isTheKey))
+                        addOnce (keys, "input:" + key);
+                    else if (std::none_of (index.rackChannels.begin(), index.rackChannels.end(),
+                                           [&isTheKey] (const auto& channel) { return isTheKey (channel.first); }))
+                    {
+                        const auto stage = "dyn:" + id;
+                        addOnce (keys, "key:" + stage);
+
+                        if (std::none_of (needs.lostKeys.begin(), needs.lostKeys.end(),
+                                          [&stage] (const CueNeeds::LostKey& lost) { return lost.fxId == stage; }))
+                            needs.lostKeys.push_back ({ id, stage, "its dynamics", key });
+                    }
+                }
             };
 
             const auto file = [&snapshot, &base, &keys, &needs, &id]

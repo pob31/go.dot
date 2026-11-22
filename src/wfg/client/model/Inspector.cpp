@@ -1677,6 +1677,7 @@ namespace wfg::client::model
         {
             offer ("Waveform, in and out points", "waveform");
             offer ("EQ, four bands and two filters", "eq");
+            offer ("Dynamics, compressor, gate and key", "dyn");
             offer ("FX, the signal chain on this cue", "fx");
             offer ("Sends, levels into the show's mix channels", "sends");
         }
@@ -1703,6 +1704,7 @@ namespace wfg::client::model
                 on a sampling channel it has a take (Phase 9c), and the panel
                 says in its own notice when the channel records nothing. */
             offer ("EQ, four bands and two filters", "eq");
+            offer ("Dynamics, compressor, gate and key", "dyn");
             offer ("FX, its channel's plugins on this cue", "fx");
             offer ("Sends, levels into the show's mix channels", "sends");
             offer ("Take, the loop its channel records", "take");
@@ -2128,6 +2130,12 @@ namespace wfg::client::model
             if (out.kind == "media" || out.kind == "mic")
                 std::erase_if (decided, [] (const Field& field)
                                         { return field.name.rfind ("eq", 0) == 0; });
+
+            /*  AND THE DYNAMICS STAGE'S EIGHTEEN, for the same reason (namespace
+                draft §141): its panel at the foot, the Dynamics opener its door. */
+            if (out.kind == "media" || out.kind == "mic")
+                std::erase_if (decided, [] (const Field& field)
+                                        { return field.name.rfind ("dyn", 0) == 0; });
 
             /*  AND THE LEVEL LANE IS DRAWN OVER THE WAVEFORM (namespace draft
                 §20.5), where its points can be seen against the sound they ride;
