@@ -48,7 +48,8 @@ namespace wfg::audio
             none,       ///< no key: the effect listens to what it changes, a plugin's sidechain is silence
             input,      ///< a named input: `first` and `width` are its logical inputs
             aux,        ///< an aux: `first` is its row of the key bus
-            self        ///< this cue, after its level
+            self,       ///< this cue, after its level
+            output      ///< an output (§141, BIB): `first` and `width` are its logical output channels
         };
 
         Kind kind = Kind::none;
@@ -60,29 +61,34 @@ namespace wfg::audio
 
         bool isNone() const noexcept { return kind == Kind::none; }
 
-        /*  KIND in the top two bits, WIDTH in the next six, FIRST in the
-            twenty-four below - more inputs and auxes than any show has. A
-            first past that, or a negative one, is no key. */
+        /*  KIND in the top three bits, WIDTH in the next six, FIRST in the
+            twenty-three below - more inputs, auxes and outputs than any show
+            has (§141, BIB: an output was a fifth kind for two bits). A first
+            past that, or a negative one, is no key; so is a kind no build
+            knows. */
+        static constexpr int firstLimit = 1 << 23;
+
         std::uint32_t packed() const noexcept
         {
-            if (kind == Kind::none || first < 0 || first >= (1 << 24))
+            if (kind == Kind::none || first < 0 || first >= firstLimit)
                 return 0;
 
-            return (static_cast<std::uint32_t> (kind) << 30)
-                 | (static_cast<std::uint32_t> (std::clamp (width, 0, maxWidth)) << 24)
+            return (static_cast<std::uint32_t> (kind) << 29)
+                 | (static_cast<std::uint32_t> (std::clamp (width, 0, maxWidth)) << 23)
                  | static_cast<std::uint32_t> (first);
         }
 
         static KeySource unpacked (std::uint32_t word) noexcept
         {
-            KeySource out;
-            out.kind = static_cast<Kind> ((word >> 30) & 0x3u);
-            out.width = static_cast<int> ((word >> 24) & 0x3fu);
-            out.first = static_cast<int> (word & 0xffffffu);
+            const auto kindBits = (word >> 29) & 0x7u;
 
-            if (out.kind == Kind::none)
+            if (kindBits == 0 || kindBits > static_cast<std::uint32_t> (Kind::output))
                 return {};
 
+            KeySource out;
+            out.kind = static_cast<Kind> (kindBits);
+            out.width = static_cast<int> ((word >> 23) & 0x3fu);
+            out.first = static_cast<int> (word & 0x7fffffu);
             return out;
         }
 

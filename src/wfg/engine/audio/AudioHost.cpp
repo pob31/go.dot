@@ -413,6 +413,13 @@ namespace wfg::audio
             /*  EVERY OUTPUT CHANNEL AT UNITY until the tick says otherwise
                 (namespace draft §38), its ramp set to the rate it will run at. */
             outputChannels = std::max (0, requested.outputChannels);
+
+            /*  THE OUTPUTS OF THE BLOCK BEFORE, an output's key (namespace draft
+                §141, BIB): one row a logical output, sized here and never on
+                the audio thread; read as nothing until a block has filled it. */
+            outputHistory.setSize (std::max (1, outputChannels), requested.blockSize, false, true, true);
+            outputTapView.buffer = &outputHistory;
+            outputTapView.channels = 0;
             outputGains = std::make_unique<std::atomic<float>[]> (static_cast<std::size_t> (std::max (1, outputChannels)));
             outputRamps.assign (static_cast<std::size_t> (std::max (1, outputChannels)), {});
 
@@ -730,6 +737,7 @@ namespace wfg::audio
 
                 dynStage->bindTap (&tapView);
                 dynStage->bindKeyBus (&keyBus);
+                dynStage->bindOutputs (&outputTapView);
                 dynStages.push_back (dynStage);
                 trackLanes.emplace_back();
                 trackPlaces.emplace_back();
@@ -762,6 +770,7 @@ namespace wfg::audio
                     proxy->bindClock (&blockClock);
                     proxy->bindTap (&tapView);
                     proxy->bindKeyBus (&keyBus);
+                    proxy->bindOutputs (&outputTapView);
                     trackLanes.back().push_back (&proxy->lane());
                     trackPlaces.back().push_back (proxy);
                     voiceInserts.back().push_back (proxy);
@@ -1614,6 +1623,7 @@ namespace wfg::audio
                     proxy->bindClock (&blockClock);
                     proxy->bindTap (&tapView);
                     proxy->bindKeyBus (&keyBus);
+                    proxy->bindOutputs (&outputTapView);
                     trackLanes.back()[slot] = &proxy->lane();
                     trackPlaces.back()[slot] = proxy;
                 }
@@ -1655,6 +1665,7 @@ namespace wfg::audio
 
             dynStage->bindTap (&tapView);
             dynStage->bindKeyBus (&keyBus);
+            dynStage->bindOutputs (&outputTapView);
             dynStages.push_back (dynStage);
 
             if (! insertProxies (false))
@@ -2272,6 +2283,23 @@ namespace wfg::audio
                 allocation-free: integers and a loop (clock/ShowHold.h). */
             if (hold != nullptr)
                 hold->applyGain (scratch.getArrayOfWritePointers(), current.outputChannels, current.blockSize);
+
+            /*  AN OUTPUT AS A KEY (namespace draft §141, BIB): what each output
+                sends the device - after its trim, its DCA and a held show, before
+                LTC replaces a channel with code - kept for the next block's
+                effects, which hear it one block late, always: outputs are summed
+                after the whole graph. Only once a key has named an output.
+                Ours, and allocation-free: copies into rows made at `start`. */
+            if (outputKeysWanted.load (std::memory_order_relaxed))
+            {
+                const auto kept = std::min (current.outputChannels, outputHistory.getNumChannels());
+
+                for (int channel = 0; channel < kept; ++channel)
+                    outputHistory.copyFrom (channel, 0, scratch, channel, 0,
+                                            std::min (current.blockSize, outputHistory.getNumSamples()));
+
+                outputTapView.channels = kept;
+            }
 
             /*  LTC (namespace draft §59, AHI), AFTER each output's gain and
                 before the block leaves: the generator replaces its channel with
@@ -3514,6 +3542,12 @@ namespace wfg::audio
         std::unique_ptr<std::atomic<float>[]> inputPeaks;
         int tapChannels = 0;
 
+        /*  THE OUTPUTS OF THE BLOCK BEFORE (§141, BIB), read by any effect keyed
+            by an output, as the tap is; kept only once a key has named one. */
+        juce::AudioBuffer<float> outputHistory;
+        LiveInputTap outputTapView;
+        std::atomic<bool> outputKeysWanted { false };
+
         /*  EACH LOGICAL OUTPUT'S GAIN (namespace draft §38): the target the
             tick thread stores, linear, and the ramp only the audio thread
             touches. Both sized at `start`. */
@@ -4076,6 +4110,9 @@ namespace wfg::audio
 
     void AudioHost::setTrackDynKey (int trackIndex, const KeySource& key) noexcept
     {
+        if (key.kind == KeySource::Kind::output)
+            impl->outputKeysWanted.store (true, std::memory_order_relaxed);
+
         if (trackIndex >= 0 && trackIndex < static_cast<int> (impl->dynStages.size()))
             if (auto* stage = impl->dynStages[static_cast<std::size_t> (trackIndex)])
                 stage->setKey (key);
@@ -4199,6 +4236,10 @@ namespace wfg::audio
 
     void AudioHost::setTrackFxKey (int trackIndex, int slot, const KeySource& key) noexcept
     {
+        //  An output's key is kept from the first one named, for every block after (§141, BIB).
+        if (key.kind == KeySource::Kind::output)
+            impl->outputKeysWanted.store (true, std::memory_order_relaxed);
+
         if (trackIndex < 0 || slot < 0 || trackIndex >= static_cast<int> (impl->trackPlaces.size()))
             return;
 

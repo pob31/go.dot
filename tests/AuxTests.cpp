@@ -33,6 +33,7 @@
 #include <wfg/engine/audio/AudioHost.h>
 #include <wfg/engine/audio/CueDyn.h>
 #include <wfg/engine/audio/CueMatrix.h>
+#include <wfg/engine/audio/KeySource.h>
 
 #include <juce_core/juce_core.h>
 
@@ -632,6 +633,81 @@ TEST_CASE ("dyn: a mic channel's own stage in the graph - off to the bit, a comp
         rig.host.setTrackDynKey (mic, key);
         CHECK (play (200) == doctest::Approx (0.5f).epsilon (0.001));
     }
+
+    SUBCASE ("a compressor keyed by an output (§141, BIB): a silent one takes nothing off, the one it plays on does")
+    {
+        audio::DynSettings s;
+        s.on = true;
+        s.thresholdDb = -20.0f;
+        s.ratio = 4.0f;
+        s.attackMs = 1.0f;
+        s.releaseMs = 500.0f;
+        s.kneeDb = 0.0f;
+        rig.host.snapTrackDyn (mic, s);
+
+        //  Output 4, which nothing plays on: no reduction at all.
+        audio::KeySource key;
+        key.kind = audio::KeySource::Kind::output;
+        key.first = 4;
+        key.width = 2;
+        rig.host.setTrackDynKey (mic, key);
+
+        CHECK (play (100) == doctest::Approx (0.5f).epsilon (0.001));
+        CHECK (rig.host.trackDynReduction (mic) == 0.0f);
+
+        /*  Output 0, which the channel itself plays on - a loop a block long,
+            which runs and stays finite (BIH): the compressor hears what it
+            sent the block before and takes level off. */
+        key.first = 0;
+        key.width = 1;
+        rig.host.setTrackDynKey (mic, key);
+
+        const auto loudest = play (200);
+        CHECK (std::isfinite (loudest));
+        CHECK (loudest < 0.45f);
+        CHECK (loudest > 0.05f);
+        CHECK (rig.host.trackDynReduction (mic) < -1.0f);
+    }
+}
+
+TEST_CASE ("key: every kind of key is one word and back - an output the fifth, wider firsts refused (§141, BIB)")
+{
+    using Kind = audio::KeySource::Kind;
+
+    for (const auto kind : { Kind::input, Kind::aux, Kind::self, Kind::output })
+        for (const auto first : { 0, 1, 63, 1000, audio::KeySource::firstLimit - 1 })
+            for (const auto width : { 0, 1, 2, 8, 63 })
+            {
+                audio::KeySource key;
+                key.kind = kind;
+                key.first = first;
+                key.width = width;
+
+                const auto back = audio::KeySource::unpacked (key.packed());
+                CHECK (back.kind == kind);
+                CHECK (back.first == first);
+                CHECK (back.width == width);
+            }
+
+    //  No key, a negative first or one past the limit is the word nought; a wider width is held to the most.
+    CHECK (audio::KeySource {}.packed() == 0u);
+
+    audio::KeySource past;
+    past.kind = Kind::output;
+    past.first = audio::KeySource::firstLimit;
+    CHECK (past.packed() == 0u);
+
+    past.first = -1;
+    CHECK (past.packed() == 0u);
+
+    audio::KeySource wide;
+    wide.kind = Kind::output;
+    wide.width = 200;
+    CHECK (audio::KeySource::unpacked (wide.packed()).width == audio::KeySource::maxWidth);
+
+    //  A kind no build knows reads as no key.
+    CHECK (audio::KeySource::unpacked (7u << 29).isNone());
+    CHECK (audio::KeySource::unpacked (0u).isNone());
 }
 
 TEST_CASE ("M88: what Go.dot's own dynamics cost a block of a graph with 32 rack channels sounding")

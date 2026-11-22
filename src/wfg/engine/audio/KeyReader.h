@@ -54,6 +54,11 @@
         from the last block's to this one's across the block, so a DCA moved
         in steps is a key moving smoothly. Into scratch, folded to two when
         the cue is wider (BHT). A level at nought on both ends is no key.
+      - AN OUTPUT (§141, BIB) is what its channels sent the device in THE
+        BLOCK BEFORE - after their trim, their DCA and a held show - which the
+        host keeps after every block: outputs are summed after the whole graph,
+        so an output is a key one block late, always and for every reader. Read
+        and folded as an input is.
       - NO KEY, or one past what the tap holds - an input the interface does
         not give tonight - is nought channels: the caller feeds silence (BHV).
 
@@ -67,6 +72,10 @@ namespace wfg::audio
     public:
         /** The tap an input is read from, bound once before blocks run. Null reads no input. */
         void bindTap (const LiveInputTap* tap) noexcept     { boundTap = tap; }
+
+        /*  The outputs of the block before (§141, BIB), kept by the host and
+            read as an input tap is, bound once. Null reads no output. */
+        void bindOutputs (const LiveInputTap* outputs) noexcept { boundOutputs = outputs; }
 
         /** The key bus an aux is read from (§141, SC.3), bound once. Null reads no aux. */
         void bindKeyBus (const AuxBus* keys) noexcept       { boundKeys = keys; }
@@ -113,7 +122,10 @@ namespace wfg::audio
                 return readSelf (own, ownChannels, samples, out);
 
             if (wanted.kind == KeySource::Kind::input)
-                return readInput (wanted, start, samples, out);
+                return readTap (boundTap, wanted, start, samples, out);
+
+            if (wanted.kind == KeySource::Kind::output)
+                return readTap (boundOutputs, wanted, start, samples, out);
 
             if (wanted.kind == KeySource::Kind::aux)
                 return readAux (wanted, start, samples, out);
@@ -182,10 +194,10 @@ namespace wfg::audio
             return 2;
         }
 
-        int readInput (const KeySource& key, int start, int samples, const float* (&out)[2]) noexcept
+        //  An input's channels, or an output's of the block before: the same buffer shape, the same fold.
+        int readTap (const LiveInputTap* tap, const KeySource& key, int start, int samples,
+                     const float* (&out)[2]) noexcept
         {
-            const auto* tap = boundTap;
-
             if (tap == nullptr || tap->buffer == nullptr || key.first >= tap->channels || key.width <= 0
                  || start < 0 || start + samples > tap->buffer->getNumSamples())
                 return 0;
@@ -226,6 +238,7 @@ namespace wfg::audio
 
         std::atomic<std::uint32_t> packed { 0 };
         const LiveInputTap* boundTap = nullptr;
+        const LiveInputTap* boundOutputs = nullptr;
         const AuxBus* boundKeys = nullptr;
         const CueMatrix* boundLevel = nullptr;
         float selfGain = -1.0f;             // the last block's level on a cue's own key; the audio thread's
