@@ -36427,6 +36427,51 @@ NUC at c548636e; the whole unit suite green in C and fr_FR, file by file, at eac
   `docs/handoffs/2026-11-22-sidechain-owed.md`, with the questions each needs and Likyū as the real sidechain plugin
   to bench.
 
+**After the close** (stages DO.0-DO.12, 2026-11-22 on). The five owed features, built by the next session.
+
+**The author's decisions** (2026-11-22, from options I wrote; the wording of each option is mine):
+
+- **BIA** **The Dynamics page is reached by walking on from EQ**, on the D700 and on the Stream Deck+ alike: neither
+  has a free page button or key. EQ pressed past its last EQ page puts the Dynamics page up; past the last Dynamics
+  page, the surface's own (the Stream Deck+ wraps to its first EQ page, as its pages do today). *(Offered as "EQ walks
+  on", the rule by which Send walks on to Pan on the Stream Deck+, §113. Declined: walking on from FX; the D700's
+  double-click note on EQ.)*
+- **BIB** **An output is a key**, heard **one block late**, always and for every cue: outputs are summed after the
+  whole graph. The key is what the output sends to the device. The lateness is said where the key is picked and in
+  the guides. *(Offered as "Build it, block late". Declined: leaving outputs off the menu.)*
+- **BIC** **Live's dynamics arrive as the Dynamics stage, and a sidechain from a track as a key aux.** Live's
+  Compressor and Glue Compressor become the cue's compressor, its Gate the gate. A sidechain from an audio track
+  becomes an aux with no outputs, fed by that track's cues, keying the ducked cue - one block late, as an aux key
+  into a cue always is (BHP). Each step is said in the import's report. *(Offered as "Convert + key aux". Declined:
+  converting the devices and only reporting the key; reporting both.)*
+- **BID** **The Android remote gains the stage twice**: its rows on the Cues page beside the EQ, and a Dynamics page on
+  the Surface tab. The app's code is written here; the author cuts its release himself. *(Offered as "Cues page +
+  Surface page". Declined: the Cues page only.)*
+
+**My calls**, each open at review:
+
+- **BIE** **The stage rides live under the lock, as the EQ does.** Found while planning: a single turn of any `dyn*`
+  row was refused under the lock while the EQ's rides (§17.14, decision 4 of the rotary pages) and `dyn.reset`
+  already rode. The engine read the live layer for every one of the stage's rows; only the door left them out. Its
+  switches, its detector and its key ride with its numbers, as the EQ's switches ride with its.
+- **BIF** **A fade moves the stage's thirteen numbers and nothing else** (`fade/dyn`, as `fade/eq`, §26): in decibels
+  straight for the thresholds, the knee, the make-up and the gate's range; in their logarithm for the ratio, the five
+  times and the two key cuts. A switch, the detector and the key are never moved: a switch has no middle.
+- **BIG** **The pages' layouts.** The D700's sixteen rotaries hold the whole stage on one page; a Mackie's eight, two.
+  The Stream Deck+'s four dials, four pages. Written below as each is built.
+- **BIH** **What an output key is.** The output's channels as sent to the device - after its trim, its DCA and a
+  held show - folded to two at a half each (BHT), read by every effect in the next block. A row is silent when its
+  output sat at nought the whole block. A cue keyed by an output it feeds is a loop one block long: it runs and is
+  said, never refused.
+
+**Stages.** DO.0 this record; DO.1 the stage rides live; DO.2-DO.3 fades move it (engine, then screen); DO.4 the
+D700's page; DO.5 the Stream Deck+'s; DO.6-DO.7 an output as a key (audio, then show and screen); DO.8 the Android
+remote; DO.9-DO.11 Live's dynamics and sidechain (reader, walk, import); DO.12 close-out.
+
+**Words owed to the author** before they ship: the D700's screen words for the page, the Stream Deck+'s key and
+title, an output's name in the Key menu and the sentence saying it is late, the import report's sentences, the
+tablet's words in English and French.
+
 ## 142. A real plugin measured through the child, and the child's buffer at any width
 
 **Asked 2026-11-22** by the author, of the Likyu repository's session: "the round of optimisations between Likyu and
