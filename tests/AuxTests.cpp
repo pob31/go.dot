@@ -633,3 +633,93 @@ TEST_CASE ("dyn: a mic channel's own stage in the graph - off to the bit, a comp
         CHECK (play (200) == doctest::Approx (0.5f).epsilon (0.001));
     }
 }
+
+TEST_CASE ("M88: what Go.dot's own dynamics cost a block of a graph with 32 rack channels sounding")
+{
+    /*  Namespace draft 141, SC.9: the stage in the real graph. Thirty-two rack
+        channels open on input 0, a 1 kHz sine at a half, each straight out -
+        then the same with every channel's stage a compressor and a gate, and
+        with them keyed by input 1. A thousand blocks of 128 timed each way.
+        Said, not asserted, as M83. */
+    const auto timeBlocks = [] (int mode)
+    {
+        HostRig rig;
+
+        audio::HostSettings settings;
+        settings.sampleRate = rate;
+        settings.blockSize = block;
+        settings.outputChannels = 2;
+        settings.inputChannels = 2;
+        REQUIRE (rig.host.start (settings));
+
+        audio::EditSpec spec;
+        spec.tracks = 1;
+        spec.channelsPerTrack = 2;
+
+        for (int i = 0; i < 32; ++i)
+        {
+            audio::RackChannelSpec channel;
+            channel.id = "MC" + juce::String (i + 1).paddedLeft ('0', 6).toStdString();
+            spec.rack.push_back (channel);
+        }
+
+        REQUIRE (rig.host.buildEdit (spec));
+
+        audio::DynSettings stage;
+        stage.on = true;
+        stage.gateOn = true;
+
+        audio::KeySource key;
+        key.kind = audio::KeySource::Kind::input;
+        key.first = 1;
+        key.width = 1;
+
+        for (const auto& channel : spec.rack)
+        {
+            const auto track = rig.host.rackTrackOf (channel.id);
+            rig.host.setRackSource (track, 0, 1);
+            rig.host.openRackGate (track, -1);
+            rig.host.setTrackRouting (track, -30.0, Coefficients { { 0, 0, 1.0 } });
+
+            if (mode > 0)
+                rig.host.snapTrackDyn (track, stage);
+
+            if (mode > 1)
+                rig.host.setTrackDynKey (track, key);
+        }
+
+        std::vector<float> first (block, 0.0f), second (block, 0.0f);
+        const float* inputs[] { first.data(), second.data() };
+
+        const auto play = [&] (int blocks)
+        {
+            for (int b = 0; b < blocks; ++b)
+            {
+                const auto start = rig.host.clock().samplesElapsed();
+
+                for (int n = 0; n < block; ++n)
+                    first[static_cast<std::size_t> (n)] = second[static_cast<std::size_t> (n)]
+                        = 0.5f * static_cast<float> (std::sin (2.0 * 3.141592653589793 * 1000.0
+                                                               * static_cast<double> (start + n) / rate));
+
+                rig.host.processBlock (inputs, 2);
+            }
+        };
+
+        play (50);
+        const auto started = juce::Time::getHighResolutionTicks();
+        play (1000);
+        const auto ticks = juce::Time::getHighResolutionTicks() - started;
+        return juce::Time::highResolutionTicksToSeconds (ticks) * 1.0e6 / 1000.0;
+    };
+
+    const auto off = timeBlocks (0);
+    const auto on = timeBlocks (1);
+    const auto keyed = timeBlocks (2);
+
+    MESSAGE ("M88: a block of 128 at 48 kHz, 32 rack channels sounding: " << off << " us with the stage off, "
+             << on << " us with a compressor and a gate on every channel, " << keyed
+             << " us keyed by an input (budget " << 1.0e6 * block / rate << " us)");
+
+    CHECK (on > 0.0);
+}

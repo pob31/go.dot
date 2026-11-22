@@ -27,7 +27,9 @@
 
 #include <wfg/engine/audio/CueDyn.h>
 
+#include <algorithm>
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <vector>
@@ -404,4 +406,72 @@ TEST_CASE ("dyn: the detector reads peaks or RMS - a sine at a half, four to one
     //  Sample 12 and sample 47988 are both a sine's peak (a 48-sample period).
     CHECK (again[0][12] / loud[12] == doctest::Approx (byRms[0][47988] / loud[47988]).epsilon (0.05));
     CHECK (steadyGain (again[0], loud) == doctest::Approx (steadyGain (byPeak[0], loud)).epsilon (0.02));
+}
+
+TEST_CASE ("M87: what Go.dot's own dynamics cost one voice's block - off, a compressor, a compressor and a gate, keyed, wide")
+{
+    /*  Namespace draft 141, SC.9. CueDyn alone, a block of 128 at 48 kHz, the
+        input copied in afresh each block (so a compressor never squeezes its
+        own output) and that copy timed alone as the floor. Said, not asserted:
+        Debug here reads several times Release, and a loaded machine more. */
+    constexpr int frames = 128;
+    constexpr int blocks = 20000;
+
+    const auto source = sine (frames * 375, 1000.0f, 0.5f);       // a whole number of periods per block
+
+    const auto time = [&source] (const audio::DynSettings* settings, int channels, bool keyed)
+    {
+        audio::CueDyn dyn;
+        dyn.prepare (channels, rate, frames);
+
+        if (settings != nullptr)
+            dyn.set (*settings);
+
+        std::vector<std::vector<float>> buffers (static_cast<std::size_t> (channels), std::vector<float> (frames));
+        std::vector<float*> pointers;
+
+        for (auto& b : buffers)
+            pointers.push_back (b.data());
+
+        const float* key[] { source.data(), source.data() };
+
+        const auto run = [&] (int count)
+        {
+            for (int n = 0; n < count; ++n)
+            {
+                const auto at = static_cast<std::size_t> ((n % 375) * frames);
+
+                for (auto& b : buffers)
+                    std::copy_n (source.begin() + static_cast<std::ptrdiff_t> (at), frames, b.begin());
+
+                if (settings != nullptr)
+                    dyn.process (pointers.data(), channels, frames, keyed, key, keyed ? 2 : 0);
+            }
+        };
+
+        run (500);
+        const auto started = std::chrono::steady_clock::now();
+        run (blocks);
+        const std::chrono::duration<double, std::micro> took = std::chrono::steady_clock::now() - started;
+        return took.count() / blocks;
+    };
+
+    audio::DynSettings off;
+    auto comp = compressor();
+    auto both = compressor();
+    both.gateOn = true;
+
+    const auto floor = time (nullptr, 2, false);
+    const auto stereoOff = time (&off, 2, false);
+    const auto stereoComp = time (&comp, 2, false);
+    const auto stereoBoth = time (&both, 2, false);
+    const auto stereoKeyed = time (&both, 2, true);
+    const auto wideBoth = time (&both, 16, false);
+
+    MESSAGE ("M87: one voice's block of 128 at 48 kHz, the copy in alone " << floor << " us; stereo: off "
+             << stereoOff << " us, a compressor " << stereoComp << " us, a compressor and a gate " << stereoBoth
+             << " us, the same keyed by a stereo key " << stereoKeyed << " us; sixteen channels, a compressor and a gate "
+             << wideBoth << " us (budget " << 1.0e6 * frames / rate << " us)");
+
+    CHECK (stereoBoth > 0.0);
 }
