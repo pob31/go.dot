@@ -35,7 +35,7 @@ installDocument();
 
 const { tree } = await import("../../clients/console/plumbing/tree.js");
 const { timeCell, listRows, cueSheet } = await import("../../clients/console/views/didi.js");
-const { stateMark, offersSeek, sceneClock, pillsOf, runSheet, spanOf, scrubbable, through } = await import("../../clients/console/views/gogo.js");
+const { runRows, stateMark, offersSeek, sceneClock, pillsOf, runSheet, spanOf, scrubbable, through } = await import("../../clients/console/views/gogo.js");
 const { selection } = await import("../../clients/console/model/selection.js");
 const { folded } = await import("../../clients/console/model/remember.js");
 
@@ -1295,4 +1295,63 @@ test("a row says how ready its cue is, and what is missing in a word", () => {
 
   assert.equal(flag("cue:S1", "warn")[1], "no voice");
   assert.equal(flag("cue:S2", "ready")[1], "preparing");
+});
+
+/*  THE RUNNING PANE, TIDIED (namespace draft §144, BIX): a run the tree has
+    nothing about is not drawn - it was a ring, a dash and an empty badge - and
+    an order list that is only spaces names no run at all. */
+test("a run the tree has nothing about draws no row, and a blank order names none", () => {
+  serve([
+    leaf("/godot/run/order", "R1 R2"),
+    leaf("/godot/run/R1/cue", "C1"),
+    leaf("/godot/run/R1/state", "playing"),
+    leaf("/godot/run/R1/kind", "media"),
+    leaf("/godot/cue/C1/name", "The bed"),
+  ]);
+
+  const rows = runRows();
+
+  assert.deepEqual(rows.map((row) => row.key), ["run:R1"], "R2 has no rows of its own, so no row");
+  assert.match(rows[0].html, /<span class="kind">media<\/span>/);
+
+  serve([leaf("/godot/run/order", "  "), leaf("/godot/run/R3/cue", "")]);
+  assert.deepEqual(tree.ids("/godot/run/order"), [], "spaces are not an identifier");
+  assert.deepEqual(runRows(), []);
+
+  /*  A run that has a cue node but no kind yet writes no empty badge. */
+  serve([leaf("/godot/run/order", "R4"), leaf("/godot/run/R4/cue", "C4")]);
+  assert.doesNotMatch(runRows()[0].html, /class="kind"/);
+});
+
+test("a seek box says what it is in words", () => {
+  serve([
+    leaf("/godot/run/order", "R1"),
+    leaf("/godot/run/R1/cue", "C1"),
+    leaf("/godot/run/R1/state", "playing"),
+    leaf("/godot/run/R1/kind", "media"),
+    { FULL_PATH: "/godot/run/R1/seekable", TYPE: "T", ACCESS: 1, VALUE: [true] },
+  ]);
+
+  assert.match(runRows()[0].html, /<label class="seek-wrap">seek <input [^>]*class="seek"[^>]*> s<\/label>/);
+});
+
+/*  WHAT WILL NOT PLAY IS MARKED APART FROM WHAT IS WAITING (BIY): "missing" and
+    "no voice" carry `data-problem`, which the stylesheet draws in the failure
+    red as the desktop does; "pending" keeps the plain warning. */
+test("a problem word is marked as one, and a pending slot is not", () => {
+  folded.clear();
+  selection.reveal = null;
+  serve([
+    leaf("/godot/list/L/order", "V2 P1"),
+    leaf("/godot/cue/V2/kind", "video"),
+    leaf("/godot/cue/V2/prepare", "partial"),
+    leaf("/godot/cue/V2/prepareError", "media-missing"),
+    leaf("/godot/cue/P1/kind", "media"),
+    leaf("/godot/cue/P1/prepare", "pending"),
+  ]);
+
+  const rows = listRows("L", "");
+
+  assert.match(htmlOf(rows, "cue:V2"), /<span data-problem="yes" class="flag warn" title="[^"]*">missing</);
+  assert.match(htmlOf(rows, "cue:P1"), /<span class="flag warn" title="[^"]*">pending</);
 });

@@ -183,6 +183,15 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  /*  THE ENGINE'S NUMBERS ON THE STRIP (namespace draft §144, BIT): the same
+      kind of answer as the inspector's place - this browser's, kept with it. */
+  if (data && data.stripMore) {
+    panel.numbers = !panel.numbers;
+    save();
+    view.render();
+    return;
+  }
+
   /*  THE INSPECTOR'S DETAILS, which is the same gesture one pane over. The
       <summary> toggles itself as well - that is what the element is for - and
       this records WHICH WAY it went, so the next render draws what the reader

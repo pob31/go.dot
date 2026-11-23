@@ -14,8 +14,9 @@
     SPDX-License-Identifier: GPL-3.0-or-later
 */
 
-/*  THE TRANSPORT'S BUTTONS: GO, the lock, revert, and every button that names
-    its command in its own `data-cmd`. Wired when this module is loaded. */
+/*  THE TRANSPORT'S BUTTONS: GO, the stops, the lock, revert, what is behind ⋯,
+    and every button that names its command in its own `data-cmd`. Wired when
+    this module is loaded. */
 
 import { tree } from "../plumbing/tree.js";
 import { command, send } from "../plumbing/link.js";
@@ -75,15 +76,33 @@ function renderPause() {
   button.title = held ? "Play: everything held goes on from where it stood (F8)"
                       : "Pause: hold everything Go.dot runs where it is, silent, until Play (F8)";
   el("paused-note").hidden = !held;
+
+  /*  GO, DRESSED AS THE DESKTOP DRESSES IT (namespace draft §144, BIU; the
+      desktop's `dressGo` and `goLine`): its yellow while the audio runs, grey
+      while it does not, and why under the word - "paused", "no clock", "no
+      audio" - so the grey is never the only thing saying so (§4.8). Grey is not
+      disabled: GO still fires. */
+  const status = String(tree.get("/godot/audio/status", ""));
+  const running = status === "running";
+  const go = el("go");
+
+  go.dataset.idle = running ? "no" : "yes";
+  setText(el("go-under"), held ? "paused"
+                        : running ? ""
+                        : status === "noClock" ? "no clock"
+                        : status === "" ? "audio not said" : "no audio");
+  go.title = running ? "Space: fires the standby cue"
+                     : "Space: fires the standby cue. The audio is not running, so an audio cue "
+                       + "will not be heard - Show settings, Audio, on the show's computer.";
 }
 
 /*  WHERE THE KEYBOARD IS, IN WORDS.
 
     A box with the focus keeps the arrows and the accelerators - stepping a
-    number is what a number box is for - so while one has them the hint beside
-    GO would otherwise be telling an operator that ctrl-Z undoes, when ctrl-Z
-    is the browser's typing-undo and the arrows are moving a pre-wait rather
-    than the standby. Didi's time columns put three such boxes on every row, so
+    number is what a number box is for - so while one has them the keys listed
+    behind ⋯ would otherwise be telling an operator that ctrl-Z undoes, when
+    ctrl-Z is the browser's typing-undo and the arrows are moving a pre-wait
+    rather than the standby. So the row says so, and says nothing otherwise. Didi's time columns put three such boxes on every row, so
     this is now one click away at all times.
 
     SAID, AND NOT COLOURED (§4.8). The focus ring on a box is a pixel of hue on
@@ -96,7 +115,7 @@ function renderPause() {
     own; `focusout` runs before the next element has it, so the answer is asked
     for after the browser has settled. */
 const hint = el("hint");
-const HINT_KEYS = hint ? hint.textContent : "";
+const HINT_KEYS = "";               // the keys themselves are behind ⋯ (BIV)
 const HINT_TYPING = "typing in a box · space still GO · esc gives the keyboard back";
 
 function sayWhereTheKeysAre() {
@@ -156,6 +175,30 @@ el("revert").addEventListener("click", () => {
 for (const button of document.querySelectorAll("#transport [data-cmd], #pair [data-cmd], #recovery [data-cmd]")) {
   button.addEventListener("click", () => command(button.dataset.cmd));
 }
+
+/*  WHAT IS BEHIND ⋯ (namespace draft §144, BIV): opened by its button, shut by
+    it again, by a tap anywhere else, or once one of its own buttons has been
+    pressed - each of them does its work on that same click, as it would on
+    the row. Not by Esc, which is PANIC's everywhere on this page (§4.4). */
+const more = el("more");
+const morePanel = el("more-panel");
+
+function showMore(open) {
+  morePanel.hidden = !open;
+  more.setAttribute("aria-expanded", open ? "true" : "false");
+}
+
+more.addEventListener("click", () => showMore(morePanel.hidden));
+
+morePanel.addEventListener("click", (event) => {
+  if (event.target.closest && event.target.closest("button")) setTimeout(() => showMore(false), 0);
+});
+
+document.addEventListener("click", (event) => {
+  if (morePanel.hidden) return;
+  if (event.target === more || morePanel.contains(event.target)) return;
+  showMore(false);
+});
 
 /*  THIS COMPUTER IN ITS PAIR (namespace draft §58, RD.11), drawn on every poll
     from the `pair/*` rows by model/pair.js - the desktop's model/Pair.h said

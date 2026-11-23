@@ -29,92 +29,136 @@
     <span class="stat" id="s-saved-wrap"><b>file</b><span id="s-saved">—</span></span>
     <span class="stat warn" id="s-write-wrap" hidden><b>write</b><span id="s-write"></span></span>
     <span class="stat" id="s-lock-wrap"><b>edits</b><span id="s-lock">—</span></span>
-    <span class="stat"><b>tick</b><span class="num" id="s-tick">—</span></span>
-    <span class="stat"><b>rev</b><span class="num" id="s-revision">—</span></span>
     <span class="stat"><b>audio</b><span id="s-audio">—</span></span>
-    <span class="stat"><b>rate</b><span class="num" id="s-rate">—</span></span>
-    <span class="stat"><b>late max</b><span class="num" id="s-late">—</span></span>
-    <span class="stat"><b>go→sound</b><span class="num" id="s-latency">—</span></span>
-    <span class="stat" id="s-rt-wrap"><b>rt</b><span class="num" id="s-rt">—</span></span>
     <span class="stat" id="s-warn-wrap" title="nothing to report"><b>warnings</b><span class="num" id="s-warn">—</span></span>
+    <!--  THE ENGINE'S OWN NUMBERS, behind a tap (namespace draft §144, BIT): what
+          somebody running the show reads is above; these are for whoever is
+          looking after the machine. Shown or not is this page's arrangement and
+          is kept per browser (model/remember.js), as the inspector's place is.
+          RT IS THE EXCEPTION: any value but nought is a broken promise (§4.2),
+          so views/strip.js shows it whatever this says. -->
+    <span id="strip-more" hidden>
+      <span class="stat"><b>tick</b><span class="num" id="s-tick">—</span></span>
+      <span class="stat"><b>rev</b><span class="num" id="s-revision">—</span></span>
+      <span class="stat"><b>rate</b><span class="num" id="s-rate">—</span></span>
+      <span class="stat"><b>late max</b><span class="num" id="s-late">—</span></span>
+      <span class="stat"><b>go→sound</b><span class="num" id="s-latency">—</span></span>
+      <span class="stat" id="s-rt-wrap"><b>rt</b><span class="num" id="s-rt">—</span></span>
+    </span>
     <span id="link"><span class="dot"></span><span id="link-text">connecting</span></span>
+    <button id="strip-toggle" data-strip-more="yes" aria-expanded="false"
+            title="the engine's own numbers: tick, revision, rate, lateness, GO to sound, real-time">details</button>
   </div>
 
+  <!--  THE TRANSPORT, laid out as the desktop's (namespace draft §144, BIU-BIW):
+        GO and the standby at the left, the stops at the right, and between them
+        only what an operator needs to see - the notes that turn up when
+        something wants an answer, and undo, redo and save, which a tablet has
+        no key for. What is used once in a while is behind ⋯.
+
+        EVERY BUTTON THAT NAMES ITS COMMAND IN `data-cmd` is wired by the loop
+        in views/transport.js, the ones behind ⋯ included, so the gesture and
+        the datagram cannot drift apart by being written down twice; and the
+        list of them is gestures/commands.json's "buttons", which
+        tests/blackbox/client_page.py holds this file to. -->
   <div id="transport">
-    <button id="go">GO</button>
-    <!--  STOPPING, ALWAYS ON SCREEN (namespace draft §75, ARI; the app's ANW):
-          Doh! takes back a GO that came too early; then air; then PANIC - a
-          press stops every cue gracefully (Esc), a second within 0.75 s drops
+    <!--  GO, the desktop's yellow while the audio runs and grey when it does not,
+          with why under the word (§4.8). Grey is not disabled: GO still fires. -->
+    <span class="go-wrap">
+      <button id="go">GO</button>
+      <span class="under" id="go-under"></span>
+    </span>
+
+    <!--  THE STANDBY: the arrows and clear, and the cue GO would fire, by name, in
+          the standby's amber - or, on a list with none, how to park one. A list
+          with no standby is a list where GO and both arrows do nothing, on
+          purpose, which is indistinguishable from a broken transport unless
+          somebody says so. -->
+    <span class="standby-block">
+      <span class="arrows">
+        <button data-cmd="standby.previous" aria-label="standby up" title="move the standby up one cue (↑)">▲</button>
+        <button data-cmd="standby.next" aria-label="standby down" title="move the standby down one cue (↓)">▼</button>
+        <button data-cmd="standby.clear" title="clear the standby: GO does nothing until a cue is parked">clear</button>
+      </span>
+      <span class="standby-said"><b>standby</b><span id="standby-name">—</span></span>
+    </span>
+
+    <span class="notes">
+      <span class="paused-note" id="paused-note" hidden>Paused - press Play (F8) to go on</span>
+      <!-- What a locked show rode live (2026-09-25): a cue's EQ and sends ridden
+           under the lock, heard and not saved. Once unlocked these keep them in
+           the show - one undo step - or let them go. Shown only while something
+           rides; the note says how many. -->
+      <span class="live-note" id="live-note" hidden></span>
+      <button data-cmd="live.keep" id="live-keep" hidden
+              title="write what was ridden live into the show - one step to undo">keep live changes</button>
+      <button data-cmd="live.drop" id="live-drop" hidden
+              title="let the live changes go: every cue sounds as it is saved">discard</button>
+      <!--  Said only while a box holds the keys (views/transport.js). -->
+      <span class="hint" id="hint"></span>
+    </span>
+
+    <!--  UNDO AND SAVE AS BUTTONS AND NOT ONLY AS KEYS: §4.11 makes Ctrl-Z an
+          accelerator OVER `undo` rather than the only road to it, and a tablet
+          has no Ctrl to hold down. Save is never greyed but under the lock
+          (views/strip.js says why); `document.saveAs` is not offered, as it
+          needs a folder on the engine's disk and a browser has no honest way to
+          name one. The line under them says what undo would unmake, in the
+          engine's word for it - a greyed button never says which something is
+          unavailable (§4.8). -->
+    <span class="edit-group">
+      <span class="buttons">
+        <button id="undo" data-cmd="undo" disabled>undo</button>
+        <button id="redo" data-cmd="redo" disabled>redo</button>
+        <button id="save" data-cmd="document.save"
+                title="writes the show into its bundle — ctrl/⌘-S">save</button>
+      </span>
+      <span class="under undo-note" id="undo-note"></span>
+    </span>
+
+    <!--  WHAT IS USED ONCE IN A WHILE, behind one button (BIV): the recorder,
+          revert, where the inspector sits, the lock and the keys. Opened and
+          shut by views/transport.js; a tap anywhere else shuts it.
+
+          REVERT HAS NO `data-cmd`, on purpose: it is the one button here that
+          asks before it sends, so it is wired by hand in views/transport.js,
+          beside the reason. THE LOCK is a node rather than a command, and is
+          wired there too. -->
+    <span class="more-wrap">
+      <button id="more" aria-expanded="false" aria-controls="more-panel" aria-label="more"
+              title="more: record, revert, lock, layout">⋯</button>
+      <div id="more-panel" hidden>
+        <!-- The live recorder (2026-09-19): every cue start kept from here, and
+             written into a take - a timeline group of start cues - on stop. -->
+        <button data-cmd="record.start" title="keep every cue start from now">record</button>
+        <button data-cmd="record.stop" title="write what was kept into a take">stop recording</button>
+        <button id="revert"
+                title="reloads the saved show; every change since is lost">revert</button>
+        <!--  WHERE THE INSPECTOR SITS, which is this page's arrangement and not
+              the show's: the engine is never told (§14.1). The button says what
+              it would do rather than what is true. -->
+        <button id="layout" data-layout="yes">inspector at the foot</button>
+        <button id="lock" aria-pressed="false" disabled>lock the show</button>
+        <p class="keys">space GO · ↑ ↓ standby · ctrl/⌘-Z undo · ctrl/⌘-S save ·
+          a row to inspect · its left edge to park</p>
+      </div>
+    </span>
+
+    <!--  THE STOPS, AT THE RIGHT EDGE, as the desktop has them (namespace draft
+          §75, ARI; PRD §3.34): Pause, its word the state's - "Pause" while the
+          show runs, "Play" while it is held, F8 on the keyboard; Doh!, which
+          takes back a GO that came too early; then air; then PANIC - a press
+          stops every cue gracefully (Esc), a second within 0.75 s drops
           everything (double Esc), and the word under it says which the next
           press will do. The keyboard keeps Esc and Esc Esc. -->
-    <!--  PAUSE / PLAY (PRD §3.34): left of Doh!, its word the state's - "Pause"
-          while the show runs, "Play" while it is held - and the note beside it
-          says "Paused" in words while it is (§4.8). F8 on the keyboard. -->
-    <button id="pause" data-held="no" title="Pause: hold everything Go.dot runs where it is, silent, until Play (F8)">Pause</button>
-    <span class="paused-note" id="paused-note" hidden>Paused - press Play (F8) to go on</span>
-    <button id="doh" title="Doh!: take back the last GO, if it came too early">Doh!</button>
-    <span class="panic" id="panic-wrap">
-      <button id="panic" data-second="no">PANIC</button>
-      <span class="next" id="panic-next">stop all</span>
+    <span class="stops">
+      <button id="pause" data-held="no" title="Pause: hold everything Go.dot runs where it is, silent, until Play (F8)">Pause</button>
+      <button id="doh" title="Doh!: take back the last GO, if it came too early">Doh!</button>
+      <span class="panic" id="panic-wrap">
+        <button id="panic" data-second="no">PANIC</button>
+        <span class="next" id="panic-next">stop all</span>
+      </span>
     </span>
-    <button data-cmd="standby.previous">▲ standby</button>
-    <button data-cmd="standby.next">▼ standby</button>
-    <button data-cmd="standby.clear">clear</button>
-    <span class="clear-note" id="clear-note" hidden></span>
-
-    <!--  UNDO AS A BUTTON AND NOT ONLY AS A KEY. §4.11 makes every gesture a
-          named command, which is what turns Ctrl-Z into an accelerator OVER
-          `undo` rather than the only road to it - and a tablet in the house
-          has no Ctrl to hold down, so the road that is not a keystroke has to
-          exist for the client PRD §3.17 calls the primary one.
-
-          The command name is the button's own `data-cmd`, read by the loop at
-          the foot of this file, so the gesture and the datagram cannot drift
-          apart by being written down twice. -->
-    <button id="undo" data-cmd="undo" disabled>undo</button>
-    <button id="redo" data-cmd="redo" disabled>redo</button>
-    <!-- The live recorder (2026-09-19): every cue start kept from here, and
-         written into a take - a timeline group of start cues - on stop. -->
-    <button data-cmd="record.start" title="keep every cue start from now">record</button>
-    <button data-cmd="record.stop" title="write what was kept into a take">stop recording</button>
-    <!-- What a locked show rode live (2026-09-25): a cue's EQ and sends ridden
-         under the lock, heard and not saved. Once unlocked these keep them in
-         the show - one undo step - or let them go. Shown only while something
-         rides; the note says how many. -->
-    <span class="live-note" id="live-note" hidden></span>
-    <button data-cmd="live.keep" id="live-keep" hidden
-            title="write what was ridden live into the show - one step to undo">keep live changes</button>
-    <button data-cmd="live.drop" id="live-drop" hidden
-            title="let the live changes go: every cue sounds as it is saved">discard</button>
-    <span class="undo-note" id="undo-note"></span>
-
-    <!--  SAVE, AS A BUTTON AND AS CTRL/⌘-S, for the reason undo is both: the
-          key is an accelerator over `document.save` and a tablet has no Ctrl
-          to hold. It is never greyed out. A save with nothing new in it
-          rewrites the same bytes, which costs nothing, and a page that
-          declined to send it would be one client's opinion of the document.
-          Nor does it answer the recovery banner: while an earlier session's
-          work is on offer the engine saves the show and leaves that work
-          where it is, because saving this show has not made that afternoon
-          the show. `document.saveAs` is not offered: it needs a folder on
-          the engine's disk, and a browser has no honest way to name one.
-
-          REVERT HAS NO `data-cmd`, on purpose. It is the one button on this
-          row that asks before it sends, so it is wired by hand at the foot of
-          this file, beside the reason. -->
-    <button id="save" data-cmd="document.save"
-            title="writes the show into its bundle — ctrl/⌘-S">save</button>
-    <button id="revert"
-            title="reloads the saved show; every change since is lost">revert</button>
-
-    <span class="hint" id="hint">space GO · ↑ ↓ standby · ctrl/⌘-Z undo · ctrl/⌘-S save ·
-                       a row to inspect · its LEFT EDGE to park</span>
-    <!--  WHERE THE INSPECTOR SITS, which is this page's arrangement and not
-          the show's: the engine is never told (§14.1). Two answers, and the
-          button says which one it would give you rather than which one you
-          have - the rule every toggle on this row follows. -->
-    <button id="layout" data-layout="yes">inspector at the foot</button>
-    <button id="lock" aria-pressed="false" disabled>lock the show</button>
   </div>
 
   <!--  THIS COMPUTER IN ITS PAIR (namespace draft §58, RD.11): a main and a
@@ -205,7 +249,7 @@
     <section class="pane" id="pane-didi">
       <header>
         <h2>Didi</h2>
-        <span class="sub">the cue list — the one that remembers</span>
+        <span class="sub">cue list</span>
         <!--  PICKING SEVERAL WITHOUT A KEYBOARD (namespace draft §75, ARJ): while
               this is on, a tap adds a cue to the pick or takes it away, as
               ctrl/⌘-click does; a long press still opens the cue's sheet. -->
@@ -213,21 +257,22 @@
       </header>
       <div class="list-tabs" id="tabs"></div>
 
-      <!--  THE COLUMN HEADS over the cue list, and the only labels in it. They
-            name the three attributes the boxes under them write, in the
-            engine's own words and in the order a cue lives them - so the page
-            and the namespace keep one vocabulary (§14.1) and an operator
-            reading `preWait` here finds `preWait` in the inspector.
+      <!--  THE COLUMN HEADS over the cue list, and the only labels in it, in the
+            desktop's words (namespace draft §144, BIY): the pointer column's ▶,
+            CUE over the numbers, and PRE, DURATION and POST over the three times
+            in the order a cue lives them. Each time head's tooltip names the
+            attribute its boxes write - `preWait`, `duration`, `postWait` - so an
+            operator reading the inspector finds the same word there (§14.1).
 
             Written here rather than drawn: the columns are always there, and a
             head that came and went with the rows would move the list under
-            somebody's hand. Four empty cells first, for the gutter, the
-            number, the name and the tail. -->
+            somebody's hand. -->
       <div class="cols" id="cue-cols">
-        <div></div><div></div><div></div><div></div>
-        <div class="when">preWait</div>
-        <div class="when">duration</div>
-        <div class="when">postWait</div>
+        <div class="ptr-head" title="▶ marks the cue GO fires next: the standby. Click or tap in this column beside any cue to move the ▶ there; ↑ and ↓ move it one cue at a time.">▶</div>
+        <div class="num-head">cue</div><div></div><div></div>
+        <div class="when" title="preWait: how long after it is reached the cue waits before it starts">pre</div>
+        <div class="when" title="duration: how long the cue plays">duration</div>
+        <div class="when" title="postWait: how long after it is complete the cue waits before it reports done">post</div>
       </div>
 
       <div class="scroll" id="cues"></div>
@@ -255,7 +300,7 @@
     <section class="pane" id="pane-gogo">
       <header>
         <h2>Gogo</h2>
-        <span class="sub">running — present tense</span>
+        <span class="sub">running</span>
         <!-- PRD §4.4's first two levels of stop are PANIC's, in the transport
              (namespace draft §75, ARI): one button, pressed once or twice. -->
       </header>
@@ -266,7 +311,6 @@
     <section class="pane" id="pane-inspect">
       <header>
         <h2>Inspector</h2>
-        <span class="sub">what someone decided</span>
       </header>
       <div class="scroll" id="inspect"></div>
     </section>

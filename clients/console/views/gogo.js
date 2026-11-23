@@ -118,7 +118,18 @@ function offersSeek(id) {
     what `parent` and `children` publish. Present tense - a finished run is kept
     for five seconds and then stops being published at all, which is why nothing
     here has to decide what to forget. */
+/*  WHAT A RUN DOES WHEN IT IS TOUCHED, said once at the head of the pane on a
+    finger and as each row's tooltip under a mouse (BIX): a mouse finds things
+    by hovering, a finger has nothing to hover with. */
+const RUN_TIP = "click for its actions · drag it far either way to kill it";
+
 function runRow(id, depth, out) {
+  /*  A RUN THE TREE HAS NOTHING ABOUT IS NOT DRAWN (namespace draft §144, BIX).
+      An id can be in an order list a poll before its own rows are, or after
+      they are gone; drawn, it was a row of fallbacks - a ring, a dash and an
+      empty badge - that said nothing and looked like something armed. */
+  if (tree.node("/godot/run/" + id + "/cue") === undefined) return;
+
   const state = tree.run(id, "state", "armed");
   const cue = tree.run(id, "cue", "");
   const kind = tree.run(id, "kind", "");
@@ -256,6 +267,7 @@ function runRow(id, depth, out) {
 
   out.push({ key: "run:" + id, html:
     '<div class="run" data-run="' + esc(id) + '" data-s="' + esc(state) + '"' +
+      ' title="' + RUN_TIP + '"' +
       ' style="padding-left:' + (12 + depth * 14) + 'px">' +
       '<div class="who">' +
         stateMark(state) +
@@ -263,14 +275,16 @@ function runRow(id, depth, out) {
         (asserted === true || asserted === "true"
            ? '<span class="asserted" title="the persistent section put this back">asserted</span>'
            : "") +
-        '<span class="kind">' + esc(kind) + "</span>" +
+        (kind ? '<span class="kind">' + esc(kind) + "</span>" : "") +
       "</div>" +
       '<div class="meta">' +
         bits.map((b) => "<span>" + esc(b) + "</span>").join("") +
+        /*  SAID IN WORDS (BIX): "seek", the box, "s" - a bare box with an "s"
+            in it read as a stray field. */
         (seekable
-           ? '<input type="number" class="seek" data-seek="' + id + '" min="0" step="0.1"' +
-             ' placeholder="s" title="seek: type a second of this ' +
-             (kind === "group" ? "scene" : "file") + ' and press Enter">'
+           ? '<label class="seek-wrap">seek <input type="number" class="seek" data-seek="' + id +
+             '" min="0" step="0.1" title="seek: type a second of this ' +
+             (kind === "group" ? "scene" : "file") + ' and press Enter"> s</label>'
            : "") +
       "</div>" +
       strip +
@@ -285,23 +299,32 @@ function runRow(id, depth, out) {
     keep, and a run keeps its row's element - and the kill button on it - from
     one poll to the next. Whether or not the row changed: this is the pane
     where it changes on every poll, for as long as a cue is playing. */
+//  Every row the pane draws, as the tree stands: none when nothing is running.
+function runRows() {
+  const out = [];
+  tree.ids("/godot/run/order")
+    .filter((id) => !tree.run(id, "parent", ""))
+    .forEach((id) => runRow(id, 0, out));
+  return out;
+}
+
 function renderRuns() {
   if (runsHold.active) return;
 
-  const all = tree.ids("/godot/run/order");
+  const out = runRows();
   const pane = el("runs");
 
-  if (!all.length) {
-    /*  §7's other phrase, for the state it names: the show is complete and all
-        is silent. It is an empty state, which §4.7 says is where these belong. */
+  /*  §7's other phrase, for the state it names: the show is complete and all is
+      silent. It is an empty state, which §4.7 says is where these belong - and
+      it is the rows drawn that decide it, not the order list, which can name a
+      run the tree has nothing about yet (BIX). */
+  if (!out.length) {
     reconcile(pane, [{ key: "empty", html:
       '<div class="empty"><div class="line">They do not move.</div>' +
       '<div class="under">Nothing is running.</div></div>' }]);
     return;
   }
 
-  const out = [];
-  all.filter((id) => !tree.run(id, "parent", "")).forEach((id) => runRow(id, 0, out));
   reconcile(pane, out);
 }
 
@@ -381,7 +404,8 @@ function pillsOf(id) {
 function pillsHtml(id, pills) {
   return '<div class="pills">' +
     pills.map((p) =>
-      '<button class="pill" data-pill="' + esc(p.cue) + '" data-pill-run="' + esc(id) + '" data-state="' + p.state + '">' +
+      '<button class="pill" data-pill="' + esc(p.cue) + '" data-pill-run="' + esc(id) + '" data-state="' + p.state + '"' +
+        ' title="click: skip this round · hold: skip until the group ends">' +
         (p.state === "playing" ? '<span class="mark" aria-hidden="true">\u25B6</span>' : "") +
         (p.number ? '<span class="number">' + esc(p.number) + "</span>" : "") +
         '<span class="text">' + esc(p.name) + "</span>" +
@@ -432,4 +456,4 @@ function runSheet(id, send) {
   return { title, sub: state, actions };
 }
 
-export { renderRuns, stateMark, offersSeek, sceneClock, runsHold, pillsOf, runSheet, spanOf, scrubbable, through };
+export { renderRuns, runRows, stateMark, offersSeek, sceneClock, runsHold, pillsOf, runSheet, spanOf, scrubbable, through };

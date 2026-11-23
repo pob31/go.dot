@@ -98,6 +98,12 @@ const panel = {
       this screen and these hands: somebody who has settled on the foot wants
       the foot in the next document too. */
   layout: "side",
+
+  /*  WHETHER THE STRIP SHOWS THE ENGINE'S OWN NUMBERS (namespace draft §144,
+      BIT): tick, revision, rate, lateness, GO to sound. Off by default - they
+      are for whoever looks after the machine, not for whoever runs the show -
+      and kept for this browser, as the inspector's place is. */
+  numbers: false,
 };
 
 /*  WHOSE FOLDS `folded` CURRENTLY HOLDS. Set by `adopt`, read by `save`, so
@@ -109,7 +115,7 @@ let path = "";
     that a caller which goes on to fill one in cannot quietly change what the
     next fallback looks like. */
 function defaults() {
-  return { v: 1, panel: { details: false, layout: "side" }, shows: {} };
+  return { v: 1, panel: { details: false, layout: "side", numbers: false }, shows: {} };
 }
 
 /*  TEXT FROM STORAGE INTO A STORE, AND ANYTHING ELSE INTO THE DEFAULTS.
@@ -145,14 +151,15 @@ function decode(text) {
 
   const store = defaults();
 
-  /*  The panel is normalised rather than rejected: it has two fields with two
-      answers each, so there is always a sane reading of whatever is there, and
+  /*  The panel is normalised rather than rejected: each of its fields has two
+      answers, so there is always a sane reading of whatever is there, and
       a typo in a preference should not cost somebody their folds. */
   const said = raw.panel && typeof raw.panel === "object" && !Array.isArray(raw.panel)
                  ? raw.panel : {};
 
   store.panel.details = said.details === true;
   store.panel.layout = said.layout === "foot" ? "foot" : "side";
+  store.panel.numbers = said.numbers === true;
 
   for (const named of Object.keys(raw.shows)) {
     const one = raw.shows[named];
@@ -196,6 +203,7 @@ function trim(store, limit = showLimit) {
     panel: {
       details: said.details === true,
       layout: said.layout === "foot" ? "foot" : "side",
+      numbers: said.numbers === true,
     },
     shows: {},
   };
@@ -261,6 +269,7 @@ function save() {
 
   out.panel.details = panel.details === true;
   out.panel.layout = panel.layout === "foot" ? "foot" : "side";
+  out.panel.numbers = panel.numbers === true;
   out.shows[path] = { shut: Array.from(folded), seen: Date.now() };
 
   try {
@@ -291,6 +300,7 @@ function adopt(show) {
 
   panel.details = store.panel.details;
   panel.layout = store.panel.layout;
+  panel.numbers = store.panel.numbers;
 
   folded.clear();
 

@@ -97,6 +97,7 @@ beforeEach(() => {
   folded.clear();
   panel.details = false;
   panel.layout = "side";
+  panel.numbers = false;
 });
 
 test("anything that is not a store this page wrote is read as the defaults", () => {
@@ -123,7 +124,7 @@ test("anything that is not a store this page wrote is read as the defaults", () 
     const said = " (from " + String(text) + ")";
 
     assert.equal(store.v, 1, "a default store says which version it is" + said);
-    assert.deepEqual(store.panel, { details: false, layout: "side" },
+    assert.deepEqual(store.panel, { details: false, layout: "side", numbers: false },
                      "the panel falls back to the arrangement the page opens with" + said);
     assert.deepEqual(store.shows, {},
                      "and nothing is remembered about any show" + said);
@@ -133,7 +134,7 @@ test("anything that is not a store this page wrote is read as the defaults", () 
 test("a store this page wrote comes back exactly as it was written", () => {
   const store = {
     v: 1,
-    panel: { details: true, layout: "foot" },
+    panel: { details: true, layout: "foot", numbers: true },
     shows: {
       "/shows/one.godot": { shut: ["B3N8", "B3N8:header", "list:L1:persistent"], seen: 1699000000000 },
       "/shows/two.godot": { shut: [], seen: 1699000000001 },
@@ -147,7 +148,7 @@ test("a store this page wrote comes back exactly as it was written", () => {
   const back = decode(text);
 
   assert.equal(back.v, 1);
-  assert.deepEqual(back.panel, { details: true, layout: "foot" });
+  assert.deepEqual(back.panel, { details: true, layout: "foot", numbers: true });
   assert.deepEqual(Object.keys(back.shows).sort(), ["/shows/one.godot", "/shows/two.godot"]);
 
   /*  THE COLONS SURVIVE, which is the whole of it: a fold key is
@@ -168,7 +169,7 @@ test("trimming keeps the shows most recently looked at and throws the rest away"
       not by what happens to be first in the object. */
   const store = {
     v: 1,
-    panel: { details: false, layout: "side" },
+    panel: { details: false, layout: "side", numbers: false },
     shows: {
       "/a.godot": { shut: ["X"], seen: 500 },
       "/b.godot": { shut: ["X"], seen: 100 },
@@ -186,7 +187,7 @@ test("trimming keeps the shows most recently looked at and throws the rest away"
       preference, not a show's, and a reader who opens a thirteenth show has not
       asked for their inspector to jump back to the side. */
   assert.equal(kept.v, 1);
-  assert.deepEqual(kept.panel, { details: false, layout: "side" });
+  assert.deepEqual(kept.panel, { details: false, layout: "side", numbers: false });
 
   /*  Fewer shows than the limit: nothing goes. */
   assert.equal(Object.keys(trim(kept, 12).shows).length, 3);
@@ -255,12 +256,14 @@ test("where the inspector sits follows the reader from one show to the next", ()
 
   panel.layout = "foot";
   panel.details = true;
+  panel.numbers = true;
   save();
 
   /*  As a reload leaves them: the module's defaults, before anything is read
       back. */
   panel.layout = "side";
   panel.details = false;
+  panel.numbers = false;
 
   adopt("/shows/two.godot");
 
@@ -269,6 +272,7 @@ test("where the inspector sits follows the reader from one show to the next", ()
       replaced `panel` would leave five modules reading the old one. */
   assert.equal(panel.layout, "foot");
   assert.equal(panel.details, true);
+  assert.equal(panel.numbers, true, "and so do the engine's numbers on the strip (§144, BIT)");
 });
 
 test("a machine that has opened many shows does not carry all of them for ever", () => {

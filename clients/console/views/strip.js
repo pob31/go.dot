@@ -21,7 +21,7 @@ import { tree } from "../plumbing/tree.js";
 import { panel } from "../model/remember.js";
 import { goList } from "../model/lists.js";
 import { selection } from "../model/selection.js";
-import { el, esc } from "./common.js";
+import { el, esc, cueName, byFinger } from "./common.js";
 
 function renderStrip() {
   const show = tree.get("/godot/document/name", "");
@@ -233,6 +233,21 @@ function renderStrip() {
   el("s-rt").textContent = Number.isFinite(rt) ? String(rt) : "—";
   el("s-rt-wrap").className = rt > 0 ? "stat warn" : "stat";
 
+  /*  THE ENGINE'S NUMBERS ARE BEHIND A TAP (namespace draft §144, BIT), and the
+      button says what it would do. A broken promise is not: while rt is above
+      nought it is shown on its own, whatever the reader chose. */
+  const more = el("strip-more");
+  const broken = rt > 0;
+
+  more.hidden = !panel.numbers && !broken;
+  more.dataset.only = !panel.numbers && broken ? "rt" : "";
+
+  const toggle = el("strip-toggle");
+  const toggleWords = panel.numbers ? "less" : "details";
+
+  if (toggle.textContent !== toggleWords) toggle.textContent = toggleWords;
+  toggle.setAttribute("aria-expanded", panel.numbers ? "true" : "false");
+
   /*  EVERYTHING WRONG WITH THE SHOW THAT DID NOT STOP IT OPENING: the
       references that point at nothing, and the slot overlaps the edit-time
       analysis found. One per LINE, which no other list-shaped readout here is,
@@ -249,14 +264,19 @@ function renderStrip() {
   el("s-warn-wrap").title = warningLines.length ? warningLines.join("\n")
                                                 : "nothing to report";
 
-  /*  A LIST WITH NO POINTER, said where the buttons that do nothing are. */
-  //  The list GO acts on, never a cart (namespace draft 74).
+  /*  THE CUE GO WOULD FIRE, BY NAME, beside the arrows that move it, as the
+      desktop has it beside GO (namespace draft §144, BIU) - and on a list with
+      no pointer, said where the buttons that do nothing are. The list GO acts
+      on, never a cart (namespace draft 74). */
   const focused = goList();
   const parked = focused ? tree.get("/godot/list/" + focused + "/standby", "") : "";
-  const note = el("clear-note");
+  const standbyName = el("standby-name");
+  const standbySaid = !focused ? "—"
+    : parked ? cueName(parked)
+    : (byFinger() ? "none — tap" : "none — click") + " a row's left edge to park it";
 
-  note.hidden = !focused || !!parked;
-  note.textContent = note.hidden ? "" : "standby is clear — click a row's left edge to park it";
+  if (standbyName.textContent !== standbySaid) standbyName.textContent = standbySaid;
+  standbyName.dataset.none = focused && !parked ? "yes" : "no";
 
   /*  THE CLOCK MOVED AND THE SHOW FOLLOWED IT (PRD §6.2, 2026-09-28): said in
       the banner until something is refused after it, the desktop transport's

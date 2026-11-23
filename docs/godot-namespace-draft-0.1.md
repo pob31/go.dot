@@ -36686,3 +36686,70 @@ its number, and no cross*; the alignment grid's case, its circles added.
 drawn in rectangles needs one for every step of its diagonals: the grid is 29 bars of lines and about 3,400 with its
 circles at 1920 by 1080, 7,000 at 3840 by 2160. The native renderer draws it once and keeps it; the GL renderer, the
 fallback, clears each bar every frame while Grid is on - to watch on a machine that falls back to it.
+
+## 144. The web console tidied
+
+**Asked 2026-11-23** by the author, after asking whether the browser page is still there for an iPad: "Can we tidy
+it up a bit?" Offered four parts to tidy and a question about the panes' names, he took all four - the top bar, the
+button row, the running pane's leftovers, and the desktop's look - and kept Didi and Gogo with a plain line under
+each. The page only: no command, node or engine behaviour changes, and `gestures/commands.json` is as it was.
+
+- **BIT** **The strip keeps what somebody running the show reads.** Show, file, edits, audio and warnings, the write
+  error when there is one, and the link. Tick, revision, rate, late max, GO to sound and rt are behind a *details*
+  button at the right of the strip (*less* to put them away). Shown or not is this browser's answer, kept with the
+  inspector's place (`panel.numbers` in `model/remember.js`). Rt is the exception: any value above nought is a broken
+  promise (§4.2) and is shown whatever the button says. *(The author's pick; the button's words mine.)*
+- **BIU** **The button row laid out as the desktop's.** GO at the left, bigger, in the desktop's yellow (`--go`, no
+  longer the standby's amber). It turns grey while the audio does not run, with why under it - *paused*, *no clock*,
+  *no audio* - the desktop's `goLine` (§4.8). Grey is not disabled: GO still fires. Beside it come the standby's
+  arrows, *clear*, and the standby cue by number and name in amber under the word *STANDBY*. On a list with none it
+  says *none - tap a row's left edge to park it* (*click* under a mouse), which replaces the separate "standby is
+  clear" note. Pause, Doh! (the desktop's pink) and PANIC are pushed to the right edge. Undo, redo and save stay on
+  the row, smaller, because a tablet has no key for them, with what undo would unmake under them. The paused note
+  and the live changes' keep and discard turn up between the standby and the buttons when they want an answer.
+  *(The author's pick; the layout mine.)*
+- **BIV** **What is used once in a while is behind ⋯**: record, stop recording, revert, where the inspector sits, the
+  lock, and the keys listed. A tap anywhere else shuts the panel, and so does pressing one of its buttons. Esc does
+  not shut it: Esc is PANIC's everywhere on this page (§4.4). Every `data-cmd` button is still in `index.html`, so
+  `client_page.py`'s check against `commands.json` holds as it was. The keys hint left the row: what stays there is
+  *typing in a box - space still GO - esc gives the keyboard back*, said only while a box holds the keys. *(Mine.)*
+- **BIW** **The desktop's transport tokens on the page**: `--go`, `--go-ink`, `--go-idle`, `--doh`, `--paused` (Play's
+  blue, until now written as a bare hex twice) and `--gutter`, at `clients/desktop/theme.json`'s values. The page's
+  three greys stay its own. The theme file records why they differ: a browser and JUCE lay type down differently, and
+  the author read both (2026-09-18). *(Mine.)*
+- **BIX** **The running pane's leftovers.** A run the tree has nothing about - no `cue` node, so an id in an order
+  list a poll before or after its rows - is not drawn. It was a ring, a dash and an empty badge that looked like
+  something armed. The empty state now follows the rows drawn, not the order list. `tree.ids` trims before it tests,
+  so an order of spaces names nothing. A run with no kind yet gets no empty badge. The seek box says *seek … s* in
+  words, not a bare box holding an "s". A ▶ or ○ is only as wide as itself, so the name sits beside it; a run's
+  name moves once, when its mark becomes a word near its end. The touch hints are shown on a finger only: *tap a
+  run for its actions…* at the pane's head and *tap: skip this round…* under the pills. Under a mouse the same words
+  are each run's and each pill's tooltip. *(The author's pick; how mine.)*
+- **BIY** **The cue list in the desktop's dress (§97).**
+  - The pointer column has its own darker ground (`--gutter`), which runs through a section's head and end as
+    through its rows.
+  - Its head is ▶ in amber, with what the column is for as its tooltip.
+  - The standby row is washed amber with a 3 px amber rule, a ▶ (it was ▸) in the column, and its number in amber.
+    The word *standby* stays on the right.
+  - The heads read *CUE*, *PRE*, *DURATION*, *POST*. Each time head's tooltip names the attribute its boxes write
+    (`preWait`, `duration`, `postWait`), so the inspector's word is still found.
+  - What will not play - *missing*, *no voice* - is in the failure red, marked `data-problem`. A slot only waiting
+    (*pending*, *shares N*) keeps the cool blue.
+  - Not taken from the desktop: the "no standby: click in the ▶ column…" line across the name head. The button row
+    already says it, where the arrows that do nothing are.
+  - *(The author's pick; the details mine.)*
+- **BIZ** **Didi - cue list; Gogo - running.** The lines under the panes' names were "the cue list - the one that
+  remembers" and "running - present tense". They are now the two plain words. The inspector loses "what someone
+  decided", since its name is already plain. *(The author's.)*
+
+**Words that ship, the author's to confirm:** *details* / *less*; ⋯ and its tooltip *more: record, revert, lock,
+layout*; *STANDBY* over the standby's name; *none - tap (click) a row's left edge to park it*; *no audio*, *no
+clock*, *paused* under GO; *CUE*, *PRE*, *DURATION*, *POST*; *seek … s*; *cue list*, *running*; the tooltips *click
+for its actions · drag it far either way to kill it* and *click: skip this round · hold: skip until the group ends*.
+
+**Tests.** `tests/console`: the run rows (`runRows`, out of `renderRuns` so it can be asked without a page) with no
+row for a run with no rows, none for a blank order, no empty badge, and the seek box in words; a problem word
+marked and a pending one not; `panel.numbers` kept and read back. `blackbox.client` in both locales as it was.
+
+**Owed.** The iPad try that §75 still owes, now of this layout as well: GO and the stops a thumb's reach apart on a
+landscape tablet, ⋯'s panel under a finger, and the row folding on a portrait one.

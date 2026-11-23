@@ -349,6 +349,7 @@ and says afterwards what was built against what was drawn.
 | The operator's window | Show settings in sections; flags; what is missing, said where it is used | §39.14, §63, §64 |
 | Carts, keys and bindings | A list GO never meets, fired by triggers, keys and the remote's Cart tab; a MIDI control or an OSC address bound to any number, learned by moving it; the wheel over a number | §74 |
 | The web console by touch | The Android remote's gestures on the page: PANIC and Doh!, swipe to kill, a run's sheet, pills, the playhead, a cue's sheet, Pick several, numbers dragged and held | §75 |
+| The web console tidied | Laid out as the desktop: GO and the standby's name left, the stops right, the rest behind ⋯ and *details*; the pointer column, heads and colours of the desktop's list | §144 |
 | Pause / Play | Everything Go.dot runs held where it stands and let go - the graph not run, the tick standing - on the desktop, the console, a Stream Deck and the remote; F8 | §120 |
 | Several fingers on the window | The desk, a cart shown as pads, the send and fade mixers and the Stream Deck's picture take a finger per control; two hands are one Undo; a Mac reads a USB touch screen itself, through spatcore and a change of Go.dot's own to JUCE | §125 |
 

@@ -48,7 +48,8 @@ const tree = {
   /** A space-separated identifier list, as every `order` node spells one. */
   ids(address) {
     const text = this.get(address, "");
-    return typeof text === "string" && text.length ? text.trim().split(/\s+/) : [];
+    const trimmed = typeof text === "string" ? text.trim() : "";
+    return trimmed.length ? trimmed.split(/\s+/) : [];
   },
   cue(id, name, fallback) { return this.get("/godot/cue/" + id + "/" + name, fallback); },
   trigger(id, name, fallback) {

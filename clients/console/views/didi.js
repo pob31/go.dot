@@ -438,7 +438,7 @@ function cueRow(id, depth, section, rail, standby, out) {
              '">\u2191 ' + esc(cueName(preparedBy)) + "</span>"
            : "") +
         (problem
-           ? '<span class="flag warn" title="' + esc(problem.note) + '">' + esc(problem.word) + "</span>"
+           ? '<span data-problem="yes" class="flag warn" title="' + esc(problem.note) + '">' + esc(problem.word) + "</span>"
            : prepare && prepare !== "idle"
            ? '<span class="flag ' + (prepare === "pending" ? "warn" : "ready") +
              '" title="' + esc(prepareNote(prepare, kind)) + '">' + esc(prepare) + "</span>"

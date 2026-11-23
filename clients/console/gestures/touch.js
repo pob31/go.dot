@@ -48,7 +48,7 @@ function send(name, args) {
 }
 
 function interactive(target) {
-  return !!(target.closest && target.closest("button, input, select, textarea, a, [data-scrub]"));
+  return !!(target.closest && target.closest("button, input, label, select, textarea, a, [data-scrub]"));
 }
 
 document.addEventListener("pointerdown", (event) => {
