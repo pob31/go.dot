@@ -1709,6 +1709,18 @@ namespace wfg::client::model
             offer ("Sends, levels into the show's mix channels", "sends");
             offer ("Take, the loop its channel records", "take");
         }
+        else if (kind == "aux")
+        {
+            /*  AN AUX IS NO CUE (namespace draft §93) and the inspector never
+                shows one: these are the foot's own head buttons while the panel
+                stands on an aux (§147, BJL), `cueId` the aux. In the order its
+                sound goes, as a mic cue's - what is sent into it has no file
+                to draw. */
+            offer ("EQ, four bands and two filters", "eq");
+            offer ("Dyn, the dynamics: compressor, gate and key", "dyn");
+            offer ("FX, this aux's own plugins", "fx");
+            offer ("Sends, its level and where it goes", "sends");
+        }
         else if (kind == "fade")
         {
             /*  OFFERED EVEN THOUGH PICKING A FADE OPENS IT, because the row is

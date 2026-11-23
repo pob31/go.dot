@@ -3905,6 +3905,28 @@ namespace wfg::client
                                  : inspecting    ? ui::Shell::Panel::inspector
                                                  : ui::Shell::Panel::none);
 
+                /*  WHILE THE FOOT STANDS ON AN AUX ITS HEAD'S BUTTONS ARE THE
+                    AUX'S (namespace draft §147, BJL; the author, 2026-11-23:
+                    "I tried pressing FX on the Aux send level panel, but this
+                    took me back to the audio cue that was sending to the
+                    aux"). An aux is no cue and the inspector never shows one,
+                    so these were the picked cue's buttons under an aux's name
+                    and nothing in the window led to an aux's EQ, dynamics or
+                    plugins. The inspector's own bar stays the picked cue's,
+                    and is the way back. */
+                const auto footOnAux = shell->footSubject().isOpen()
+                                    && model::isAux (*snapshot, shell->footSubject().objectId);
+
+                if (footOnAux)
+                {
+                    std::vector<ui::FootPanelComponent::PanelDoor> doors;
+
+                    for (const auto& panel : model::openersFor ("aux", shell->footSubject().objectId))
+                        doors.push_back ({ panel.value, panel.label, panel.address });
+
+                    shell->foot.setPanels (std::move (doors));
+                }
+
                 if (inspecting && ! loadingToTime && ! browsingUndo)
                 {
                     const auto& inspection = inspectPick (*snapshot, reading.revision);
@@ -3920,7 +3942,8 @@ namespace wfg::client
                                            model::footCueForPick (*snapshot, model::subjectKindFor (panel.value),
                                                                   panel.address.empty() ? onCue : panel.address) });
 
-                    shell->foot.setPanels (std::move (doors));
+                    if (! footOnAux)
+                        shell->foot.setPanels (std::move (doors));
                 }
 
                 /*  WHICH PANEL IS OPEN AT THE FOOT, and on which cue, so the

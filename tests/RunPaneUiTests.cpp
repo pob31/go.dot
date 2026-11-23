@@ -7354,6 +7354,111 @@ TEST_CASE ("plugin windows: Edit... on an insert the cue has not got switches it
     folder.deleteRecursively();
 }
 
+namespace
+{
+    /*  AN AUX WITH A PLUGIN OF ITS OWN, and a media cue picked in the list
+        that cannot have it (namespace draft §147). */
+    std::shared_ptr<const wfg::tree::TreeSnapshot> auxEditorTree (bool withInsert)
+    {
+        std::vector<wfg::tree::Node> nodes;
+
+        const auto add = [&nodes] (const std::string& address, wfg::osc::Value value)
+        {
+            wfg::tree::Node node;
+            node.address = address;
+            node.values.push_back (std::move (value));
+            nodes.push_back (std::move (node));
+        };
+
+        using wfg::osc::Value;
+        add ("/godot/cue/CUE00001/kind", Value::string ("media"));
+        add ("/godot/cue/CUE00001/name", Value::string ("Steady"));
+        add ("/godot/cue/CUE00001/number", Value::string ("1"));
+
+        if (withInsert)
+        {
+            add ("/godot/fx/FX7N0002/cue", Value::string ("AUX00001"));
+            add ("/godot/fx/FX7N0002/enabled", Value::boolean (true));
+            add ("/godot/fx/FX7N0002/plugin", Value::string ("PG7N0002"));
+            add ("/godot/fx/FX7N0002/values", Value::string ("0:0.25"));
+        }
+
+        add ("/godot/plugin/PG7N0002/identifier", Value::string ("godot:test-gain"));
+        add ("/godot/plugin/PG7N0002/name", Value::string ("Test gain"));
+        add ("/godot/plugin/PG7N0002/paramCount", Value::string ("2"));
+
+        add ("/godot/slot/AUX00001/access", Value::string ("shared"));
+        add ("/godot/slot/AUX00001/kind", Value::string ("rackChannel"));
+        add ("/godot/slot/AUX00001/name", Value::string ("Reverb"));
+        add ("/godot/slot/AUX00001/plugins", Value::string ("PG7N0002"));
+        add ("/godot/slot/order", Value::string ("AUX00001"));
+
+        std::sort (nodes.begin(), nodes.end(), [] (const auto& a, const auto& b) { return a.address < b.address; });
+        return std::make_shared<const wfg::tree::TreeSnapshot> (1, nullptr, nullptr, std::move (nodes));
+    }
+}
+
+TEST_CASE ("plugin windows: an aux's plugin opens on the aux and stays on it while a cue is picked (namespace draft §147)")
+{
+    /*  The author, 2026-11-23, could not reach an aux's plugins. The window
+        followed the list's pick, which is never an aux: on the picked cue it
+        was greyed - and since §145 hidden - the moment it opened. */
+    const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                            .getChildFile ("wfg-editors-ui-" + juce::Uuid().toDashedString());
+
+    std::vector<std::pair<std::string, std::string>> written, made;
+
+    ui::PluginEditors::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& text) { written.emplace_back (address, text); };
+    actions.createFx = [&] (const std::string& cue, const std::string& plugin) { made.emplace_back (cue, plugin); };
+
+    {
+        ui::PluginEditors editors (actions, {}, folder.getFullPathName().toStdString(), launchOfThisBinary(), true);
+
+        SUBCASE ("open on the aux, a cue picked: a turn is one write on the aux's insert")
+        {
+            const auto tree = auxEditorTree (true);
+
+            editors.edit (*tree, "AUX00001", "PG7N0002", false);
+            auto* host = editors.hostFor ("PG7N0002");
+            REQUIRE (host != nullptr);
+            CHECK (made.empty());
+
+            REQUIRE (serviceUntil (editors, [&] { return host->status() == wfg::plugin::EditorHost::Status::open
+                                                         && host->subjectTaken() >= 1u
+                                                         && std::abs (host->currentValue (0) - 0.25f) < 1.0e-4f; }));
+
+            //  The pass after: the list's pick is the cue that sends into it.
+            const auto taken = host->subjectTaken();
+            editors.follow (*tree, "CUE00001", false);
+            juce::Thread::sleep (150);
+            editors.service();
+            CHECK (host->subjectTaken() == taken);
+
+            host->poke (0, 0.7f);
+            REQUIRE (serviceUntil (editors, [&] { return ! written.empty(); }));
+            REQUIRE (written.size() == 1);
+            CHECK (written[0] == std::pair<std::string, std::string> ("/godot/fx/FX7N0002/p0", "0.7"));
+        }
+
+        SUBCASE ("not switched in on the aux yet: Edit... switches it in, and opens with a cue picked")
+        {
+            editors.edit (*auxEditorTree (false), "AUX00001", "PG7N0002", false);
+            REQUIRE (made.size() == 1);
+            CHECK (made[0] == std::pair<std::string, std::string> ("AUX00001", "PG7N0002"));
+            CHECK (editors.hostFor ("PG7N0002") == nullptr);
+
+            editors.follow (*auxEditorTree (false), "CUE00001", false);
+            CHECK (editors.words().at ("PG7N0002").find ("switching it in") != std::string::npos);
+
+            editors.follow (*auxEditorTree (true), "CUE00001", false);
+            CHECK (editors.hostFor ("PG7N0002") != nullptr);
+        }
+    }
+
+    folder.deleteRecursively();
+}
+
 TEST_CASE ("new-cue bar: four buttons open their list under themselves, the rest make a cue")
 {
     /*  The author (2026-09-27): "+ group" and "+ transport" show a vertical

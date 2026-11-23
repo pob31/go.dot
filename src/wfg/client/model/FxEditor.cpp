@@ -35,9 +35,16 @@ namespace wfg::client::model
             return static_cast<int> (osc::parseDouble (text (snapshot, address)).value_or (0.0));
         }
 
-        /** "3 Steady", or whichever of the two the cue has, or its identifier. */
+        /*  "3 Steady", or whichever of the two the cue has, or its identifier.
+            An aux by its name, as the rack and the sends panel call it. */
         std::string labelOf (const tree::TreeSnapshot& snapshot, const std::string& cueId)
         {
+            if (isAux (snapshot, cueId))
+            {
+                const auto called = text (snapshot, "/godot/slot/" + cueId + "/name");
+                return called.empty() ? std::string ("this aux") : called;
+            }
+
             const auto base = "/godot/cue/" + cueId + "/";
             const auto number = text (snapshot, base + "number");
             const auto name = shownCueName (snapshot, cueId);
@@ -52,6 +59,43 @@ namespace wfg::client::model
         }
 
         constexpr const char* dash = " \xe2\x80\x94 ";
+    }
+
+    std::string auxCarrying (const tree::TreeSnapshot& snapshot, const std::string& pluginId)
+    {
+        for (const auto& id : words (text (snapshot, "/godot/slot/order")))
+        {
+            if (! isAux (snapshot, id))
+                continue;
+
+            const auto chain = words (text (snapshot, "/godot/slot/" + id + "/plugins"));
+
+            if (std::find (chain.begin(), chain.end(), pluginId) != chain.end())
+                return id;
+        }
+
+        return {};
+    }
+
+    std::string editorCueFor (const tree::TreeSnapshot& snapshot, const std::string& pickedCueId,
+                              const std::string& pluginId, const std::string& on)
+    {
+        const auto aux = auxCarrying (snapshot, pluginId);
+
+        if (aux.empty())
+            return pickedCueId;
+
+        /*  OPENED ON A FADE AIMED AT THAT AUX, it stays there while that fade
+            is the pick: what is turned is the fade's to move. It never goes
+            onto a fade by itself - a hand that opened it on the aux would be
+            writing a fade's moves without having asked to. */
+        const auto fade = "/godot/cue/" + on + "/";
+
+        if (! on.empty() && on == pickedCueId && text (snapshot, fade + "kind") == "fade"
+              && text (snapshot, fade + "aux") == aux)
+            return on;
+
+        return aux;
     }
 
     EditorSubject readEditorSubject (const tree::TreeSnapshot& snapshot, const std::string& pickedCueId,
@@ -84,7 +128,10 @@ namespace wfg::client::model
         if (text (snapshot, "/godot/cue/" + pickedCueId + "/kind") == "fade")
         {
             const auto fade = "/godot/cue/" + pickedCueId + "/";
-            const auto targetId = text (snapshot, fade + "target");
+
+            //  Aimed at an aux (namespace draft §93), the target is the aux, read where its rows are.
+            const auto onAux = text (snapshot, fade + "aux");
+            const auto targetId = ! onAux.empty() ? onAux : text (snapshot, fade + "target");
 
             if (! text (snapshot, fade + "dca").empty() || targetId.empty())
             {
@@ -100,7 +147,8 @@ namespace wfg::client::model
 
             if (found == inserts.end())
             {
-                out.reason = name + " is not on " + targetLabel + ": switch it in on that cue first.";
+                out.reason = name + " is not on " + targetLabel + ": switch it in on that "
+                               + (onAux.empty() ? "cue" : "aux") + " first.";
                 return out;
             }
 
@@ -135,9 +183,13 @@ namespace wfg::client::model
         }
 
         /*  A MEDIA CUE'S INSERTS, OR A MIC CUE'S (Phase 9b): the helper follows
-            the pick onto a mic cue whose channel carries this plugin. */
+            the pick onto a mic cue whose channel carries this plugin. OR AN
+            AUX'S OWN (namespace draft §147, BJM): its inserts are Fx children
+            of its channel, read as a cue's are. */
+        const auto aux = isAux (snapshot, pickedCueId);
+
         if (const auto kind = text (snapshot, "/godot/cue/" + pickedCueId + "/kind");
-            kind != "media" && kind != "mic")
+            ! aux && kind != "media" && kind != "mic")
         {
             out.reason = label + " plays nothing: inserts belong to media and mic cues.";
             return out;
@@ -154,8 +206,10 @@ namespace wfg::client::model
 
         out.greyed = false;
         out.fxId = found->second.fxId;
-        out.reason = found->second.enabled ? std::string ("in this cue's signal")
-                                           : std::string ("switched out on this cue - what you set is kept");
+        out.reason = aux ? (found->second.enabled ? std::string ("in this aux's signal")
+                                                  : std::string ("switched out on this aux - what you set is kept"))
+                         : found->second.enabled ? std::string ("in this cue's signal")
+                                                 : std::string ("switched out on this cue - what you set is kept");
 
         /*  EVERY PARAMETER, as many as the catalogue says - or as far as the
             cue's own row reaches, on a machine whose catalogue is late - with

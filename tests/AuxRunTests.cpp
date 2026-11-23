@@ -48,6 +48,7 @@
 #include <wfg/client/model/FadeMix.h>
 #include <wfg/client/model/Foot.h>
 #include <wfg/client/model/Fx.h>
+#include <wfg/client/model/FxEditor.h>
 #include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/Sends.h>
 #include <wfg/client/model/Text.h>
@@ -457,6 +458,81 @@ TEST_CASE ("aux window: an aux's EQ and inserts are read where its rows are")
     const auto fx = client::model::readFx (*snapshot, rig.auxId);
     CHECK (fx.notice.empty() == false);
     CHECK (fx.notice.find ("Reverb carries no plugins yet") != std::string::npos);
+}
+
+TEST_CASE ("aux window: an aux has panels of its own at the foot, and its plugin's window is on the aux whatever is picked (namespace draft §147)")
+{
+    /*  The author, 2026-11-23: "I tried pressing FX on the Aux send level
+        panel, but this took me back to the audio cue that was sending to the
+        aux". Nothing in the window led to an aux's EQ, dynamics or plugins:
+        the foot's head carried the picked cue's buttons, and a plugin's own
+        window knew media and mic cues only and followed the pick. */
+    Rig rig;
+
+    //  THE FOOT'S HEAD ON AN AUX: its EQ, dynamics, plugins and sends, each on the aux.
+    std::vector<std::string> doors;
+
+    for (const auto& door : client::model::openersFor ("aux", rig.auxId))
+    {
+        doors.push_back (door.value);
+        CHECK (door.address == rig.auxId);
+    }
+
+    CHECK (doors == std::vector<std::string> { "eq", "dyn", "fx", "sends" });
+
+    const auto plugin = rig.document.createChannelPlugin (rig.auxId, "Test gain", "godot:test-gain", "VST3", "").id;
+    REQUIRE_FALSE (plugin.empty());
+
+    const auto voice = rig.media ("voice");
+    const auto fade = rig.auxFade (-20, 2.0);
+
+    //  NOT SWITCHED IN YET: greyed, and where to switch it in - by the aux's name.
+    {
+        const auto snapshot = snapshotOf (rig);
+        const auto subject = client::model::readEditorSubject (*snapshot, rig.auxId, plugin);
+        CHECK (subject.greyed);
+        CHECK (subject.reason == "Test gain is not on Reverb: switch it in from the FX panel.");
+    }
+
+    const auto fx = rig.document.createFx (rig.auxId, plugin, {}).id;
+    REQUIRE_FALSE (fx.empty());
+    rig.set ("/godot/fx/" + fx + "/values", "0:0.25");
+
+    const auto snapshot = snapshotOf (rig);
+
+    //  THE AUX'S OWN INSERT, as a cue's is read: its values, and whose it is in words.
+    const auto subject = client::model::readEditorSubject (*snapshot, rig.auxId, plugin);
+    CHECK_FALSE (subject.greyed);
+    CHECK (subject.fxId == fx);
+    CHECK (subject.title == "Test gain \xe2\x80\x94 Reverb");
+    CHECK (subject.reason == "in this aux's signal");
+    REQUIRE_FALSE (subject.values.empty());
+    CHECK (subject.values[0] == doctest::Approx (0.25f));
+
+    /*  WHATEVER IS PICKED, the window is on the aux: no cue can have this
+        plugin, and on the picked cue it would be greyed - and hidden. */
+    CHECK (client::model::auxCarrying (*snapshot, plugin) == rig.auxId);
+    CHECK (client::model::editorCueFor (*snapshot, voice, plugin, rig.auxId) == rig.auxId);
+    CHECK (client::model::editorCueFor (*snapshot, {}, plugin, rig.auxId) == rig.auxId);
+    CHECK (client::model::readEditorSubject (*snapshot, voice, plugin).greyed);
+
+    /*  A FADE AIMED AT THE AUX has the window when it was opened on that fade,
+        while the fade is the pick - what is turned is the fade's to move - and
+        never by itself. */
+    CHECK (client::model::editorCueFor (*snapshot, fade, plugin, fade) == fade);
+    CHECK (client::model::editorCueFor (*snapshot, fade, plugin, rig.auxId) == rig.auxId);
+    CHECK (client::model::editorCueFor (*snapshot, voice, plugin, fade) == rig.auxId);
+
+    const auto onFade = client::model::readEditorSubject (*snapshot, fade, plugin);
+    CHECK_FALSE (onFade.greyed);
+    CHECK (onFade.fxId == client::model::fadeEditorId (fade));
+    CHECK (onFade.title.ends_with ("\xe2\x86\x92 Reverb"));
+    REQUIRE_FALSE (onFade.values.empty());
+    CHECK (onFade.values[0] == doctest::Approx (0.25f));
+
+    //  A plugin a cue can have follows the pick, as it always did.
+    CHECK (client::model::auxCarrying (*snapshot, "NOSUCH01").empty());
+    CHECK (client::model::editorCueFor (*snapshot, voice, "NOSUCH01", rig.auxId) == voice);
 }
 
 TEST_CASE ("aux window: a fade aimed at an aux draws the aux's level, and the inspector offers the auxes")

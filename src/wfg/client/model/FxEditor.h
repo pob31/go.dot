@@ -73,6 +73,20 @@ namespace wfg::client::model
     EditorSubject readEditorSubject (const tree::TreeSnapshot&, const std::string& pickedCueId,
                                      const std::string& pluginId);
 
+    /*  WHAT A PLUGIN'S WINDOW IS ON, GIVEN THE PICK (namespace draft §147,
+        BJM): the cue picked - except for a plugin of an aux's own chain, which
+        no cue can have. Its window stays on its aux whatever is picked in the
+        list, since following the pick would hide it the moment it opened.
+        `on` is what the window is on now: opened on a fade aimed at that aux
+        (§26: what is turned is the fade's to move), it stays on the fade
+        while that fade is the pick and goes back to the aux when the pick
+        moves; it never goes onto a fade by itself. */
+    std::string editorCueFor (const tree::TreeSnapshot&, const std::string& pickedCueId,
+                              const std::string& pluginId, const std::string& on);
+
+    /** The aux whose own chain carries this plugin, or empty: a plugin a cue can have. */
+    std::string auxCarrying (const tree::TreeSnapshot&, const std::string& pluginId);
+
     /*  THE IDENTIFIER A WINDOW ON A FADE IS HANDED in place of an Fx's
         (namespace draft §26): `fade:` and the fade, which no Fx can be - so
         what the window reports is routed to the fade's door and no state is

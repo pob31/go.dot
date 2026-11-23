@@ -36841,3 +36841,47 @@ window's copy of the plugin processes what the voice playing its cue was given` 
 
 **Owed.** The author's try with Likyū: the RTA on a media cue, on a mic cue through its rack channel, and keyed by
 an aux; the CPU of a window left open beside a show (one more run of the plugin while its window is shown).
+
+## 147. An aux's own panels, and its plugins' windows
+
+**Found 2026-11-23** by the author, asking how to edit the plugins on an aux: "I tried pressing FX on the Aux send
+level panel, but this took me back to the audio cue that was sending to the aux." *Show settings > Rack* edits what
+is on a chain and in what order, never a plugin's values. §93.6 says "the EQ and FX panels stand on an aux the same
+way", and the models did (`readEq`, `readDyn`, `readFx` on an aux), but nothing in the window opened them, and a
+plugin's own window did not know what an aux was. An aux's plugins could be added and never set.
+
+- **BJL** **While the foot stands on an aux, the buttons in its head are the aux's**: *EQ*, *Dyn*, *FX* and *Sends*,
+  each opening on that aux, lit as a cue's are and shut by a second press (`openersFor ("aux", id)`). They were the
+  picked cue's buttons (§94) under the aux's name, so *FX* left the aux for the cue. An aux is no cue and the
+  inspector never shows one: its bar stays the picked cue's, and is the way back, as picking another cue is. The way
+  in is unchanged: a click on the aux's name in a cue's Sends panel (§93.6). *(The author's, by what he pressed; the
+  four panels and their order mine - a mic cue's, without the take.)*
+- **BJM** **A plugin of an aux's own chain has its window on the aux, whatever is picked in the list**
+  (`model::editorCueFor`). The window followed the pick (2026-09-25), which is always a cue, and no cue can have an
+  aux's plugin: it would have been greyed the moment it opened, and since BJC hidden. `readEditorSubject` reads an
+  aux's insert as a cue's - its Fx children are published the same way (§93.4) - and titles the window with the
+  aux's name. *Edit...* on a plugin the aux has not switched in makes the insert first (`fx.create` with the aux,
+  which the document already took), as on a cue (§105). What §146 relays is found by the Fx, so the window's
+  analyser shows what is sent into the aux. *(Mine.)*
+- **BJN** **A fade aimed at an aux can open that plugin's window too**: `readEditorSubject` read a fade's `target`
+  and not its `aux`, and said such a fade moved no cue's sound. Opened from the fade's FX panel the window is on the
+  fade while that fade is the pick - what is turned is the fade's to move (§26, PH) - and goes back to the aux when
+  the pick moves. It never goes onto a fade by itself: a hand that opened it on the aux would be writing a fade's
+  moves without having asked to. Pressing *Edit...* again, on the aux or on the fade, puts an open window on what
+  was asked for. *(Mine.)*
+
+**Not changed.** A mic channel's plugins: their window is opened from a mic cue through that channel and follows
+the pick among such cues, as before. *Show settings > Rack* still has no *Edit...*: on a mic channel a plugin's
+values are each cue's, so there is no one place to edit; on an aux there is, and a door from the Rack tab onto the
+aux's panels is the author's to ask for.
+
+**Tests.** `aux window: an aux has panels of its own at the foot, and its plugin's window is on the aux whatever is
+picked…` (the doors, the subject on an aux and on a fade aimed at it, what the window is on for each pick),
+`plugin windows: an aux's plugin opens on the aux and stays on it while a cue is picked…` (the helper, headless: a
+turn is one write on the aux's insert; not switched in, it is made and then opens).
+
+**Words that ship, the author's to confirm:** the tooltips "FX, this aux's own plugins" and "Sends, its level and
+where it goes"; "in this aux's signal" under an open window; the guides' lines.
+
+**Owed.** The author's try: Likyū on an aux, set from the aux's FX panel, with a cue picked and sending into it; the
+D700's and the Stream Deck+'s pages on an aux (§93's own owed item, still).

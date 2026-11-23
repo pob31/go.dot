@@ -104,17 +104,25 @@ namespace wfg::client::ui
                                   || host->status() == plugin::EditorHost::Status::open)
                             && ! open[pluginId].leaving)
         {
+            /*  AND ON WHAT IT WAS ASKED FOR, where the pick does not say: an
+                aux's plugin, open on its aux, asked for from a fade aimed at
+                that aux - or the other way (namespace draft §147, BJM). */
+            if (auto& entry = open[pluginId]; ! model::auxCarrying (snapshot, pluginId).empty()
+                                                && entry.sent.cueId != cueId)
+                hand (entry, model::readEditorSubject (snapshot, cueId, pluginId));
+
             host->raise();
             return;
         }
 
         /*  NOT ON THIS CUE YET: the chain's first switch-in, and the window
             once the tree shows the insert - on a mic cue as on a media cue
-            (namespace draft §105), never on a fade, which switches nothing. */
+            (namespace draft §105), and on an aux (§147), never on a fade,
+            which switches nothing. */
         const auto subject = model::readEditorSubject (snapshot, cueId, pluginId);
         const auto kind = model::text (snapshot, "/godot/cue/" + cueId + "/kind");
 
-        if (subject.greyed && (kind == "media" || kind == "mic"))
+        if (subject.greyed && (kind == "media" || kind == "mic" || model::isAux (snapshot, cueId)))
         {
             if (actions.createFx)
                 actions.createFx (cueId, pluginId);
@@ -207,7 +215,8 @@ namespace wfg::client::ui
         {
             const auto late = juce::Time::getMillisecondCounter() - waiting->since > waitForCreateMs;
 
-            if (pickedCueId != waiting->cueId || late)
+            //  An aux's plugin waits on its aux, which the list's pick never is (§147).
+            if (model::editorCueFor (snapshot, pickedCueId, waiting->pluginId, waiting->cueId) != waiting->cueId || late)
             {
                 hush (waiting->pluginId);
                 waiting.reset();
@@ -226,7 +235,13 @@ namespace wfg::client::ui
             if (entry.host == nullptr || entry.leaving)
                 continue;
 
-            const auto subject = model::readEditorSubject (snapshot, pickedCueId, pluginId);
+            /*  ON THE PICK - or, for a plugin of an aux's own chain, on its aux
+                (namespace draft §147, BJM): no cue has it, so following the
+                pick hid its window the moment it opened. */
+            const auto subject = model::readEditorSubject (snapshot,
+                                                           model::editorCueFor (snapshot, pickedCueId, pluginId,
+                                                                                entry.sent.cueId),
+                                                           pluginId);
 
             if (! subject.sameSubjectAs (entry.sent))
             {
