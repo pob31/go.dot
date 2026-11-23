@@ -5351,7 +5351,7 @@ TEST_CASE ("key: the region carries a key after each lane's audio, and its versi
 {
     using namespace plugin::region;
 
-    CHECK (version == 7u);
+    CHECK (version >= 7u);          // the key came with 7; the tap (8) and the times (9) since
     CHECK (keyChannelsMax == 2);
     CHECK (laneStride (2, 64) >= sizeof (Lane) + (2 + keyChannelsMax) * 64 * sizeof (float));
 

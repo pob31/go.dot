@@ -127,7 +127,7 @@ namespace wfg
             plugin's window to hear: off whichever audio host is current,
             asked on the window's thread, which is the one an interface is
             changed on. Null lane when none holds it. */
-        std::function<plugin::region::TapView (const std::string& fxId)> pluginTap;
+        std::function<plugin::region::TapView (const std::string& fxId)> pluginTap {};
 
         /*  FILE > OPEN RECENT (namespace draft §106): the show folders this
             machine opened last, newest first, ten at most (app/RecentShows.h),
