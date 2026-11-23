@@ -21,7 +21,9 @@
 #include <algorithm>
 #include <cstddef>
 #include <limits>
+#include <random>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -188,6 +190,30 @@ namespace wfg::client::gesture
     Event createRackChannel (const std::string& channelClass)
     {
         return { origin::window, "channel.create", { osc::Value::string (channelClass) } };
+    }
+
+    Event createRackChannel (const std::string& channelClass, const std::string& id, const std::string& name)
+    {
+        return { origin::window, "channel.create",
+                 { osc::Value::string (channelClass), osc::Value::string (id), osc::Value::string (name) } };
+    }
+
+    std::string drawnIdentifier()
+    {
+        static constexpr std::string_view alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+        static constexpr std::string_view firsts = "ABCDFGHJKMNPQRSTVWXYZ";
+
+        std::random_device entropy;
+        std::uniform_int_distribution<std::size_t> anyOf (0, alphabet.size() - 1);
+        std::uniform_int_distribution<std::size_t> firstOf (0, firsts.size() - 1);
+
+        std::string drawn;
+        drawn += firsts[firstOf (entropy)];
+
+        while (drawn.size() < 8)
+            drawn += alphabet[anyOf (entropy)];
+
+        return drawn;
     }
 
     Event createAux (const std::string& channelClass)

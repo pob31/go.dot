@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <iterator>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -256,9 +257,27 @@ namespace wfg::client::model
                                      { { "input", input.id }, { "channel", channel.id } },
                                      section, false, false, {} });
             }
+
+            /*  AND THROUGH A NEW ONE (namespace draft §143, the author's pick
+                of 2026-11-23): a show with inputs and no rack offered nothing
+                but "No input yet", which read as no inputs at all. A channel
+                of each class the input fits, made named after the input and
+                the cue born on it - after the ones there are, since a channel
+                that exists may already have its chain. Wider inputs wait for
+                wider channels, as the lines above do. */
+            struct NewChannel { const char* channelClass; const char* word; };
+            static constexpr NewChannel forMono[] { { "mono", "mono" }, { "monoToStereo", "mono-to-stereo" } };
+            static constexpr NewChannel forStereo[] { { "stereo", "stereo" } };
+
+            if (input.width == 1 || input.width == 2)
+                for (const auto& made : input.width == 1 ? std::span<const NewChannel> (forMono)
+                                                         : std::span<const NewChannel> (forStereo))
+                    choices.push_back ({ std::string ("through a new ") + made.word + " rack channel",
+                                         "made with it, called " + input.name, "mic", { { "input", input.id } },
+                                         section, false, false, {}, made.channelClass });
         }
 
-        choices.push_back ({ "No input yet", "set it in the inspector", "mic", {}, {}, false, false, {} });
+        choices.push_back ({ "Choose the input later", "in the inspector", "mic", {}, {}, false, false, {} });
         return choices;
     }
 
@@ -630,10 +649,10 @@ namespace wfg::client::model
             named input is said, with where to make them. */
         if (readInputs (snapshot).empty())
             lines.push_back ({ MenuLine::Kind::note,
-                               "No named inputs yet: name them in Show settings, on the Inputs tab.", -1, false });
+                               "No inputs in this show yet: add them in Show settings, on the Inputs tab.", -1, false });
         else if (readRack (snapshot).channels.empty())
             lines.push_back ({ MenuLine::Kind::note,
-                               "No rack channels yet: add one in Show settings, on the Rack tab.", -1, false });
+                               "A mic cue plays its input through a rack channel: pick a new one below.", -1, false });
 
         std::vector<Choice> placed;
         std::vector<int> indices;

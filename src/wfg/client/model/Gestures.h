@@ -243,6 +243,17 @@ namespace wfg::client::gesture
         into its channel, and emptied with `object.delete`, as anything is. */
     Event createRackChannel (const std::string& channelClass);
 
+    /*  And one named, under an identifier the client drew, so the cue made
+        next can name it (§143: the mic cue menu's "a new rack channel"). */
+    Event createRackChannel (const std::string& channelClass, const std::string& id, const std::string& name);
+
+    /*  AN IDENTIFIER FOR SOMETHING A WINDOW MAKES AND NAMES IN ONE GO, in the
+        engine's form - eight characters of Crockford base32 - from the system's
+        randomness, its first a letter other than E so Pure Data never reads it
+        as a number. A clash with one the show holds is refused by the engine,
+        never written over. */
+    std::string drawnIdentifier();
+
     /*  AN AUX (namespace draft §93): a shared rack channel the cues send into,
         made in one step. */
     Event createAux (const std::string& channelClass);

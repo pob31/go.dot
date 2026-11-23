@@ -2725,7 +2725,8 @@ namespace wfg::doc
 
     EditResult ShowDocument::createRackChannel (const std::string& channelClass,
                                                 const std::string& id,
-                                                const std::string& access)
+                                                const std::string& access,
+                                                const std::string& name)
     {
         /*  ASKED HERE AS WELL AS AT THE DOOR, because this is the one create
             that changes the document before it reaches `insertObject`: the
@@ -2763,6 +2764,9 @@ namespace wfg::doc
 
         if (! access.empty())
             attributes.push_back ({ "access", access });
+
+        if (! name.empty())
+            attributes.push_back ({ "name", name });
 
         return insertObject (rack, endOfSequence, "Channel", id, attributes);
     }

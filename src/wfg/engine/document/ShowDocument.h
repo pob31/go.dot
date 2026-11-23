@@ -310,10 +310,13 @@ namespace wfg::doc
                                const std::string& id = {});
 
         /*  `access` empty is the row's default, an exclusive channel; `shared`
-            makes an aux (namespace draft §93) in the same step. */
+            makes an aux (namespace draft §93) in the same step. `name`, when
+            given, is written in the same step too (§143: a channel made from
+            the mic cue menu is named after its input). */
         EditResult createRackChannel (const std::string& channelClass,
                                       const std::string& id = {},
-                                      const std::string& access = {});
+                                      const std::string& access = {},
+                                      const std::string& name = {});
 
         /*  THE OUTPUT LAYOUT (PRD §3.9b, §6.2). A show's outputs are a list
             somebody wrote - so many mono direct outs, so many stereo mix

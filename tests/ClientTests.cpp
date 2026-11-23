@@ -4358,6 +4358,68 @@ TEST_CASE ("client: a cue born with its settings is one record, carrying the id 
     CHECK (creates[1].args[8].getString() == group);
 }
 
+TEST_CASE ("client: the mic list offers a new rack channel for each input, and its two commands make the channel and the cue on it")
+{
+    /*  The author, 2026-11-23: inputs and no rack offered nothing but "No input
+        yet", which read as no inputs at all. Each input now has a line through
+        a new channel of each class it fits, named after it. */
+    Rig rig ("mic");
+    const std::string listId = "MC000001";
+    auto tick = std::int64_t { 1 };
+
+    auto snapshot = rig.publish (tick);
+    const auto mics = model::micChoices (*snapshot);
+
+    std::vector<std::string> made;
+
+    for (const auto& choice : mics)
+        if (! choice.newRackChannel.empty())
+            made.push_back (choice.settings.at (0).second + " " + choice.newRackChannel);
+
+    //  The mono input: mono and mono-to-stereo; the stereo one: stereo.
+    CHECK (made == std::vector<std::string> { "MC000021 mono", "MC000021 monoToStereo", "MC000022 stereo" });
+
+    //  After the channels there are, under the input's heading; and the last line chooses later.
+    CHECK (mics.back().label == "Choose the input later");
+
+    const auto line = std::find_if (mics.begin(), mics.end(), [] (const model::Choice& choice)
+                                    { return choice.newRackChannel == "stereo"; });
+    REQUIRE (line != mics.end());
+    CHECK (line->label == "through a new stereo rack channel");
+
+    /*  The identifier the window draws for it: the engine's form, and never one
+        Pure Data reads as a number. */
+    for (auto draw = 0; draw < 200; ++draw)
+    {
+        const auto drawn = gesture::drawnIdentifier();
+        CHECK (doc::Id::isValid (drawn));
+        CHECK_FALSE (doc::IdRegistry::readAsNumberByPd (drawn));
+    }
+
+    //  What the client sends for it: the channel, named, then the cue on it.
+    const auto channel = gesture::drawnIdentifier();
+    const auto inputName = model::text (*snapshot, "/godot/input/MC000022/name");
+    REQUIRE_FALSE (inputName.empty());
+
+    const auto create = gesture::createRackChannel ("stereo", channel, inputName);
+    REQUIRE (rig.apply (tick++, create.origin, create.command, create.args).applied == 1);
+
+    auto settings = line->settings;
+    settings.emplace_back ("channel", channel);
+    const auto cue = gesture::createCue (listId, 0, "mic", "", settings);
+    rig.document.beginTransaction (cue.command, tick, cue.origin, {});
+    REQUIRE (rig.apply (tick++, cue.origin, cue.command, cue.args).applied == 1);
+
+    snapshot = rig.publish (tick);
+    CHECK (model::text (*snapshot, "/godot/slot/" + channel + "/name") == inputName);
+    CHECK (model::text (*snapshot, "/godot/slot/" + channel + "/class") == "stereo");
+
+    const auto mic = model::createdAt (model::text (*snapshot, "/godot/list/" + listId + "/order"), 0);
+    CHECK (model::text (*snapshot, "/godot/cue/" + mic + "/kind") == "mic");
+    CHECK (model::text (*snapshot, "/godot/cue/" + mic + "/input") == "MC000022");
+    CHECK (model::text (*snapshot, "/godot/cue/" + mic + "/channel") == channel);
+}
+
 TEST_CASE ("client: every line of the new-cue lists makes its cue, born with what the line says")
 {
     /*  The four lists (the author, 2026-09-27) held against the engine, the
@@ -4396,7 +4458,7 @@ TEST_CASE ("client: every line of the new-cue lists makes its cue, born with wha
     CHECK (through ("MC000021") == std::vector<std::string> { "MC000011" });   // mono into mono-to-stereo
     CHECK (through ("MC000022") == std::vector<std::string> { "CH000031" });   // stereo into stereo
     REQUIRE_FALSE (mics.empty());
-    CHECK (mics.back().settings.empty());                                       // "No input yet"
+    CHECK (mics.back().settings.empty());                                       // "Choose the input later"
     CHECK (mics.back().section.empty());
 
     const auto micLines = model::micMenu (*snapshot, mics, "at the end of the list");

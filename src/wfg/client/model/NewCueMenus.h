@@ -82,6 +82,12 @@ namespace wfg::client::model
             `cue.createFrom` rather than `cue.create`, and for a media cue the
             files chosen first. Empty for every other line. */
         std::string cueTemplate;
+
+        /*  MADE THROUGH A NEW RACK CHANNEL of this class (namespace draft §143,
+            the author's pick): "mono", "monoToStereo" or "stereo", made named
+            after the input just before the cue, which is born on it. Empty for
+            every other line. */
+        std::string newRackChannel {};
     };
 
     /*  THE SHOW'S CUE TEMPLATES (namespace draft §38), in the show's order:

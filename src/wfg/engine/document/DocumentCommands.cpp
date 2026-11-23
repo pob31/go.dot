@@ -705,14 +705,16 @@ namespace wfg::doc
         //----------------------------------------------------------------------
         registry.add ({ "channel.create",
                         "Adds a channel to the live rack: one position in the pool a cue's insert"
-                        " claims. Makes the rack if the show has none.",
-                        { { "class", 's', false }, { "id", 's', true } },
+                        " claims. Makes the rack if the show has none. A name, when given, is"
+                        " written with it.",
+                        { { "class", 's', false }, { "id", 's', true }, { "name", 's', true } },
                         true,
                         [&document] (CommandContext&, const std::vector<osc::Value>& args)
                         {
                             const auto id = args.size() > 1 ? args[1].getString() : std::string {};
+                            const auto name = args.size() > 2 ? args[2].getString() : std::string {};
 
-                            const auto edit = document.createRackChannel (args[0].getString(), id);
+                            const auto edit = document.createRackChannel (args[0].getString(), id, {}, name);
 
                             return fromEdit (edit, withId (args, 1, edit.id));
                         } });

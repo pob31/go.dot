@@ -36642,6 +36642,13 @@ circles in each corner (third of the height)?"
   window on the Mac, transient for it on Linux - kept above that window alone, minimised with it, moved with it when
   it is dragged, and under the questions that window asks. *(The author's; moving with the show's window is the
   system's way with an owned window, and mine to accept.)*
+- **BIQ** **The mic cue list offers a new rack channel for each input** (the author's pick, the same day, of the two
+  offered: "No input yet" was all a show with inputs and no rack offered, and it read as no inputs at all). Under each
+  input, after the channels it already fits, a line through a new channel of each class it fits - mono and
+  mono-to-stereo for a mono input, stereo for a stereo one - made named after the input, the cue born on it: two
+  commands, two steps of undo, the channel's identifier drawn by the window so the cue can name it. `channel.create`
+  takes an optional `name`, written in the same step. The last line reads "Choose the input later"; with no rack, a
+  note says a mic cue plays through one. *(The line's words mine.)*
 - **Getting started for a new show.** A show New has just made opens its settings on Getting started, which names every
   page there is to set in order. The launcher's empty show, opened only when its interface did not start, still opens on
   the Audio interface page. *(The author's.)*

@@ -78,6 +78,7 @@
 #include <wfg/client/model/DirectOuts.h>
 #include <wfg/client/model/OutputList.h>
 #include <wfg/client/model/Pair.h>
+#include <wfg/client/model/InputList.h>
 #include <wfg/client/model/Selection.h>
 #include <wfg/client/model/SettingsPages.h>
 #include <wfg/client/model/Surfaces.h>
@@ -6397,6 +6398,31 @@ namespace wfg::client
                     when the list opened, and placed after it. */
                 if (line.aimed && ! aim.empty())
                     bornWith.emplace_back ("target", aim);
+
+                /*  THROUGH A NEW RACK CHANNEL (namespace draft §143): the channel
+                    first, named after its input, under an identifier drawn here
+                    so the cue - the next command, applied after it - is born on
+                    it. Two steps of undo: the cue, then the channel. */
+                if (! line.newRackChannel.empty())
+                {
+                    if (refusedWhileLocked() || latest == nullptr)
+                        return;
+
+                    std::string input, called;
+
+                    for (const auto& [attribute, value] : bornWith)
+                        if (attribute == "input")
+                            input = value;
+
+                    //  Called as the line said: the input's name, or the one its row is shown by.
+                    for (const auto& row : model::readInputs (*latest))
+                        if (row.id == input)
+                            called = row.name;
+
+                    const auto channel = gesture::drawnIdentifier();
+                    send (gesture::createRackChannel (line.newRackChannel, channel, called));
+                    bornWith.emplace_back ("channel", channel);
+                }
 
                 createCue (line.kind, bornWith);
             }
