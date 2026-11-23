@@ -494,11 +494,19 @@ namespace wfg::cue
 
             const auto bus = document.findById (busId);
 
-            if (! bus.isValid() || ! bus.hasType ("Bus"))
+            /*  OR AN AUX (namespace draft §145): a shared rack channel takes a
+                send as a mix channel does, and the voices already play one
+                made live into it (Runner's `sendTargetNamed`). A surface's Send
+                page walks the auxes after the mixes, so a turn there under the
+                lock is a send made live like any other. */
+            const auto aux = bus.isValid() && bus.hasType ("Channel") && bus.getParent().hasType ("Rack")
+                               && bus["access"].toString() == "shared";
+
+            if (! bus.isValid() || ! (bus.hasType ("Bus") || aux))
                 return Outcome::rejected (reason::unknownId);
 
             //  A MIX CHANNEL, which is what a send is into; a direct out is a cue's own.
-            if (document.getAttribute ("/godot/bus/" + busId + "/kind").value_or (std::string {}) != "mix")
+            if (! aux && document.getAttribute ("/godot/bus/" + busId + "/kind").value_or (std::string {}) != "mix")
                 return Outcome::rejected (reason::badValue);
 
             //  ONE SEND PER BUS PER CUE, the show's rule, across the show and the layer together.

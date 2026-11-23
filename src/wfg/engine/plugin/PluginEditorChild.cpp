@@ -292,13 +292,18 @@ namespace wfg::plugin
         //======================================================================
         /*  WHAT THE WINDOW HOLDS: a line of Go.dot's own across the top -
             which cue this is, in words - and the plugin's editor under it.
-            When the pick has no such insert the editor is hidden and the
-            reason is drawn in its place: a native plugin view covers
-            anything drawn over it, so hiding is the one honest greying. The
+            When the pick has no such insert the whole window is hidden
+            (the author, 2026-11-23), so the editor itself stays shown. The
             colours are the default theme's panel and inks. */
         struct Holder final : juce::Component
         {
             static constexpr int bannerHeight = 28;
+
+            /*  HOW LONG A SIZE IS HELD after the window comes back: a plugin
+                asked again for its size as it is shown can answer with one
+                it had before the scale of the screen reached it (Likyū at
+                175 %, 2026-11-23), and the window shrank to it. */
+            static constexpr std::uint32_t keepMs = 500;
 
             Holder (std::unique_ptr<juce::AudioProcessorEditor> viewToUse, std::function<void (editor::Key)> onKeyToUse)
                 : view (std::move (viewToUse)), onKey (std::move (onKeyToUse))
@@ -313,9 +318,55 @@ namespace wfg::plugin
                 view.reset();
             }
 
+            juce::Point<int> fitSize() const
+            {
+                return { std::max (view->getWidth(), 420), view->getHeight() + bannerHeight };
+            }
+
             void fit()
             {
-                setSize (std::max (view->getWidth(), 420), view->getHeight() + bannerHeight);
+                const auto size = fitSize();
+                setSize (size.x, size.y);
+            }
+
+            /*  THE WINDOW AROUND THE PLUGIN AS IT REALLY IS, once a pass. A
+                plugin can change its own size while this lays it out - its
+                smallest size enforced against the window's, or its first
+                size read before the screen's scale reached it - and a change
+                made then is not followed as it happens (`laying`), which left
+                Likyū cut off at 175 % (2026-11-23). Never while a mouse button
+                is down: a hand dragging the window's edge is not fought. */
+            void settle (std::uint32_t now)
+            {
+                if (laying || juce::ModifierKeys::getCurrentModifiersRealtime().isAnyMouseButtonDown())
+                    return;
+
+                if (keepUntil != 0)
+                {
+                    if (static_cast<std::int32_t> (now - keepUntil) >= 0)
+                        keepUntil = 0;
+                    else if (view->getWidth() != kept.x || view->getHeight() != kept.y)
+                        view->setSize (kept.x, kept.y);
+                }
+
+                if (const auto size = fitSize(); getWidth() != size.x || getHeight() != size.y)
+                    fit();
+            }
+
+            /*  THE SIZE THE PLUGIN HAD BEFORE ITS WINDOW WAS HIDDEN, given back
+                as it is shown again - only to one whose size the hand sets. */
+            juce::Point<int> viewSize() const { return { view->getWidth(), view->getHeight() }; }
+
+            void keep (juce::Point<int> size, std::uint32_t now)
+            {
+                if (! view->isResizable() || size.x <= 0 || size.y <= 0)
+                    return;
+
+                kept = size;
+                keepUntil = (now + keepMs) | 1u;
+
+                if (view->getWidth() != kept.x || view->getHeight() != kept.y)
+                    view->setSize (kept.x, kept.y);
             }
 
             void childBoundsChanged (juce::Component* child) override
@@ -343,31 +394,15 @@ namespace wfg::plugin
                 g.setFont (14.0f);
                 g.drawText (heading, banner, juce::Justification::centredLeft, true);
 
-                if (greyed)
-                {
-                    g.setColour (juce::Colour (0xFFC6C1B9));
-                    g.setFont (15.0f);
-                    g.drawFittedText (reason, getLocalBounds().withTrimmedTop (bannerHeight).reduced (24),
-                                      juce::Justification::centred, 4);
-                    return;
-                }
-
                 g.setColour (juce::Colour (0xFFA9A49C));
                 g.setFont (12.0f);
                 g.drawText (reason, banner, juce::Justification::centredRight, true);
             }
 
-            void show (const juce::String& headingToUse, bool greyedToUse, const juce::String& reasonToUse)
+            void show (const juce::String& headingToUse, const juce::String& reasonToUse)
             {
                 heading = headingToUse;
                 reason = reasonToUse;
-
-                if (greyed != greyedToUse)
-                {
-                    greyed = greyedToUse;
-                    view->setVisible (! greyed);
-                }
-
                 repaint();
             }
 
@@ -394,8 +429,9 @@ namespace wfg::plugin
             std::unique_ptr<juce::AudioProcessorEditor> view;
             std::function<void (editor::Key)> onKey;
             juce::String heading, reason;
-            bool greyed = false;
             bool laying = false;
+            juce::Point<int> kept;
+            std::uint32_t keepUntil = 0;
         };
 
         struct EditorWindow final : juce::DocumentWindow
@@ -477,7 +513,7 @@ namespace wfg::plugin
                     });
 
                     holder = content.get();
-                    holder->show (name, false, {});
+                    holder->show (name, {});
                     window = std::make_unique<EditorWindow> (name, std::move (content), [this] { closePressed(); });
                 }
             }
@@ -546,6 +582,9 @@ namespace wfg::plugin
                 takeSubject();
                 reconcile();
                 place();
+
+                if (holder != nullptr)
+                    holder->settle (juce::Time::getMillisecondCounter());
 
                 /*  THE QUIET MOMENT: a second and a half after the hand last
                     moved and with no gesture open, the plugin's whole state
@@ -768,7 +807,7 @@ namespace wfg::plugin
                 region.subjectTaken.store (seq, std::memory_order_release);
 
                 if (holder != nullptr)
-                    holder->show (title, greyed, reason);
+                    holder->show (title, reason);
 
                 if (window != nullptr && title.isNotEmpty())
                     window->setName (title);
@@ -884,7 +923,13 @@ namespace wfg::plugin
                 Go.dot's window while Go.dot is the one in front - never
                 above everything, and never owned by Go.dot's window across
                 processes: on Windows that joins the two processes' input,
-                and a plugin window that hung would freeze the GO button. */
+                and a plugin window that hung would freeze the GO button.
+
+                HIDDEN WHILE THE PICK HAS NO SUCH INSERT, and shown again by
+                the next pick that has one, whatever the pick before it hid
+                (the author, 2026-11-23) - with the size it had, and without
+                taking the keys from Go.dot's window: only a first showing or
+                an Edit... brings it forward. */
             void place()
             {
                 if (window == nullptr)
@@ -897,10 +942,16 @@ namespace wfg::plugin
                 if (raised)
                     closedByHand = false;
 
-                const auto wanted = region.visible.load (std::memory_order_acquire) != 0 && ! closedByHand;
+                const auto wanted = region.visible.load (std::memory_order_acquire) != 0 && ! closedByHand && ! greyed;
 
                 if (wanted != window->isVisible())
+                {
+                    const auto size = holder != nullptr ? holder->viewSize() : juce::Point<int>();
                     window->setVisible (wanted);
+
+                    if (wanted && shownOnce && holder != nullptr)
+                        holder->keep (size, juce::Time::getMillisecondCounter());
+                }
 
                 if (wanted && (raised || ! shownOnce))
                 {

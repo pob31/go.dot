@@ -839,6 +839,36 @@ TEST_CASE ("stream deck bridge: the Send page makes a send a turn up asks for, a
     CHECK (desk.host.keys[5].dim);
 }
 
+TEST_CASE ("stream deck bridge: the Send page has the auxes after the mix channels, an unnamed one by its place (§145)")
+{
+    Desk desk ("plus");
+    desk.fake.text ("/godot/audio/mixes", "BUS00001");
+    desk.fake.text ("/godot/bus/BUS00001/name", "Reverb");
+    desk.fake.text ("/godot/slot/order", "RCH00001 RCH00002");
+    desk.fake.text ("/godot/slot/RCH00001/kind", "rackChannel");
+    desk.fake.text ("/godot/slot/RCH00001/access", "exclusive");
+    desk.fake.text ("/godot/slot/RCH00002/kind", "rackChannel");
+    desk.fake.text ("/godot/slot/RCH00002/access", "shared");
+    desk.fake.text ("/godot/surface/aim", "CUE00001");
+    desk.fake.text ("/godot/cue/CUE00001/sends", "");
+    desk.step();
+
+    CHECK (desk.host.zones[0].label == "Reverb");
+    CHECK (desk.host.zones[1].label == "Aux 2");
+    CHECK (desk.host.zones[1].value == "no send");
+    CHECK (desk.host.zones[2].label.empty());
+
+    surface::DeckInput turn;
+    turn.kind = surface::DeckInput::Kind::dialTurns;
+    turn.detents = { 0, 2, 0, 0 };
+    desk.host.input ("AL12K1A00001", turn);
+    desk.step();
+
+    REQUIRE (desk.submitted.size() == 1);
+    CHECK (desk.submitted[0].command == "send.create");
+    CHECK (desk.submitted[0].args[1].getString() == "RCH00002");
+}
+
 TEST_CASE ("stream deck bridge: the Send key walks the levels, the pans and the widths, and the key says which (§113)")
 {
     /*  Namespace draft §113, the author's pick (no key being free): Send

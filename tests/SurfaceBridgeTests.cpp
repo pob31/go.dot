@@ -4608,6 +4608,60 @@ TEST_CASE ("surface bridge: seventeen mix channels on sixteen rotaries are two S
     CHECK (desk.page().word == "eq");
 }
 
+TEST_CASE ("surface bridge: Send walks the auxes after the mix channels, in the rack's order, and makes a send into one (§145)")
+{
+    /*  The author, 2026-11-23: "Send on the MIDI controller, here a D700,
+        should also show the auxes." The desktop's Sends mixer's order: the
+        mixes, then every aux; a rack channel a mic cue holds is no aux, and an
+        aux nobody named is "Aux n" by its place among the rack's channels. */
+    PageDesk desk;
+    fakeSends (desk.fake, 2);
+    desk.fake.text ("/godot/slot/order", "INP00001 RCH00001 RCH00002 RCH00003");
+    desk.fake.text ("/godot/slot/INP00001/kind", "input");
+    desk.fake.text ("/godot/slot/RCH00001/kind", "rackChannel");
+    desk.fake.text ("/godot/slot/RCH00001/access", "shared");
+    desk.fake.text ("/godot/slot/RCH00001/name", "Verb");
+    desk.fake.text ("/godot/slot/RCH00002/kind", "rackChannel");
+    desk.fake.text ("/godot/slot/RCH00002/access", "exclusive");
+    desk.fake.text ("/godot/slot/RCH00003/kind", "rackChannel");
+    desk.fake.text ("/godot/slot/RCH00003/access", "shared");
+    desk.fake.text ("/godot/cue/CUE00001/sends", "SND00001 SND00002");
+    desk.fake.text ("/godot/send/SND00002/bus", "RCH00001");
+    desk.fake.number ("/godot/send/SND00002/level", -12.0);
+    desk.fake.flag ("/godot/send/SND00002/on", true);
+    desk.aimAt ("CUE00001");
+
+    desk.sink.sent.clear();
+    desk.press ("PORTBNK1", 0x29);
+    CHECK (desk.page().word == "send");
+    CHECK (desk.page().count == 1);
+    desk.settle();
+
+    const auto first = sentOn (desk.sink, "PORTBNK1");
+    CHECK (contains (first, surface::d700DisplayRow (0, 0, "Foldback")));
+    CHECK (contains (first, surface::d700DisplayRow (1, 0, "Mix 2")));
+    CHECK (contains (first, surface::d700DisplayRow (2, 0, "Verb")));
+    CHECK (contains (first, surface::d700DisplayRow (2, 1, "-12.0 dB")));
+    CHECK (contains (first, surface::d700DisplayRow (3, 0, "Aux 3")));
+    CHECK (contains (first, surface::d700DisplayRow (3, 1, "no send")));
+    CHECK (contains (first, surface::d700DisplayRow (4, 0, "")));
+
+    //  A turn on the aux's rotary rides its send; on the other, makes one.
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x12, 0x01 } } });
+    desk.press ("PORTBNK1", 0x23);
+
+    const auto up = surface::turned (surface::Law::level, -12.0, 1, -120.0, 12.0, surface::FaderLaw::d700);
+    CHECK (desk.writes() == std::vector<std::string> { "node.set /godot/send/SND00002/level " + tenths (up),
+                                                       "send.create CUE00001 RCH00003  0.0" });
+
+    //  The Pan page walks the same channels.
+    desk.press ("PORTBNK1", 0x29);
+    desk.press ("PORTBNK1", 0x2a);
+    CHECK (desk.page().word == "pan");
+    CHECK (desk.page().count == 1);
+}
+
 TEST_CASE ("surface bridge: the master dial turns the number last clicked, its click lets go and its double click rests")
 {
     /*  The author, 2026-09-26: "Can selecting a parameter in the inspector or

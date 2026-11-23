@@ -36753,3 +36753,49 @@ marked and a pending one not; `panel.numbers` kept and read back. `blackbox.clie
 
 **Owed.** The iPad try that §75 still owes, now of this layout as well: GO and the stops a thumb's reach apart on a
 landscape tablet, ⋯'s panel under a finger, and the row folding on a portrait one.
+
+## 145. The plugin window's size and its hiding, and the auxes on the surfaces' Send pages
+
+**Asked 2026-11-23** by the author, after Likyū ran keyed in Go.dot for the first time (an aux fed by a media cue as
+its key, a mic cue through a rack channel): five fixes. This section is the first four; the fifth, the analyser in
+the plugin's window, is §146.
+
+- **BJA** **The window fits the plugin as it really is.** At 175 % Likyū's window opened cut off: the helper read the
+  plugin's first size before the screen's scale had reached it (1400 × 820 physical taken as logical, 800 wide), and
+  the plugin then grew to its smallest size (1100 × 660) while the window was laying it out, where a change is not
+  followed as it happens. The opening is a race - one run in two came up right. The helper now fits the window round
+  the plugin's real size once a pass, never while a mouse button is down, so a hand on the window's edge is not
+  fought. When the race is lost Likyū opens at its smallest size, whole. *(Mine.)*
+- **BJB** **A size the hand gave is kept when the window comes back.** A plugin asked again for its size as it is
+  shown can answer with an older one. For half a second after the window is shown again, a resizable plugin is held
+  at the size it had when it was hidden. *(Mine.)*
+- **BJC** **The window hides on a cue without the plugin, and comes back on the next cue with it** - whatever the
+  pick before it did. It used to stay up, greyed, with the reason in its place. Coming back it does not take the keys
+  from Go.dot's window: only its first showing and an *Edit...* bring it forward. Its close button still closes it
+  for good, as before. *(The author's.)* Measured with Likyū at 175 %: opened at 1925 × 1155 in a 1925 × 1204 client
+  (the banner's 49 px), resized by hand to 2277 × 1388, kept across a pick with the insert, hidden on one without and
+  back at 2277 × 1388.
+- **BJD** **The Send pages list the auxes after the mix channels**, in the rack's order - the desktop Sends mixer's own
+  order - on a D700 or Mackie and on a Stream Deck+ alike; the Pan and Width pages walk the same list. An aux is named
+  by its name, or "Aux n" by its place among the rack's channels, the desktop's word for an unnamed one. A turn on an
+  aux the cue does not reach yet makes the send (`send.create` with the aux's identifier), as on a mix.
+  `SendTargets.h` holds the list for both bridges. *(The author's ask; the order and the name mine.)*
+- **BJE** **Under the lock that send is made live too.** The live layer's `send.create` refused anything but a mix
+  bus. It now takes an aux as well. The voices already played a live send into one (Runner's `sendTargetNamed`).
+  *(Mine.)*
+- **BJF** **The D700's page buttons were not at fault.** "Pressing EQ, FX, Send didn't show the next page." Recorded
+  on both of its ports: one momentary note per press, on the first port only (FX 0x2B, EQ 0x2C, Send 0x29). On a copy
+  of the author's show served with the D700, aimed at the Likyū mic cue, FX walked 1/18, 2/18, 3/18 and EQ went on to
+  the dynamics, the author watching. His session's log shows the aim moved from the mic cue to a media cue with no
+  insert at 30:03 and back at 35:57. On that cue FX is one "no FX" page and the next press leaves, and the EQ's
+  sixteen controls fit on one page of a D700's sixteen rotaries. No change. *(Mine; the author to confirm in his next
+  session.)*
+
+**Tests.** `surface bridge: Send walks the auxes after the mix channels…`, `stream deck bridge: the Send page has the
+auxes after the mix channels…`, `live: under the lock a new send into an aux is made live too…`. The window's size
+was measured by eye on Likyū (a helper test with `WFG_EDITOR_WINDOW` and `WFG_REAL_VST3`); a CI runner has no
+screen to measure it on.
+
+**Words that ship, the author's to confirm:** "Aux n" on a surface for an unnamed aux; the guides' lines.
+
+**Owed.** BJF confirmed in the author's own session; the window on a second screen with another scale.

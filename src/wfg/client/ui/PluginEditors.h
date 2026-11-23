@@ -25,7 +25,8 @@
     (EditorHost): Edit... on a box starts it, or brings its window forward if
     it is already up. Its window FOLLOWS THE PICK - once a pass, from the
     pass's own snapshot, every open window is told which cue it is about and
-    what that cue says - and it greys when the pick has no such insert.
+    what that cue says - and it hides while the pick has no such insert,
+    shown again by the next pick that has one (the author, 2026-11-23).
 
     WHAT THE WINDOW DOES IS AN ORDINARY WRITE. Each value the helper reports
     becomes one `node.set` on the cue's `p<n>`, with origin `window`, exactly

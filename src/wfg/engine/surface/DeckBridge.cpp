@@ -20,6 +20,7 @@
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/surface/DeckLayout.h>
 #include <wfg/engine/surface/FaderCurve.h>
+#include <wfg/engine/surface/SendTargets.h>
 #include <wfg/engine/surface/SurfacePages.h>
 #include <wfg/engine/surface/SurfaceProfile.h>
 #include <wfg/engine/tree/Node.h>
@@ -72,6 +73,12 @@ namespace wfg::surface
         {
             const auto* value = soleAt (snapshot, address);
             return value != nullptr && value->isString() ? value->getString() : noText();
+        }
+
+        /** The reader `sendTargetsOf` asks for, on one snapshot. */
+        auto rowText (const tree::TreeSnapshot* snapshot)
+        {
+            return [snapshot] (const std::string& address) -> const std::string& { return textAt (snapshot, address); };
         }
 
         std::optional<double> numberAt (const tree::TreeSnapshot* snapshot, const std::string& address)
@@ -258,6 +265,7 @@ namespace wfg::surface
         {
             int control = -1;
             std::string controlAt, switchAt, busId, busNameAt, paramAt, fxTextAt;
+            std::string busUnnamed;             // a send page: what the zone says of a channel with no name (§145)
             std::string placementAt, onAt;      // a pan or width page: the send's shape and its switch (§113)
         };
 
@@ -939,7 +947,7 @@ namespace wfg::surface
                 case Page::send:
                 case Page::pan:
                 case Page::width:
-                    return pageCount (static_cast<int> (wordsOf (textAt (at(), "/godot/audio/mixes")).size()), zones);
+                    return pageCount (static_cast<int> (sendTargetsOf (rowText (at())).size()), zones);
                 case Page::fx:   return std::max (1, static_cast<int> (fxPagesOf (aimNow()).size()));
                 case Page::dyn:  return deckDynPageCount;
                 case Page::loop:
@@ -1064,7 +1072,9 @@ namespace wfg::surface
         {
             const auto& aim = aimNow();
             const auto base = aim.empty() ? std::string {} : "/godot/cue/" + aim + "/";
-            const auto mixes = textAt (at(), "/godot/audio/mixes");
+            //  The mix channels, then the auxes (§145): one dial each.
+            const auto targets = isSendKind (deck.page) ? sendTargetsOf (rowText (at())) : std::vector<SendTarget> {};
+            const auto mixes = sendTargetsKey (targets);
             const auto sends = base.empty() ? std::string {} : textAt (at(), base + "sends");
             const auto fxPages = deck.page == Page::fx ? fxPagesOf (aim) : std::vector<FxPage> {};
 
@@ -1115,19 +1125,19 @@ namespace wfg::surface
                 for (const auto& sendId : wordsOf (sends))
                     sendInto[textAt (at(), "/godot/send/" + sendId + "/bus")] = sendId;
 
-                const auto channels = wordsOf (mixes);
-
                 for (int position = 0; position < zones; ++position)
                 {
                     const auto index = deck.pageIndex * zones + position;
 
-                    if (index >= static_cast<int> (channels.size()))
+                    if (index >= static_cast<int> (targets.size()))
                         break;
 
+                    const auto& target = targets[static_cast<std::size_t> (index)];
                     auto& control = deck.controls[static_cast<std::size_t> (position)];
                     control.control = index;
-                    control.busId = channels[static_cast<std::size_t> (index)];
-                    control.busNameAt = "/godot/bus/" + control.busId + "/name";
+                    control.busId = target.id;
+                    control.busNameAt = target.nameAt;
+                    control.busUnnamed = target.unnamed;
 
                     if (const auto found = sendInto.find (control.busId); found != sendInto.end())
                     {
@@ -1844,7 +1854,7 @@ namespace wfg::surface
                         zone.label = textAt (at(), control.busNameAt);
 
                         if (zone.label.empty())
-                            zone.label = control.busId;
+                            zone.label = control.busUnnamed;
 
                         zone.colour = cueColour;
 
@@ -1876,7 +1886,7 @@ namespace wfg::surface
                         zone.label = textAt (at(), control.busNameAt);
 
                         if (zone.label.empty())
-                            zone.label = control.busId;
+                            zone.label = control.busUnnamed;
 
                         zone.colour = cueColour;
                         const auto lean = deck.page == Page::pan;

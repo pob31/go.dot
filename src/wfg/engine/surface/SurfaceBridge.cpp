@@ -23,6 +23,7 @@
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/surface/FaderCurve.h>
 #include <wfg/engine/surface/McuCodec.h>
+#include <wfg/engine/surface/SendTargets.h>
 #include <wfg/engine/surface/SurfacePages.h>
 #include <wfg/engine/surface/SurfaceProfile.h>
 #include <wfg/engine/tree/DualCue.h>
@@ -151,12 +152,6 @@ namespace wfg::surface
             return address;
         }
 
-        const std::string& mixesAddress()
-        {
-            static const std::string address { "/godot/audio/mixes" };
-            return address;
-        }
-
         /*  WHAT A POSITION WITH NO STRIP SAYS on a D700's third row (namespace
             draft §30.5): the field's eight characters exactly. */
         constexpr std::string_view vacantWord = "no strip";
@@ -255,6 +250,12 @@ namespace wfg::surface
         {
             const auto* value = soleAt (snapshot, address);
             return value != nullptr && value->isString() ? value->getString() : noText();
+        }
+
+        /** The reader `sendTargetsOf` asks for, on one snapshot. */
+        auto rowText (const tree::TreeSnapshot* snapshot)
+        {
+            return [snapshot] (const std::string& address) -> const std::string& { return textAt (snapshot, address); };
         }
 
         std::optional<double> numberAt (const tree::TreeSnapshot* snapshot, const std::string& address)
@@ -608,8 +609,9 @@ namespace wfg::surface
             int control = -1;                       // which of the page's controls; -1 for none
             std::string controlAt;                  // its row on the aimed cue; on a Send page, empty for no send yet
             std::string switchAt;                   // the switch that takes its band, or its send, out
-            std::string busId;                      // a Send page: the mix channel under the rotary
+            std::string busId;                      // a Send page: the mix channel or aux under the rotary
             std::string busNameAt;
+            std::string busUnnamed;                 // what its screen says when it has no name
             std::string placementAt;                // a pan or width page: the send's shape, /godot/send/<id>/placement; empty for no send
             std::string onAt;                       // a pan or width page: the send's switch, for the dimming
             std::string paramAt;                    // an FX page: /godot/plugin/<id>/param/<n>/, its name, steps, default
@@ -1036,11 +1038,13 @@ namespace wfg::surface
             const auto* at = published.get();
             const auto base = aim.empty() ? std::string {} : "/godot/cue/" + aim + "/";
 
-            /*  A SEND PAGE IS ALSO MADE AGAIN when the show's mix channels or
-                the cue's sends change - a send made by the page's own turn, a
-                bus added - since which send is under which rotary moved. */
+            /*  A SEND PAGE IS ALSO MADE AGAIN when the show's mix channels,
+                its auxes (§145) or the cue's sends change - a send made by the
+                page's own turn, a bus or an aux added - since which send is
+                under which rotary moved. */
             const auto sendKind = isSendKind (paging.page);
-            const auto& mixes = sendKind ? textAt (at, mixesAddress()) : noText();
+            const auto targets = sendKind ? sendTargetsOf (rowText (at)) : std::vector<SendTarget> {};
+            const auto mixes = sendTargetsKey (targets);
             const auto sends = sendKind && ! base.empty() ? textAt (at, base + "sends") : std::string {};
             auto sendsKey = sends;
 
@@ -1109,6 +1113,7 @@ namespace wfg::surface
                 strip.switchAt.clear();
                 strip.busId.clear();
                 strip.busNameAt.clear();
+                strip.busUnnamed.clear();
                 strip.placementAt.clear();
                 strip.onAt.clear();
                 strip.paramAt.clear();
@@ -1133,7 +1138,7 @@ namespace wfg::surface
 
             if (isSendKind (paging.page))
             {
-                //  Which of the cue's sends goes into which mix channel.
+                //  Which of the cue's sends goes into which mix channel or aux.
                 std::map<std::string, std::string> sendInto;
 
                 for (const auto& sendId : wordsOf (sends))
@@ -1142,19 +1147,19 @@ namespace wfg::surface
                     sendInto[textAt (at, busAt)] = sendId;
                 }
 
-                const auto channels = wordsOf (mixes);
-
                 for (int position = 0; position < rotaries; ++position)
                 {
                     const auto index = paging.index * rotaries + position;
 
-                    if (index >= static_cast<int> (channels.size()))
+                    if (index >= static_cast<int> (targets.size()))
                         break;
 
+                    const auto& target = targets[static_cast<std::size_t> (index)];
                     auto& strip = box.strips[box.firstShown() + static_cast<std::size_t> (position)];
                     strip.control = index;
-                    strip.busId = channels[static_cast<std::size_t> (index)];
-                    strip.busNameAt = "/godot/bus/" + strip.busId + "/name";
+                    strip.busId = target.id;
+                    strip.busNameAt = target.nameAt;
+                    strip.busUnnamed = target.unnamed;
 
                     if (const auto found = sendInto.find (strip.busId); found != sendInto.end())
                     {
@@ -1283,14 +1288,14 @@ namespace wfg::surface
         }
 
         /*  How many controls a kind of page has: the EQ's sixteen, the
-            dynamics' fourteen, or one a mix channel of the show. */
+            dynamics' fourteen, or one a mix channel or aux of the show. */
         int controlsOf (Page page) const
         {
             if (page == Page::eq || page == Page::dyn)
                 return pageControlCount (page);
 
             if (isSendKind (page))
-                return static_cast<int> (wordsOf (textAt (published.get(), mixesAddress())).size());
+                return static_cast<int> (sendTargetsOf (rowText (published.get())).size());
 
             return 0;
         }
@@ -3784,7 +3789,7 @@ namespace wfg::surface
                 const auto out = ! present || ! flagAt (at, strip.switchAt);
                 const auto& busName = textAt (at, strip.busNameAt);
 
-                labelScratch.assign (busName.empty() ? std::string_view (strip.busId) : std::string_view (busName));
+                labelScratch.assign (busName.empty() ? std::string_view (strip.busUnnamed) : std::string_view (busName));
 
                 if (native && present && out)
                     labelScratch.append (" off");
@@ -3826,7 +3831,7 @@ namespace wfg::surface
                 const auto out = ! present || ! flagAt (at, strip.onAt);
                 const auto& busName = textAt (at, strip.busNameAt);
 
-                labelScratch.assign (busName.empty() ? std::string_view (strip.busId) : std::string_view (busName));
+                labelScratch.assign (busName.empty() ? std::string_view (strip.busUnnamed) : std::string_view (busName));
 
                 if (native && ! lean && ! strip.switchAt.empty() && flagAt (at, strip.switchAt))
                     labelScratch.append (" swap");

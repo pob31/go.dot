@@ -106,7 +106,8 @@ namespace wfg::plugin::editor
             empty for the preset (the author's decision of 2026-09-25). */
         char statePath[pathChars];
 
-        /** Nought: the window is the cue's. One: it is greyed, and `reason` says why. */
+        /*  Nought: the window is the cue's. One: it is greyed - the window
+            hidden, and a hand goes nowhere - and `reason` says why. */
         std::atomic<std::uint32_t> greyed;
 
         /** How many of `values` mean something; the plugin's parameter count. */

@@ -15084,6 +15084,35 @@ TEST_CASE ("live: a knob's set over several marks rides live under the lock, and
     CHECK (rig.saved (curve) == "50");
 }
 
+TEST_CASE ("live: under the lock a new send into an aux is made live too, as into a mix channel (§145)")
+{
+    /*  The author, 2026-11-23: a surface's Send page walks the auxes after
+        the mixes, and a turn on one under the lock makes a send live. */
+    LiveRig rig;
+    const auto aux = rig.document.createRackChannel ("stereo", {}, "shared").id;
+    const auto held = rig.document.createRackChannel ("mono").id;
+    REQUIRE_FALSE (aux.empty());
+
+    rig.lock (true);
+    const auto steps = rig.steps();
+
+    REQUIRE (rig.submitAndTick ("send.create", { osc::Value::string (rig.mediaId), osc::Value::string (aux),
+                                                 osc::Value::string (""), osc::Value::string ("-10") }).applied == 1);
+
+    const auto created = rig.live.createdSendsOf (rig.mediaId);
+    REQUIRE (created.size() == 1u);
+    CHECK (rig.published ("/godot/send/" + created.front() + "/bus") == aux);
+    CHECK (rig.published ("/godot/send/" + created.front() + "/live") == "true");
+    CHECK_FALSE (rig.document.findById (created.front()).isValid());
+    CHECK (rig.steps() == steps);
+
+    //  One per aux, as per bus; and a mic cue's own channel is no aux.
+    CHECK (rig.submitAndTick ("send.create", { osc::Value::string (rig.mediaId),
+                                               osc::Value::string (aux) }).rejected == 1);
+    CHECK (rig.submitAndTick ("send.create", { osc::Value::string (rig.mediaId),
+                                               osc::Value::string (held) }).rejected == 1);
+}
+
 TEST_CASE ("live: under the lock a send rides live, a new one is made live, and Keep makes it real")
 {
     LiveRig rig;
