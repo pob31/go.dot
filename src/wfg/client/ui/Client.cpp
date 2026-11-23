@@ -1625,7 +1625,7 @@ namespace wfg::client
                     /*  WHAT CROSSED THE WIRE (author, 2026-09-30): OSC and MIDI,
                         in and out, in a window of its own. */
                     menu.addSeparator();
-                    addMenuItem (menu, menuNetworkMonitor, "Network monitor...");
+                    addMenuItem (menu, menuNetworkMonitor, "Network and MIDI monitor...");
 
                     /*  AND WHAT THE CANVASES SHOW (author, 2026-10-07: "a video
                         monitor window for the canvases ... opened by an item in
@@ -6738,7 +6738,7 @@ namespace wfg::client
             std::unique_ptr<ui::TouchPanels> touchPanels;
             std::unique_ptr<ui::ShowSettingsWindow> audioSettings;
             std::unique_ptr<ui::SurfaceWindow> surfaces;    // Show > Surfaces..., made on first open
-            std::unique_ptr<ui::NetworkMonitorWindow> networkMonitor;   // Show > Network monitor...
+            std::unique_ptr<ui::NetworkMonitorWindow> networkMonitor;   // Show > Network and MIDI monitor...
             std::unique_ptr<ui::OscGridWindow> gridWindow;              // an OSC cue's messages as a grid (§80)
             std::optional<model::ColumnWidths> columnWidths;            // dragged on this computer (§98), read when first asked
             std::unique_ptr<ui::VideoMonitorWindow> videoMonitor;       // Show > Video monitor...

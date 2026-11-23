@@ -409,7 +409,7 @@ namespace wfg::client::ui
     };
 
     NetworkMonitorWindow::NetworkMonitorWindow (const model::Theme& theme, Actions actionsToUse)
-        : DocumentWindow ("Network monitor", Look::colour (theme, "ground"), juce::DocumentWindow::closeButton),
+        : DocumentWindow ("Network and MIDI monitor", Look::colour (theme, "ground"), juce::DocumentWindow::closeButton),
           actions (std::move (actionsToUse))
     {
         content = std::make_unique<Content> (theme, [this] (bool on) { if (actions.listen) actions.listen (on); });
