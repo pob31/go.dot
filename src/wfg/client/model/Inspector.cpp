@@ -1677,7 +1677,7 @@ namespace wfg::client::model
         {
             offer ("Waveform, in and out points", "waveform");
             offer ("EQ, four bands and two filters", "eq");
-            offer ("Dynamics, compressor, gate and key", "dyn");
+            offer ("Dyn, the dynamics: compressor, gate and key", "dyn");
             offer ("FX, the signal chain on this cue", "fx");
             offer ("Sends, levels into the show's mix channels", "sends");
         }
@@ -1704,7 +1704,7 @@ namespace wfg::client::model
                 on a sampling channel it has a take (Phase 9c), and the panel
                 says in its own notice when the channel records nothing. */
             offer ("EQ, four bands and two filters", "eq");
-            offer ("Dynamics, compressor, gate and key", "dyn");
+            offer ("Dyn, the dynamics: compressor, gate and key", "dyn");
             offer ("FX, its channel's plugins on this cue", "fx");
             offer ("Sends, levels into the show's mix channels", "sends");
             offer ("Take, the loop its channel records", "take");
@@ -1721,7 +1721,7 @@ namespace wfg::client::model
             if (aim == "media" || aim == "mic" || aim == "aux")
             {
                 offer ("EQ, the target's bands the fade moves", "eq");
-                offer ("Dynamics, the target's numbers the fade moves", "dyn");
+                offer ("Dyn, the target's dynamics the fade moves", "dyn");
                 offer ("FX, the target's plugin values the fade moves", "fx");
             }
             else if (aim == "video")

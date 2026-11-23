@@ -5058,7 +5058,7 @@ TEST_CASE ("client: the inspector offers the panels a kind actually has, and no 
     //  Its own dynamics after the EQ, as the sound goes through them (namespace draft §141).
     CHECK (onMedia[2].control == model::Control::opener);
     CHECK (onMedia[2].value == "dyn");
-    CHECK (onMedia[2].label.find ("Dynamics") != std::string::npos);
+    CHECK (onMedia[2].label.rfind ("Dyn,", 0) == 0);
     CHECK_FALSE (onMedia[2].writable);
     REQUIRE (onMedia.size() >= 4);
     CHECK (onMedia[3].control == model::Control::opener);
