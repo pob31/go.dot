@@ -40,6 +40,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <string>
 #include <vector>
 
 namespace wfg::video
@@ -272,7 +273,7 @@ namespace wfg::video
         return std::max (1, static_cast<int> (std::lround (std::min (std::max (1, width), std::max (1, height)) / 400.0)));
     }
 
-    inline std::vector<GridBar> gridBars (int width, int height)
+    inline std::vector<GridBar> gridLineBars (int width, int height)
     {
         width = std::max (1, width);
         height = std::max (1, height);
@@ -310,5 +311,192 @@ namespace wfg::video
         bars.push_back ({ 0, 0, std::min (line, width), height });
         bars.push_back ({ std::max (0, width - line), 0, std::min (line, width), height });
         return bars;
+    }
+
+    /*  A RING, `thick` pixels wide inside a circle of radius `outer` round
+        (cx, cy), as bars: one or two runs a row - the circle's width at that
+        row less the hole's - and a run that is the same as the row below's
+        grown upwards rather than drawn again, so the near-vertical sides of a
+        ring cost a bar per stretch rather than per row. Clipped to the
+        picture, which a full-height circle on a portrait canvas outgrows. */
+    inline void ringBars (std::vector<GridBar>& bars, double cx, double cy, double outer, int thick,
+                          int width, int height)
+    {
+        const auto inner = std::max (0.0, outer - thick);
+        std::vector<std::size_t> below, here;
+
+        const auto first = std::max (0, static_cast<int> (std::floor (cy - outer)));
+        const auto last = std::min (height, static_cast<int> (std::ceil (cy + outer)));
+
+        for (auto y = first; y < last; ++y)
+        {
+            const auto dy = std::abs (y + 0.5 - cy);
+            here.clear();
+
+            if (dy < outer)
+            {
+                const auto out = std::sqrt (outer * outer - dy * dy);
+                const auto in = dy < inner ? std::sqrt (inner * inner - dy * dy) : 0.0;
+
+                const auto run = [&] (double from, double to)
+                {
+                    const auto x0 = std::clamp (static_cast<int> (std::lround (from)), 0, width);
+                    const auto x1 = std::clamp (static_cast<int> (std::lround (to)), 0, width);
+
+                    if (x1 <= x0)
+                        return;
+
+                    for (const auto at : below)
+                        if (bars[at].x == x0 && bars[at].w == x1 - x0 && bars[at].y + bars[at].h == y)
+                        {
+                            ++bars[at].h;
+                            here.push_back (at);
+                            return;
+                        }
+
+                    here.push_back (bars.size());
+                    bars.push_back ({ x0, y, x1 - x0, 1 });
+                };
+
+                if (in > 0.0)
+                {
+                    run (cx - out, cx - in);
+                    run (cx + in, cx + out);
+                }
+                else
+                {
+                    run (cx - out, cx + out);
+                }
+            }
+
+            std::swap (below, here);
+        }
+    }
+
+    /*  AND ITS CIRCLES (the author, 2026-11-23): one the full height of the
+        picture, centred, and one a third of the height across in each corner,
+        touching its two edges - where a lens's distortion and a keystone show
+        first, and a circle drawn round shows it as a line drawn straight does
+        not. As thin as the grid's lines. */
+    inline std::vector<GridBar> gridCircleBars (int width, int height)
+    {
+        width = std::max (1, width);
+        height = std::max (1, height);
+
+        const auto line = gridLine (width, height);
+        const auto cornerRadius = height / 6.0;
+        std::vector<GridBar> bars;
+
+        ringBars (bars, width / 2.0, height / 2.0, height / 2.0, line, width, height);
+
+        for (const auto cx : { cornerRadius, width - cornerRadius })
+            for (const auto cy : { cornerRadius, height - cornerRadius })
+                ringBars (bars, cx, cy, cornerRadius, line, width, height);
+
+        return bars;
+    }
+
+    /*  The whole grid: its lines, then its circles. */
+    inline std::vector<GridBar> gridBars (int width, int height)
+    {
+        auto bars = gridLineBars (width, height);
+        const auto circles = gridCircleBars (width, height);
+        bars.insert (bars.end(), circles.begin(), circles.end());
+        return bars;
+    }
+
+    /*  WHICH PROJECTOR IS WHICH (`videoOutput.identify`; the author's round of
+        2026-11-23: "the identify and grid do double duty"). It was a white
+        frame and a white cross, which on a wall is most of an alignment grid;
+        now it is a thick frame in the output's own colour and the output's
+        number - its place in the Video tab's list, from one - large in the
+        middle, on a black plate so it reads over any picture, and no cross.
+        With every output identified at once, each wall says its own number,
+        and the colour is a second way to tell them apart, never the only one
+        (§4.8). Bars as the grid's are, x, y, w, h in pixels from the
+        bottom-left; both renderers draw these, so they agree. */
+    struct IdentifyPattern
+    {
+        float colour[3] {};
+        GridBar plate {};                   ///< black, under the digits
+        std::vector<GridBar> frame {};      ///< in the colour, round the edge
+        std::vector<GridBar> digits {};     ///< in the colour, on the plate
+    };
+
+    /*  Eight colours far apart on a wall, by the number, round again after
+        the eighth: red, green, blue, yellow, magenta, cyan, orange, violet. */
+    inline void identifyColour (int number, float (&rgb)[3]) noexcept
+    {
+        static constexpr float palette[8][3] { { 1.0f, 0.15f, 0.15f }, { 0.15f, 1.0f, 0.2f }, { 0.25f, 0.45f, 1.0f },
+                                               { 1.0f, 0.9f, 0.1f },  { 1.0f, 0.25f, 1.0f },  { 0.1f, 1.0f, 1.0f },
+                                               { 1.0f, 0.55f, 0.05f }, { 0.65f, 0.35f, 1.0f } };
+        const auto& picked = palette[static_cast<std::size_t> (((std::max (1, number) - 1) % 8))];
+        rgb[0] = picked[0];
+        rgb[1] = picked[1];
+        rgb[2] = picked[2];
+    }
+
+    inline IdentifyPattern identifyPattern (int number, int width, int height)
+    {
+        width = std::max (1, width);
+        height = std::max (1, height);
+        number = std::max (1, number);
+
+        IdentifyPattern out;
+        identifyColour (number, out.colour);
+
+        //  The frame: thick enough to find from the back of the room.
+        const auto edge = std::max (4, std::min (width, height) / 60);
+        out.frame.push_back ({ 0, 0, width, std::min (edge, height) });
+        out.frame.push_back ({ 0, std::max (0, height - edge), width, std::min (edge, height) });
+        out.frame.push_back ({ 0, 0, std::min (edge, width), height });
+        out.frame.push_back ({ std::max (0, width - edge), 0, std::min (edge, width), height });
+
+        /*  THE NUMBER IN SEVEN SEGMENTS, a third of the height and never wider
+            than two thirds of the width: a digit is half as wide as it is tall,
+            its strokes an eighth of its height. */
+        const auto text = std::to_string (number);
+        const auto count = static_cast<int> (text.size());
+        auto tall = height / 3;
+        tall = std::min (tall, 8 * width / (3 * (3 * count - 1)));  // count digits and their gaps in two thirds
+        tall = std::max (8, tall);
+        const auto wide = tall / 2;
+        const auto stroke = std::max (2, tall / 8);
+        const auto gap = wide / 2;
+        const auto across = count * wide + (count - 1) * gap;
+        const auto left = (width - across) / 2;
+        const auto bottom = (height - tall) / 2;
+        const auto margin = 2 * stroke;
+
+        out.plate = { std::max (0, left - margin), std::max (0, bottom - margin),
+                      std::min (width, across + 2 * margin), std::min (height, tall + 2 * margin) };
+
+        //  Which of a, b, c, d, e, f, g each digit lights - top, then clockwise, then the middle.
+        static constexpr const char* lit[10] { "abcdef", "bc", "abdeg", "abcdg", "bcfg",
+                                               "acdfg", "acdefg", "abc", "abcdefg", "abcdfg" };
+
+        for (auto at = 0; at < count; ++at)
+        {
+            const auto x = left + at * (wide + gap);
+            const auto half = tall / 2;
+
+            for (const char* segment = lit[static_cast<std::size_t> (text[static_cast<std::size_t> (at)] - '0')];
+                 *segment != 0; ++segment)
+            {
+                switch (*segment)
+                {
+                    case 'a': out.digits.push_back ({ x, bottom + tall - stroke, wide, stroke }); break;
+                    case 'b': out.digits.push_back ({ x + wide - stroke, bottom + half, stroke, tall - half }); break;
+                    case 'c': out.digits.push_back ({ x + wide - stroke, bottom, stroke, half }); break;
+                    case 'd': out.digits.push_back ({ x, bottom, wide, stroke }); break;
+                    case 'e': out.digits.push_back ({ x, bottom, stroke, half }); break;
+                    case 'f': out.digits.push_back ({ x, bottom + half, stroke, tall - half }); break;
+                    case 'g': out.digits.push_back ({ x, bottom + half - stroke / 2, wide, stroke }); break;
+                    default: break;
+                }
+            }
+        }
+
+        return out;
     }
 }

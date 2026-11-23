@@ -1477,13 +1477,15 @@ namespace wfg::video
 
                 std::string canvasId;
                 bool testPattern = false;
+                int identifyNumber = 1;
                 const region::OutputReading* mine = nullptr;
 
-                for (const auto& output : config.outputs)
-                    if (output.id == outputId)
+                for (std::size_t at = 0; at < config.outputs.size(); ++at)
+                    if (const auto& output = config.outputs[at]; output.id == outputId)
                     {
                         canvasId = output.canvas;
                         testPattern = output.testPattern;
+                        identifyNumber = static_cast<int> (at) + 1;
                         mine = &output;
                     }
 
@@ -1558,7 +1560,7 @@ namespace wfg::video
                 }
 
                 if (testPattern)
-                    drawTestPattern (overhang.left, overhang.bottom, width, height);
+                    drawTestPattern (identifyNumber, overhang.left, overhang.bottom, width, height);
             }
 
             /*  ONE CANVAS'S LAYERS, bottom first, into whatever is bound - the
@@ -2179,30 +2181,37 @@ namespace wfg::video
                 pictureProgram.reset();
             }
 
-            /*  WHICH PROJECTOR IS WHICH: a white frame round the edge and a
-                cross through the middle, drawn by clearing thin rectangles -
-                no text, no geometry. The output's name is said on the Video
-                tab beside the switch that turns this on. */
-            static void drawTestPattern (int left, int bottom, int width, int height)
+            /*  WHICH PROJECTOR IS WHICH (Mapping.h's identifyPattern): a
+                thick frame in the output's colour and its number on a black
+                plate, drawn by clearing thin rectangles - no text, no
+                geometry. `number` is the output's place in the configuration,
+                from one, which is the Video tab's order. */
+            static void drawTestPattern (int number, int left, int bottom, int width, int height)
             {
                 using namespace juce::gl;
 
-                const auto line = std::max (2, std::min (width, height) / 200);
-                const auto bar = [left, bottom] (int x, int y, int w, int h)
+                const auto pattern = identifyPattern (number, width, height);
+                const auto bar = [left, bottom] (const GridBar& at)
                 {
-                    glScissor (left + x, bottom + y, w, h);
+                    glScissor (left + at.x, bottom + at.y, at.w, at.h);
                     glClear (GL_COLOR_BUFFER_BIT);
                 };
 
                 glEnable (GL_SCISSOR_TEST);
-                glClearColor (1.0f, 1.0f, 1.0f, 1.0f);
-                bar (0, 0, width, line);
-                bar (0, height - line, width, line);
-                bar (0, 0, line, height);
-                bar (width - line, 0, line, height);
-                bar (0, height / 2 - line / 2, width, line);
-                bar (width / 2 - line / 2, 0, line, height);
+                glClearColor (pattern.colour[0], pattern.colour[1], pattern.colour[2], 1.0f);
+
+                for (const auto& edge : pattern.frame)
+                    bar (edge);
+
+                glClearColor (0.0f, 0.0f, 0.0f, 1.0f);
+                bar (pattern.plate);
+                glClearColor (pattern.colour[0], pattern.colour[1], pattern.colour[2], 1.0f);
+
+                for (const auto& segment : pattern.digits)
+                    bar (segment);
+
                 glDisable (GL_SCISSOR_TEST);
+                glClearColor (0.0f, 0.0f, 0.0f, 1.0f);
             }
 
             /*  AN ALIGNMENT GRID (§68, ANX, Mapping.h's bars) into whatever is

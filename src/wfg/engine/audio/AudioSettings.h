@@ -57,6 +57,17 @@ namespace wfg::audio
     std::string saveAudioDefaults (const std::string& file, const AudioSettings&);
     bool loadAudioDefaults (const std::string& file, AudioSettings&);
 
+    /*  WHAT A NEW SHOW TAKES OF THE DEFAULTS: the interface, its devices and
+        its buffer - and NOT the two patches (the author's round of 2026-11-23:
+        a new show's Main L/R was found pushed down the interface). A patch says
+        where THAT show's outputs and inputs land; a new show has one output of
+        its own and none of the other's, so a patch carried over put its Main
+        wherever the other show's first output was, counted the show as patched
+        by hand from birth, and gave every output added after it the channels
+        past the highest the other show used. Empty, the new show follows its
+        own list until something plays or somebody patches it. */
+    AudioSettings forNewShow (AudioSettings defaults);
+
     struct AudioState;
     using SettingsRequest = std::function<void (const AudioSettings&, bool defaultsOnly)>;
     void registerAudioSettingsCommands (Engine&, doc::ShowDocument&, cue::Runner&, cue::RunTable&,

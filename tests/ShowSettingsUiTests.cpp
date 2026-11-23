@@ -18,6 +18,7 @@
 #include <wfg/client/model/Theme.h>
 #include <wfg/engine/audio/DeviceLayer.h>
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/tree/PresetTable.h>
@@ -229,6 +230,69 @@ TEST_CASE ("audio settings UI: the Outputs tab makes outputs, and a hand patch s
 
     REQUIRE (rig.sent.back().command == "audio.setup");
     CHECK_FALSE (rig.sent.back().args[6].getString().empty());
+}
+
+TEST_CASE ("audio settings UI: the output patch shows what the engine did with it until somebody draws their own")
+{
+    /*  THE AUTHOR'S ROUND OF 2026-11-23. The matrix's draft was filled once,
+        when the window was made: an output added at the head of a patched show
+        moved every channel's place in the engine's patch and not in the
+        matrix - and Apply, which sends a patched show's draft, would have
+        written the old picture back. */
+    Rig rig;
+    REQUIRE (doc::CanonicalXml::read (
+        "<Show><Lists><List id=\"7K2QM9X4\"/></Lists><Mounts/>"
+        "<Audio tracks=\"2\"><Bus id=\"J3MT5XYA\" name=\"Main\" kind=\"mix\" width=\"2\"/>"
+        "<Bus id=\"K4NV6ZB1\" firstChannel=\"2\" name=\"Foldback\" kind=\"mix\" width=\"2\"/></Audio></Show>",
+        rig.document).ok);
+
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+    tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("Output patch"));
+
+    const auto drawn = [&panel]
+    {
+        std::vector<int> rows;
+
+        if (auto* matrix = component<spatcore::ui::patch::PatchMatrixComponent> (panel))
+            for (auto row = 0; row < matrix->getNumWFSChannels(); ++row)
+                rows.push_back (matrix->getHardwareChannelForWFS (row));
+
+        return rows;
+    };
+
+    CHECK (drawn() == std::vector<int> { 0, 1, 2, 3 });
+
+    //  Patched, then a stereo mix put first: the two that were there keep their interface channels.
+    rig.document.beginTransaction ("node.set", 0, "test", {});
+    REQUIRE (rig.document.setAttribute ("/godot/audio/patchSettled", "true").ok);
+    REQUIRE (rig.document.createBus ("mix", 2, 0).ok);
+    REQUIRE (rig.document.getAttribute ("/godot/audio/outputPatch") == "4 5 0 1 2 3");
+
+    panel.refresh (*rig.publish());
+    CHECK (drawn() == std::vector<int> { 4, 5, 0, 1, 2, 3 });
+
+    //  And what Apply sends is that patch, not the one the window was made with.
+    auto* apply = button (panel, "Apply while stopped");
+    REQUIRE (apply != nullptr);
+    apply->onClick();
+    REQUIRE (rig.sent.back().command == "audio.setup");
+    CHECK (rig.sent.back().args[6].getString() == "4 5 0 1 2 3");
+
+    /*  A HAND EDIT IS A DRAFT, and the engine's patch is not drawn over it
+        until the Apply that sends it has landed. */
+    auto* matrix = component<spatcore::ui::patch::PatchMatrixComponent> (panel);
+    REQUIRE (matrix != nullptr);
+    REQUIRE (matrix->onBeforeUserPatchEdit != nullptr);
+    matrix->onBeforeUserPatchEdit();
+
+    rig.document.beginTransaction ("bus.create", 0, "test", {});
+    REQUIRE (rig.document.createBus ("direct", 1, 0).ok);
+    panel.refresh (*rig.publish());
+    CHECK (drawn() == std::vector<int> { 4, 5, 0, 1, 2, 3 });
 }
 
 TEST_CASE ("show settings UI: the Inputs tab makes named inputs, and a hand patch of the inputs settles them")

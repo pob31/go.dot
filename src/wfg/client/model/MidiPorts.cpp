@@ -31,6 +31,7 @@ namespace wfg::client::model
     namespace
     {
         constexpr std::string_view portPrefix = "/godot/port/";
+        constexpr std::string_view portOrderAddress = "/godot/port/order";
 
         /*  One name per line, which is how the engine publishes a list whose
             members contain spaces. An empty reading is no devices, not one
@@ -90,11 +91,19 @@ namespace wfg::client::model
             `readOutputs` do: `childrenOf` walks the whole tree per call and is
             banned for it. */
         std::map<std::string, PortRow> found;
+        std::string order;
 
         for (const auto* node : snapshot.under (portPrefix))
         {
             if (node->address.rfind (portPrefix, 0) != 0)
                 continue;
+
+            //  The show's order (the author, 2026-11-23): a port added is the last row.
+            if (node->address == portOrderAddress)
+            {
+                order = text (node);
+                continue;
+            }
 
             const auto rest = node->address.substr (portPrefix.size());
             const auto slash = rest.find ('/');
@@ -127,8 +136,19 @@ namespace wfg::client::model
             else if (name == "dohRollback")   row.dohRollback = text (node);
         }
 
+        /*  IN THE ORDER THE SHOW DECLARES THEM, and anything the order does
+            not name last rather than gone, as the video lists read theirs: an
+            identifier is random, so sorting by it put a new port anywhere -
+            usually above the others. */
         std::vector<PortRow> rows;
         rows.reserve (found.size());
+
+        for (const auto& id : words (order))
+            if (const auto at = found.find (id); at != found.end())
+            {
+                rows.push_back (std::move (at->second));
+                found.erase (at);
+            }
 
         for (auto& [id, row] : found)
             rows.push_back (std::move (row));

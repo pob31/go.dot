@@ -404,6 +404,69 @@ TEST_CASE ("a new show arrives able to play something")
     CHECK (fresh.getAttribute ("/godot/audio/outputPatch") == "");
 }
 
+TEST_CASE ("a new show takes the interface from this machine's defaults, and not their patches")
+{
+    /*  THE AUTHOR'S ROUND OF 2026-11-23: a new show, then mono and stereo mixes,
+        then direct outs - and Main L/R was found pushed down the interface.
+        The defaults had been taken from another show, and with them its
+        patch: here Main would have landed on interface 9-10, the show would
+        have counted as patched by hand, and every output added after it would
+        have gone past channel 10. */
+    audio::AudioSettings defaults;
+    defaults.enabled = true;
+    defaults.deviceType = "ASIO";
+    defaults.outputDevice = "MADIface USB";
+    defaults.bufferSize = 128;
+    defaults.inputPatch = "4 5";
+    defaults.outputPatch = "8 9 0 1 2 3 4 5 6 7";
+
+    const auto taken = audio::forNewShow (defaults);
+    CHECK (taken.deviceType == "ASIO");
+    CHECK (taken.outputDevice == "MADIface USB");
+    CHECK (taken.bufferSize == 128);
+    CHECK (taken.enabled);
+    CHECK (taken.inputPatch.empty());
+    CHECK (taken.outputPatch.empty());
+
+    //  Made as File - New makes it (Console's openWindow): the defaults, then the show.
+    doc::ShowDocument document;
+    document.beginTransaction ("new", 0, "test", {});
+    REQUIRE (document.configureAudio (taken).ok);
+    REQUIRE (document.startNewShow().ok);
+
+    std::vector<std::string> made;
+
+    for (const auto& child : document.root().getChildWithName ("Audio"))
+        if (child.hasType ("Bus"))
+            made.push_back (child["id"].toString().toStdString());
+
+    REQUIRE (made.size() == 1u);
+
+    const std::pair<const char*, int> adds[] { { "mix", 1 }, { "mix", 2 }, { "mix", 1 }, { "mix", 2 },
+                                               { "direct", 1 }, { "direct", 2 }, { "direct", 1 } };
+
+    for (const auto& [kind, width] : adds)
+    {
+        document.beginTransaction ("bus.create", 0, "test", {});
+        const auto bus = document.createBus (kind, width, -1);
+        REQUIRE (bus.ok);
+        made.push_back (bus.id);
+    }
+
+    //  Main on the first two channels, each output after it on the next ones, and no patch written.
+    auto expected = 0;
+
+    for (std::size_t at = 0; at < made.size(); ++at)
+    {
+        CAPTURE (at);
+        CHECK (document.getAttribute ("/godot/bus/" + made[at] + "/firstChannel") == std::to_string (expected));
+        expected += std::stoi (*document.getAttribute ("/godot/bus/" + made[at] + "/width"));
+    }
+
+    CHECK (document.getAttribute ("/godot/audio/outputPatch") == "");
+    CHECK (document.getAttribute ("/godot/audio/inputPatch") == "");
+}
+
 TEST_CASE ("how many cues can sound at once is a decision, so a client can state it")
 {
     /*  It was `access=r` with no command behind it, which is a decision nobody

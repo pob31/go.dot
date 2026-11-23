@@ -2774,6 +2774,14 @@ namespace wfg::tree
                     are what the machine found, so they come from the port
                     table and are never stored, exactly as a mount's `loaded`
                     does two branches up. */
+                /*  AND THEIR ORDER, as every other list publishes it (the
+                    author, 2026-11-23: an added port landed at the top of the
+                    MIDI tab, where its identifier happened to sort). */
+                for (const auto* row : doc::Schema::rowsForOwner ("ports"))
+                    if (row->name == "order")
+                        nodes.push_back (makeLeaf (std::string (godot) + "/port/order", *row,
+                                                   orderOf (container, "Port")));
+
                 for (const auto& port : container)
                 {
                     const auto id = port[idProperty].toString().toStdString();
@@ -4666,6 +4674,10 @@ namespace wfg::tree
 
             const auto name = std::string (row->name);
             std::string text;
+
+            //  The document's half, with the ports themselves (above).
+            if (name == "order")
+                continue;
 
             if (name == "inputs" && ports != nullptr)
                 text = midi::PortTable::namesOf (ports->inputs());

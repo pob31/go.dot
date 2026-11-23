@@ -117,6 +117,13 @@ namespace wfg::audio
             && readPatch (settings.inputPatch, patch) && readPatch (settings.outputPatch, patch);
     }
 
+    AudioSettings forNewShow (AudioSettings defaults)
+    {
+        defaults.inputPatch.clear();
+        defaults.outputPatch.clear();
+        return defaults;
+    }
+
     std::string saveAudioDefaults (const std::string& path, const AudioSettings& settings)
     {
         if (! validAudioSettings (settings)) return "Invalid audio defaults";

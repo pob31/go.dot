@@ -28,6 +28,7 @@
 #include <wfg/client/model/Video.h>
 #include <wfg/engine/surface/DeckPainter.h>
 #include <wfg/engine/video/Displays.h>
+#include <wfg/engine/video/Mapping.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 #include <wfg/engine/process/ScriptText.h>
 #include <spatcore/ui/patch/PatchMatrixComponent.h>
@@ -78,6 +79,36 @@ namespace wfg::client::ui
             }
         private:
             spatcore::io::TestSignalGenerator* draftGenerator;
+        };
+
+        /*  ONE MENU MOVED TO THE CELL CLICKED, gone again once its popup has
+            shut (the author's round of 2026-11-23: deleting MIDI ports left
+            menus standing on empty lines). The MIDI, Serial and Video tabs
+            each show one over the cell being chosen from and never put it
+            away, so it stayed drawn over that cell - and once the row under it
+            had been deleted, over nothing. A popup shut with or without a
+            choice says nothing to the menu but that it is no longer open, so
+            that is looked at, a few times a second while it is up; the choice
+            itself still arrives through `onChange`, after this. */
+        class CellChooser final : public juce::ComboBox,
+                                  private juce::Timer
+        {
+        public:
+            void showPopup() override
+            {
+                juce::ComboBox::showPopup();
+                startTimer (100);
+            }
+
+        private:
+            void timerCallback() override
+            {
+                if (isPopupActive())
+                    return;
+
+                stopTimer();
+                setVisible (false);
+            }
         };
         // These trees are LOCAL EDITOR DRAFTS, never a document or an engine
         // tree. spatcore edits them; Apply sends their values as one command.
@@ -154,6 +185,9 @@ namespace wfg::client::ui
                     mapping = audio::identityPatch (static_cast<int> (mapping.size()));
                     for (auto& channel : mapping) if (channel >= hardware) channel = -1;
                     touched = false;
+
+                    //  A draft until Apply sends it: the engine's patch is not mirrored over it.
+                    pending = true;
                     rebuild();
 
                     if (follow)
@@ -208,6 +242,27 @@ namespace wfg::client::ui
 
             /** Whether the show has stopped following its output list. */
             void setSettled (bool now) noexcept { settled = now; }
+
+            /*  WHAT THE ENGINE IS DOING, drawn while nobody is drawing a patch
+                of their own (the author's round of 2026-11-23). The draft was
+                filled once, when the window was made, and then only grown: an
+                output added at the head of a patched show, or one removed, had
+                the engine move every channel's place in the patch while the
+                matrix kept the old picture - and Apply, which sends a patched
+                show's draft, would have written that old picture back. Mirrored
+                every pass instead, until a hand edit or a 1:1 makes it a draft;
+                the Apply that sends the draft hands it back to the engine. */
+            void mirror (std::vector<int> engine)
+            {
+                if (touched || pending || engine == mapping)
+                    return;
+
+                mapping = std::move (engine);
+                rebuild();
+            }
+
+            /** The Apply that sent the draft has landed: the engine holds it now. */
+            void applied() noexcept { touched = false; pending = false; }
             void setHardware (int channels)
             {
                 if (hardware == channels) return;
@@ -396,7 +451,7 @@ namespace wfg::client::ui
             const model::Theme& theme;
             bool isInput;
             int hardware = 0;
-            bool touched = false, settled = false;
+            bool touched = false, settled = false, pending = false;
             std::vector<std::string> labels;
             std::vector<int> mapping;
             juce::ValueTree draft { "PatchDraft" }, channelsDraft { "ChannelsDraft" };
@@ -1859,7 +1914,7 @@ namespace wfg::client::ui
             juce::Rectangle<int> heading;
 
             juce::Label cellEditor;
-            juce::ComboBox chooser;
+            CellChooser chooser;
             std::string editing, choosing;
             bool choosingOutput = true;
             bool editingRollback = false;
@@ -2301,7 +2356,7 @@ namespace wfg::client::ui
             juce::Rectangle<int> heading;
 
             juce::Label cellEditor;
-            juce::ComboBox chooser;
+            CellChooser chooser;
             std::string editing, choosing;
             bool choosingWhere = true;
             std::vector<std::string> choices;
@@ -5731,7 +5786,7 @@ namespace wfg::client::ui
             Field editing = Field::none;
             std::string editingId;
 
-            juce::ComboBox chooser;
+            CellChooser chooser;
             Choice choosing = Choice::none;
             std::string choosingId;
             std::vector<std::string> choiceValues;
@@ -7204,6 +7259,27 @@ namespace wfg::client::ui
                 addAndMakeVisible (addOutput);
                 addAndMakeVisible (addInput);
                 addAndMakeVisible (addInsert);
+
+                /*  EVERY WALL AT ONCE (the author's round of 2026-11-23): each
+                    output shows its own number in its own colour, so one press
+                    says which projector is which. Tonight's, as each row's
+                    Identify is, and so under the lock too. */
+                addAndMakeVisible (identifyAll);
+                identifyAll.setTooltip ("Shows every output's number, in its own colour and a thick frame, on its"
+                                        " wall - the number of its row below. Press again to take them away."
+                                        " Tonight's, never saved.");
+                identifyAll.onClick = [this]
+                {
+                    if (! send || outputs.empty())
+                        return;
+
+                    const auto on = ! everyOutputIdentified();
+
+                    for (const auto& entry : outputs)
+                        if (entry.testPattern != on)
+                            send (gesture::identifyVideoOutput (entry.id, on));
+                };
+
                 addInput.setTooltip ("A video input: a picture another program sends - over NDI, or on this machine"
                                      " over Spout or Syphon - which a capture cue shows.");
                 addInsert.setTooltip ("A video insert: a cue's picture sent to another program and what comes back"
@@ -7319,6 +7395,10 @@ namespace wfg::client::ui
                 canvases = std::move (canvasRows);
                 outputs = std::move (outputRows);
 
+                //  What the button would do, in words: all up, it takes them away.
+                identifyAll.setButtonText (everyOutputIdentified() ? "Stop identifying" : "Identify all");
+                identifyAll.setEnabled (! outputs.empty());
+
                 /*  WITH THIS MACHINE'S OWN, as last looked for: the menu's
                     answer is a place in this list, so it is the same list on
                     every pass until the menu looks again. */
@@ -7371,6 +7451,7 @@ namespace wfg::client::ui
                 addOutput.setBounds (bar.removeFromLeft (128).reduced (3, 0));
                 addInput.setBounds (bar.removeFromLeft (128).reduced (3, 0));
                 addInsert.setBounds (bar.removeFromLeft (128).reduced (3, 0));
+                identifyAll.setBounds (bar.removeFromRight (150).reduced (3, 0));
 
                 summary.setBounds (area.removeFromBottom (40));
 
@@ -7626,10 +7707,27 @@ namespace wfg::client::ui
                     g.setColour (Look::colour (page.theme, entry.enabled ? "ink" : "ink-off"));
                     g.drawText (entry.enabled ? "ON" : "OFF", cells[3], juce::Justification::centredLeft);
 
-                    /*  IDENTIFY: the white frame and cross on that wall, said
-                        in words while it is up - tonight's, and never locked. */
-                    g.setColour (Look::colour (page.theme, entry.testPattern ? "ink" : "ink-off"));
-                    g.drawText (entry.testPattern ? "ON" : "OFF", cells[4], juce::Justification::centredLeft);
+                    /*  IDENTIFY: the number that wall shows - its row's, from
+                        one - and whether it is up, in words; while it is, a
+                        swatch of the frame's colour beside them, never the
+                        colour alone (§4.8). Tonight's, and never locked. */
+                    {
+                        auto cell = cells[4];
+
+                        if (entry.testPattern)
+                        {
+                            float rgb[3] {};
+                            video::identifyColour (row + 1, rgb);
+                            const auto swatch = cell.removeFromLeft (12).withSizeKeepingCentre (10, 10);
+                            g.setColour (juce::Colour::fromFloatRGBA (rgb[0], rgb[1], rgb[2], 1.0f));
+                            g.fillRect (swatch);
+                            cell.removeFromLeft (4);
+                        }
+
+                        g.setColour (Look::colour (page.theme, entry.testPattern ? "ink" : "ink-off"));
+                        g.drawText (juce::String (row + 1) + (entry.testPattern ? "  ON" : "  OFF"), cell,
+                                    juce::Justification::centredLeft);
+                    }
 
                     //  GRID (§68, ANX): the alignment grid on that wall, in words, as Identify is.
                     g.setColour (Look::colour (page.theme, entry.grid ? "ink" : "ink-off"));
@@ -8436,11 +8534,19 @@ namespace wfg::client::ui
             InsertModel insertModel;
             juce::ListBox canvasList, outputList, inputList, insertList;
             juce::TextButton addCanvas { "+ canvas" }, addOutput { "+ output" }, addInput { "+ input" }, addInsert { "+ insert" };
+            juce::TextButton identifyAll { "Identify all" };
+
+            bool everyOutputIdentified() const
+            {
+                return ! outputs.empty()
+                         && std::all_of (outputs.begin(), outputs.end(),
+                                         [] (const model::VideoOutputRow& entry) { return entry.testPattern; });
+            }
             juce::Label summary;
             juce::Rectangle<int> canvasHeading, outputHeading, inputHeading, insertHeading;
 
             juce::Label cellEditor;
-            juce::ComboBox chooser;
+            CellChooser chooser;
             std::string editingAddress, editingWas, choosingOutput;
             bool choosingDisplay = false;
 
@@ -10242,6 +10348,9 @@ namespace wfg::client::ui
                                   juce::String (model::text (snapshot, "/godot/audio/tracks")).getIntValue(),
                                   model::dcaChoices (dcas), model::dcaTwiceSentences (snapshot, rows, dcas));
 
+                outputs->mirror (enginePatch (model::text (snapshot, "/godot/audio/outputPatch"),
+                                              model::outputChannelCount (rows), true));
+
                 /*  Unconditional: `setListRows` reads the draft back before it
                     redraws, so a rename reaches the rows without disturbing a
                     patch somebody is halfway through. */
@@ -10260,6 +10369,9 @@ namespace wfg::client::ui
                 inputSettled = model::inputPatchHasSettled (snapshot);
                 inputs->setSettled (inputSettled);
                 inputList->show (rows, inputSettled, ! lockedShow);
+                inputs->mirror (enginePatch (model::text (snapshot, "/godot/audio/inputPatch"),
+                                             model::inputChannelCount (rows),
+                                             ! model::text (snapshot, "/godot/audio/inputDevice").empty()));
                 inputs->setListRows (model::inputChannelLabels (rows, 0), model::inputChannelCount (rows));
             }
             /*  THE DEVICES ARE THE DOCUMENT'S, so they are re-read every pass
@@ -10445,6 +10557,7 @@ namespace wfg::client::ui
                     if (! error.empty()) { saveAfterApply = false; defaultsAfterApply = false; }
                     if (error.empty())
                     {
+                        outputs->applied(); inputs->applied();
                         if (saveAfterApply) send ({ "window", "document.save", {} });
                         if (defaultsAfterApply) send ({ "window", "audio.defaults", {} });
                         status.setText (saveAfterApply ? "Audio settings applied. Saving show..." : "Audio settings applied. Save the show to keep them.", juce::dontSendNotification);
@@ -10644,6 +10757,29 @@ namespace wfg::client::ui
             buffer.setEditableText (true);
             buffer.setText (previous.isEmpty() ? "Device default" : previous, juce::dontSendNotification);
         }
+        /*  A PATCH AS THE ENGINE HAS IT, row by row, the way the window first
+            filled its draft: an empty one follows the list - the diagonal, or
+            nothing for inputs with no device to take them from - and every
+            row past what is written is disconnected. Never fewer rows than the
+            list needs, nor than two. */
+        static std::vector<int> enginePatch (const std::string& text, int channels, bool followsWhenEmpty)
+        {
+            std::vector<int> patch;
+
+            if (! audio::readPatch (text, patch))
+                patch.clear();
+
+            const auto rows = std::max (2, channels);
+
+            if (patch.empty())
+                patch = followsWhenEmpty ? audio::identityPatch (rows) : std::vector<int> (static_cast<std::size_t> (rows), -1);
+
+            if (patch.size() < static_cast<std::size_t> (rows))
+                patch.resize (static_cast<std::size_t> (rows), -1);
+
+            return patch;
+        }
+
         void applySettings()
         {
             outputs->stopTest();

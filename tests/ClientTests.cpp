@@ -11340,6 +11340,43 @@ TEST_CASE ("client: Doh!'s choice on an OSC or a MIDI cue says what its device s
     CHECK (devices[1].dohWord() == "Meh");
 }
 
+TEST_CASE ("client: MIDI ports read in the order the show declares them, a new one last")
+{
+    /*  The author's round of 2026-11-23: an added port landed at the top of the
+        MIDI tab. The rows were read in identifier order, and an identifier is
+        random; they are read in `/godot/port/order` now, as the video lists
+        read theirs. */
+    Rig rig;
+    std::int64_t tick = 1;
+    std::vector<std::string> made;
+
+    for (const auto* name : { "Lights", "The desk", "Keys", "Synth", "Foldback desk", "Clock" })
+    {
+        rig.apply (tick++, "window", "port.create", { osc::Value::string (name) });
+        const auto ports = model::readPorts (*rig.publish (tick++));
+        REQUIRE (ports.size() == made.size() + 1);
+        CHECK (ports.back().name == name);
+        made.push_back (ports.back().id);
+    }
+
+    const auto snapshot = rig.publish (tick++);
+    std::string order;
+
+    for (const auto& id : made)
+        order += (order.empty() ? "" : " ") + id;
+
+    CHECK (model::text (*snapshot, "/godot/port/order") == order);
+
+    //  And a port taken out leaves the others where they were.
+    rig.apply (tick++, "window", "object.delete", { osc::Value::string (made[2]) });
+    const auto after = model::readPorts (*rig.publish (tick++));
+    REQUIRE (after.size() == 5u);
+    CHECK (after[0].name == "Lights");
+    CHECK (after[1].name == "The desk");
+    CHECK (after[2].name == "Synth");
+    CHECK (after[4].name == "Clock");
+}
+
 TEST_CASE ("client: Doh!'s rollback row shows what the Doh would send - the device's command, else the previous command - and the engine agrees")
 {
     /*  The author, 2026-10-03 (OV-OX): "We could have a default for the device

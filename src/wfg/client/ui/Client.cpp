@@ -79,6 +79,7 @@
 #include <wfg/client/model/OutputList.h>
 #include <wfg/client/model/Pair.h>
 #include <wfg/client/model/Selection.h>
+#include <wfg/client/model/SettingsPages.h>
 #include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Theme.h>
@@ -3270,7 +3271,16 @@ namespace wfg::client
                     const auto sounding = ! model::text (*snapshot, "/godot/audio/device").empty();
                     const auto waited = (juce::Time::getCurrentTime() - firstPass).inSeconds();
 
-                    if (! host.emptyShowAtStart || (! sounding && waited > 4.0))
+                    /*  A NEW SHOW ON GETTING STARTED (the author, 2026-11-23),
+                        which names every page there is to set in its order; the
+                        empty show opened for want of an interface stays where it
+                        opens, nearest the interface it needs. */
+                    if (! host.emptyShowAtStart)
+                    {
+                        openedSettingsAtStart = true;
+                        openShowSettings (model::settingsPages::gettingStarted);
+                    }
+                    else if (! sounding && waited > 4.0)
                     {
                         openedSettingsAtStart = true;
                         openShowSettings();

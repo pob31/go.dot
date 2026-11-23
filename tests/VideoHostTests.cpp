@@ -2968,7 +2968,7 @@ TEST_CASE ("video mapping: the alignment grid - sixteen columns, square-ish rows
     const auto bars = video::gridBars (1920, 1080);
 
     //  Fifteen inner columns, eight inner rows, the two centre lines and the four edges.
-    CHECK (bars.size() == 15u + 8u + 2u + 4u);
+    CHECK (video::gridLineBars (1920, 1080).size() == 15u + 8u + 2u + 4u);
 
     const auto covered = [&bars] (int x, int y)
     {
@@ -2996,11 +2996,118 @@ TEST_CASE ("video mapping: the alignment grid - sixteen columns, square-ish rows
         CHECK (bar.y + bar.h <= 1080);
     }
 
-    CHECK (std::count_if (bars.begin(), bars.end(), [] (const video::GridBar& bar) { return bar.w == 6 || bar.h == 6; }) == 2);
+    const auto lines = video::gridLineBars (1920, 1080);
+    CHECK (std::count_if (lines.begin(), lines.end(), [] (const video::GridBar& bar) { return bar.w == 6 || bar.h == 6; }) == 2);
+
+    /*  AND ITS CIRCLES (the author, 2026-11-23): the full height, centred, and
+        a third of the height across in each corner, touching its edges. */
+    CHECK (covered (421, 540));         // the big one's left, 960 - 540
+    CHECK (covered (1498, 540));        // and its right
+    CHECK (covered (960, 1));           // its foot
+    CHECK (covered (960, 1078));        // its top
+    CHECK (covered (180, 358));         // the bottom-left corner's top, 2 x 1080 / 6
+    CHECK (covered (1740, 1078));       // the top-right corner's top
+    CHECK (covered (1918, 900));        // the top-right corner's right
+    CHECK_FALSE (covered (180, 180));   // the corner circle's middle
+    CHECK_FALSE (covered (700, 650));   // inside the big one, off every line
+
+    //  A run the same as the row below's is grown rather than drawn again.
+    CHECK (video::gridCircleBars (1920, 1080).size() < 4u * 1080u);
+
+    //  A portrait canvas: the full-height circle outgrows the width and is cut at its sides.
+    for (const auto& bar : video::gridBars (1080, 1920))
+    {
+        CHECK (bar.x >= 0);
+        CHECK (bar.x + bar.w <= 1080);
+        CHECK (bar.y + bar.h <= 1920);
+    }
 
     //  A tiny canvas still gets lines a pixel wide.
     for (const auto& bar : video::gridBars (16, 9))
         CHECK ((bar.w >= 1 && bar.h >= 1));
+}
+
+TEST_CASE ("video mapping: Identify is a frame in the output's colour and its number, and no cross (the author, 2026-11-23)")
+{
+    /*  "The identify and grid do double duty": a white frame and a white cross
+        was most of an alignment grid. Now each output says its own number in
+        its own colour, so every wall can be identified at once. */
+    const auto inside = [] (const video::GridBar& bar, int width, int height)
+    {
+        return bar.x >= 0 && bar.y >= 0 && bar.w > 0 && bar.h > 0 && bar.x + bar.w <= width && bar.y + bar.h <= height;
+    };
+
+    const auto covered = [] (const std::vector<video::GridBar>& bars, int x, int y)
+    {
+        return std::any_of (bars.begin(), bars.end(), [x, y] (const video::GridBar& bar)
+                            { return x >= bar.x && x < bar.x + bar.w && y >= bar.y && y < bar.y + bar.h; });
+    };
+
+    const auto one = video::identifyPattern (1, 1920, 1080);
+
+    //  A frame of four edges, thick enough to find from the back of the room.
+    REQUIRE (one.frame.size() == 4u);
+    CHECK (covered (one.frame, 0, 540));
+    CHECK (covered (one.frame, 1919, 540));
+    CHECK (covered (one.frame, 960, 0));
+    CHECK (covered (one.frame, 960, 1079));
+    CHECK (covered (one.frame, 17, 540));      // a sixtieth of the shorter side, 18 px at 1080
+    CHECK_FALSE (covered (one.frame, 200, 540));
+
+    //  A "1" is two segments, both on the right of the digit; no cross through the middle of the wall.
+    CHECK (one.digits.size() == 2u);
+    CHECK_FALSE (covered (one.digits, 100, 540));
+    CHECK_FALSE (covered (one.digits, 960, 100));
+
+    //  "12" is the two segments and the five of a 2; "8" all seven.
+    CHECK (video::identifyPattern (12, 1920, 1080).digits.size() == 7u);
+    CHECK (video::identifyPattern (8, 1920, 1080).digits.size() == 7u);
+
+    //  Every bar inside the picture, and the digits on their plate.
+    for (const auto number : { 1, 8, 12, 99, 128 })
+        for (const auto [width, height] : { std::pair { 1920, 1080 }, std::pair { 1080, 1920 }, std::pair { 64, 36 } })
+        {
+            CAPTURE (number);
+            CAPTURE (width);
+            const auto pattern = video::identifyPattern (number, width, height);
+
+            for (const auto& bar : pattern.frame)
+                CHECK (inside (bar, width, height));
+
+            CHECK (inside (pattern.plate, width, height));
+
+            for (const auto& bar : pattern.digits)
+            {
+                CHECK (bar.x >= pattern.plate.x);
+                CHECK (bar.y >= pattern.plate.y);
+                CHECK (bar.x + bar.w <= pattern.plate.x + pattern.plate.w);
+                CHECK (bar.y + bar.h <= pattern.plate.y + pattern.plate.h);
+            }
+        }
+
+    //  Eight colours, each its own, and the ninth output round again to the first's.
+    const auto apart = [] (const float (&a)[3], const float (&b)[3])
+    {
+        return std::abs (a[0] - b[0]) + std::abs (a[1] - b[1]) + std::abs (a[2] - b[2]);
+    };
+
+    float colours[8][3] {};
+
+    for (auto number = 1; number <= 8; ++number)
+    {
+        auto& rgb = colours[number - 1];
+        video::identifyColour (number, rgb);
+
+        //  Never white, which is the grid's.
+        CHECK ((rgb[0] < 0.99f || rgb[1] < 0.99f || rgb[2] < 0.99f));
+
+        for (auto before = 0; before < number - 1; ++before)
+            CHECK (apart (rgb, colours[before]) > 0.3f);
+    }
+
+    float ninth[3] {};
+    video::identifyColour (9, ninth);
+    CHECK (apart (ninth, colours[0]) < 1.0e-6f);
 }
 
 TEST_CASE ("video host: an output's mesh and CDL reach the region with its configuration")

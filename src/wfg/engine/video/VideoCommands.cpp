@@ -32,8 +32,9 @@ namespace wfg::video
             the main's are, so neither is sent to it, and neither is a step of
             undo - "tonight's, never saved" already said half of that. */
         registry.add (machineLocal ({ "videoOutput.identify",
-                        "Puts a video output's test pattern - a white frame and a cross - over what it shows,"
-                        " or takes it away: to find which projector is which. Tonight's, never saved.",
+                        "Puts a video output's test pattern - a thick frame in the output's own colour and its number,"
+                        " its place in the Video tab's list, large in the middle - over what it shows, or takes it"
+                        " away: to find which projector is which. Tonight's, never saved.",
                         { { "output", 's', false }, { "on", 'T', false } },
                         false,
                         [host] (CommandContext&, const std::vector<osc::Value>& args)
@@ -45,7 +46,8 @@ namespace wfg::video
                         } }));
 
         registry.add (machineLocal ({ "videoOutput.grid",
-                        "Puts a video output's alignment grid - white lines in its canvas's own space, bent"
+                        "Puts a video output's alignment grid - white lines in its canvas's own space, a circle"
+                        " its full height in the middle and one a third of its height in each corner, bent"
                         " through the same mesh as the picture - over what it shows, or takes it away: to set"
                         " its geometry by. Tonight's, never saved.",
                         { { "output", 's', false }, { "on", 'T', false } },

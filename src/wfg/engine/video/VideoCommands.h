@@ -20,7 +20,8 @@
     THE PICTURES' OWN COMMANDS (Phase 8a, namespace draft 35).
 
     `videoOutput.identify <output> <on>` puts an output's test pattern - a
-    white frame and a cross - over whatever it shows, or takes it away: how
+    thick frame in its own colour and its number on a black plate (Mapping.h's
+    identifyPattern) - over whatever it shows, or takes it away: how
     somebody at the wall finds which projector is which. Tonight's, never the
     show's (PRD §4.10), so it is no edit of the document and is taken under
     the show lock; a named command all the same (§4.11), logged, so a replay

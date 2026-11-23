@@ -10215,7 +10215,7 @@ namespace
                     wfg::audio::AudioSettings defaults;
                     if (wfg::audio::loadAudioDefaults (engineCacheFolder().getSiblingFile ("audio-defaults.xml")
                                                        .getFullPathName().toStdString(), defaults))
-                        fresh.configureAudio (defaults);
+                        fresh.configureAudio (wfg::audio::forNewShow (defaults));
 
                     /*  A LIST, AN OUTPUT AND SOME TRACKS: `startNewShow` says
                         why all three, and why a show with one of them and not

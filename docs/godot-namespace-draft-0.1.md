@@ -20889,8 +20889,8 @@ The implementer's, open to overruling:
 | `enabled` | `T` | rw | show | off, the output is not opened: a rehearsal room without the projector |
 | `bound` | `T` | r | none | a display is behind it tonight |
 | `problem` | `s` | r | none | why not, in a sentence |
-| `testPattern` | `T` | r | none | a white frame and a cross over whatever is up; `videoOutput.identify` switches it (§35.9) |
-| `grid` | `T` | r | none | the alignment grid, in the canvas's space and bent by the mesh, over whatever is up; `videoOutput.grid` switches it (§68.2, ANX) |
+| `testPattern` | `T` | r | none | a thick frame in the output's colour and its number over whatever is up (§143, BII); `videoOutput.identify` switches it (§35.9) |
+| `grid` | `T` | r | none | the alignment grid - lines, a full-height circle and four corner circles (§143, BIN) - in the canvas's space and bent by the mesh, over whatever is up; `videoOutput.grid` switches it (§68.2, ANX) |
 | `framesPresented`, `framesLate` | `h` | r | none | the child's own count, so pacing is measured, not judged by eye |
 | `presentJitter` | `d` ms | r | none | how far presentation strays from its due time |
 | `meshColumns`, `meshRows`, `mesh` | `i`, `i`, `d*` | rw | show | V.5: the bezier mesh in canvas coordinates 0..1 |
@@ -21024,7 +21024,7 @@ deeper than eight bits; a still with a duration; editing a mesh from the tablet.
   read-only: the test pattern is tonight's (§4.10), held by the host and never in the show, so it is no
   edit of the document and is taken under the show lock - finding a projector is not editing the show.
   The pattern is a white frame and a cross, with no text; the output's name is on the Video tab beside
-  the switch. A replay applies the record and draws nothing.
+  the switch. *(Since §143, BII: a thick frame in the output's own colour and its number, and no cross.)* A replay applies the record and draws nothing.
 - **The inspector calls `paint` "colour on canvas"** - the implementer's words, since the cue's own
   "colour", its tint in the list, is on the same panel.
 - **`--no-video-window`** runs the renderer with no window, for a machine with no screen and the
@@ -36588,3 +36588,57 @@ child, turns it down when the key is loud* (skipped unless asked for).
 
 **Owed.** BHZ. The same cases on the Mac farm with Likyu's AU, whose discrete layouts reach the 32-channel line BHX is
 about, and on the NUC with its LV2.
+
+## 143. Small fixes: Identify apart from the grid, the MIDI ports' order, menus left standing, a new show's patch, Getting started, the grid's circles
+
+**Asked 2026-11-23** by the author, as a round of small fixes: "the identify and grid do double duty - either have a
+different colour and identify all at once or drop identify"; "adding MIDI devices adds at the top of the list";
+"removing MIDI devices leaves some drop down menus on empty lines"; the automatic output patch pushing Main L/R back
+when mixes and direct outs were added after it, before the patch was set; then "on a new show, can the show settings
+open on the getting started tab?" and "can the video grid also show a large circle (full height) centred and 4 smaller
+circles in each corner (third of the height)?"
+
+- **BII** **Identify is kept, and no longer looks like the grid.** It was a white frame and a white cross - most of an
+  alignment grid. It is now a thick frame (a sixtieth of the shorter side) in the output's own colour and the output's
+  number, its row on the Video tab from one, large in the middle in seven segments on a black plate, and no cross
+  (`video/Mapping.h`, `identifyPattern`, drawn by both renderers). Eight colours, round again after the eighth. The
+  number carries the information and the colour is a second way to tell walls apart, never the only one (§4.8). The
+  Identify cell says the number and ON or OFF, with a swatch of the colour while it is up. *(The author's choice of
+  his two; the number, the palette and the sizes mine.)*
+- **BIJ** **Identify all**, a button on the Video tab: every output's pattern up at once, each wall saying its own
+  number; pressed again when all are up ("Stop identifying") it takes them away. One `videoOutput.identify` per output,
+  tonight's, and answered under the lock as each row's is. *(The author's.)*
+- **BIK** **The MIDI tab lists ports in the show's order.** The rows were read in identifier order, and an identifier
+  is random, so a new port landed anywhere - usually at the top. `/godot/port/order` is published as every other list's
+  order is (`ports,order` in the parameter table) and the rows read in it, a new port last. *(Mine.)*
+- **BIL** **A menu over a cell goes once its popup shuts.** The MIDI, Serial and Video tabs moved one menu to the cell
+  clicked and never put it away, so it stayed drawn over that cell - over nothing once the row was deleted. The menu
+  hides itself once its popup is no longer open (`CellChooser`); the Surfaces tab already did this by hand. *(Mine.)*
+- **BIM** **A new show takes the interface from this machine's defaults, and not their patches.** The cause of the
+  pushed-back Main: "Use as defaults for new shows" keeps a show's whole audio settings, patches included, and New
+  copied them into the show it made. The new show's Main then landed where the other show's first output was, the show
+  counted as patched by hand from birth, and each output added after it took the channels past the highest the other
+  show used. A patch says where one show's outputs land; a new show has one output and none of the other's, so it now
+  takes the interface, its devices and its buffer, and starts following its own list (`audio::forNewShow`). The
+  defaults file still keeps the patches; nothing reads them. *(Mine.)* With it, the Patch pages mirror the engine's
+  patch on every pass until a hand edit or 1:1 makes them a draft, and the Apply that sends the draft lands it back:
+  the draft was filled once when the window was made, so an output added at the head of a patched show moved every
+  channel in the engine's patch and not in the matrix, and Apply would have written the old picture back. *(Mine.)*
+- **Getting started for a new show.** A show New has just made opens its settings on Getting started, which names every
+  page there is to set in order. The launcher's empty show, opened only when its interface did not start, still opens on
+  the Audio interface page. *(The author's.)*
+- **BIN** **The grid's circles.** Beside its lines, the alignment grid draws a circle the full height of the canvas,
+  centred, and one a third of the height across in each corner, touching its two edges - where a lens's distortion and
+  a keystone show first. As thin as the grid's lines; a full-height circle on a portrait canvas is cut at the sides.
+  Bars as the lines are (`gridCircleBars`): a run per side of the ring per row, grown upwards while it does not move.
+  *(The author's; touching the edges, and the thickness, mine.)*
+
+**Tests**: *a new show takes the interface from this machine's defaults, and not their patches*; *the output patch
+shows what the engine did with it until somebody draws their own*; *MIDI ports read in the order the show declares
+them, a new one last*; *Identify is a frame in the output's colour and its number, and no cross*; the alignment grid's
+case, its circles added.
+
+**Owed.** A look at a wall: Identify all on the projectors, and the grid's circles through a warped mesh. A ring
+drawn in rectangles needs one for every step of its diagonals: the grid is 29 bars of lines and about 3,400 with its
+circles at 1920 by 1080, 7,000 at 3840 by 2160. The native renderer draws it once and keeps it; the GL renderer, the
+fallback, clears each bar every frame while Grid is on - to watch on a machine that falls back to it.

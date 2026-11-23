@@ -1350,29 +1350,47 @@ namespace wfg::video::render
             sg_draw (0, meshSteps * meshSteps * 6, 1);
         }
 
-        /*  WHICH PROJECTOR IS WHICH: a white frame round the edge and a cross
-            through the middle - thin fills, in the display's own pixels. */
-        void testPattern (int width, int height, sg_pixel_format format)
+        /*  WHICH PROJECTOR IS WHICH (Mapping.h's identifyPattern): a thick
+            frame in the output's colour and its number on a black plate - thin
+            fills, in the display's own pixels. `number` is its place in the
+            configuration's outputs, from one, which is the Video tab's order. */
+        void testPattern (int number, int width, int height, sg_pixel_format format)
         {
-            const auto line = std::max (2, std::min (width, height) / 200);
-            const auto bar = [&] (int x, int y, int w, int h)
+            const auto pattern = identifyPattern (number, width, height);
+            const auto bar = [&] (const GridBar& at, const float (&rgb)[3])
             {
                 const auto ndcX = [width] (int px) { return 2.0 * px / std::max (1, width) - 1.0; };
                 const auto ndcY = [height] (int py) { return 2.0 * py / std::max (1, height) - 1.0; };
-                apply (UB_video_corners, rectangle (ndcX (x), ndcY (y), ndcX (x + w), ndcY (y + h)));
+                apply (UB_video_corners, rectangle (ndcX (at.x), ndcY (at.y), ndcX (at.x + at.w), ndcY (at.y + at.h)));
                 video_fill_t fill {};
-                fill.colour[0] = fill.colour[1] = fill.colour[2] = fill.colour[3] = 1.0f;
+                fill.colour[0] = rgb[0];
+                fill.colour[1] = rgb[1];
+                fill.colour[2] = rgb[2];
+                fill.colour[3] = 1.0f;
                 apply (UB_video_fill, fill);
                 sg_draw (0, 4, 1);
             };
 
+            static constexpr float black[3] { 0.0f, 0.0f, 0.0f };
             sg_apply_pipeline (pipeline (Program::fill, Lay::none, format));
-            bar (0, 0, width, line);
-            bar (0, height - line, width, line);
-            bar (0, 0, line, height);
-            bar (width - line, 0, line, height);
-            bar (0, height / 2 - line / 2, width, line);
-            bar (width / 2 - line / 2, 0, line, height);
+
+            for (const auto& edge : pattern.frame)
+                bar (edge, pattern.colour);
+
+            bar (pattern.plate, black);
+
+            for (const auto& segment : pattern.digits)
+                bar (segment, pattern.colour);
+        }
+
+        /*  An output's place in the configuration, from one: the number Identify shows. */
+        int identifyNumber (const std::string& outputId) const
+        {
+            for (std::size_t at = 0; at < config.outputs.size(); ++at)
+                if (config.outputs[at].id == outputId)
+                    return static_cast<int> (at) + 1;
+
+            return 1;
         }
 
         /*  A CANVAS'S ALIGNMENT GRID (`videoOutput.grid`, namespace draft
@@ -1546,7 +1564,7 @@ namespace wfg::video::render
                 drawGrids (into.format, false);
 
             if (output.testPattern)
-                testPattern (width, height, into.format);
+                testPattern (identifyNumber (output.id), width, height, into.format);
 
             sg_end_pass();
         }
