@@ -372,6 +372,9 @@ namespace wfg::plugin
                 it is laid out, nought while its cue has no key. Set by a reset,
                 the lane parked. */
             int keyWidth = 0;
+
+            /** Whether its blocks are kept for a plugin's window (namespace draft §146). */
+            region::TapGate tap;
         };
 
         struct TestGainWorker
@@ -514,6 +517,13 @@ namespace wfg::plugin
                         const auto numChannels = std::min<int> (lanes.channels, static_cast<int> (lane->numChannels.load (std::memory_order_relaxed)));
                         const auto numSamples = std::min<int> (lanes.maxSamples, static_cast<int> (lane->numSamples.load (std::memory_order_relaxed)));
                         auto* audio = region::audioOf (lane);
+
+                        /*  WHAT IT WAS GIVEN, kept for the plugin's window while
+                            the parent asks (namespace draft §146) - before the
+                            gain is put on it in place. */
+                        if (instance.tap.open (*lane, numSamples, static_cast<int> (lanes.header.sampleRate.load (std::memory_order_relaxed))))
+                            region::tapBlock (lane, lanes.channels, lanes.maxSamples, numChannels, numSamples,
+                                              static_cast<int> (lane->keyChannels.load (std::memory_order_relaxed)));
 
                         const auto factor = instance.gain * instance.padFactor;
                         const lanemap::Shape shape { numChannels, inputs, outputs, lanes.channels };
@@ -821,6 +831,9 @@ namespace wfg::plugin
                 std::uint64_t answered = 0;
                 std::uint32_t epochSeen = 0;
                 std::vector<float> applied;
+
+                /** Whether its blocks are kept for the plugin's window (namespace draft §146). */
+                region::TapGate tap;
             };
 
             /** The worker thread. */
@@ -926,6 +939,15 @@ namespace wfg::plugin
 
                         if (lanemap::takes (shape))
                         {
+                            /*  WHAT IT IS GIVEN, kept for the plugin's window while
+                                the parent asks (namespace draft §146): the cue and
+                                its key as the lane carries them, before the answer
+                                is written back over them. */
+                            if (s.tap.open (*lane, numSamples, static_cast<int> (lanes.header.sampleRate.load (std::memory_order_relaxed))))
+                                region::tapBlock (lane, lanes.channels, lanes.maxSamples, numChannels, numSamples,
+                                                  keyWidth[static_cast<std::size_t> (i)] > 0
+                                                      ? static_cast<int> (lane->keyChannels.load (std::memory_order_relaxed)) : 0);
+
                             pointersOf (lane, lanes.channels, lanes.maxSamples, lanePointers);
                             fitScratch (scratch, numSamples);
                             scratch.clear();

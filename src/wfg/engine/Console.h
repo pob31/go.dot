@@ -40,6 +40,7 @@
 
 #include <wfg/engine/ImportChanges.h>
 #include <wfg/engine/TemplateChanges.h>
+#include <wfg/engine/plugin/SharedRegion.h>
 
 #include <functional>
 #include <memory>
@@ -121,6 +122,12 @@ namespace wfg
 
         /** Where the helpers' shared regions go: the engine's cache, under editor/. */
         std::string pluginWorkFolder;
+
+        /*  THE VOICE PLAYING AN INSERT NOW (namespace draft §146), for its
+            plugin's window to hear: off whichever audio host is current,
+            asked on the window's thread, which is the one an interface is
+            changed on. Null lane when none holds it. */
+        std::function<plugin::region::TapView (const std::string& fxId)> pluginTap;
 
         /*  FILE > OPEN RECENT (namespace draft §106): the show folders this
             machine opened last, newest first, ten at most (app/RecentShows.h),

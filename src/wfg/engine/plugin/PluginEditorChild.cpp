@@ -18,6 +18,7 @@
 #include <wfg/engine/plugin/PluginEditorChild.h>
 #include <wfg/engine/plugin/Catalogue.h>
 #include <wfg/engine/plugin/EditorRegion.h>
+#include <wfg/engine/plugin/LaneMapping.h>
 #include <wfg/engine/plugin/PluginLoad.h>
 #include <wfg/engine/plugin/TestGainState.h>
 
@@ -26,6 +27,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -467,12 +469,14 @@ namespace wfg::plugin
         {
             Session (editor::Region& regionToUse, juce::AudioProcessor& processorToUse,
                      std::int64_t parentPidToUse, bool windowed, const juce::String& name,
-                     std::string pluginIdToUse, std::string stateFolderToUse, int channels, int blockSize)
+                     std::string pluginIdToUse, std::string stateFolderToUse, int channels, int blockSize,
+                     const InsertLayout& layoutToUse, double sampleRateToUse)
                 : region (regionToUse), processor (processorToUse), parentPid (parentPidToUse),
                   params (processorToUse.getParameters()),
                   count (std::min (params.size(), editor::maxParams)),
                   watcher (count),
-                  pluginId (std::move (pluginIdToUse)), stateFolder (std::move (stateFolderToUse))
+                  pluginId (std::move (pluginIdToUse)), stateFolder (std::move (stateFolderToUse)),
+                  layout (layoutToUse), rate (sampleRateToUse), block (std::max (1, blockSize))
             {
                 baseline.assign (static_cast<std::size_t> (count), 0.0f);
                 sentAt.assign (static_cast<std::size_t> (count), 0u);
@@ -494,6 +498,17 @@ namespace wfg::plugin
                 silence.setSize (std::max ({ channels, processor.getTotalNumInputChannels(),
                                              processor.getTotalNumOutputChannels(), 1 }),
                                  std::max (1, blockSize));
+
+                /*  THE TAP'S BUFFERS (namespace draft §146): a block of each of
+                    the ring's slots, and the plugin's own buffer; a sidechain
+                    the plugin will not let go of is laid out as it stands. */
+                for (auto& slot : heard)
+                    slot.assign (static_cast<std::size_t> (block), 0.0f);
+
+                if (layout.keyForced)
+                    layTapKey();
+
+                fed.setSize (std::max ({ processor.getTotalNumInputChannels(), processor.getTotalNumOutputChannels(), 1 }), block);
                 processor.getStateInformation (initialState);
                 cleanHash = hashOfState();
 
@@ -585,6 +600,8 @@ namespace wfg::plugin
 
                 if (holder != nullptr)
                     holder->settle (juce::Time::getMillisecondCounter());
+
+                hear();
 
                 /*  THE QUIET MOMENT: a second and a half after the hand last
                     moved and with no gesture open, the plugin's whole state
@@ -799,6 +816,10 @@ namespace wfg::plugin
                 fxId = greyed ? std::string() : nextFx;
                 dirty = false;
 
+                //  Its tap starts with what arrives from now (§146): nothing the last cue's voice gave.
+                tapPrimed = false;
+                heardAt = 0;
+
                 /*  A NEW CUE STARTS WITH NOTHING OF ITS OWN IN FLIGHT: the
                     last cue's protection is the last cue's. */
                 std::fill (sentAt.begin(), sentAt.end(), 0u);
@@ -902,6 +923,117 @@ namespace wfg::plugin
                 }
 
                 watcher.muted.store (false, std::memory_order_release);
+            }
+
+            //==================================================================
+            /*  THE TAP (namespace draft §146, the author 2026-11-23): what the
+                voice playing the subject's insert was given, relayed into the
+                region by the parent, processed by this copy of the plugin a
+                block at a time - so its own analyser and meters show the cue,
+                its key included. What this copy gives back goes nowhere: the
+                voice is what is heard. When the sound stops, a second of
+                silence, so the meters fall rather than freeze. */
+            void hear()
+            {
+                const auto now = juce::Time::getMillisecondCounter();
+
+                if (greyed)
+                    return;
+
+                if (! tapPrimed)
+                {
+                    tapRead = region.tapWritten.load (std::memory_order_acquire);
+                    tapPrimed = true;
+                }
+
+                float* slots[editor::tapSlots];
+
+                for (int slot = 0; slot < editor::tapSlots; ++slot)
+                    slots[slot] = heard[static_cast<std::size_t> (slot)].data();
+
+                auto any = false;
+
+                for (int round = 0; round < 64; ++round)
+                {
+                    int channels = 0, keyChannels = 0;
+                    const auto frames = editor::takeTap (region, tapRead, slots, block, channels, keyChannels);
+
+                    if (frames <= 0)
+                        break;
+
+                    any = true;
+                    lastChannels = channels;
+                    feed (frames, channels, keyChannels);
+                }
+
+                if (any)
+                {
+                    heardAt = now | 1u;
+                    return;
+                }
+
+                //  The fall: ten milliseconds of silence a pass, for a second.
+                if (heardAt == 0 || now - heardAt < 50)
+                    return;
+
+                if (now - heardAt > 1050)
+                {
+                    heardAt = 0;
+                    return;
+                }
+
+                for (auto& slot : heard)
+                    std::fill (slot.begin(), slot.end(), 0.0f);
+
+                feed (std::min (block, std::max (1, static_cast<int> (rate / 100.0))), std::max (1, lastChannels), 0);
+            }
+
+            void feed (int frames, int channels, int keyChannels)
+            {
+                const lanemap::Shape shape { channels, processor.getMainBusNumInputChannels(),
+                                             processor.getMainBusNumOutputChannels(), std::max (1, channels) };
+
+                if (! lanemap::takes (shape) || frames <= 0 || frames > block)
+                    return;
+
+                //  A key arriving lays the sidechain out, once, as the voice's child does.
+                if (keyChannels > 0 && tapKeyWidth == 0 && layout.keyOffer > 0 && ! layout.keyForced)
+                    layTapKey();
+
+                fed.clear();
+                const float* cue[region::tapChannelsMax] = { heard[0].data(), heard[1].data() };
+                lanemap::feedInto (cue, shape, fed.getArrayOfWritePointers(), frames);
+
+                if (tapKeyWidth > 0 && keyChannels > 0)
+                {
+                    const float* keys[region::keyChannelsMax] = { heard[region::tapChannelsMax].data(),
+                                                                 heard[region::tapChannelsMax + 1].data() };
+                    float* into[2] = { nullptr, nullptr };
+                    auto usable = 0;
+
+                    for (int channel = 0; channel < tapKeyWidth; ++channel)
+                        if (tapKeyAt[channel] >= 0 && tapKeyAt[channel] < fed.getNumChannels())
+                            into[usable++] = fed.getWritePointer (tapKeyAt[channel]);
+
+                    lanemap::keyInto (keys, keyChannels, into, usable, frames);
+                }
+
+                juce::AudioBuffer<float> piece (fed.getArrayOfWritePointers(), fed.getNumChannels(), frames);
+                juce::MidiBuffer midi;
+                processor.processBlock (piece, midi);
+                region.tapBlocks.fetch_add (1, std::memory_order_release);
+            }
+
+            /*  ITS SIDECHAIN ON, as the voice's child lays it for a keyed cue
+                (§141): released, laid out and prepared again here on the
+                message thread, which is this copy's only thread. */
+            void layTapKey()
+            {
+                processor.releaseResources();
+                tapKeyWidth = plugin::layKey (processor, layout, true);
+                processor.prepareToPlay (rate, block);
+                keyChannelIndices (processor, tapKeyWidth, tapKeyAt);
+                fed.setSize (std::max ({ processor.getTotalNumInputChannels(), processor.getTotalNumOutputChannels(), 1 }), block);
             }
 
             void closePressed()
@@ -1022,6 +1154,21 @@ namespace wfg::plugin
             std::unique_ptr<EditorWindow> window;
             Holder* holder = nullptr;
 
+            /*  THE TAP (§146): the plugin's layout, where this helper is in the
+                region's ring, a block of each slot, the plugin's buffer, its
+                sidechain as laid out for the tap, and when sound last came. */
+            const InsertLayout layout;
+            const double rate;
+            const int block;
+            std::uint64_t tapRead = 0;
+            bool tapPrimed = false;
+            std::array<std::vector<float>, editor::tapSlots> heard;
+            juce::AudioBuffer<float> fed;
+            int tapKeyWidth = 0;
+            int tapKeyAt[2] = { -1, -1 };
+            int lastChannels = 0;
+            std::uint32_t heardAt = 0;
+
             std::uint32_t taken = 0, pokeSeen = 0, liveSeen = 0, raiseSeen = 0;
             std::uint64_t ticks = 0;
             bool greyed = false, closedByHand = false, shownOnce = false, onTop = false;
@@ -1083,6 +1230,7 @@ namespace wfg::plugin
 
         juce::AudioPluginFormatManager manager;
         std::unique_ptr<juce::AudioProcessor> processor;
+        InsertLayout chosenLayout;
         std::string problem;
 
         if (Catalogue::isTestIdentifier (identifier))
@@ -1109,7 +1257,7 @@ namespace wfg::plugin
             }
 
             const auto preset = optionFrom (args, "--preset");
-            InsertLayout layout;
+            InsertLayout& layout = chosenLayout;
             auto instance = makeInsertInstance (manager, description, channels, sampleRate, blockSize,
                                                 preset.empty() ? juce::File() : juce::File (juce::String (preset)),
                                                 layout, problem);
@@ -1133,7 +1281,7 @@ namespace wfg::plugin
         {
             Session session (region, *processor, parentPid, windowed, name,
                              optionFrom (args, "--plugin-id"), optionFrom (args, "--state-folder"),
-                             channels, blockSize);
+                             channels, blockSize, chosenLayout, sampleRate);
             region.ready.store (1, std::memory_order_release);
 
             session.startTimer (10);

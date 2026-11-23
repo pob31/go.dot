@@ -47,6 +47,7 @@
 #include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/plugin/PluginScan.h>
 #include <wfg/engine/plugin/EditorHost.h>
+#include <wfg/engine/plugin/EditorRegion.h>
 #include <wfg/engine/cue/InsertChain.h>
 #include <wfg/engine/plugin/LaneMapping.h>
 #include <wfg/engine/plugin/PluginLoad.h>
@@ -1196,6 +1197,163 @@ TEST_CASE ("proxy: the test child comes up, halves an enabled lane's block, leav
     CHECK_FALSE (juce::File (host.regionPath()).existsAsFile());
     CHECK_FALSE (lanes[0].isBound());
     CHECK (table.statusOf ("PG7N0001").state == "unloaded");
+}
+
+//==============================================================================
+/*  THE TAP (namespace draft §146; the author, 2026-11-23: Likyū's analyser
+    showed nothing in its window, from the sidechain or the cue): what a lane
+    was given, kept by its child while the parent asks, relayed into the
+    window's region and taken by the helper in order. */
+TEST_CASE ("proxy: a lane's tap keeps what it was given while the parent asks, wraps its ring, and reaches the window's end in order (§146)")
+{
+    constexpr int samples = 64;
+    VectorRegion region (2, samples, 1);
+    auto* lane = region.lane (0);
+    auto* audio = plugin::region::audioOf (lane);
+    auto* key = plugin::region::keyOf (lane, 2, samples);
+
+    const auto fill = [&] (int b)
+    {
+        for (int n = 0; n < samples; ++n)
+        {
+            audio[n] = static_cast<float> (b * 1000 + n);
+            audio[samples + n] = -static_cast<float> (b * 1000 + n);
+            key[n] = 0.5f + static_cast<float> (b);
+        }
+    };
+
+    //  NOBODY ASKED: the gate is shut, and the child keeps nothing.
+    plugin::region::TapGate gate;
+    CHECK_FALSE (gate.open (*lane, samples, 48000));
+
+    //  ASKED: the lane and its ring, and the gate open from the next block.
+    plugin::ProxyLane proxy;
+    region.bind (proxy, 0);
+    const auto view = proxy.askTap();
+    REQUIRE (view.lane == lane);
+    CHECK (view.ring == plugin::region::tapOf (lane, 2, samples));
+    CHECK (gate.open (*lane, samples, 48000));
+
+    //  Seventy blocks wrap the 4096-frame ring; the newest is where the count says.
+    for (int b = 0; b < 70; ++b)
+    {
+        fill (b);
+        plugin::region::tapBlock (lane, 2, samples, 2, samples, 1);
+    }
+
+    CHECK (lane->tapWritten.load() == 70u * samples);
+    CHECK (lane->tapChannels.load() == 2u);
+    CHECK (lane->tapKeyChannels.load() == 1u);
+
+    const auto newest = static_cast<std::size_t> ((70 * samples - 1) % plugin::region::tapFrames);
+    CHECK (view.ring[newest] == doctest::Approx (69 * 1000 + samples - 1));
+    CHECK (view.ring[plugin::region::tapFrames + newest] == doctest::Approx (-(69 * 1000 + samples - 1)));
+    CHECK (view.ring[2 * plugin::region::tapFrames + newest] == doctest::Approx (69.5f));
+
+    //  A SECOND OF THE LANE'S AUDIO WITHOUT A LOOK, and it shuts again.
+    for (int b = 0; b < 48000 / samples - 1; ++b)
+        CHECK (gate.open (*lane, samples, 48000));
+
+    CHECK_FALSE (gate.open (*lane, samples, 48000));
+
+    //  THE WINDOW'S END: the first look starts where the lane stands.
+    auto window = std::make_unique<plugin::editor::Region>();
+    plugin::editor::TapCursor cursor;
+    CHECK (plugin::editor::relayTap (*view.lane, view.ring, cursor, *window) == 0);
+
+    for (int b = 70; b < 73; ++b)
+    {
+        fill (b);
+        plugin::region::tapBlock (lane, 2, samples, 2, samples, 1);
+    }
+
+    CHECK (plugin::editor::relayTap (*view.lane, view.ring, cursor, *window) == 3 * samples);
+    CHECK (plugin::editor::relayTap (*view.lane, view.ring, cursor, *window) == 0);
+
+    //  And the helper takes them in order, a block at a time.
+    std::vector<std::vector<float>> slots (plugin::editor::tapSlots, std::vector<float> (samples));
+    std::vector<float*> into;
+
+    for (auto& slot : slots)
+        into.push_back (slot.data());
+
+    std::uint64_t read = 0;
+    auto taken = 0;
+
+    for (int b = 70; b < 73; ++b)
+    {
+        int channels = 0, keyChannels = 0;
+        REQUIRE (plugin::editor::takeTap (*window, read, into.data(), samples, channels, keyChannels) == samples);
+        CHECK (channels == 2);
+        CHECK (keyChannels == 1);
+        CHECK (slots[0][0] == doctest::Approx (b * 1000));
+        CHECK (slots[1][samples - 1] == doctest::Approx (-(b * 1000 + samples - 1)));
+        CHECK (slots[2][5] == doctest::Approx (0.5f + static_cast<float> (b)));
+        taken += samples;
+    }
+
+    int channels = 0, keyChannels = 0;
+    CHECK (plugin::editor::takeTap (*window, read, into.data(), samples, channels, keyChannels) == 0);
+    CHECK (taken == 3 * samples);
+
+    //  ANOTHER LANE, and the cursor starts over where it stands.
+    VectorRegion other (2, samples, 1);
+    CHECK (plugin::editor::relayTap (*other.lane (0), plugin::region::tapOf (other.lane (0), 2, samples), cursor, *window) == 0);
+    CHECK (cursor.lane == other.lane (0));
+}
+
+TEST_CASE ("proxy: the test child keeps what a lane was given, before its gain, only while the parent asks (§146)")
+{
+    Folder folder;
+    plugin::PluginTable table;
+    plugin::ProxyLane lanes[1];
+    plugin::ProxyHost host (testGainSpec (folder, 1), { &lanes[0] }, &table);
+
+    std::string problem;
+    REQUIRE_MESSAGE (host.start (problem), problem);
+    REQUIRE (waitForState (host, "loaded", 5000));
+
+    lanes[0].setDeadlineMicroseconds (200000);
+    lanes[0].setEnabled (true);
+    host.poll();
+    REQUIRE (waitSettled (host, lanes[0]));
+
+    Block block (2, 64, 0.8f);
+
+    for (int i = 0; i < 64; ++i)
+    {
+        std::fill (block.storage.begin(), block.storage.end(), 0.8f);
+        lanes[0].process (block.data(), 2, 64);
+
+        if (block.allEqual (0.4f))
+            break;
+    }
+
+    REQUIRE (block.allEqual (0.4f));
+
+    //  Where the lane keeps it.
+    const auto view = lanes[0].askTap();
+    REQUIRE (view.lane != nullptr);
+    const auto before = view.lane->tapWritten.load();
+
+    //  Asked before each block: every block kept, as it went in, while the cue hears half.
+    for (int i = 0; i < 8; ++i)
+    {
+        lanes[0].askTap();
+        std::fill (block.storage.begin(), block.storage.end(), 0.8f);
+        lanes[0].process (block.data(), 2, 64);
+        CHECK (block.allEqual (0.4f));
+    }
+
+    const auto after = view.lane->tapWritten.load();
+    CHECK (after >= before + 7u * 64u);
+    CHECK (view.ring[static_cast<std::size_t> ((after - 1) % plugin::region::tapFrames)] == doctest::Approx (0.8f));
+    CHECK (view.ring[plugin::region::tapFrames + static_cast<std::size_t> ((after - 1) % plugin::region::tapFrames)]
+             == doctest::Approx (0.8f));
+    CHECK (view.lane->tapChannels.load() == 2u);
+    CHECK (view.lane->tapKeyChannels.load() == 0u);
+
+    host.stop();
 }
 
 //==============================================================================
@@ -4007,6 +4165,75 @@ TEST_CASE ("proxy: the set's plugins are pooled - one child a plugin, a few copi
     host.stop();
     CHECK_FALSE (juce::File (region).existsAsFile());
     CHECK (failures == 0);
+}
+
+TEST_CASE ("proxy: the lane playing an insert is found by its Fx for the plugin's window, lent or waited for, and lost when given back (§146)")
+{
+    ScopedStorage storage;
+    audio::AudioHost host { storage.path() };
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 64;
+    settings.outputChannels = 2;
+    REQUIRE (host.start (settings));
+
+    plugin::PluginTable table;
+    audio::ProxyServices services;
+    services.table = &table;
+    services.launch = launchOfThisBinary();
+    host.setProxyServices (services);
+
+    REQUIRE (host.buildEdit (specWithPlugins (4, 1)));
+
+    const auto poll = [&host] (auto done, int milliseconds = 10000)
+    {
+        const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds (milliseconds);
+
+        while (std::chrono::steady_clock::now() < end)
+        {
+            host.pollProxies();
+
+            if (done())
+                return true;
+
+            std::this_thread::sleep_for (std::chrono::milliseconds (10));
+        }
+
+        return done();
+    };
+
+    REQUIRE (poll ([&] { return table.statusOf ("PG7N0001").state == "loaded"; }));
+
+    //  Nobody holds it yet.
+    CHECK (host.tapFor ("FXTAP001").lane == nullptr);
+
+    //  An arm lends a copy, and the copy is the one found.
+    host.snapTrackFx (0, 0, true, {}, {}, true, {}, "FXTAP001");
+    auto* const lent = host.trackInsertTarget (0, 0);
+    REQUIRE (lent != nullptr);
+    CHECK (lent->owner() == "FXTAP001");
+    REQUIRE (poll ([&] { return host.isTrackFxSettled (0); }));
+
+    const auto first = host.tapFor ("FXTAP001");
+    REQUIRE (first.lane != nullptr);
+    CHECK (first.lane->tapPulse.load() >= 1u);
+    CHECK (host.tapFor ("FXOTHER1").lane == nullptr);
+
+    //  A claim that waits for its copy is labelled once lent.
+    host.snapTrackFx (1, 0, true, {}, {}, true, {}, "FXTAP002");
+    host.snapTrackFx (2, 0, true, {}, {}, true, {}, "FXTAP003");
+    REQUIRE (poll ([&] { return host.isTrackFxSettled (2); }));
+    CHECK (host.trackInsertTarget (2, 0)->owner() == "FXTAP003");
+    CHECK (host.tapFor ("FXTAP003").lane != nullptr);
+    CHECK (host.tapFor ("FXTAP003").lane != host.tapFor ("FXTAP001").lane);
+
+    //  Given back, it is nobody's.
+    host.snapTrackFx (0, 0, false, {}, {}, false);
+    CHECK (lent->owner().empty());
+    CHECK (host.tapFor ("FXTAP001").lane == nullptr);
+
+    host.stop();
 }
 
 TEST_CASE ("proxy: a voice is lent a copy for the cue that has the insert, gives it back, and one more is made when the last is taken")

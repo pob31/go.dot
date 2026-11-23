@@ -1187,6 +1187,7 @@ namespace wfg::audio
             std::vector<std::pair<int, float>> values;
             std::string statePath;
             std::string pluginId;
+            std::string fxId;
         };
 
         std::vector<std::unique_ptr<PooledCopy>> pooledCopies;
@@ -1330,6 +1331,7 @@ namespace wfg::audio
             if (copy != nullptr)
             {
                 copy->lane.setEnabled (false);
+                copy->lane.setOwner ({});
                 copy->track = -1;
                 copy->slot = -1;
                 copy->cooling = true;
@@ -1399,7 +1401,8 @@ namespace wfg::audio
             copy it has, or is lent a free one, and the copy takes the cue's
             switch, values and whole state. */
         void claimPlace (int track, int slot, const std::string& pluginId, bool enabled,
-                         const std::vector<std::pair<int, float>>& values, const std::string& statePath)
+                         const std::vector<std::pair<int, float>>& values, const std::string& statePath,
+                         const std::string& fxId)
         {
             auto* place = placeAt (track, slot);
 
@@ -1429,7 +1432,7 @@ namespace wfg::audio
                 if (copy == nullptr)
                 {
                     forgetWaiting (track, slot);
-                    waitingClaims.push_back ({ track, slot, enabled, values, statePath, pluginId });
+                    waitingClaims.push_back ({ track, slot, enabled, values, statePath, pluginId, fxId });
                     place->lane().setEnabled (enabled);
                     place->setTarget (&place->lane());
 
@@ -1449,6 +1452,7 @@ namespace wfg::audio
                 sidechain switched on when the cue at this place has a key
                 (namespace draft §141), laid out in the reset below. */
             copy->lane.setKeyed (! place->key().isNone());
+            copy->lane.setOwner (enabled ? fxId : std::string {});
             copy->lane.setValues (values);
             copy->lane.setEnabled (enabled);
             copy->lane.requestReset();
@@ -1474,7 +1478,8 @@ namespace wfg::audio
             const auto waiting = waitingClaims;
 
             for (const auto& claim : waiting)
-                claimPlace (claim.track, claim.slot, claim.pluginId, claim.enabled, claim.values, claim.statePath);
+                claimPlace (claim.track, claim.slot, claim.pluginId, claim.enabled, claim.values, claim.statePath,
+                            claim.fxId);
         }
 
         bool isWaiting (int track) const noexcept
@@ -4314,7 +4319,7 @@ namespace wfg::audio
 
     void AudioHost::snapTrackFx (int trackIndex, int slot, bool enabled,
                                  const std::vector<std::pair<int, float>>& values,
-                                 const std::string& statePath, bool held, const std::string& pluginId)
+                                 const std::string& statePath, bool held, const std::string& pluginId, const std::string& fxId)
     {
         /*  A VOICE'S INSERT IS LENT A COPY, or gives its copy back when the
             cue has no such insert (namespace draft §133, stage 3). */
@@ -4325,7 +4330,7 @@ namespace wfg::audio
             if (held)
                 impl->claimPlace (trackIndex, slot,
                                   pluginId.empty() ? builtEntryAt (impl->builtEntries, slot) : pluginId,
-                                  enabled, values, statePath);
+                                  enabled, values, statePath, fxId);
             else
                 impl->releasePlace (trackIndex, slot);
 
@@ -4334,6 +4339,7 @@ namespace wfg::audio
 
         if (auto* lane = proxyLane (trackIndex, slot))
         {
+            lane->setOwner (enabled ? fxId : std::string {});
             lane->setValues (values);
             lane->setEnabled (enabled);
             lane->requestReset();
@@ -4345,6 +4351,25 @@ namespace wfg::audio
             if (enabled)
                 lane->wantState (statePath);
         }
+    }
+
+    plugin::region::TapView AudioHost::tapFor (const std::string& fxId) noexcept
+    {
+        if (fxId.empty())
+            return {};
+
+        /*  A COPY LENT TO A VOICE (§133), or the lane a rack channel or an aux
+            plays its chain through: whichever the last arm or hold labelled. */
+        for (const auto& copy : impl->pooledCopies)
+            if (copy->track >= 0 && copy->lane.owner() == fxId)
+                return copy->lane.askTap();
+
+        for (const auto& chain : impl->trackLanes)
+            for (auto* lane : chain)
+                if (lane != nullptr && lane->owner() == fxId)
+                    return lane->askTap();
+
+        return {};
     }
 
     bool AudioHost::isTrackFxSettled (int trackIndex) noexcept

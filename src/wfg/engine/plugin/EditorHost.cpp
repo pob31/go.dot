@@ -293,6 +293,7 @@ namespace wfg::plugin
 
         std::optional<Subject> waiting;
         std::uint32_t published = 0;
+        editor::TapCursor tapCursor;
         std::deque<std::pair<std::uint32_t, std::string>> routes;
     };
 
@@ -309,6 +310,19 @@ namespace wfg::plugin
     {
         impl->waiting = subject;
         impl->handOver();
+    }
+
+    int EditorHost::relayTap (const region::TapView& tap) noexcept
+    {
+        if (impl->region == nullptr || tap.lane == nullptr || tap.ring == nullptr)
+            return 0;
+
+        return editor::relayTap (*tap.lane, tap.ring, impl->tapCursor, *impl->region);
+    }
+
+    std::uint32_t EditorHost::tapBlocks() const noexcept
+    {
+        return impl->region != nullptr ? impl->region->tapBlocks.load (std::memory_order_acquire) : 0u;
     }
 
     void EditorHost::setLive (const std::vector<float>& values)

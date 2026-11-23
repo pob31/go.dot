@@ -168,6 +168,17 @@ namespace wfg::plugin
 
         std::int64_t pid() const noexcept;
 
+        /*  THE TAP (namespace draft §146): what the voice's lane playing the
+            subject's insert has kept since the last look, into the helper's
+            ring, for its copy of the plugin to process - the analyser and the
+            meters in its window then show the cue. The message thread's, on
+            the client's timer; a lane other than the last one starts from
+            where it stands. Answers the frames relayed. */
+        int relayTap (const region::TapView& tap) noexcept;
+
+        /** For tests: the blocks the helper's plugin has processed from the tap. */
+        std::uint32_t tapBlocks() const noexcept;
+
         //==============================================================================
         /*  FOR TESTS: a hand on the plugin's window, which CI has none of -
             parameter `index` to `value`, gesture and all; -2 is its close

@@ -323,6 +323,14 @@ namespace wfg::client::ui
                     actions.set (model::fxParameterAddress (where.first, where.second), valueText (value));
             }
 
+            /*  WHAT THE VOICE PLAYING ITS CUE HEARS, relayed to the window's copy
+                of the plugin (namespace draft §146): its analyser and its meters
+                show the cue. Only while the window is on an insert a cue has -
+                hidden, it is on none. */
+            if (actions.tap && ! entry.leaving && ! entry.sent.greyed && ! entry.sent.fxId.empty()
+                  && host.status() == plugin::EditorHost::Status::open)
+                host.relayTap (actions.tap (entry.sent.fxId));
+
             /*  THE WHOLE STATE, KEPT: after the values, so the turn goes out
                 first and the capture joins it. Taken whether or not the helper
                 is still there - one is made on the way out. */

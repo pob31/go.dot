@@ -962,6 +962,9 @@ namespace wfg::client
                         shell->foot.setEditorWords (editors->words());
                 };
 
+                //  What the voice playing a window's insert hears (§146), off the engine.
+                editing.tap = host.pluginTap;
+
                 editors = std::make_unique<ui::PluginEditors> (std::move (editing), host.describePlugin,
                                                                host.pluginWorkFolder);
 

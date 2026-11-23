@@ -1037,7 +1037,14 @@ namespace wfg::audio
         void snapTrackFx (int trackIndex, int slot, bool enabled,
                           const std::vector<std::pair<int, float>>& values,
                           const std::string& statePath = {}, bool held = true,
-                          const std::string& pluginId = {});
+                          const std::string& pluginId = {}, const std::string& fxId = {});
+
+        /*  THE LANE PLAYING AN INSERT NOW, for its plugin's window (namespace
+            draft §146): the one the last arm or hold gave the Fx `fxId`, its
+            child asked to keep its blocks for the next second. Message
+            thread, as every graph change is, so the lane cannot go from under
+            the caller before it has read it; null when no voice holds it. */
+        plugin::region::TapView tapFor (const std::string& fxId) noexcept;
 
         /*  The tick thread, at every launch: every entry this voice has
             switched in holds the state its cue asked for - two atomics a

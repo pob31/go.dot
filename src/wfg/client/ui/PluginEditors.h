@@ -86,6 +86,12 @@ namespace wfg::client::ui
 
             /** The words changed: the chain should say so. */
             std::function<void()> changed;
+
+            /*  THE VOICE PLAYING AN INSERT NOW (namespace draft §146): its
+                lane and the ring its child keeps its blocks in, asked each
+                time the timer looks while a window is on that insert. Null
+                lane for none - no voice holds it, or no audio runs. */
+            std::function<plugin::region::TapView (const std::string& fxId)> tap;
         };
 
         /*  `describe` is the console's door to this machine's scan;

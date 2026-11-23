@@ -10320,6 +10320,17 @@ namespace
                 clientHost.pluginWorkFolder = engineCacheFolder().getChildFile ("editor")
                                                                  .getFullPathName().toStdString();
 
+                clientHost.pluginTap = [&deviceDriver, &driver] (const std::string& fxId)
+                {
+                    if (deviceDriver != nullptr)
+                        return deviceDriver->host().tapFor (fxId);
+
+                    if (driver != nullptr)
+                        return driver->host().tapFor (fxId);
+
+                    return wfg::plugin::region::TapView {};
+                };
+
                 /*  THE TAKES' PICTURES, off whichever audio host is current:
                     asked on the window's thread, which is the one an interface
                     is changed on, so the host cannot go from under it. */

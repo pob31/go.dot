@@ -25,8 +25,10 @@
     desktop client, through EditorHost) and read by both as the structure
     below. It is the voice child's region in miniature and in the same
     discipline - every field a lock-free atomic or a byte array published by
-    one - but it carries no audio: the helper's copy of the plugin is there to
-    be LOOKED AT and turned, never heard.
+    one. The helper's copy of the plugin is there to be LOOKED AT and turned,
+    never heard - but since namespace draft §146 it is FED: what the voice
+    playing the subject's insert was given, relayed by the parent into a ring
+    here, so the plugin's own analyser and meters show the cue.
 
     PARENT TO HELPER. Which cue the window is about (the SUBJECT: its title,
     whether it is greyed and why, and the cue's values for every parameter),
@@ -50,6 +52,7 @@
 
 #include <wfg/engine/plugin/SharedRegion.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
@@ -59,8 +62,8 @@ namespace wfg::plugin::editor
     /** "GotE", read as a little-endian word. */
     constexpr std::uint32_t magic = 0x45746f47u;
 
-    /** Bumped whenever the structure below changes shape. */
-    constexpr std::uint32_t version = 2;
+    /** Bumped whenever the structure below changes shape. 3 since 2026-11-23: the tap (§146). */
+    constexpr std::uint32_t version = 3;
 
     constexpr int maxParams = region::maxParams;
     constexpr int idChars = 64;
@@ -69,6 +72,12 @@ namespace wfg::plugin::editor
 
     /** Events the parent has not drained yet, at most; a power of two. */
     constexpr std::uint32_t ringSize = 1024;
+
+    /*  THE WINDOW'S RING (namespace draft §146): 16384 frames, a third of a
+        second at 48 kHz - the parent fills it every 20 ms and the helper
+        empties it every 10, so it holds a stalled message thread's worth. */
+    constexpr int tapRingFrames = 16384;
+    constexpr int tapSlots = region::tapChannelsMax + region::keyChannelsMax;
 
     /** A value the helper reads as "rest where the preset left it". */
     constexpr float restsAtPreset = -1.0f;
@@ -194,6 +203,19 @@ namespace wfg::plugin::editor
         std::atomic<std::uint32_t> ringWrite;
         std::atomic<std::uint32_t> ringRead;
         Event ring[ringSize];
+
+        /*  THE TAP (namespace draft §146), parent to helper: what the voice
+            playing the subject's insert was given - its cue in the first
+            `region::tapChannelsMax` slots, its key in the rest - and how many
+            of each the latest frames carry. `tapWritten` counts every frame
+            the ring has had, stored with release after them; the helper keeps
+            its own place. Helper to parent, `tapBlocks`: the blocks its copy
+            of the plugin has processed from it, for tests and nothing else. */
+        std::atomic<std::uint64_t> tapWritten;
+        std::atomic<std::uint32_t> tapChannels;
+        std::atomic<std::uint32_t> tapKeyChannels;
+        std::atomic<std::uint32_t> tapBlocks;
+        float tap[tapSlots][tapRingFrames];
     };
 
     static_assert (std::atomic<std::uint32_t>::is_always_lock_free
@@ -228,6 +250,8 @@ namespace wfg::plugin::editor
         mix (static_cast<std::uint32_t> (sizeof (Event)));
         mix (static_cast<std::uint32_t> (maxParams));
         mix (ringSize);
+        mix (static_cast<std::uint32_t> (tapRingFrames));
+        mix (static_cast<std::uint32_t> (tapSlots));
         return hash;
     }
 
@@ -236,6 +260,86 @@ namespace wfg::plugin::editor
         return r.magic.load (std::memory_order_relaxed) == magic
             && r.version.load (std::memory_order_relaxed) == version
             && r.layoutHash.load (std::memory_order_relaxed) == layoutHash();
+    }
+
+    //==============================================================================
+    /*  THE TAP'S RELAY (namespace draft §146), the parent's, on its window's
+        timer: what a voice's lane has kept since the cursor, into the
+        window's ring. A lane it was not following - the pick moved, the cue
+        was lent another copy - starts the cursor where the lane stands, so
+        nothing older than now is heard. Never more than half the lane's ring
+        is taken in one look: the child may be writing the half after it. */
+    struct TapCursor
+    {
+        const region::Lane* lane = nullptr;
+        std::uint64_t read = 0;
+    };
+
+    inline int relayTap (const region::Lane& lane, const float* laneRing, TapCursor& cursor, Region& into) noexcept
+    {
+        const auto written = lane.tapWritten.load (std::memory_order_acquire);
+
+        if (cursor.lane != &lane || written < cursor.read)
+        {
+            cursor.lane = &lane;
+            cursor.read = written;
+            return 0;
+        }
+
+        constexpr auto most = static_cast<std::uint64_t> (region::tapFrames / 2);
+        const auto from = written - cursor.read > most ? written - most : cursor.read;
+        const auto frames = static_cast<int> (written - from);
+
+        if (frames <= 0)
+            return 0;
+
+        const auto at = into.tapWritten.load (std::memory_order_relaxed);
+
+        for (int slot = 0; slot < tapSlots; ++slot)
+        {
+            const auto* source = laneRing + static_cast<std::size_t> (slot) * static_cast<std::size_t> (region::tapFrames);
+            auto* target = into.tap[slot];
+
+            for (int n = 0; n < frames; ++n)
+                target[(at + static_cast<std::uint64_t> (n)) % static_cast<std::uint64_t> (tapRingFrames)]
+                    = source[(from + static_cast<std::uint64_t> (n)) % static_cast<std::uint64_t> (region::tapFrames)];
+        }
+
+        into.tapChannels.store (lane.tapChannels.load (std::memory_order_relaxed), std::memory_order_relaxed);
+        into.tapKeyChannels.store (lane.tapKeyChannels.load (std::memory_order_relaxed), std::memory_order_relaxed);
+        into.tapWritten.store (at + static_cast<std::uint64_t> (frames), std::memory_order_release);
+        cursor.read = written;
+        return frames;
+    }
+
+    /*  AND ITS OTHER END, the helper's: up to `maxFrames` of what the ring
+        has had since `read`, a slot into each of `out` (`tapSlots` of them),
+        and how many of the cue's channels and of the key's they carry. A
+        helper that fell more than half the ring behind takes only the newest
+        half. */
+    inline int takeTap (const Region& r, std::uint64_t& read, float* const* out, int maxFrames,
+                        int& channels, int& keyChannels) noexcept
+    {
+        const auto written = r.tapWritten.load (std::memory_order_acquire);
+
+        if (written < read)
+            read = written;
+
+        constexpr auto most = static_cast<std::uint64_t> (tapRingFrames / 2);
+
+        if (written - read > most)
+            read = written - most;
+
+        const auto frames = static_cast<int> (std::min<std::uint64_t> (written - read, static_cast<std::uint64_t> (maxFrames > 0 ? maxFrames : 0)));
+        channels = static_cast<int> (r.tapChannels.load (std::memory_order_relaxed));
+        keyChannels = static_cast<int> (r.tapKeyChannels.load (std::memory_order_relaxed));
+
+        for (int slot = 0; slot < tapSlots; ++slot)
+            for (int n = 0; n < frames; ++n)
+                out[slot][n] = r.tap[slot][(read + static_cast<std::uint64_t> (n)) % static_cast<std::uint64_t> (tapRingFrames)];
+
+        read += static_cast<std::uint64_t> (frames);
+        return frames;
     }
 
     //==============================================================================

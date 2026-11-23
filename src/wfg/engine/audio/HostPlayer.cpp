@@ -107,7 +107,8 @@ namespace wfg::audio
                 //  The key first: the copy lent below is laid out for it (§141).
                 audioHost.setTrackFxKey (held->track, held->fx.slot, held->fx.key);
                 audioHost.snapTrackFx (held->track, held->fx.slot, held->fx.enabled, held->fx.values,
-                                       held->fx.statePath, ! held->fx.fxId.empty(), held->fx.pluginId);
+                                       held->fx.statePath, ! held->fx.fxId.empty(), held->fx.pluginId,
+                                       held->fx.fxId);
                 audioHost.setTrackFxShape (held->track, held->fx.slot, held->fx.feed, held->fx.back);
                 holdsQueued.fetch_sub (1, std::memory_order_release);
             }
@@ -214,7 +215,7 @@ namespace wfg::audio
                 the copy the snap lends is asked for its sidechain by it. */
             audioHost.setTrackFxKey (request.track, fx.slot, fx.key);
             audioHost.snapTrackFx (request.track, fx.slot, fx.enabled, fx.values, fx.statePath,
-                                   ! fx.fxId.empty(), fx.pluginId);
+                                   ! fx.fxId.empty(), fx.pluginId, fx.fxId);
             audioHost.setTrackFxShape (request.track, fx.slot, fx.feed, fx.back);
         }
 

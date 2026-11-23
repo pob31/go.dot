@@ -36799,3 +36799,45 @@ screen to measure it on.
 **Words that ship, the author's to confirm:** "Aux n" on a surface for an unnamed aux; the guides' lines.
 
 **Owed.** BJF confirmed in the author's own session; the window on a second screen with another scale.
+
+## 146. The plugin's window hears the cue it is on
+
+**Asked 2026-11-23** by the author, the fifth of §145's fixes: "The RTA in Likyū didn't work on Go.dot. Neither from
+the sidechain, nor from the cue's signal." The window has been a second copy of the plugin, in its editing helper,
+since 2026-09-25 (§17.13). It is turned and looked at but never heard, and until now it was never given a block
+either, so an analyser, a meter or a gain-reduction display in it showed nothing. Offered three ways, the author
+took the first: feed the window's copy. The others were to say so and leave it, or to open the window from the
+process that plays the cue, which would undo the separate helper.
+
+- **BJG** **The window's copy is fed what the voice playing its cue is given**: the cue, before the plugin, and its
+  key when it has one. It processes that, and what it gives back goes nowhere. What is heard is the voice, as
+  before. *(The author's.)*
+- **BJH** **The voice's child keeps a lane's blocks only while a window asks**, in a ring after the key in the
+  shared region (`region::tapBlock`, version 8). Up to two of the cue's channels and the key's two, 4096 frames:
+  85 ms at 48 kHz. The parent moves the lane's `tapPulse` each time it looks. The child keeps blocks while the pulse
+  has moved within the last second of the lane's audio (`TapGate`); otherwise it copies nothing. The copy is a few
+  hundred floats into memory both sides already map, on the worker: no allocation, no lock, no call. *(Mine.)*
+- **BJI** **The parent relays, the helper never maps the voice's region.** A third process holding that file open
+  would stop the engine deleting and making it again when the graph is rebuilt, and the entry would fail. So the
+  window's own timer (20 ms) asks the engine for the lane playing its Fx (`AudioHost::tapFor`). The lane an arm or a
+  hold gave that Fx is labelled with it (`ProxyLane::setOwner`): a pooled copy lent to a voice, a rack channel's
+  lane for a mic cue, an aux's. The timer copies what the lane kept since its last look into the helper's region,
+  16384 frames (`editor::relayTap`, version 3). A lane it was not following - another pick, another copy lent -
+  starts from where it stands, so nothing older than now is heard. *(Mine.)*
+- **BJJ** **The helper processes it a block at a time** (`editor::takeTap`), by the voice's own rules: the cue into
+  the main inputs as `LaneMapping.h` lays it, and the key into the sidechain. The sidechain is laid out the first
+  time a key arrives, released and prepared again on the helper's message thread, its only thread. When the sound
+  stops it is given a second of silence, so meters fall rather than freeze. On a cue without the insert the window
+  is hidden (BJC), and nothing is processed. *(Mine.)*
+- **BJK** **What it is not.** A plugin's *Listen* (Likyū's band solo) is the window's copy's, and is not heard: the
+  voice hears nothing the window does but the values and the state it keeps. A cue wider than two channels is shown
+  by its first two. The display is a pass or two behind the sound (10 to 30 ms). A fade's window has no voice of its
+  own and stays unfed. *(Mine.)*
+
+**Tests.** `proxy: a lane's tap keeps what it was given while the parent asks…` (ring, wrap, gate, relay and the
+helper's end), `proxy: the test child keeps what a lane was given, before its gain, only while the parent asks`,
+`proxy: the lane playing an insert is found by its Fx…` (lent, waited for, given back), `editor helper: the
+window's copy of the plugin processes what the voice playing its cue was given` (and not while hidden).
+
+**Owed.** The author's try with Likyū: the RTA on a media cue, on a mic cue through its rack channel, and keyed by
+an aux; the CPU of a window left open beside a show (one more run of the plugin while its window is shown).

@@ -65,12 +65,23 @@ namespace wfg::plugin::region
         6 since 2026-11-20: a reset is answered (`resetDoneSeq`), so the parent
         can wait for it without calling the lane (namespace draft §139).
         7 since 2026-11-22: a key beside the audio on every lane, and whether
-        the plugin's sidechain input is to carry it (namespace draft §141). */
-    constexpr std::uint32_t version = 7;
+        the plugin's sidechain input is to carry it (namespace draft §141).
+        8 since 2026-11-23: what a lane was given, kept a moment for the
+        plugin's window to hear (the tap, namespace draft §146). */
+    constexpr std::uint32_t version = 8;
 
     /*  THE WIDEST KEY A LANE CARRIES (namespace draft §141, BHT): one channel
         or two. A wider input or cue is folded to two before it is sent. */
     constexpr int keyChannelsMax = 2;
+
+    /*  THE TAP (namespace draft §146, the author 2026-11-23: the plugin's
+        window is a second copy of it that never heard a block, so its
+        analyser and its meters showed nothing): what a lane was given - at
+        most two channels of the cue, and its key - kept in a ring after the
+        key, while the parent asks for it. 4096 frames is 85 ms at 48 kHz,
+        four of the parent's 20 ms looks. */
+    constexpr int tapChannelsMax = 2;
+    constexpr int tapFrames = 4096;
 
     /** The most parameters a plugin may expose through the proxy; a plugin
         with more has the rest neither published nor written. */
@@ -229,6 +240,19 @@ namespace wfg::plugin::region
             places the beat against. */
         std::atomic<std::uint64_t> blockStartSample;
 
+        /*  THE TAP (namespace draft §146). Parent to child, `tapPulse`: moved
+            by the parent each time it looks while a plugin's window wants
+            this lane; the child keeps the lane's blocks while it has moved in
+            the last second of the lane's audio, and nought costs it nothing.
+            Child to parent: `tapWritten`, how many frames the ring has ever
+            had, stored with release once they are in it; `tapChannels` and
+            `tapKeyChannels`, how many of the cue's channels and of its key
+            the last block carried, stored before it. */
+        std::atomic<std::uint32_t> tapPulse;
+        std::atomic<std::uint32_t> tapChannels;
+        std::atomic<std::uint32_t> tapKeyChannels;
+        std::atomic<std::uint64_t> tapWritten;
+
         /*  A CUE'S WHOLE STATE, loaded onto this lane's instance before the cue
             may launch (the author's decision of 2026-09-25). One in flight:
             the parent writes `statePath` - absolute, empty for the preset's
@@ -255,9 +279,11 @@ namespace wfg::plugin::region
 
         /*  The audio follows this structure at `audioOf`, channel-major:
             `channels * maxSamples` floats, of which `numChannels * numSamples`
-            are the block; and the key after it at `keyOf`, `keyChannelsMax *
+            are the block; the key after it at `keyOf`, `keyChannelsMax *
             maxSamples` floats, of which `keyChannels * numSamples` are the
-            block's (§141). */
+            block's (§141); and the tap's ring after that at `tapOf`,
+            `(tapChannelsMax + keyChannelsMax) * tapFrames` floats, the cue's
+            channels first and the key's after them (§146). */
     };
 
     static_assert (std::atomic<std::uint64_t>::is_always_lock_free
@@ -285,7 +311,8 @@ namespace wfg::plugin::region
     constexpr std::size_t laneStride (int channels, int maxSamples) noexcept
     {
         return alignUp (sizeof (Lane)
-                        + static_cast<std::size_t> (channels + keyChannelsMax) * static_cast<std::size_t> (maxSamples)
+                        + (static_cast<std::size_t> (channels + keyChannelsMax) * static_cast<std::size_t> (maxSamples)
+                             + static_cast<std::size_t> (tapChannelsMax + keyChannelsMax) * static_cast<std::size_t> (tapFrames))
                             * sizeof (float));
     }
 
@@ -316,6 +343,87 @@ namespace wfg::plugin::region
         return audioOf (lane) + static_cast<std::size_t> (channels) * static_cast<std::size_t> (maxSamples);
     }
 
+    /** The lane's tap ring, after its key (namespace draft §146): slot `c` is `tapFrames` floats at `c * tapFrames`. */
+    inline float* tapOf (Lane* lane, int channels, int maxSamples) noexcept
+    {
+        return keyOf (lane, channels, maxSamples) + static_cast<std::size_t> (keyChannelsMax) * static_cast<std::size_t> (maxSamples);
+    }
+
+    inline const float* tapOf (const Lane* lane, int channels, int maxSamples) noexcept
+    {
+        return tapOf (const_cast<Lane*> (lane), channels, maxSamples);
+    }
+
+    /*  ONE BLOCK INTO THE TAP, by the child, before the plugin writes its
+        answer over it: the first `tapChannelsMax` of the cue's channels, then
+        the key's. A copy into memory both sides already have - no lock, no
+        allocation, no call (PRD §4.2). */
+    inline void tapBlock (Lane* lane, int channels, int maxSamples, int numChannels, int numSamples, int keyChannels) noexcept
+    {
+        if (numSamples <= 0 || numSamples > tapFrames)
+            return;
+
+        const auto cue = numChannels < tapChannelsMax ? numChannels : tapChannelsMax;
+        const auto key = keyChannels < keyChannelsMax ? keyChannels : keyChannelsMax;
+        const auto written = lane->tapWritten.load (std::memory_order_relaxed);
+        const auto at = static_cast<int> (written % static_cast<std::uint64_t> (tapFrames));
+        const auto first = numSamples < tapFrames - at ? numSamples : tapFrames - at;
+        auto* ring = tapOf (lane, channels, maxSamples);
+
+        const auto copy = [ring, at, first, numSamples] (const float* from, int slot) noexcept
+        {
+            auto* into = ring + static_cast<std::size_t> (slot) * static_cast<std::size_t> (tapFrames);
+
+            for (int n = 0; n < first; ++n)
+                into[at + n] = from[n];
+
+            for (int n = first; n < numSamples; ++n)
+                into[n - first] = from[n];
+        };
+
+        for (int c = 0; c < cue; ++c)
+            copy (audioOf (lane) + static_cast<std::size_t> (c) * static_cast<std::size_t> (maxSamples), c);
+
+        for (int c = 0; c < key; ++c)
+            copy (keyOf (lane, channels, maxSamples) + static_cast<std::size_t> (c) * static_cast<std::size_t> (maxSamples),
+                  tapChannelsMax + c);
+
+        lane->tapChannels.store (static_cast<std::uint32_t> (cue < 0 ? 0 : cue), std::memory_order_relaxed);
+        lane->tapKeyChannels.store (static_cast<std::uint32_t> (key < 0 ? 0 : key), std::memory_order_relaxed);
+        lane->tapWritten.store (written + static_cast<std::uint64_t> (numSamples), std::memory_order_release);
+    }
+
+    /*  A LANE'S TAP AS THE PARENT SEES IT: the lane, and its ring. */
+    struct TapView
+    {
+        const Lane* lane = nullptr;
+        const float* ring = nullptr;
+    };
+
+    /*  WHETHER THE CHILD KEEPS A LANE'S BLOCKS: while the parent's pulse has
+        moved within the last second of the lane's own audio. One of these a
+        lane, the child's, read on its worker with nothing but loads. */
+    struct TapGate
+    {
+        std::uint32_t seen = 0;
+        std::int64_t quietSamples = std::int64_t { 1 } << 40;
+
+        bool open (const Lane& lane, int numSamples, int sampleRate) noexcept
+        {
+            if (const auto pulse = lane.tapPulse.load (std::memory_order_relaxed); pulse != seen)
+            {
+                seen = pulse;
+                quietSamples = 0;
+            }
+            else if (quietSamples < (std::int64_t { 1 } << 40))
+            {
+                quietSamples += numSamples;
+            }
+
+            return quietSamples < static_cast<std::int64_t> (sampleRate > 0 ? sampleRate : 48000);
+        }
+    };
+
     /** FNV-1a over everything a layout depends on. */
     constexpr std::uint32_t layoutHashFor (int channels, int maxSamples, int lanes) noexcept
     {
@@ -335,6 +443,8 @@ namespace wfg::plugin::region
         mix (static_cast<std::uint32_t> (sizeof (Lane)));
         mix (static_cast<std::uint32_t> (maxParams));
         mix (static_cast<std::uint32_t> (keyChannelsMax));
+        mix (static_cast<std::uint32_t> (tapChannelsMax));
+        mix (static_cast<std::uint32_t> (tapFrames));
         mix (static_cast<std::uint32_t> (channels));
         mix (static_cast<std::uint32_t> (maxSamples));
         mix (static_cast<std::uint32_t> (lanes));

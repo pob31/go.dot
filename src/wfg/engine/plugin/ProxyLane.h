@@ -327,6 +327,19 @@ namespace wfg::plugin
             plugin as warm as it always did. Any thread. */
         bool isResting() const noexcept;
 
+        /*  WHOSE INSERT THIS LANE PLAYS (namespace draft §146): the Fx the last
+            arm or hold gave it, empty while it is lent to nobody. The message
+            thread's, and the parent's alone - the child never reads it. What
+            a plugin's window follows to the voice playing its cue. */
+        void setOwner (std::string fxId) { ownerId = std::move (fxId); }
+        const std::string& owner() const noexcept { return ownerId; }
+
+        /*  THE TAP, ASKED FOR (namespace draft §146): the child keeps this
+            lane's blocks for the next second of its audio, and here is where
+            they are. Null while unbound. The message thread's, each time it
+            looks; the pointers last until the region is let go of. */
+        region::TapView askTap() noexcept;
+
         /** How long silence in and out must last before a lane rests. */
         static constexpr double restAfterSeconds = 10.0;
 
@@ -364,6 +377,9 @@ namespace wfg::plugin
 
         /** What a relaunched child is to be given back (`restoreState`); the message thread's. */
         std::string restoreStatePath;
+
+        /** The Fx this lane plays (§146); the message thread's. */
+        std::string ownerId;
         std::atomic<std::int64_t> deadlineUs { defaultDeadlineMicroseconds };
         std::atomic<std::int64_t> floorUs { defaultDeadlineMicroseconds };
 

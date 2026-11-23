@@ -128,6 +128,17 @@ namespace wfg::plugin
         return lane.load (std::memory_order_acquire) != nullptr;
     }
 
+    region::TapView ProxyLane::askTap() noexcept
+    {
+        auto* bound = lane.load (std::memory_order_acquire);
+
+        if (bound == nullptr)
+            return {};
+
+        bound->tapPulse.fetch_add (1, std::memory_order_relaxed);
+        return { bound, region::tapOf (bound, regionChannels, regionMaxSamples) };
+    }
+
     void ProxyLane::setDeadlineMicroseconds (std::int64_t microseconds) noexcept
     {
         //  Fixed: the floor is the cap, so no callback's end comes before it.

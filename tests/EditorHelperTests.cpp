@@ -37,9 +37,11 @@
 
 #include <juce_core/juce_core.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <memory>
+#include <new>
 #include <optional>
 #include <thread>
 #include <vector>
@@ -516,6 +518,59 @@ TEST_CASE ("editor helper: a real window, when somebody asks for one")
     greyed.reason = "2 Memo plays no file: inserts belong to media cues.";
     host.setSubject (greyed);
     waitFor (host, [] { return false; }, 1000);
+}
+
+TEST_CASE ("editor helper: the window's copy of the plugin processes what the voice playing its cue was given (§146)")
+{
+    /*  The author, 2026-11-23: Likyū's analyser showed nothing in its window.
+        A lane laid out by hand stands in for the voice's; the parent's relay
+        puts what it kept into the helper's ring, and the helper's plugin
+        processes it - none of it while the window is on no insert. */
+    Folder folder;
+    plugin::EditorHost host (testGainEditor (folder));
+
+    std::string why;
+    REQUIRE_MESSAGE (host.start (why), why);
+    REQUIRE (waitFor (host, [&] { return host.status() == Status::open; }));
+
+    host.setSubject (subjectOf ("CUE00001", "FX000001", {}));
+    REQUIRE (waitFor (host, [&] { return host.subjectTaken() > 0; }));
+
+    constexpr int samples = 64;
+    std::vector<char> bytes (plugin::region::regionBytes (2, samples, 1), 0);
+    new (bytes.data()) plugin::region::Header {};
+    auto* lane = new (plugin::region::laneAt (bytes.data(), 2, samples, 0)) plugin::region::Lane {};
+    const plugin::region::TapView view { lane, plugin::region::tapOf (lane, 2, samples) };
+
+    const auto play = [&] (int blocks)
+    {
+        auto* audio = plugin::region::audioOf (lane);
+
+        for (int b = 0; b < blocks; ++b)
+        {
+            std::fill (audio, audio + 2 * samples, 0.25f);
+            plugin::region::tapBlock (lane, 2, samples, 2, samples, 0);
+        }
+    };
+
+    //  The first look starts where the lane stands; what comes after it is processed.
+    CHECK (host.relayTap (view) == 0);
+    play (16);
+    CHECK (host.relayTap (view) == 16 * samples);
+    CHECK (waitFor (host, [&] { return host.tapBlocks() >= 16u; }));
+
+    //  On a cue without the insert: relayed or not, nothing more is processed.
+    auto greyed = subjectOf ("CUE00002", "", {});
+    greyed.greyed = true;
+    host.setSubject (greyed);
+    REQUIRE (waitFor (host, [&] { return host.subjectTaken() > 1; }));
+    waitFor (host, [] { return false; }, 1200);     // the fall after the sound has run out
+
+    const auto settled = host.tapBlocks();
+    play (16);
+    host.relayTap (view);
+    waitFor (host, [] { return false; }, 300);
+    CHECK (host.tapBlocks() == settled);
 }
 
 TEST_CASE ("editor helper: a plugin it cannot make says why, in a sentence")
