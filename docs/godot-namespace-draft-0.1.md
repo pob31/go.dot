@@ -36983,3 +36983,76 @@ Clang 21 with the real-time sanitizer (no report), and the plugin drivers.
 hour, with and without the D700 - the FX strip quiet, and the log saying why where it is not. One row each under
 the Balanced plan and under Best performance, the setting his to flip. The same rows on a second Windows machine
 (the Ryzen), to know how much of what is left is this laptop.
+
+## 149. A plugin that needs more time is given it, and plays that much later
+
+**Ruled 2026-11-23** by the author, shown §148's numbers for Tails (bursts of 1.4 to 1.8 ms of its own work at
+each onset, against 0.8 ms allowed at 128 frames): "We should allow for larger buffers when needed, late is better
+than glitchy." Asked how a plugin should be given one - a setting, by itself, or both: "Can we test this when
+scanning to have a preset?" Asked whether Waves' declared latency is "similar to what we're after": similar in
+effect, another cause, and the two add up in one figure (BJX). And asked "Were we too stringent on the processing
+time for the plugins initially?": yes, twice - the fixed 250 µs before §139, and since then a share (BHB's 0.30)
+chosen with one reverb in front of it, a third of what a host that runs plugins in its own process leaves them.
+
+This reverses the first of §139's rulings ("the plugin's time comes from the buffer, with no latency added") for a
+plugin that needs it, and with it §139's "No latency is added and none is compensated", §140 BHK's "No latency is
+added anywhere" and §17.6's proxy that adds none. A plugin that fits its buffer is as it was: nothing added.
+
+- **BJT** **A plugin that cannot answer inside the buffer is played later instead of silenced.** Delay, never
+  holes. *(The author's.)*
+- **BJU** **Each plugin is measured when it is scanned, and by default is given what that measure says it needs.**
+  Picked from three: "as measured by default" over "measured, but only suggested". Resolved when the graph is
+  built - a show opened, the audio set up, *Load now* - from the measure and the interface's buffer. *(The
+  author's pick; the options' wording mine.)*
+- **BJV** **A plugin that is still late on what it was given is given more at once**, while its cue sounds. Picked
+  over what I recommended (say so, and apply it at the next build): no more holes, at the price of that cue's
+  sound moving later in the middle of a show. *(The author's pick, against the recommendation.)*
+
+How, all mine and his to overrule:
+
+- **BJW** **"Larger" is built as later, not as bigger blocks.** The plugin goes on being given the interface's
+  own blocks, one a callback; what changes is when its answer is played: so many samples after it was sent,
+  instead of in the same callback. A lane with nought to wait (`late = 0`) is exactly today's lane - the audio
+  thread waits for the answer inside the callback, and nothing is added. A lane with more sends its block and does
+  not wait at all: it plays what the child answered `late` samples ago, so the plugin has that long, whole
+  periods, over a buffer. Chosen over handing the plugin blocks of 512 or 1024 for what BJV needs: growing must
+  cost one gap and lose nothing. With blocks in a queue, a block found unanswered is simply waited for one more
+  callback - one buffer of silence (over the quick fade, CV), then the very block that was late, and everything
+  after it in order. Re-blocking a plugin while it sounds would need its instance prepared again.
+- **BJX** **What Go.dot adds is said with what the plugin declares.** `ProxyHost::statusNow` reports the plugin's
+  own delay plus the lane's, so every reader has one figure: the foot's words, the rack's budget (BY: "going over
+  is said loudly ... never refused, never compensated" - a plugin played three buffers late on a mic channel says
+  so there), and a timeline's line-up (§140), which then lines it up as it does a limiter's look-ahead.
+- **BJY** **A lane's own share (BHB's 0.30) goes: a lane may wait to the callback's end (0.60).** The share kept
+  one slow plugin from taking the others' time. A plugin that is late is now played later, where it costs the
+  callback no waiting, so the share protects nothing and only made a lone plugin late sooner. A wait the
+  callback's end cut short is still *starved* and not the plugin's failing when the lane began with less than the
+  old share left; otherwise it is a *miss*, as before. A lane that starved is played later too.
+- **BJZ** **The measure**: a child of the scan (`plugin-host`, as `--catalogue-only` makes one today) runs each
+  newly listed plugin alone for a few seconds of sound with onsets at 128 frames and 48 kHz, twice, and keeps the
+  lesser of the two worst blocks - a scan's process is no real-time thread, and one preemption must not pass for
+  the plugin's need. Kept in a file of its own beside the catalogue (the catalogue is rewritten whole by every
+  child that loads the plugin), by identifier and the file's time. It is this machine's knowledge, like the scan,
+  never the show's. And it learns: when a plugin's own work in a show is longer than its measure - the times §148
+  notes - the measure is raised, so the next build starts where this one ended. A wait that was the machine's
+  (the worker kept from the processor) moves the lane later for the session and is not kept.
+- **BKA** **`plugin/buffer`**, on every plugin of the set, of a rack channel and of an aux, kept in the show:
+  `measured` (the default: what BJU says), `interface` (never played later; a late buffer is silent, as before
+  §149 - for a monitor path where a hole is the lesser evil), or `1`, `2`, `4`, `8` buffers later, fixed. A
+  different choice is another child: one region has one shape.
+- **BKB** **Eight buffers is the most** (21 ms at 128 frames and 48 kHz). A plugin late beyond that is silent for
+  the buffer and the eight-in-a-row rule (BHD) fails it, as today.
+- **BKC** **A reset or a state empties the queue**: what was in flight is the last cue's. A cue through a lane
+  played later begins with that much silence - which is the delay itself.
+- **BKD** **Never less while the graph stands.** What a lane was moved to it keeps until the graph is built again,
+  which resolves it afresh from the measure. Nothing moves a cue's sound earlier in the middle of a show.
+
+**Stages.** LB.1 the region carries several requests a lane (version 10: a ring of slots, each with its own
+shape, start and stamp; the child answers them in order; the waiting lane unchanged in what it does). LB.2 the
+lane played later: the queue, the first silence, growing at once, the most, resets and states, rest, what is
+counted, the delay reported. LB.3 BJY. LB.4 `plugin/buffer`, resolved at the build; the children's grouping; the
+Plugins and Rack tabs, the web page. LB.5 the measure, its file, what it learns. LB.6 M90 (Tails at 128 frames:
+one gap, then none; Likyū not delayed), a driver for the delay declared and lined up, the guides.
+
+**Words that ship, the author's to confirm before they do:** the row's name and its choices; what the strip says
+when a plugin has been moved later.
