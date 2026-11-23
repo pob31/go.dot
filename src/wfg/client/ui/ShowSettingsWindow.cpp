@@ -237,6 +237,14 @@ namespace wfg::client::ui
                 if (! touched && ! settled)
                     return {};
 
+                /*  AND 1:1 IS THE LIST AGAIN, not a copy of it (the author,
+                    2026-11-23): pressed and not drawn over since, Apply sends no
+                    patch, so the show follows its list from then on. Sending the
+                    diagonal instead kept every row the patch had - rows no
+                    output or input feeds among them - and kept the show patched. */
+                if (pending && ! touched)
+                    return {};
+
                 return audio::writePatch (mapping);
             }
 
@@ -10186,8 +10194,12 @@ namespace wfg::client::ui
                     const auto first = juce::String (model::text (snapshot, base + "/firstChannel")).getIntValue();
                     minimumOutputs = std::max (minimumOutputs, first + juce::String (model::text (node)).getIntValue());
                 }
-            if (in.empty()) in = initial.inputDevice.empty() ? std::vector<int> (2, -1)
-                                                             : audio::identityPatch (2);
+            /*  AS MANY INPUT ROWS AS THE SHOW HAS INPUTS, and none for a show with
+                none (the author, 2026-11-23: "channels 1 and 2 in the patch even
+                when there aren't any inputs created"). */
+            const auto inputRows = model::inputChannelCount (model::readInputs (snapshot));
+            if (in.empty()) in = initial.inputDevice.empty() ? std::vector<int> (static_cast<std::size_t> (inputRows), -1)
+                                                             : audio::identityPatch (inputRows);
             if (out.empty()) out = audio::identityPatch (minimumOutputs);
             out.resize (std::max (out.size(), static_cast<std::size_t> (minimumOutputs)), -1);
             inputs = std::make_unique<PatchPage> (theme, true, in, send);
@@ -10349,7 +10361,7 @@ namespace wfg::client::ui
                                   model::dcaChoices (dcas), model::dcaTwiceSentences (snapshot, rows, dcas));
 
                 outputs->mirror (enginePatch (model::text (snapshot, "/godot/audio/outputPatch"),
-                                              model::outputChannelCount (rows), true));
+                                              model::outputChannelCount (rows), true, 2));
 
                 /*  Unconditional: `setListRows` reads the draft back before it
                     redraws, so a rename reaches the rows without disturbing a
@@ -10371,7 +10383,7 @@ namespace wfg::client::ui
                 inputList->show (rows, inputSettled, ! lockedShow);
                 inputs->mirror (enginePatch (model::text (snapshot, "/godot/audio/inputPatch"),
                                              model::inputChannelCount (rows),
-                                             ! model::text (snapshot, "/godot/audio/inputDevice").empty()));
+                                             ! model::text (snapshot, "/godot/audio/inputDevice").empty(), 0));
                 inputs->setListRows (model::inputChannelLabels (rows, 0), model::inputChannelCount (rows));
             }
             /*  THE DEVICES ARE THE DOCUMENT'S, so they are re-read every pass
@@ -10761,15 +10773,17 @@ namespace wfg::client::ui
             filled its draft: an empty one follows the list - the diagonal, or
             nothing for inputs with no device to take them from - and every
             row past what is written is disconnected. Never fewer rows than the
-            list needs, nor than two. */
-        static std::vector<int> enginePatch (const std::string& text, int channels, bool followsWhenEmpty)
+            list needs, nor than `fewest`: two for the outputs, as the window
+            always drew them, none for the inputs, which a show may have none
+            of. */
+        static std::vector<int> enginePatch (const std::string& text, int channels, bool followsWhenEmpty, int fewest)
         {
             std::vector<int> patch;
 
             if (! audio::readPatch (text, patch))
                 patch.clear();
 
-            const auto rows = std::max (2, channels);
+            const auto rows = std::max (fewest, channels);
 
             if (patch.empty())
                 patch = followsWhenEmpty ? audio::identityPatch (rows) : std::vector<int> (static_cast<std::size_t> (rows), -1);

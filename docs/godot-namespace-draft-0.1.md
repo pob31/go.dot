@@ -36624,6 +36624,14 @@ circles in each corner (third of the height)?"
   patch on every pass until a hand edit or 1:1 makes them a draft, and the Apply that sends the draft lands it back:
   the draft was filled once when the window was made, so an output added at the head of a patched show moved every
   channel in the engine's patch and not in the matrix, and Apply would have written the old picture back. *(Mine.)*
+- **BIO** **A show with no inputs has no input rows, and 1:1 then Apply hands a patch back to the list** (the author's
+  second look, the same day: "channels 1 and 2 in the patch even when there aren't any inputs created. And these extra
+  channels stay there even if we add new input channels"). The input patch page drew two rows whatever the show had; it
+  draws as many as the show's inputs need, or as the engine's patch holds. The two that stayed were a patch copied
+  from the defaults (BIM), "0 1" with no input to feed: the layout keeps rows past the list as somebody's, so every
+  input added landed in front of them. A show born so is put right with 1:1 then Apply - which sent the diagonal back,
+  those rows included, and kept the show patched; pressed and not drawn over since, Apply now sends no patch and the
+  show follows its list. The same on the output patch. *(Mine.)*
 - **Getting started for a new show.** A show New has just made opens its settings on Getting started, which names every
   page there is to set in order. The launcher's empty show, opened only when its interface did not start, still opens on
   the Audio interface page. *(The author's.)*
@@ -36634,9 +36642,10 @@ circles in each corner (third of the height)?"
   *(The author's; touching the edges, and the thickness, mine.)*
 
 **Tests**: *a new show takes the interface from this machine's defaults, and not their patches*; *the output patch
-shows what the engine did with it until somebody draws their own*; *MIDI ports read in the order the show declares
-them, a new one last*; *Identify is a frame in the output's colour and its number, and no cross*; the alignment grid's
-case, its circles added.
+shows what the engine did with it until somebody draws their own*; *a show with no inputs draws no input rows, and 1:1
+then Apply hands a patch back to the list*; *MIDI ports read in the order the show declares them, a new one last*;
+*Identify is a frame in the output's colour and its number, and no cross*; the alignment grid's case, its circles
+added.
 
 **Owed.** A look at a wall: Identify all on the projectors, and the grid's circles through a warped mesh. A ring
 drawn in rectangles needs one for every step of its diagonals: the grid is 29 bars of lines and about 3,400 with its

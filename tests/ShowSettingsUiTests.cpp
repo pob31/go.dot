@@ -295,6 +295,68 @@ TEST_CASE ("audio settings UI: the output patch shows what the engine did with i
     CHECK (drawn() == std::vector<int> { 4, 5, 0, 1, 2, 3 });
 }
 
+TEST_CASE ("audio settings UI: a show with no inputs draws no input rows, and 1:1 then Apply hands a patch back to the list")
+{
+    /*  The author, 2026-11-23: "channels 1 and 2 in the patch even when there
+        aren't any inputs created". The window drew two input rows whatever the
+        show had; and a show born with another show's patch - "0 1" with no
+        input to feed - could not be put right, because 1:1 then Apply sent the
+        diagonal back, those two rows included. */
+    {
+        Rig rig;
+        REQUIRE (doc::CanonicalXml::read (
+            "<Show><Lists><List id=\"7K2QM9X4\"/></Lists><Mounts/>"
+            "<Audio tracks=\"2\" inputDevice=\"ASIO MADIface USB\"><Bus id=\"J3MT5XYA\" name=\"Main\" kind=\"mix\" width=\"2\"/></Audio></Show>",
+            rig.document).ok);
+
+        client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+            [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+        panel.refresh (*rig.publish());
+
+        auto* tabs = component<juce::TabbedComponent> (panel);
+        REQUIRE (tabs != nullptr);
+        tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("Input patch"));
+        auto* matrix = component<spatcore::ui::patch::PatchMatrixComponent> (*tabs->getCurrentContentComponent());
+        REQUIRE (matrix != nullptr);
+        CHECK (matrix->getNumWFSChannels() == 0);
+    }
+
+    Rig rig;
+    REQUIRE (doc::CanonicalXml::read (
+        "<Show><Lists><List id=\"7K2QM9X4\"/></Lists><Mounts/>"
+        "<Audio tracks=\"2\" inputDevice=\"ASIO MADIface USB\" inputPatch=\"0 1\" outputPatch=\"8 9 0 1 2 3 4 5 6 7\">"
+        "<Bus id=\"J3MT5XYA\" name=\"Main\" kind=\"mix\" width=\"2\"/></Audio></Show>",
+        rig.document).ok);
+
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+    panel.refresh (*rig.publish());
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+
+    //  The rows the engine's patch holds are drawn, since it holds them: honest about what is there.
+    for (const auto* page : { "Input patch", "Output patch" })
+    {
+        INFO (page);
+        tabs->setCurrentTabIndex (tabs->getTabNames().indexOf (page));
+        auto* content = tabs->getCurrentContentComponent();
+        REQUIRE (content != nullptr);
+
+        auto* oneToOne = button (*content, "1:1");
+        REQUIRE (oneToOne != nullptr);
+        oneToOne->onClick();
+    }
+
+    auto* apply = button (panel, "Apply while stopped");
+    REQUIRE (apply != nullptr);
+    apply->onClick();
+
+    REQUIRE (rig.sent.back().command == "audio.setup");
+    CHECK (rig.sent.back().args[5].getString() == "");     // the input patch
+    CHECK (rig.sent.back().args[6].getString() == "");     // the output patch
+}
+
 TEST_CASE ("show settings UI: the Inputs tab makes named inputs, and a hand patch of the inputs settles them")
 {
     /*  Phase 9b (namespace draft 18.9): the output list's twin, beside it. Two
