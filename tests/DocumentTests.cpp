@@ -2582,6 +2582,28 @@ TEST_CASE ("edit lock: the refusal arrives before the value is parsed, and the l
     CHECK (endsWith (rig.engine.lastError(), "type-mismatch node.set"));
 }
 
+TEST_CASE ("a rack channel is named when it is made: Channel N, Aux N for a shared one, or the name it is given")
+{
+    /*  The author, 2026-11-23: a mic cue on a channel nobody had named showed
+        its identifier, which "looks like a bug". Named as an output and an
+        input are, counted over the channels of its own kind. */
+    doc::ShowDocument document;
+    document.beginTransaction ("channel.create", 0, "test", {});
+
+    const auto nameOf = [&document] (const doc::EditResult& made)
+    {
+        REQUIRE (made.ok);
+        return document.getAttribute ("/godot/slot/" + made.id + "/name").value_or ("");
+    };
+
+    CHECK (nameOf (document.createRackChannel ("mono")) == "Channel 1");
+    CHECK (nameOf (document.createRackChannel ("stereo")) == "Channel 2");
+    CHECK (nameOf (document.createRackChannel ("stereo", {}, "shared")) == "Aux 1");
+    CHECK (nameOf (document.createRackChannel ("mono", {}, {}, "Voix solo")) == "Voix solo");
+    CHECK (nameOf (document.createRackChannel ("monoToStereo")) == "Channel 4");
+    CHECK (nameOf (document.createRackChannel ("mono", {}, "shared")) == "Aux 2");
+}
+
 TEST_CASE ("edit lock: a locked channel.create leaves no rack behind and does not move the show")
 {
     /*  The one create that changes the document on its way to the door: it

@@ -36649,6 +36649,12 @@ circles in each corner (third of the height)?"
   commands, two steps of undo, the channel's identifier drawn by the window so the cue can name it. `channel.create`
   takes an optional `name`, written in the same step. The last line reads "Choose the input later"; with no rack, a
   note says a mic cue plays through one. *(The line's words mine.)*
+- **BIR** **A rack channel is named when it is made** (the author, the same day: a mic cue on a channel nobody had
+  named showed its identifier until somebody renamed it - "looks less like a bug" with a name). "Channel 2", or
+  "Aux 1" for a shared one, counted over the rack's channels of its kind, as an output arrives "Mix 2" and an input
+  "Input 3" - the words the Rack tab already gave an unnamed channel; a name given to `channel.create` (BIQ, an
+  import) is kept. A channel of an older show with no name is called by the Rack tab's word in the running cues'
+  words too, never by its identifier. *(Mine: "Channel" over the author's "Rack", the Rack tab's word since 9b.)*
 - **Getting started for a new show.** A show New has just made opens its settings on Getting started, which names every
   page there is to set in order. The launcher's empty show, opened only when its interface did not start, still opens on
   the Audio interface page. *(The author's.)*

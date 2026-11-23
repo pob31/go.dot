@@ -16,6 +16,7 @@
 
 #include <wfg/client/model/RunModel.h>
 
+#include <wfg/client/model/Rack.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/client/model/Timecode.h>
 #include <wfg/engine/cue/GroupMode.h>
@@ -198,8 +199,13 @@ namespace wfg::client::model
             const auto channel = text (snapshot, "/godot/cue/" + row.cueId + "/channel");
             auto called = text (snapshot, "/godot/slot/" + channel + "/name");
 
+            /*  A CHANNEL NOBODY NAMED, in a show from before channels were
+                named when made (§143), by the name the Rack tab shows for it -
+                never its identifier, which reads as a fault. */
             if (called.empty())
-                called = channel;
+                for (const auto& declared : readRack (snapshot).channels)
+                    if (declared.id == channel)
+                        called = declared.name;
 
             if (! row.pending.empty())
                 return "waiting for " + called;

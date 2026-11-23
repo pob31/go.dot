@@ -2765,8 +2765,27 @@ namespace wfg::doc
         if (! access.empty())
             attributes.push_back ({ "access", access });
 
-        if (! name.empty())
-            attributes.push_back ({ "name", name });
+        /*  A NAME IT CAN BE CALLED BY AT ONCE (the author, 2026-11-23: a mic
+            cue on a channel nobody had named showed its identifier, which
+            "looks like a bug"), as an output arrives "Mix 2" and an input
+            "Input 3": "Channel 2", or "Aux 1" for a shared one, counted over
+            the rack's channels of its own kind - the words the Rack tab gave
+            an unnamed channel already. Renamed when somebody knows what it is. */
+        auto called = name;
+
+        if (called.empty())
+        {
+            const auto shared = access == "shared";
+            auto same = 0;
+
+            for (const auto& child : rack)
+                if (child.hasType ("Channel") && (child["access"].toString() == "shared") == shared)
+                    ++same;
+
+            called = (shared ? std::string ("Aux ") : std::string ("Channel ")) + std::to_string (same + 1);
+        }
+
+        attributes.push_back ({ "name", called });
 
         return insertObject (rack, endOfSequence, "Channel", id, attributes);
     }
