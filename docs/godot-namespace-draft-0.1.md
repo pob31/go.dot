@@ -3533,7 +3533,9 @@ human-paced"*.
 - a **kill from the running pane** does — §3.29's *(proposed)* item, **taken as yes** (decision S):
   run-local like a prune, for the session, until a load-to-time re-solves. Without it the operator
   fights the machine, and every other run-local gesture in this engine already evaporates the same
-  way;
+  way; *(2026-11-23, §143, BIS: or until the operator asks the section again by hand -
+  `persistent.assert`, the click on its pointer column - which lifts the kills on that list's
+  section and puts it back at once, standby unmoved)*
 - a **double Esc** does not, by §3.29. Phase 10's.
 - **Esc** does not either *(2026-10-02, K8, the author's ruling, §23.17)*: it **pauses** a persistent
   media cue - brought down over the panic fade, its second remembered - and the next step carries it
@@ -36655,6 +36657,16 @@ circles in each corner (third of the height)?"
   "Input 3" - the words the Rack tab already gave an unnamed channel; a name given to `channel.create` (BIQ, an
   import) is kept. A channel of an older show with no name is called by the Rack tab's word in the running cues'
   words too, never by its identifier. *(Mine: "Channel" over the author's "Rack", the Rack tab's word since 9b.)*
+- **BIS** **The persistent section started again by hand** (the author, the same day: a looped bed in the section,
+  killed from the running pane, did not come back at the next GO - "I see the audio cue is called, but fails to run" -
+  and "clicking the stand-by pointer of the persistent section could start it. Imagine we have to relaunch a reverb in
+  the middle of a section when no cue is happening"). The silence was decision S as built: a kill suspends a persistent
+  cue for the session, until a load-to-time. `persistent.assert <list>` now asks the section again: the kills on that
+  list's persistent cues are lifted, and the next tick's pass puts back what the section declares, with no GO and
+  standby where it was - a cue still running left alone, a stop cue the show placed before the pointer still holding, a
+  bed Esc paused carried on, and none of a Doh's leaving-alone, the operator having asked. A kill after it suspends the
+  cue again. The cue list's pointer column sends it, on the persistent band (a band with cues in it) and on any of its
+  cues - where the pointer cannot stand, and a click used to say so. *(The author's; the stop cue still holding mine.)*
 - **Getting started for a new show.** A show New has just made opens its settings on Getting started, which names every
   page there is to set in order. The launcher's empty show, opened only when its interface did not start, still opens on
   the Audio interface page. *(The author's.)*

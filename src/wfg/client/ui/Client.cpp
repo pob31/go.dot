@@ -247,6 +247,18 @@ namespace wfg::client
                                               { shell->transport.setNotice (sentence); };
                 listActions.go              = [this] { send (gesture::go()); leaveLoadToTime(); };
 
+                /*  THE PERSISTENT SECTION STARTED AGAIN (namespace draft §143):
+                    the list shown, standby left where it is - and said, since
+                    a bed already running gives the ear nothing to confirm. */
+                listActions.assertPersistent = [this]
+                {
+                    if (show.list().empty())
+                        return;
+
+                    send (gesture::assertPersistent (show.list()));
+                    shell->transport.setNotice ("the persistent section is started again: what was not running starts");
+                };
+
                 /*  A FOLD IS THIS CLIENT'S AND NEVER THE ENGINE'S (§14.1): what
                     somebody collapsed on their screen is not something the show
                     decided, so it goes to the model and nowhere near `submit`. */

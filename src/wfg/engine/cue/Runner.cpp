@@ -2022,11 +2022,50 @@ namespace wfg::cue
 
     bool Runner::killedSinceLift (const std::string& cueId) const
     {
+        auto since = liftedAt;
+
+        if (const auto found = liftedFor.find (cueId); found != liftedFor.end())
+            since = std::max (since, found->second);
+
         for (const auto& run : runs.all())
-            if (run.cue == cueId && run.killed && run.endedAtTick >= liftedAt)
+            if (run.cue == cueId && run.killed && run.endedAtTick >= since)
                 return true;
 
         return false;
+    }
+
+    bool Runner::askPersistent (const std::string& listId, std::int64_t tick)
+    {
+        const auto list = document.findById (listId);
+
+        if (! list.isValid() || list.getType().toString() != "List")
+            return false;
+
+        //  Every cue in the section, at any depth: a bed may sit in a group there.
+        std::vector<juce::ValueTree> pending { list.getChildWithName ("Persistent") };
+
+        while (! pending.empty())
+        {
+            const auto node = pending.back();
+            pending.pop_back();
+
+            if (! node.isValid())
+                continue;
+
+            for (const auto& child : node)
+            {
+                if (const auto id = child[idProperty].toString().toStdString(); ! id.empty())
+                {
+                    liftedFor[id] = tick;
+                    suspended.erase (id);
+                }
+
+                pending.push_back (child);
+            }
+        }
+
+        ++persistentAsked;
+        return true;
     }
 
     std::optional<Runner::ResumePoint> Runner::pausedAt (const std::string& cueId) const
@@ -2300,8 +2339,11 @@ namespace wfg::cue
             uses, and for the same reason: a step is written by a handler and
             the pass is a decision, so a replay runs neither and re-injects the
             `run.assert` records from the log instead. */
-        if (assertedFor != lists.stepsTaken())
+        if (assertedFor != lists.stepsTaken() || persistentAnswered != persistentAsked)
         {
+            /*  ASKED BY HAND (§143): the same pass, owing a Doh nothing. */
+            askedPass = persistentAnswered != persistentAsked;
+            persistentAnswered = persistentAsked;
             assertedFor = lists.stepsTaken();
             assertDue = tick;
             cartsOnlyPass = false;
@@ -2424,7 +2466,8 @@ namespace wfg::cue
             comes back at the next step, as it does after any Esc. */
         const auto leftAlone = [this] (const std::string& cueId)
         {
-            return assertedFor == persistentLeftAt && (persistentAllLeft || persistentLeft.count (cueId) > 0);
+            return ! askedPass && assertedFor == persistentLeftAt
+                     && (persistentAllLeft || persistentLeft.count (cueId) > 0);
         };
 
         for (const auto& plan : plans)
@@ -27608,6 +27651,29 @@ namespace wfg::cue
                                 return Outcome::rejected (reason::unknownId);
 
                             runner.revokePrepared (engine, context.tick, runId);
+                            return Outcome::ok (args);
+                        } });
+
+        //----------------------------------------------------------------------
+        /*  THE PERSISTENT SECTION ASKED AGAIN BY HAND (namespace draft §143, the
+            author, 2026-11-23): the list's persistent cues the operator killed
+            are theirs again, and the next tick's pass puts back what the
+            section declares - a reverb relaunched mid-section with no cue to
+            GO, standby where it was. The pass's own records follow as
+            `run.assert`, from the engine, so a replay re-injects them as it
+            does a step's. */
+        registry.add ({ "persistent.assert",
+                        "Puts the list's persistent section back as it declares, now, without"
+                        " moving standby: a cue the operator killed there is lifted, and what is not"
+                        " running is started again. A cue still running is left alone, and a stop"
+                        " cue the show placed before the pointer still holds.",
+                        { { "list", 's', false } },
+                        true,
+                        [&runner] (CommandContext& context, const std::vector<osc::Value>& args)
+                        {
+                            if (! runner.askPersistent (args[0].getString(), context.tick))
+                                return Outcome::rejected (reason::unknownId);
+
                             return Outcome::ok (args);
                         } });
 

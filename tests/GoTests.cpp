@@ -13009,6 +13009,73 @@ TEST_CASE ("persistent: a kill leaves it silent, and a load-to-time brings it ba
     CHECK (rig.liveBed() != nullptr);
 }
 
+TEST_CASE ("persistent: the section asked again by hand brings a killed bed back at once, standby where it was (§143)")
+{
+    /*  The author, 2026-11-23: a looped bed killed from the pane stayed silent
+        at every GO after (decision S, as designed) and nothing short of a
+        load-to-time brought it back - "Imagine we have to relaunch a reverb in
+        the middle of a section when no cue is happening". `persistent.assert`,
+        the click on the section's pointer column, is the operator taking the
+        kill back: the bed starts again on the next tick, with no GO, and
+        standby does not move. */
+    PersistentRig rig;
+
+    rig.step();
+    rig.settle();
+    rig.audio.completeArms (rig.engine);
+    rig.settle();
+
+    const auto* live = rig.liveBed();
+    REQUIRE (live != nullptr);
+
+    REQUIRE (rig.submitAndTick ("run.kill",
+                                { osc::Value::string (live->id) }).applied == 1);
+    REQUIRE (rig.engine.submit (origin::engine, "run.ended",
+                                { osc::Value::string (rig.runOf (rig.bed)) }));
+    rig.tickOnce();
+
+    rig.step();
+    rig.settle();
+    REQUIRE (rig.liveBed() == nullptr);
+    REQUIRE (rig.runner.isSuspended (rig.bed));
+
+    const auto where = rig.standby();
+
+    //  A list the show does not have is refused, and lifts nothing.
+    CHECK (rig.submitAndTick ("persistent.assert", { osc::Value::string ("NQ0T4L1S") }).rejected == 1);
+    CHECK (rig.runner.isSuspended (rig.bed));
+
+    REQUIRE (rig.submitAndTick ("persistent.assert", { osc::Value::string (rig.listId) }).applied == 1);
+    CHECK_FALSE (rig.runner.isSuspended (rig.bed));
+
+    //  No GO: the pass the click asked for puts it back.
+    rig.settle();
+    rig.audio.completeArms (rig.engine);
+    rig.settle();
+
+    const auto* again = rig.liveBed();
+    REQUIRE (again != nullptr);
+    CHECK (again->asserted);
+    CHECK (rig.standby() == where);
+
+    //  Asked again while it runs, it is left alone: the same run.
+    const auto running = again->id;
+    REQUIRE (rig.submitAndTick ("persistent.assert", { osc::Value::string (rig.listId) }).applied == 1);
+    rig.settle();
+    REQUIRE (rig.liveBed() != nullptr);
+    CHECK (rig.liveBed()->id == running);
+
+    //  And a kill after the click suspends it again, as decision S says.
+    REQUIRE (rig.submitAndTick ("run.kill", { osc::Value::string (running) }).applied == 1);
+    REQUIRE (rig.engine.submit (origin::engine, "run.ended",
+                                { osc::Value::string (rig.runOf (rig.bed)) }));
+    rig.tickOnce();
+    rig.step();
+    rig.settle();
+    CHECK (rig.liveBed() == nullptr);
+    CHECK (rig.runner.isSuspended (rig.bed));
+}
+
 TEST_CASE ("persistent: a bed whose lane pass the hand ends is stopped, not killed, and the next GO puts it back")
 {
     /*  K4's KP, pinned (the review, 2026-10-02). The hand's end of a pass was a

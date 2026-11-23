@@ -1509,6 +1509,20 @@ namespace wfg::client::ui
             the page's own reasoning about its `[data-fold]` head. */
         if (entry.rowKind == model::RowKind::band)
         {
+            /*  BUT THE POINTER COLUMN OF THE PERSISTENT BAND STARTS ITS SECTION
+                AGAIN (namespace draft §143, the author, 2026-11-23: "clicking
+                the stand-by pointer of the persistent section could start it"),
+                as it does on any of its cues below. */
+            const auto pointerColumn = juce::roundToInt (theme.type * 7.0) * gutterChars
+                                         + juce::roundToInt (theme.type * 7.0) / 2;
+
+            if (entry.section == model::Section::persistent && event.x <= pointerColumn
+                  && entry.count > 0 && actions.assertPersistent)
+            {
+                actions.assertPersistent();
+                return;
+            }
+
             if (actions.fold)
                 actions.fold (entry.bandKey);
 
@@ -1622,10 +1636,20 @@ namespace wfg::client::ui
 
         if (target.empty())
         {
-            if (actions.say && entry.section == model::Section::persistent)
-                actions.say (juce::String (entry.name.empty() ? entry.id : entry.name)
-                               + " runs from the moment the show starts, so the pointer cannot"
-                                 " stand there");
+            /*  A PERSISTENT CUE'S POINTER COLUMN STARTS ITS SECTION AGAIN
+                (namespace draft §143): the pointer still cannot stand there - a
+                persistent cue runs from the moment the show starts - and the
+                click is the operator asking the section to be as it declares,
+                a bed they killed or a reverb gone, without moving standby. */
+            if (entry.section == model::Section::persistent)
+            {
+                if (actions.assertPersistent)
+                    actions.assertPersistent();
+                else if (actions.say)
+                    actions.say (juce::String (entry.name.empty() ? entry.id : entry.name)
+                                   + " runs from the moment the show starts, so the pointer cannot"
+                                     " stand there");
+            }
 
             return;
         }

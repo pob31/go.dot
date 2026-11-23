@@ -56,6 +56,11 @@ namespace wfg::client::gesture
         return { origin::window, "standby.set", { osc::Value::string (cueId) } };
     }
 
+    Event assertPersistent (const std::string& listId)
+    {
+        return { origin::window, "persistent.assert", { osc::Value::string (listId) } };
+    }
+
     /*  NO ARGUMENTS, though both take an optional domain: one domain exists
         (`document`), and naming it would be this client deciding what the
         default is rather than the engine. When Phase 6 adds the parameter

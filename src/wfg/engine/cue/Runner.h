@@ -4448,6 +4448,22 @@ namespace wfg::cue
             quiet must not stop the section asserting. */
         void assertPersistent (Engine& engine, std::int64_t tick);
 
+    public:
+        /*  THE PERSISTENT SECTION ASKED AGAIN BY HAND (`persistent.assert`,
+            namespace draft §143, the author 2026-11-23: "Imagine we have to
+            relaunch a reverb in the middle of a section when no cue is
+            happening ... without disturbing the standby pointer"). The kills
+            on the list's persistent cues are lifted - decision S's suspension
+            is the operator's, and this is the operator taking it back - and the
+            next tick's pass puts back what the section declares, as a step's
+            pass does: a cue still running is left alone, a stop cue the show
+            placed before the pointer still holds, a bed Esc paused carries on.
+            Standby does not move. Handler half; the pass is the hook's. False
+            when `listId` names no list. */
+        bool askPersistent (const std::string& listId, std::int64_t tick);
+
+    private:
+
         std::uint64_t assertedFor = 0;
         std::int64_t assertDue = -1;
 
@@ -4531,8 +4547,9 @@ namespace wfg::cue
             its file is all but over there, when it starts from the top. */
         void submitAssert (Engine& engine, const std::string& cueId);
 
-        /*  Whether a run of the cue was killed since the last load-to-time:
-            decision S's suspension, read off the run table. */
+        /*  Whether a run of the cue was killed since the last load-to-time, or
+            since the operator last asked its section again: decision S's
+            suspension, read off the run table. */
         bool killedSinceLift (const std::string& cueId) const;
 
         /** Whether the cue sits in a list's persistent section. */
@@ -4551,6 +4568,20 @@ namespace wfg::cue
             keeps every run for ever, so without this the same killed run would
             re-suspend the cue on the next step and the lift would do nothing. */
         std::int64_t liftedAt = -1;
+
+        /*  AND WHEN THE OPERATOR LAST ASKED A CUE'S SECTION AGAIN (namespace
+            draft §143, the author: "clicking the stand-by pointer of the
+            persistent section could start it"), by cue: a kill before it is
+            lifted for that cue alone. Handler state, as `liftedAt` is. */
+        std::map<std::string, std::int64_t> liftedFor;
+
+        /*  How many times the operator has asked, and how many passes have
+            answered: the hook runs a pass when they differ, as it does when a
+            step has been taken - and that pass leaves nothing alone for a Doh
+            (`askedPass`), the operator having asked for the section by hand. */
+        std::uint64_t persistentAsked = 0;
+        std::uint64_t persistentAnswered = 0;
+        bool askedPass = false;
 
         /*  Fades taken over by another fade since the last tick, whose runs
             have still to be ended. A queue rather than a submission at the

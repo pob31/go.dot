@@ -99,6 +99,10 @@ namespace wfg::client::gesture
         page answers that with a click on a row and so does this. */
     Event park (const std::string& cueId);
 
+    /*  THE LIST'S PERSISTENT SECTION PUT BACK NOW, standby where it is
+        (`persistent.assert`, namespace draft §143). */
+    Event assertPersistent (const std::string& listId);
+
     /** Undo and redo: the buttons, and ctrl/⌘-Z and ctrl/⌘-shift-Z. */
     Event undo();
     Event redo();
