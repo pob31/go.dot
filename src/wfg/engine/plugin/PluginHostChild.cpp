@@ -206,8 +206,28 @@ namespace wfg::plugin
                 const auto rate = std::max<std::uint32_t> (1, header.sampleRate.load (std::memory_order_relaxed));
                 const auto block = std::max<std::uint32_t> (1, header.blockSize.load (std::memory_order_relaxed));
                 const auto periodMs = 1000.0 * static_cast<double> (block) / static_cast<double> (rate);
-                app::takeRealtime (app::RealtimeRank::sound, periodMs, periodMs * 0.5);
+
+                /*  WHICH CLASS, on Windows, where this thread never sleeps
+                    while a lane is in (namespace draft §148; app/RealtimeRights.h
+                    says why it matters). `WFG_PROXY_WORKER=mmcss|timecritical|away`
+                    picks one for a bench or a test; read once, here, before
+                    any real-time work. Elsewhere they are the same ask. */
+                const auto asked = juce::SystemStats::getEnvironmentVariable ("WFG_PROXY_WORKER", {});
+                const auto spinClass = asked == "timecritical" ? app::SpinClass::timeCritical
+                                     : asked == "away"         ? app::SpinClass::timeCriticalAway
+                                     : asked == "mmcss"        ? app::SpinClass::multimedia
+                                                               : defaultSpinClass;
+                app::takeRealtimeSpinning (spinClass, periodMs, periodMs * 0.5);
             }
+
+            /*  The class the worker takes when nobody says (namespace draft §148,
+                BJR): the plain top of the ordinary range on Windows, and the
+                sound's own class everywhere else, where the name changes
+                nothing. M89, this laptop, Likyū keyed at 128 samples, the
+                three run at one moment for ten minutes: 43 buffers late in
+                the multimedia class, 4 here, 4 with the wish for another
+                core - which therefore stays a bench's word. */
+            static constexpr app::SpinClass defaultSpinClass = app::SpinClass::timeCritical;
 
             /*  THE INTERFACE'S AUDIO WORKGROUP (macOS, 2026-10-22): the worker,
                 at the top of every pass, joins what the parent shares when it
@@ -244,14 +264,25 @@ namespace wfg::plugin
                 is so small that a nap would be a real share of a lane's
                 allowance, it spins as it always did.
 
-                NOT ON WINDOWS, which does not punish the spin and cannot nap
-                so briefly: on the author's laptop the spinning worker was
-                never late in M86 (13 microseconds a round trip, 239 at
-                worst), and one napping on a high-resolution timer took a
-                millisecond to answer and 1.6 at worst - the timer's half
-                millisecond is a whole one by the time a thread runs again.
-                There it spins while a lane is in, as before, and only its
-                rest when none is uses the finer wait. */
+                NOT ON WINDOWS, which cannot nap so briefly: a worker napping
+                on a high-resolution timer took a millisecond to answer and
+                1.6 at worst - the timer's half millisecond is a whole one by
+                the time a thread runs again. There it spins while a lane is
+                in, as before, and only its rest when none is uses the finer
+                wait.
+
+                BUT WINDOWS DOES PUNISH THE SPIN, in the class the sound's
+                threads are given (namespace draft §148). §139 read eight
+                seconds of a gain on a quiet machine and found it never late.
+                The multimedia class takes a fifth of every ten milliseconds
+                back from a thread that used its whole share, and one that
+                never sleeps always has: beside sixteen ordinary threads at
+                work, 2313 buffers of 22499 came back late, each some two
+                milliseconds; beside none but the author at his desk, 26 in
+                five minutes - what his session showed. So the worker asks
+                for no such class there (`takePriority`): at the plain top of
+                the ordinary range nothing takes a share from it, and the
+                same rows read nought and a tenth as many. */
             void restAfterIdlePass (bool anyRequest) noexcept
             {
                 const auto now = std::chrono::steady_clock::now();
@@ -368,6 +399,12 @@ namespace wfg::plugin
             std::vector<float> held;
             std::size_t heldAt = 0;
 
+            /*  LATE ON PURPOSE, in each of the two ways (namespace draft §148),
+                from its state: microseconds before the worker takes a request,
+                and inside its work. */
+            int takeDelayUs = 0;
+            int workDelayUs = 0;
+
             /*  ITS SIDECHAIN, for the ducker (namespace draft §141): how wide
                 it is laid out, nought while its cue has no key. Set by a reset,
                 the lane parked. */
@@ -464,7 +501,17 @@ namespace wfg::plugin
                 instance.held.assign (static_cast<std::size_t> (instance.lookAhead)
                                           * static_cast<std::size_t> (std::max (1, lanes.channels)), 0.0f);
                 instance.heldAt = 0;
+                instance.takeDelayUs = problem.empty() ? std::clamp (state.takeDelayUs, 0, 1000000) : 0;
+                instance.workDelayUs = problem.empty() ? std::clamp (state.workDelayUs, 0, 1000000) : 0;
                 return problem;
+            }
+
+            /** Awake and busy for this long: a test's lateness, never a show's. */
+            static void spinFor (int microseconds) noexcept
+            {
+                const auto until = std::chrono::steady_clock::now() + std::chrono::microseconds (microseconds);
+
+                while (std::chrono::steady_clock::now() < until) {}
             }
 
             void run (const std::atomic<bool>& stop)
@@ -492,6 +539,15 @@ namespace wfg::plugin
                             continue;
 
                         any = true;
+
+                        if (instance.takeDelayUs > 0)
+                            spinFor (instance.takeDelayUs);
+
+                        //  TAKEN (namespace draft §148): from here the time is this side's.
+                        const auto takenAt = region::steadyNanos();
+
+                        if (instance.workDelayUs > 0)
+                            spinFor (instance.workDelayUs);
 
                         //  A STATE LOADED UNDER IT: every value again, on top.
                         if (const auto epoch = lanes.control[static_cast<std::size_t> (i)].epoch.load (std::memory_order_acquire);
@@ -607,6 +663,7 @@ namespace wfg::plugin
                         }
 
                         instance.answered = request;
+                        region::noteTimes (*lane, takenAt, region::steadyNanos(), app::processorNow());
                         lane->responseSeq.store (request, std::memory_order_release);
                     }
 
@@ -892,6 +949,12 @@ namespace wfg::plugin
 
                         any = true;
 
+                        /*  TAKEN (namespace draft §148): how long the request
+                            waited for this thread ends here, and what follows -
+                            the values, the plugin's block, the copy back - is
+                            the time in the plugin's hands. */
+                        const auto takenAt = region::steadyNanos();
+
                         /*  A STATE LOADED UNDER IT: forget what was set, and set
                             every value again on top - preallocated, a fill and
                             nothing more on this thread. */
@@ -984,6 +1047,7 @@ namespace wfg::plugin
                         }
 
                         s.answered = request;
+                        region::noteTimes (*lane, takenAt, region::steadyNanos(), app::processorNow());
                         lane->responseSeq.store (request, std::memory_order_release);
                     }
 

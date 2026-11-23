@@ -36885,3 +36885,101 @@ where it goes"; "in this aux's signal" under an open window; the guides' lines.
 
 **Owed.** The author's try: Likyū on an aux, set from the aux's FX panel, with a cue picked and sending into it; the
 D700's and the Stream Deck+'s pages on an aux (§93's own owed item, still).
+
+## 148. Why a plugin is late: measured, and the Windows worker's class
+
+**Reported 2026-11-23** by the author: "On several occasions when I tried the session with the live input and
+sidechain with Likyu there were audio drop outs" - which were the FX panel's notes that Likyū was behind, nothing
+heard, the plugin's window open or shut - and later the same evening: "Unfiltered Audio Tails had much more
+dropouts." His laptop (Core Ultra 7 255H: six performance cores, eight efficiency, two low-power), ASIO at 48 kHz
+and 128 frames, the Balanced plan.
+
+**What his logs said.** Likyū on the mic cue's rack channel, keyed from an aux: 16 buffers late in a quarter of an
+hour, then 119 in 26 minutes; mostly one at a time, some seconds to a minute apart, and five flurries of 5 to 32
+inside a second or three. Tails at the end of the same channel: 46 in a minute, one at a time. Tails alone on a
+mono aux afterwards: none. The interface never went quiet and Go.dot's own callback stayed short. A count was all
+there was (§139, BHE): it could not say whether a plugin had taken too long or had been kept waiting.
+
+**Two different faults, as measured** (M89, spike 09's addendum; this laptop, a Release build, no interface):
+
+- *Tails takes the time itself.* Alone, at 128 frames: 68 µs for a usual buffer, and at each onset of sound one of
+  1.4 to 1.7 ms, against 0.8 allowed - ten late buffers in twenty seconds, the session's rate. The same burst at
+  512 frames, where 3.2 ms is allowed and nothing is late.
+- *Likyū is kept waiting.* Its work is ten microseconds for a usual buffer in the session's own state. Beside
+  sixteen ordinary threads that never rest, with the worker as it shipped: 2313 buffers late of 22499, the longest
+  wait for its thread 2.2 ms. That is Windows' multimedia class (MMCSS, "Pro Audio") doing what it documents: a
+  thread in it that uses its whole share of a processor is dropped to priorities 1 to 7 for the rest of each
+  10 ms, and "can continue running only if no low-priority threads are ready to run". The child's worker never
+  sleeps on Windows (§139, BHG), so it always uses its whole share, and anything that wants its core has it for
+  up to 2 ms. §139 kept the spin on the strength of one eight-second row with a gain on a quiet machine.
+
+- **BJO** **The child notes, for every request, how long it waited and how long the work took**, and each lane
+  keeps the longest of each until the parent takes them (`region::noteTimes`, `ProxyLane::takeWorst`; region
+  version 9). The parent stamps a request with the steady clock as it publishes it (`requestNanos`), one clock for
+  every process on all three systems; the worker reads it twice more. No lock, no call; a reading taken while the
+  other side writes may be lost, which a pointer to where to look can afford. The processor the worker was on is
+  kept beside them where the system says (`app::processorNow`). *(Mine.)*
+- **BJP** **A spell of late blocks ends with a note in the session's log** saying which it was
+  (`ProxyHost::lateNoteOf`, `onLateNote`): `# note plugin Likyu (YK90V10R): 12 late, in 3.1 s; longest wait for
+  its thread 2.30 ms, longest in the plugin 0.05 ms, against 0.79 ms allowed; its thread was on a performance
+  core`. Blocks the callback's end cut short are counted apart in it. A note, so a replay passes over it; nothing
+  on screen changes and the `plugin.late` records are as they were. Put together from whole numbers, the same
+  words in every locale. *(Mine.)*
+- **BJQ** **M86 is run beside what a show has**: a key (`WFG_M86_KEY`), ordinary threads that never rest
+  (`WFG_M86_LOAD`), a second real plugin after the first on one channel (`WFG_M86_SECOND_VST3`, phase e), the rows
+  cut down so one can be long (`WFG_M86_PHASES`, `_BLOCKS`, `_LIMITS`, `_GAIN`), and the worker's class picked by
+  `WFG_PROXY_WORKER=mmcss|timecritical|away`. The test gain can be made late in either way from its state
+  (`takeDelayUs`, `workDelayUs`). *(Mine.)*
+- **BJR** **On Windows the child's worker takes the plain top of the ordinary range (`TIME_CRITICAL`) and stays out
+  of the multimedia class** (`app::takeRealtimeSpinning`, `SpinClass::timeCritical`), as the tick thread has since
+  §31. Nothing takes a share of a processor from it there. It still spins while a lane is in: Windows cannot nap
+  for a tenth of a millisecond, and the parent, on the audio thread, cannot wake it. macOS and Linux are untouched;
+  their workers nap (BHG) and were measured clean. This reverses §139's "Windows keeps the spin" only as to the
+  class it spins in. *(Mine; the author, asked whether the worker should also be kept off the first processor:
+  "You probably know this much better than I. I trust your judgment on this.")*
+
+  | Likyū keyed, 128 frames, this laptop | multimedia class | time-critical |
+  |---|---|---|
+  | beside 16 busy ordinary threads, 1 min (22499 buffers) | 2313 late, longest wait 2.19 ms | **0**, 0.04 ms |
+  | beside 6, 1 min | 1 | 0 |
+  | beside 3, 2 min (44999) | 18 | 1 |
+  | alone, 5 min (112499), three times | 0, 0, 26 | 2, 0, 9 |
+  | both at one moment, 10 min (224999) | 8 | 2 |
+  | three at one moment, 10 min | 43 | 4 |
+
+  The "alone" rows are a machine with a person at it; the third of each was run while files were being copied to
+  the farm. Run apart they do not compare, which is why the last two rows were run at one moment. What is left
+  under time-critical is a wait of 0.8 to 1.4 ms a few times in ten minutes (13.5 ms once): interrupts, which
+  this laptop is known for (the author, 2026-10-14: "sometimes has long interrupts, more than 2ms") and no class is
+  above.
+- **BJS** **No wish for a core.** Every time-critical stall of the first rows was on the machine's first
+  processor, so a third class was tried: time-critical with the thread's ideal processor set to a performance
+  core other than the first (`SpinClass::timeCriticalAway`, a wish the system may pass over, not a pin). Run
+  beside the other two it was late as often: 4 in ten minutes against 4. It stays a bench's word and is not what
+  ships; §108's refusal to pin anything stands. *(Mine.)*
+
+**What this does not mend: Tails.** A plugin whose own work is longer than a lane is allowed is late in any class:
+Likyū then Tails on one channel, a minute, 30 buffers late in the multimedia class and 31 time-critical, Tails'
+own work up to 2.1 ms. The author, told so: "We should allow for larger buffers when needed, late is better than
+glitchy", and, asked how a plugin should be given one: "Can we test this when scanning to have a preset?" - a
+measure of each plugin taken at the scan, setting the buffer it is given by default. That reverses the first of
+§139's rulings (the plugin's time comes from the buffer, nothing added) for a plugin that needs it, and is the
+next round's, not this one's.
+
+**Not explained.** Tails on the mono aux was never late in the author's session, with the send into it at 0 dB.
+It bursts the same in mono here (1.76 ms at worst). The note (BJP) will say where the time went the next time.
+
+**Also mended here, found by the farm:** main had been red since §146. `ClientHost::pluginTap` had no default
+initialiser, which GCC's strict build refuses (the trap of 2026-10-08), and `key: the region carries a key…` still
+pinned the region's version at 7.
+
+**Tests.** `proxy: the child notes how long a request waited for its worker and how long the work took…` (the
+stamp, the longest kept, taken and nought again, a clock that ran backwards), `proxy: a spell's note is the same
+words whatever the locale…`, `proxy: a spell of late blocks ends with a note that tells a worker kept waiting from
+a plugin that took the time` (the test gain late in each way). On the farm: macOS, GCC 15 strict in both locales,
+Clang 21 with the real-time sanitizer (no report), and the plugin drivers.
+
+**Owed.** The author's try: the same show on a Release build, the mic through Likyū keyed from the aux, half an
+hour, with and without the D700 - the FX strip quiet, and the log saying why where it is not. One row each under
+the Balanced plan and under Best performance, the setting his to flip. The same rows on a second Windows machine
+(the Ryzen), to know how much of what is left is this laptop.

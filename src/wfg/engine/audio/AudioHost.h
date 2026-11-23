@@ -136,6 +136,9 @@ namespace wfg::audio
         /** A spell of late blocks began or ended (namespace draft §139, BHE): the entry, its count, its words. */
         std::function<void (const std::string& pluginId, std::uint32_t blocks, const std::string& words)> onLate;
 
+        /** A spell of late blocks is over, and where its time went, in one line for the log (namespace draft §148). */
+        std::function<void (const std::string& note)> onLateNote {};
+
         /*  THIS MACHINE'S LIST, for the description each child makes its
             plugin from (2026-09-26): Go.dot's own known.xml as serve holds
             it, asked at every start of a host. Empty in a test rig, which

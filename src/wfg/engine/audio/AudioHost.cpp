@@ -1273,6 +1273,9 @@ namespace wfg::audio
             if (services.onLate)
                 host->onLate (services.onLate);
 
+            if (services.onLateNote)
+                host->onLateNote (services.onLateNote);
+
             if (first && services.onChanged)
                 host->onChanged (services.onChanged);
 
@@ -1877,6 +1880,9 @@ namespace wfg::audio
 
                 if (services.onLate)
                     host->onLate (services.onLate);
+
+                if (services.onLateNote)
+                    host->onLateNote (services.onLateNote);
 
                 if (services.onChanged)
                     host->onChanged (services.onChanged);

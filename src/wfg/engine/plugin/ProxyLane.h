@@ -327,6 +327,21 @@ namespace wfg::plugin
             plugin as warm as it always did. Any thread. */
         bool isResting() const noexcept;
 
+        /*  WHERE A BUFFER'S TIME WENT (namespace draft §148): the longest a
+            request of this lane waited for the child's worker, the longest
+            the worker then took over one, and the processor it was on (one
+            more than its number, nought when not noted) - since this was last
+            asked, and nought again once it has been. The host's poll, message
+            thread; nought everywhere while unbound. */
+        struct Worst
+        {
+            std::uint32_t pickupMicros = 0;
+            std::uint32_t workMicros = 0;
+            std::uint32_t core = 0;
+        };
+
+        Worst takeWorst() noexcept;
+
         /*  WHOSE INSERT THIS LANE PLAYS (namespace draft §146): the Fx the last
             arm or hold gave it, empty while it is lent to nobody. The message
             thread's, and the parent's alone - the child never reads it. What

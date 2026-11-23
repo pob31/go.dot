@@ -17,6 +17,7 @@
 #include <wfg/engine/plugin/ProxyHost.h>
 #include <wfg/engine/plugin/ChildLaunch.h>
 #include <wfg/engine/plugin/ProcessUtil.h>
+#include <wfg/engine/app/RealtimeRights.h>
 
 #include <juce_core/juce_core.h>
 
@@ -108,12 +109,22 @@ namespace wfg::plugin
             with an empty log. */
         void watchLate (std::uint32_t now)
         {
-            std::uint32_t total = 0;
+            std::uint32_t missed = 0, starved = 0;
+            ProxyLane::Worst worst;
 
             for (auto* lane : lanes)
-                if (lane != nullptr)
-                    total += lane->misses() + lane->starved();
+            {
+                if (lane == nullptr)
+                    continue;
 
+                missed += lane->misses();
+                starved += lane->starved();
+                foldWorst (worst, lane->takeWorst());
+            }
+
+            foldWorst (worstSeen, worst);
+
+            const auto total = missed + starved;
             const auto fresh = total != lateBlocksSeen;
             lateBlocksSeen = total;
 
@@ -124,14 +135,49 @@ namespace wfg::plugin
                 if (! lateSpell)
                 {
                     lateSpell = true;
+                    spell = {};
+                    spellBeganAt = now;
+                    spellMissedBefore = missedSeen;
+                    spellStarvedBefore = starvedSeen;
                     tellLate();
                 }
-
-                return;
             }
 
-            if (lateSpell && now - lateLastAt > static_cast<std::uint32_t> (lateSpellEndsAfterMs))
+            missedSeen = missed;
+            starvedSeen = starved;
+
+            /*  WHERE THE SPELL'S TIME WENT (namespace draft §148): the longest
+                wait and the longest work of every poll from the one that saw
+                its first late block - a block is counted late at its limit,
+                and the child notes its times when it answers, which is after -
+                to the spell's end, two seconds past its last. */
+            if (lateSpell)
+            {
+                const auto raisedBefore = std::max (spell.pickupMicros, spell.workMicros);
+                spell.pickupMicros = std::max (spell.pickupMicros, worst.pickupMicros);
+                spell.workMicros = std::max (spell.workMicros, worst.workMicros);
+
+                if (std::max (spell.pickupMicros, spell.workMicros) > raisedBefore)
+                    spell.core = worst.core;
+
+                spell.missed = missed - spellMissedBefore;
+                spell.starved = starved - spellStarvedBefore;
+                spell.seconds = static_cast<double> (lateLastAt - spellBeganAt) / 1000.0;
+                spell.allowedMicros = deadlineUs;
+            }
+
+            if (! fresh && lateSpell && now - lateLastAt > static_cast<std::uint32_t> (lateSpellEndsAfterMs))
                 endLateSpell();
+        }
+
+        static void foldWorst (ProxyLane::Worst& into, const ProxyLane::Worst& from) noexcept
+        {
+            const auto before = std::max (into.pickupMicros, into.workMicros);
+            into.pickupMicros = std::max (into.pickupMicros, from.pickupMicros);
+            into.workMicros = std::max (into.workMicros, from.workMicros);
+
+            if (std::max (into.pickupMicros, into.workMicros) > before)
+                into.core = from.core;
         }
 
         void endLateSpell()
@@ -140,7 +186,12 @@ namespace wfg::plugin
                 return;
 
             lateSpell = false;
+            lastSpell = spell;
             tellLate();
+
+            if (lateNote)
+                lateNote (ProxyHost::lateNoteOf (spec.name.empty() ? spec.identifier : spec.name, spec.pluginId, spell,
+                                                 app::coreKindOf (spell.core)));
         }
 
         void tellLate()
@@ -645,6 +696,18 @@ namespace wfg::plugin
         std::uint32_t lateLastAt = 0;
         bool lateSpell = false;
 
+        /*  The spell in progress, as it will be said when it ends, and the one
+            before it (namespace draft §148); the two counts apart as last
+            seen, and as they stood when the spell began. */
+        LateNoteHandler lateNote;
+        ProxyHost::LateSpell spell, lastSpell;
+        std::uint32_t spellBeganAt = 0;
+        std::uint32_t missedSeen = 0, starvedSeen = 0;
+        std::uint32_t spellMissedBefore = 0, spellStarvedBefore = 0;
+
+        /** The longest wait and work of any lane since `takeWorstSeen` last asked. */
+        ProxyLane::Worst worstSeen;
+
         juce::File regionFile;
         juce::File descriptionFile;
         juce::File catalogueFile;
@@ -687,6 +750,52 @@ namespace wfg::plugin
 
     void ProxyHost::onFailed (FailureHandler handler)   { impl->failed = std::move (handler); }
     void ProxyHost::onLate (LateHandler handler)        { impl->late = std::move (handler); }
+    void ProxyHost::onLateNote (LateNoteHandler handler) { impl->lateNote = std::move (handler); }
+
+    ProxyHost::LateSpell ProxyHost::lastLateSpell() const { return impl->lastSpell; }
+
+    ProxyLane::Worst ProxyHost::takeWorstSeen()
+    {
+        const auto worst = impl->worstSeen;
+        impl->worstSeen = {};
+        return worst;
+    }
+
+    /*  Whole numbers put together by hand: a note reads the same whatever the
+        machine's locale, where a printf would say "0,8 ms" on a French one. */
+    std::string ProxyHost::lateNoteOf (const std::string& name, const std::string& pluginId, const LateSpell& spell,
+                                       const std::string& coreKind)
+    {
+        const auto fixed = [] (std::uint64_t thousandths, int decimals)
+        {
+            //  `thousandths` of the unit, said to one or two places.
+            const auto whole = thousandths / 1000u;
+            const auto rest = decimals == 1 ? (thousandths % 1000u) / 100u : (thousandths % 1000u) / 10u;
+            auto text = std::to_string (whole) + ".";
+
+            if (decimals == 2 && rest < 10u)
+                text += "0";
+
+            return text + std::to_string (rest);
+        };
+
+        const auto ms = [&fixed] (std::uint64_t micros) { return fixed (micros, 2) + " ms"; };
+        const auto seconds = static_cast<std::uint64_t> (std::max (0.0, spell.seconds) * 1000.0 + 0.5);
+
+        auto note = "plugin " + name + " (" + pluginId + "): " + std::to_string (spell.missed) + " late";
+
+        if (spell.starved > 0)
+            note += ", " + std::to_string (spell.starved) + " cut short by the callback's end";
+
+        note += ", in " + fixed (seconds, 1) + " s; longest wait for its thread " + ms (spell.pickupMicros)
+              + ", longest in the plugin " + ms (spell.workMicros)
+              + ", against " + ms (static_cast<std::uint64_t> (std::max<std::int64_t> (0, spell.allowedMicros))) + " allowed";
+
+        if (! coreKind.empty())
+            note += "; its thread was on " + std::string (coreKind == "efficiency" ? "an " : "a ") + coreKind + " core";
+
+        return note;
+    }
     void ProxyHost::onChanged (ChangeHandler handler)   { impl->changed = std::move (handler); }
 
     bool ProxyHost::start (std::string& problem)

@@ -4817,6 +4817,14 @@ namespace
                              wfg::osc::Value::int32 (static_cast<std::int32_t> (std::min<std::uint32_t> (blocks, 0x7fffffffu))),
                              wfg::osc::Value::string (words) });
         };
+        proxyServices.onLateNote = [&engine] (const std::string& note)
+        {
+            /*  AND WHY, once the spell is over (namespace draft §148): a note
+                beside the record, which a replay passes over - how long the
+                plugin's thread kept a buffer waiting and how long the plugin
+                then took, so the next reading of a log says which it was. */
+            engine.log().note (note);
+        };
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::cue::registerLaneCommands (engine.commands(), engine, runner, document, lanes);
         wfg::cue::registerCurveCommands (engine.commands(), engine, runner, document, curveTable, &spaceMouse);

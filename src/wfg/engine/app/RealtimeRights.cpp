@@ -220,3 +220,169 @@ namespace wfg::app
 }
 
 #endif
+
+//==============================================================================
+//  THE THREAD THAT NEVER SLEEPS, and where a thread is (namespace draft §148).
+#if defined (_WIN32)
+
+ #include <vector>
+
+namespace wfg::app
+{
+    namespace
+    {
+        /*  Every core's efficiency class and the processors it holds, group
+            nought only: a machine with more than sixty-four processors is no
+            laptop, and has one kind. Empty when the system will not say. */
+        struct CoreClass
+        {
+            KAFFINITY processors = 0;
+            int efficiency = 0;
+        };
+
+        std::vector<CoreClass> coreClasses()
+        {
+            DWORD length = 0;
+            ::GetLogicalProcessorInformationEx (RelationProcessorCore, nullptr, &length);
+
+            if (length == 0)
+                return {};
+
+            std::vector<unsigned char> storage (length);
+
+            if (! ::GetLogicalProcessorInformationEx (RelationProcessorCore,
+                                                       reinterpret_cast<PSYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX> (storage.data()),
+                                                       &length))
+                return {};
+
+            std::vector<CoreClass> cores;
+
+            //  The entries are as long as each says, not as long as the structure that names them all.
+            for (DWORD at = 0; at + 2 * sizeof (DWORD) <= length;)
+            {
+                const auto* info = reinterpret_cast<const SYSTEM_LOGICAL_PROCESSOR_INFORMATION_EX*> (storage.data() + at);
+
+                if (info->Size == 0 || at + info->Size > length)
+                    break;
+
+                if (info->Relationship == RelationProcessorCore && info->Processor.GroupCount > 0
+                      && info->Processor.GroupMask[0].Group == 0)
+                    cores.push_back ({ info->Processor.GroupMask[0].Mask, static_cast<int> (info->Processor.EfficiencyClass) });
+
+                at += info->Size;
+            }
+
+            return cores;
+        }
+
+        int highestClass (const std::vector<CoreClass>& cores) noexcept
+        {
+            auto highest = 0;
+
+            for (const auto& core : cores)
+                highest = core.efficiency > highest ? core.efficiency : highest;
+
+            return highest;
+        }
+
+        /*  AWAY FROM PROCESSOR NOUGHT (namespace draft §148): a wish, not a
+            pin - the thread's ideal processor set to a performance core other
+            than the first, one chosen by the process's number so two children
+            wish for different ones. The system still runs the thread wherever
+            it sees fit; this is where it looks first. */
+        void wishAwayFromFirst() noexcept
+        {
+            const auto cores = coreClasses();
+            const auto highest = highestClass (cores);
+            std::vector<BYTE> wished;
+
+            for (const auto& core : cores)
+                if (core.efficiency == highest)
+                    for (BYTE n = 1; n < 64; ++n)
+                        if ((core.processors & (KAFFINITY { 1 } << n)) != 0)
+                            wished.push_back (n);
+
+            if (wished.empty())
+                return;
+
+            PROCESSOR_NUMBER ideal {};
+            ideal.Group = 0;
+            ideal.Number = wished[static_cast<std::size_t> (::GetCurrentProcessId() / 4u) % wished.size()];
+            ::SetThreadIdealProcessorEx (::GetCurrentThread(), &ideal, nullptr);
+            ::Sleep (1);        // off the processor once, so the wish is acted on before the work begins
+        }
+    }
+
+    RealtimeBy takeRealtimeSpinning (SpinClass spinClass, double periodMs, double computationMs) noexcept
+    {
+        if (spinClass == SpinClass::multimedia)
+            return takeRealtime (RealtimeRank::sound, periodMs, computationMs);
+
+        const auto raised = ::SetThreadPriority (::GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL) != 0;
+
+        if (spinClass == SpinClass::timeCriticalAway)
+            wishAwayFromFirst();
+
+        return raised ? RealtimeBy::system : RealtimeBy::none;
+    }
+
+    std::uint32_t processorNow() noexcept
+    {
+        return static_cast<std::uint32_t> (::GetCurrentProcessorNumber()) + 1u;
+    }
+
+    std::string coreKindOf (std::uint32_t processorPlusOne)
+    {
+        if (processorPlusOne == 0 || processorPlusOne > 64)
+            return {};
+
+        const auto cores = coreClasses();
+        const auto highest = highestClass (cores);
+        const auto bit = KAFFINITY { 1 } << (processorPlusOne - 1u);
+        auto lowest = 255, own = -1;
+
+        for (const auto& core : cores)
+        {
+            lowest = core.efficiency < lowest ? core.efficiency : lowest;
+
+            if ((core.processors & bit) != 0)
+                own = core.efficiency;
+        }
+
+        if (own < 0 || lowest >= highest)
+            return {};
+
+        return own == highest ? "performance" : "efficiency";
+    }
+}
+
+#else
+
+ #if defined (__linux__)
+  #include <sched.h>
+ #endif
+
+namespace wfg::app
+{
+    RealtimeBy takeRealtimeSpinning (SpinClass, double periodMs, double computationMs) noexcept
+    {
+        return takeRealtime (RealtimeRank::sound, periodMs, computationMs);
+    }
+
+    std::uint32_t processorNow() noexcept
+    {
+       #if defined (__linux__)
+        const auto processor = ::sched_getcpu();
+        return processor < 0 ? 0u : static_cast<std::uint32_t> (processor) + 1u;
+       #else
+        return 0;
+       #endif
+    }
+
+    std::string coreKindOf (std::uint32_t)
+    {
+        return {};
+    }
+}
+
+#endif

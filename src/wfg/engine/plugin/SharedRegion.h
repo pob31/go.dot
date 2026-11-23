@@ -48,6 +48,7 @@
 */
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 
@@ -67,8 +68,11 @@ namespace wfg::plugin::region
         7 since 2026-11-22: a key beside the audio on every lane, and whether
         the plugin's sidechain input is to carry it (namespace draft §141).
         8 since 2026-11-23: what a lane was given, kept a moment for the
-        plugin's window to hear (the tap, namespace draft §146). */
-    constexpr std::uint32_t version = 8;
+        plugin's window to hear (the tap, namespace draft §146).
+        9 since 2026-11-24: when each request was made, and the longest a
+        request waited for the worker and was then worked on (namespace draft
+        §147). */
+    constexpr std::uint32_t version = 9;
 
     /*  THE WIDEST KEY A LANE CARRIES (namespace draft §141, BHT): one channel
         or two. A wider input or cue is folded to two before it is sent. */
@@ -253,6 +257,27 @@ namespace wfg::plugin::region
         std::atomic<std::uint32_t> tapKeyChannels;
         std::atomic<std::uint64_t> tapWritten;
 
+        /*  WHERE A BUFFER'S TIME WENT (namespace draft §148). A late answer
+            was only ever counted, and a count cannot say whether the plugin
+            took the time or the worker was kept from it - two faults with
+            two different mends. Parent to child, `requestNanos`: the steady
+            clock, which is one clock for every process on all three systems,
+            as the request is published - stored before `requestSeq`. Child to
+            parent, the longest since the parent last took them (`takeWorst`):
+            `pickupMaxMicros`, from that moment to the worker taking the
+            request, and `workMaxMicros`, from there to its answer - the
+            values set, the plugin's own block and the copy back. And
+            `worstCore`, the processor the worker was on for the longer of
+            those, one more than its number so that nought is "not noted".
+            Two clock reads a block on the worker, a compare and a store; no
+            lock and no call. A reading the parent takes while the child
+            writes one may be lost: these say where to look, they are not
+            accounts. */
+        std::atomic<std::int64_t> requestNanos;
+        std::atomic<std::uint32_t> pickupMaxMicros;
+        std::atomic<std::uint32_t> workMaxMicros;
+        std::atomic<std::uint32_t> worstCore;
+
         /*  A CUE'S WHOLE STATE, loaded onto this lane's instance before the cue
             may launch (the author's decision of 2026-09-25). One in flight:
             the parent writes `statePath` - absolute, empty for the preset's
@@ -287,6 +312,7 @@ namespace wfg::plugin::region
     };
 
     static_assert (std::atomic<std::uint64_t>::is_always_lock_free
+                     && std::atomic<std::int64_t>::is_always_lock_free
                      && std::atomic<std::uint32_t>::is_always_lock_free
                      && std::atomic<float>::is_always_lock_free
                      && std::atomic<double>::is_always_lock_free,
@@ -423,6 +449,51 @@ namespace wfg::plugin::region
             return quietSamples < static_cast<std::int64_t> (sampleRate > 0 ? sampleRate : 48000);
         }
     };
+
+    /** The steady clock in nanoseconds, as both sides read it (namespace draft §148). */
+    inline std::int64_t steadyNanos() noexcept
+    {
+        return std::chrono::duration_cast<std::chrono::nanoseconds> (
+                   std::chrono::steady_clock::now().time_since_epoch()).count();
+    }
+
+    /*  THE CHILD'S NOTE OF ONE ANSWERED REQUEST (namespace draft §148): when
+        the worker took it and when it had answered, against when the parent
+        made it - the longest of each kept, and where the worker was (`core`,
+        one more than the processor's number, nought when the system does not
+        say). Before `responseSeq`, on the worker. */
+    inline void noteTimes (Lane& lane, std::int64_t takenNanos, std::int64_t doneNanos, std::uint32_t core) noexcept
+    {
+        const auto asked = lane.requestNanos.load (std::memory_order_relaxed);
+
+        if (asked <= 0)
+            return;
+
+        const auto micros = [] (std::int64_t nanos) noexcept
+        {
+            const auto whole = nanos / 1000;
+            return static_cast<std::uint32_t> (whole < 0 ? 0 : whole > 4000000000ll ? 4000000000ll : whole);
+        };
+
+        const auto pickup = micros (takenNanos - asked);
+        const auto work = micros (doneNanos - takenNanos);
+        auto raised = false;
+
+        if (pickup > lane.pickupMaxMicros.load (std::memory_order_relaxed))
+        {
+            lane.pickupMaxMicros.store (pickup, std::memory_order_relaxed);
+            raised = true;
+        }
+
+        if (work > lane.workMaxMicros.load (std::memory_order_relaxed))
+        {
+            lane.workMaxMicros.store (work, std::memory_order_relaxed);
+            raised = true;
+        }
+
+        if (raised)
+            lane.worstCore.store (core, std::memory_order_relaxed);
+    }
 
     /** FNV-1a over everything a layout depends on. */
     constexpr std::uint32_t layoutHashFor (int channels, int maxSamples, int lanes) noexcept

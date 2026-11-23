@@ -709,6 +709,11 @@ namespace wfg::plugin
             bound->blockStartSample.store (static_cast<std::uint64_t> (std::max<std::int64_t> (0, blockStart + offset)),
                                            std::memory_order_relaxed);
 
+            /*  WHEN IT WAS ASKED (namespace draft §148), for the child to measure
+                its own wait against: the steady clock, read as the waits below
+                read it - no call into the system. */
+            bound->requestNanos.store (region::steadyNanos(), std::memory_order_relaxed);
+
             const auto seq = bound->requestSeq.load (std::memory_order_relaxed) + 1;
             bound->requestSeq.store (seq, std::memory_order_release);
             blockCount.fetch_add (1, std::memory_order_relaxed);
@@ -767,6 +772,20 @@ namespace wfg::plugin
     bool ProxyLane::isResting() const noexcept
     {
         return resting.load (std::memory_order_relaxed) != 0;
+    }
+
+    ProxyLane::Worst ProxyLane::takeWorst() noexcept
+    {
+        Worst worst;
+
+        if (auto* bound = lane.load (std::memory_order_acquire); bound != nullptr)
+        {
+            worst.pickupMicros = bound->pickupMaxMicros.exchange (0, std::memory_order_relaxed);
+            worst.workMicros = bound->workMaxMicros.exchange (0, std::memory_order_relaxed);
+            worst.core = bound->worstCore.exchange (0, std::memory_order_relaxed);
+        }
+
+        return worst;
     }
 
     //==============================================================================

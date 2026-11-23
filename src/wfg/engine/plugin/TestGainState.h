@@ -30,7 +30,11 @@
     `resetDelayMs` the same at a reset, which is a VST3's deactivation made on
     purpose (namespace draft 139). `lookAhead`, tests only too: the gain gives
     its sound back that many samples late and declares it, which is a limiter's
-    look-ahead made on purpose (namespace draft 140).
+    look-ahead made on purpose (namespace draft 140). `takeDelayUs` and
+    `workDelayUs`, tests only again, are the two ways a buffer comes back late
+    (namespace draft 148): the worker that many microseconds before it takes a
+    request, as one kept from its processor is, and that many inside its
+    work, as a plugin too heavy for the buffer is.
 
     Plain text, a word a line, so a test can write one by hand. Std only: the
     voice child's test gain has no JUCE at all.
@@ -51,6 +55,8 @@ namespace wfg::plugin
         int loadDelayMs = 0;
         int resetDelayMs = 0;
         int lookAhead = 0;
+        int takeDelayUs = 0;
+        int workDelayUs = 0;
 
         /** What Pad does to the signal: twelve decibels, a quarter. */
         float padFactor() const noexcept { return pad ? 0.25f : 1.0f; }
@@ -69,6 +75,12 @@ namespace wfg::plugin
 
             if (lookAhead > 0)
                 out << "lookAhead=" << lookAhead << "\n";
+
+            if (takeDelayUs > 0)
+                out << "takeDelayUs=" << takeDelayUs << "\n";
+
+            if (workDelayUs > 0)
+                out << "workDelayUs=" << workDelayUs << "\n";
 
             return out.str();
         }
@@ -97,6 +109,8 @@ namespace wfg::plugin
                 else if (key == "loadDelayMs")  value >> state.loadDelayMs;
                 else if (key == "resetDelayMs") value >> state.resetDelayMs;
                 else if (key == "lookAhead")    value >> state.lookAhead;
+                else if (key == "takeDelayUs")  value >> state.takeDelayUs;
+                else if (key == "workDelayUs")  value >> state.workDelayUs;
             }
 
             return state;

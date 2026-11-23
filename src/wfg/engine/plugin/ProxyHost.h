@@ -143,6 +143,38 @@ namespace wfg::plugin
             spell, never once a block. */
         using LateHandler = std::function<void (const std::string& pluginId, std::uint32_t blocks, const std::string& words)>;
 
+        /*  WHAT A SPELL WAS, ONCE IT IS OVER (namespace draft §148). A count
+            says a plugin was late and not why, and there are two whys with
+            two different mends: the plugin took longer over a buffer than a
+            buffer allows, or its thread was kept from the processor while the
+            request waited. So the child notes both times for every request
+            (SharedRegion.h) and the spell keeps the longest of each: blocks
+            the plugin was late for and blocks the callback's end cut short,
+            apart; from the first late block seen to the last, in seconds; the
+            longest wait before the worker took a request, and the longest it
+            then took; the processor it was on (one more than its number, or
+            nought); and what a lane was allowed. */
+        struct LateSpell
+        {
+            std::uint32_t missed = 0;
+            std::uint32_t starved = 0;
+            double seconds = 0.0;
+            std::uint32_t pickupMicros = 0;
+            std::uint32_t workMicros = 0;
+            std::uint32_t core = 0;
+            std::int64_t allowedMicros = 0;
+        };
+
+        /*  The spell in one line, for the session's log - a note, which a
+            replay passes over: "plugin Likyu (YK90V10R): 12 late, in 3.1 s;
+            longest wait for its thread 2.30 ms, longest in the plugin 0.05 ms,
+            against 0.79 ms allowed; its thread was on a performance core".
+            `coreKind` is "performance", "efficiency" or empty
+            (app/RealtimeRights.h), and empty leaves the last part out. */
+        using LateNoteHandler = std::function<void (const std::string& note)>;
+        static std::string lateNoteOf (const std::string& name, const std::string& pluginId, const LateSpell& spell,
+                                       const std::string& coreKind);
+
         /** Milliseconds a child has to say it is ready. */
         static constexpr int readyTimeoutMs = 5000;
 
@@ -180,6 +212,17 @@ namespace wfg::plugin
 
         /** Called when a spell of late blocks begins and when it ends, on the polling thread. */
         void onLate (LateHandler handler);
+
+        /** Called once a spell of late blocks is over, with its note, on the polling thread (§147). */
+        void onLateNote (LateNoteHandler handler);
+
+        /** The last spell that ended, as it was said; all nought before any has. */
+        LateSpell lastLateSpell() const;
+
+        /*  The longest wait and the longest work of any lane since this was
+            last asked, late or not - what a bench reads a row from. The
+            polling thread's. */
+        ProxyLane::Worst takeWorstSeen();
 
         /** Called whenever the table entry changed, so the tree can look again. */
         void onChanged (ChangeHandler handler);

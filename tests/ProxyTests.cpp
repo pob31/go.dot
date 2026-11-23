@@ -2340,6 +2340,183 @@ TEST_CASE ("proxy: a spell of late blocks is said once when it begins and once w
     host.stop();
 }
 
+TEST_CASE ("proxy: the child notes how long a request waited for its worker and how long the work took, and the parent takes the longest of each")
+{
+    /*  Namespace draft 148. The parent stamps each request with the steady
+        clock; the child notes, before it answers, how long the request had
+        waited and how long it then took - the longest of each kept on the
+        lane until the parent takes them. Driven here with no process: the
+        test is the child. */
+    using namespace plugin::region;
+
+    plugin::ProxyLane lane;
+    CHECK (lane.takeWorst().pickupMicros == 0);     // unbound: nothing to read
+
+    VectorRegion region (2, 64, 1);
+    region.bind (lane, 0);
+    lane.setEnabled (true);
+    region.answerResets();
+    lane.setDeadlineMicroseconds (200);
+
+    CHECK (region.lane (0)->requestNanos.load() == 0);
+
+    const auto before = steadyNanos();
+    Block block (2, 64, 0.5f);
+    lane.process (block.data(), 2, 64);             // nobody answers: late, and the request stands
+    const auto asked = region.lane (0)->requestNanos.load();
+    CHECK (asked >= before);
+    CHECK (asked <= steadyNanos());
+
+    //  Taken 3 ms after it was asked, answered 0.5 ms later, on processor 4.
+    noteTimes (*region.lane (0), asked + 3000000, asked + 3500000, 5);
+    //  A quicker one after it moves neither.
+    noteTimes (*region.lane (0), asked + 100000, asked + 150000, 2);
+
+    auto worst = lane.takeWorst();
+    CHECK (worst.pickupMicros == 3000);
+    CHECK (worst.workMicros == 500);
+    CHECK (worst.core == 5);
+
+    //  Taken: nought again, until the next.
+    worst = lane.takeWorst();
+    CHECK (worst.pickupMicros == 0);
+    CHECK (worst.workMicros == 0);
+    CHECK (worst.core == 0);
+
+    //  A longer work alone moves the work and where it was; a clock that ran backwards is nought.
+    noteTimes (*region.lane (0), asked + 100000, asked + 900000, 3);
+    noteTimes (*region.lane (0), asked - 5000000, asked - 6000000, 9);
+    worst = lane.takeWorst();
+    CHECK (worst.pickupMicros == 100);
+    CHECK (worst.workMicros == 800);
+    CHECK (worst.core == 3);
+}
+
+TEST_CASE ("proxy: a spell's note is the same words whatever the locale, and says what was cut short only when something was")
+{
+    //  Namespace draft 148. Put together from whole numbers: no printf, no comma for a point.
+    plugin::ProxyHost::LateSpell spell;
+    spell.missed = 12;
+    spell.seconds = 3.14;
+    spell.pickupMicros = 2304;
+    spell.workMicros = 52;
+    spell.allowedMicros = 799;
+
+    CHECK (plugin::ProxyHost::lateNoteOf ("Likyu", "YK90V10R", spell, {})
+             == "plugin Likyu (YK90V10R): 12 late, in 3.1 s; longest wait for its thread 2.30 ms,"
+                " longest in the plugin 0.05 ms, against 0.79 ms allowed");
+
+    spell.starved = 2;
+    spell.seconds = 0.0;
+    spell.pickupMicros = 41;
+    spell.workMicros = 12500;
+    CHECK (plugin::ProxyHost::lateNoteOf ("Tails", "71MK49R9", spell, "efficiency")
+             == "plugin Tails (71MK49R9): 12 late, 2 cut short by the callback's end, in 0.0 s;"
+                " longest wait for its thread 0.04 ms, longest in the plugin 12.50 ms, against 0.79 ms allowed;"
+                " its thread was on an efficiency core");
+
+    CHECK (plugin::ProxyHost::lateNoteOf ("Tails", "71MK49R9", spell, "performance").find ("on a performance core")
+             != std::string::npos);
+}
+
+TEST_CASE ("proxy: a spell of late blocks ends with a note that tells a worker kept waiting from a plugin that took the time")
+{
+    /*  Namespace draft 148. The test gain made late in each of the two ways
+        (TestGainState): twenty milliseconds before its worker takes a request,
+        or twenty inside its work. The count is the same; the note is not. */
+    const auto slowTake = [] (bool take)
+    {
+        Folder folder;
+        plugin::PluginTable table;
+        plugin::ProxyLane lane;
+        plugin::ProxyHost host (testGainSpec (folder, 1), { &lane }, &table);
+
+        std::vector<std::string> notes;
+        host.onLateNote ([&notes] (const std::string& note) { notes.push_back (note); });
+
+        std::string problem;
+        REQUIRE (host.start (problem));
+        REQUIRE (waitForState (host, "loaded", 5000));
+
+        const auto file = folder.path.getChildFile ("slow.state");
+        REQUIRE (file.replaceWithText (juce::String ("gain=0.5\ndie=0\npad=0\n")
+                                         + (take ? "takeDelayUs=20000\n" : "workDelayUs=20000\n")));
+
+        lane.setDeadlineMicroseconds (500000);
+        lane.setEnabled (true);
+        lane.wantState (file.getFullPathName().toStdString());
+        REQUIRE (waitSettled (host, lane, 10000));
+
+        Block block (2, 64, 0.5f);
+        const auto play = [&lane, &block]
+        {
+            std::fill (block.storage.begin(), block.storage.end(), 0.5f);
+            lane.process (block.data(), 2, 64);
+        };
+
+        /*  IN TIME under a wide limit, and noted all the same: what a bench
+            reads a row from, late or not - and nought once it has been taken. */
+        (void) host.takeWorstSeen();
+
+        for (int i = 0; i < 3; ++i)
+            play();
+
+        host.poll();
+        const auto seen = host.takeWorstSeen();
+        CHECK ((take ? seen.pickupMicros : seen.workMicros) >= 15000u);
+        CHECK (host.takeWorstSeen().pickupMicros == 0u);
+        CHECK (notes.empty());
+
+        //  LATE, three times: a limit of a millisecond.
+        lane.setDeadlineMicroseconds (1000);
+
+        while (lane.misses() < 3)
+        {
+            play();
+            std::this_thread::sleep_for (std::chrono::milliseconds (40));    // and the child answers before the next
+        }
+
+        lane.setDeadlineMicroseconds (500000);
+        const auto late = lane.misses();
+        REQUIRE (late < static_cast<std::uint32_t> (plugin::ProxyLane::missesBeforeFailure));
+
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds (plugin::ProxyHost::lateSpellEndsAfterMs + 5000);
+
+        while (notes.empty() && std::chrono::steady_clock::now() < until)
+        {
+            host.poll();
+            std::this_thread::sleep_for (std::chrono::milliseconds (10));
+        }
+
+        REQUIRE (notes.size() == 1);
+        const auto spell = host.lastLateSpell();
+        CHECK (spell.missed == late);
+        CHECK (spell.starved == 0u);
+        CHECK (spell.allowedMicros > 0);
+
+        if (take)
+        {
+            CHECK (spell.pickupMicros >= 15000u);
+            CHECK (spell.workMicros < 15000u);      // a gain's work is microseconds
+        }
+        else
+        {
+            CHECK (spell.workMicros >= 15000u);
+        }
+
+        CHECK (notes[0].find ("plugin ") == 0);
+        CHECK (notes[0].find ("(PG7N0001): " + std::to_string (late) + " late") != std::string::npos);
+        CHECK (notes[0].find ("longest wait for its thread") != std::string::npos);
+        CHECK (notes[0].find ("allowed") != std::string::npos);
+        CHECK (host.status().state == "loaded");
+
+        host.stop();
+    };
+
+    SUBCASE ("its worker kept from the request") { slowTake (true); }
+    SUBCASE ("its work too long for the buffer")  { slowTake (false); }
+}
+
 TEST_CASE ("proxy: plugin.failed writes the table and plugin.restart reaches the hook; an unknown id is refused")
 {
     CommandRegistry registry;
@@ -3369,6 +3546,17 @@ namespace
         std::uint32_t starved = 0;        // its blocks cut short by the callback's end
         int longestRun = 0;               // its late blocks in a row, at most
         int failures = 0;                 // times a child was seen failed
+        plugin::ProxyLane::Worst worst;   // its child's longest wait and work in the row, and where (namespace draft 148)
+        std::uint32_t firstMisses = 0;    // the lane asked first, when it is not the watched one
+    };
+
+    /*  WHAT A ROW IS RUN BESIDE (namespace draft 148): a key for every lane's
+        sidechain, as a keyed cue sends one; and so many ordinary threads that
+        never rest - "another thread wants this core", on demand. */
+    struct AllowanceBeside
+    {
+        bool key = false;
+        int busyThreads = 0;
     };
 
     /*  A SHOW'S BLOCKS, as near as a test comes: one thread in the real-time
@@ -3381,9 +3569,34 @@ namespace
     AllowanceReading driveForAllowance (std::vector<std::unique_ptr<AllowanceChild>>& children,
                                         const std::vector<plugin::ProxyLane*>& order,
                                         plugin::ProxyLane* watched, plugin::ProxyLane* resetLane,
-                                        int block, double seconds, int channels = 2)
+                                        int block, double seconds, int channels = 2, AllowanceBeside beside = {})
     {
         AllowanceReading reading;
+
+        /*  THE WATCHED LANE'S CHILD, whose longest wait and work the row
+            reads; cleared of whatever its coming up left. */
+        plugin::ProxyHost* watchedHost = nullptr;
+
+        for (auto& child : children)
+        {
+            (void) child->host->takeWorstSeen();
+
+            for (auto& lane : child->lanes)
+                if (lane.get() == watched)
+                    watchedHost = child->host.get();
+        }
+
+        std::atomic<bool> busy { true };
+        std::vector<std::thread> busyThreads;
+
+        for (int i = 0; i < beside.busyThreads; ++i)
+            busyThreads.emplace_back ([&busy]
+            {
+                volatile std::uint64_t turns = 0;
+
+                while (busy.load (std::memory_order_relaxed))
+                    turns = turns + 1;
+            });
         const auto periodUs = static_cast<double> (block) * 1000000.0 / 48000.0;
         const auto blocks = static_cast<int> (seconds * 1000000.0 / periodUs);
         const auto resetEvery = std::max (1, static_cast<int> (500000.0 / periodUs));
@@ -3414,7 +3627,7 @@ namespace
             }
         });
 
-        std::thread driver ([&reading, &order, watched, resetLane, block, blocks, resetEvery, periodUs, channels]
+        std::thread driver ([&reading, &order, watched, resetLane, block, blocks, resetEvery, periodUs, channels, beside]
         {
             app::takeRealtime (app::RealtimeRank::sound, periodUs / 1000.0, periodUs / 2000.0);
 
@@ -3423,6 +3636,10 @@ namespace
 
             for (std::size_t i = 0; i < order.size(); ++i)
                 buffers.emplace_back (channels, block, 0.0f);
+
+            //  The key, when the row has one: the first buffer's noise, two channels of it.
+            Block keyBlock (2, block, 0.0f);
+            const auto firstMissesBefore = order.front()->misses();
 
             std::uint32_t noise = 0x9e3779b9u;
             const auto missesBefore = watched->misses();
@@ -3478,8 +3695,17 @@ namespace
                         resetAskedAt = std::chrono::steady_clock::now();
                     }
 
+                    if (beside.key && i == 0)
+                        for (std::size_t n = 0; n < keyBlock.storage.size(); ++n)
+                            keyBlock.storage[n] = buffers[0].storage[n % buffers[0].storage.size()];
+
                     const auto t0 = std::chrono::steady_clock::now();
-                    lane->process (buffers[i].data(), channels, block, &clock, 0);
+
+                    if (beside.key)
+                        lane->process (buffers[i].data(), channels, block, &clock, 0, keyBlock.data(), 2);
+                    else
+                        lane->process (buffers[i].data(), channels, block, &clock, 0);
+
                     const auto us = std::chrono::duration<double, std::micro> (std::chrono::steady_clock::now() - t0).count();
 
                     if (lane == resetLane && resetting && lane->stateSettled())
@@ -3504,12 +3730,24 @@ namespace
 
             reading.misses = missesSeen - missesBefore;
             reading.starved = watched->starved() - starvedBefore;
+            reading.firstMisses = order.front() != watched ? order.front()->misses() - firstMissesBefore : 0;
         });
 
         driver.join();
+        busy.store (false);
+
+        for (auto& thread : busyThreads)
+            thread.join();
+
+        //  One more look, so the last blocks' times are in, then the poller's own stop.
+        std::this_thread::sleep_for (std::chrono::milliseconds (30));
         running.store (false);
         poller.join();
         reading.failures = failures.load();
+
+        if (watchedHost != nullptr)
+            reading.worst = watchedHost->takeWorstSeen();
+
         return reading;
     }
 }
@@ -3525,7 +3763,12 @@ namespace
       b  two lanes on one child, the pool's shape at the start;
       c  two lanes, one of them switched out and in every half second: the
          reset an arm asks for, timed, and the other lane's blocks meanwhile;
-      d  the plugin's child beside one, three, seven and eleven spinning ones.
+      d  the plugin's child beside one, three, seven and eleven spinning ones;
+      e  a second real plugin after it in the same round, two inserts on one
+         channel (namespace draft 148, when `WFG_M86_SECOND_VST3` names one).
+
+    Each row also says the longest a request waited for the child's worker
+    and the longest the worker took over one, and the core it was on.
 
     `WFG_REAL_VST3=<identifier> wfg_tests --test-case="M86*" --no-skip`, a
     Release build on a quiet machine; `WFG_M86_SECONDS` is each row's length
@@ -3551,19 +3794,51 @@ TEST_CASE ("M86: what a real plugin needs of a buffer - under a wide limit and t
 
     plugin::shareWorkgroupHandle (nullptr);
 
+    /*  WHAT THE ROWS ARE RUN BESIDE, AND WHICH ARE RUN (namespace draft 148).
+        `WFG_M86_KEY=1`: every lane keyed and sent a key. `WFG_M86_LOAD=<n>`:
+        n ordinary threads that never rest, beside each row.
+        `WFG_M86_SECOND_VST3` (and `WFG_M86_SECOND_STATE`): a second real
+        plugin in a child of its own, asked after the first in the same round
+        - two inserts on one channel - as phase e, the second watched.
+        `WFG_M86_PHASES` (letters, "abcde"), `WFG_M86_BLOCKS` ("512,128"),
+        `WFG_M86_LIMITS` ("wide,shipped") and `WFG_M86_GAIN=0` cut the table
+        down to the rows wanted, so a row can be long. The child's worker
+        takes its class from `WFG_PROXY_WORKER` (PluginHostChild.cpp). */
+    const auto envText = [] (const char* name, const char* fallback)
+    {
+        return juce::SystemStats::getEnvironmentVariable (name, fallback);
+    };
+
+    const auto secondIdentifier = envText ("WFG_M86_SECOND_VST3", "").toStdString();
+    const auto secondState = envText ("WFG_M86_SECOND_STATE", "");
+    const auto secondStatePath = secondState.isEmpty() ? std::string {}
+                                                       : juce::File::getCurrentWorkingDirectory().getChildFile (secondState)
+                                                             .getFullPathName().toStdString();
+    const AllowanceBeside beside { envText ("WFG_M86_KEY", "0").getIntValue() != 0,
+                                   std::clamp (envText ("WFG_M86_LOAD", "0").getIntValue(), 0, 256) };
+    const auto phases = envText ("WFG_M86_PHASES", "abcde");
+    const auto blocksAsked = juce::StringArray::fromTokens (envText ("WFG_M86_BLOCKS", "512,128"), ",", "");
+    const auto limitsAsked = juce::StringArray::fromTokens (envText ("WFG_M86_LIMITS", "wide,shipped"), ",", "");
+    const auto withGain = envText ("WFG_M86_GAIN", "1").getIntValue() != 0;
+    const auto has = [&phases] (char phase) { return phases.containsChar (phase); };
+
     MESSAGE ("M86 on " << juce::SystemStats::getOperatingSystemName() << ", "
              << juce::SystemStats::getCpuModel() << ", " << juce::SystemStats::getNumCpus() << " cores, "
              << seconds << " s a row, " << channels << " channel(s)"
-             << (statePath.empty() ? std::string() : ", the real plugin in " + statePath));
+             << (statePath.empty() ? std::string() : ", the real plugin in " + statePath)
+             << (beside.key ? ", keyed" : "") << ", beside " << beside.busyThreads << " busy thread(s), worker "
+             << envText ("WFG_PROXY_WORKER", "as shipped"));
     MESSAGE ("plugin | block | limit | phase | children | lanes | n | p50 us | p99 | p99.9 | max | over 250 us | over 0.3 period"
-             " | misses | starved | longest run | failed | resets | reset p50 us | reset max | first late blocks");
+             " | misses | starved | longest run | failed | resets | reset p50 us | reset max | worst wait us | worst work us | core"
+             " | the first's misses | first late blocks");
 
     auto childIndex = 0;
     std::vector<std::string> saidLayout;
 
-    const auto make = [&childIndex, &saidLayout, &gain, channels, statePath] (const std::string& identifier, const std::string& xml,
-                                                                              int laneCount, int block, std::int64_t limitUs)
+    const auto make = [&childIndex, &saidLayout, &gain, channels, statePath, secondIdentifier, secondStatePath, beside]
+                          (const std::string& identifier, const std::string& xml, int laneCount, int block, std::int64_t limitUs)
     {
+        const auto& stateOfIt = ! secondIdentifier.empty() && identifier == secondIdentifier ? secondStatePath : statePath;
         auto child = std::make_unique<AllowanceChild>();
         std::vector<plugin::ProxyLane*> pointers;
 
@@ -3598,19 +3873,22 @@ TEST_CASE ("M86: what a real plugin needs of a buffer - under a wide limit and t
             if (limitUs > 0)
                 lane->setDeadlineMicroseconds (limitUs);
 
+            if (beside.key)
+                lane->setKeyed (true);
+
             lane->setEnabled (true);
 
-            if (identifier != gain && ! statePath.empty())
-                lane->wantState (statePath);
+            if (identifier != gain && ! stateOfIt.empty())
+                lane->wantState (stateOfIt);
         }
 
         for (auto& lane : child->lanes)
             REQUIRE (waitSettled (*child->host, *lane, 10000));
 
-        if (identifier != gain && ! statePath.empty())
+        if (identifier != gain && ! stateOfIt.empty())
         {
             const auto stateProblem = child->table.statusOf (spec.pluginId).stateProblem;
-            INFO ("the state " << statePath << ": " << stateProblem);
+            INFO ("the state " << stateOfIt << ": " << stateProblem);
             REQUIRE (stateProblem.empty());
         }
 
@@ -3661,7 +3939,11 @@ TEST_CASE ("M86: what a real plugin needs of a buffer - under a wide limit and t
                  << reading.longestRun << " | "
                  << reading.failures << " | " << reading.resets.size() << " | "
                  << juce::String (at (reading.resets, 0.5), 1) << " | "
-                 << juce::String (reading.resets.empty() ? 0.0 : reading.resets.back(), 1) << " | " << lateAt);
+                 << juce::String (reading.resets.empty() ? 0.0 : reading.resets.back(), 1) << " | "
+                 << reading.worst.pickupMicros << " | " << reading.worst.workMicros << " | "
+                 << (reading.worst.core == 0 ? std::string ("-")
+                                             : std::to_string (reading.worst.core - 1) + " " + app::coreKindOf (reading.worst.core))
+                 << " | " << reading.firstMisses << " | " << lateAt);
     };
 
     const auto stopAll = [] (std::vector<std::unique_ptr<AllowanceChild>>& children)
@@ -3670,9 +3952,14 @@ TEST_CASE ("M86: what a real plugin needs of a buffer - under a wide limit and t
             child->host->stop();
     };
 
+    const auto secondXml = secondIdentifier.empty() ? std::string {} : plugin::describePlugin (storage, secondIdentifier);
+
+    if (! secondIdentifier.empty() && secondXml.empty())
+        MESSAGE ("the scan does not know " << secondIdentifier << "; no phase e");
+
     for (const auto& identifier : std::vector<std::string> { gain, realIdentifier })
     {
-        if (identifier.empty())
+        if (identifier.empty() || (identifier == gain && ! withGain))
             continue;
 
         std::string xml;
@@ -3692,15 +3979,22 @@ TEST_CASE ("M86: what a real plugin needs of a buffer - under a wide limit and t
 
         for (const auto block : { 512, 128 })
         {
+            if (! blocksAsked.contains (juce::String (block)))
+                continue;
+
             for (const std::int64_t limitUs : { std::int64_t { 20000 }, std::int64_t { 0 } })
             {
+                if (! limitsAsked.contains (limitUs > 0 ? "wide" : "shipped"))
+                    continue;
+
                 //  a - one lane.
+                if (has ('a'))
                 {
                     std::vector<std::unique_ptr<AllowanceChild>> children;
                     children.push_back (make (identifier, xml, 1, block, limitUs));
                     auto* lane = children[0]->lanes[0].get();
                     say (name, block, limitUs, "a one lane", 1, 1,
-                         driveForAllowance (children, { lane }, lane, nullptr, block, seconds, channels));
+                         driveForAllowance (children, { lane }, lane, nullptr, block, seconds, channels, beside));
 
                    #if JUCE_MAC
                     /*  THE SAME IN A WORKGROUP, a work interval of the test's
@@ -3711,7 +4005,7 @@ TEST_CASE ("M86: what a real plugin needs of a buffer - under a wide limit and t
                     if (interval != nullptr && plugin::shareWorkgroupHandle (interval)
                          && waitForWorkgroup (*children[0]->host, 1, 5000))
                         say (name, block, limitUs, "a in a workgroup", 1, 1,
-                             driveForAllowance (children, { lane }, lane, nullptr, block, seconds, channels));
+                             driveForAllowance (children, { lane }, lane, nullptr, block, seconds, channels, beside));
                     else
                         MESSAGE ("no workgroup joined here; that row is not taken");
 
@@ -3725,31 +4019,49 @@ TEST_CASE ("M86: what a real plugin needs of a buffer - under a wide limit and t
                 }
 
                 //  b - two lanes on one child, the second watched.
+                if (has ('b'))
                 {
                     std::vector<std::unique_ptr<AllowanceChild>> children;
                     children.push_back (make (identifier, xml, 2, block, limitUs));
                     auto* first = children[0]->lanes[0].get();
                     auto* second = children[0]->lanes[1].get();
                     say (name, block, limitUs, "b two lanes", 1, 2,
-                         driveForAllowance (children, { first, second }, second, nullptr, block, seconds, channels));
+                         driveForAllowance (children, { first, second }, second, nullptr, block, seconds, channels, beside));
                     stopAll (children);
                 }
 
                 /*  c - the reset. The lane switched in is called first, so
                     under the shipped limit the parent has given up on it and
                     asks the watched lane while the worker is still resetting. */
+                if (has ('c'))
                 {
                     std::vector<std::unique_ptr<AllowanceChild>> children;
                     children.push_back (make (identifier, xml, 2, block, limitUs));
                     auto* sounding = children[0]->lanes[0].get();
                     auto* armed = children[0]->lanes[1].get();
                     say (name, block, limitUs, "c beside a reset", 1, 2,
-                         driveForAllowance (children, { armed, sounding }, sounding, armed, block, seconds, channels));
+                         driveForAllowance (children, { armed, sounding }, sounding, armed, block, seconds, channels, beside));
+                    stopAll (children);
+                }
+
+                /*  e - two inserts on one channel (namespace draft 148): the
+                    second plugin, in a child of its own, asked after the
+                    first in the same round and watched; how often the first
+                    was late is said beside it. */
+                if (has ('e') && identifier != gain && ! secondXml.empty())
+                {
+                    std::vector<std::unique_ptr<AllowanceChild>> children;
+                    children.push_back (make (identifier, xml, 1, block, limitUs));
+                    children.push_back (make (secondIdentifier, secondXml, 1, block, limitUs));
+                    auto* first = children[0]->lanes[0].get();
+                    auto* second = children[1]->lanes[0].get();
+                    say (name + " then " + secondIdentifier, block, limitUs, "e the second after the first", 2, 2,
+                         driveForAllowance (children, { first, second }, second, nullptr, block, seconds, channels, beside));
                     stopAll (children);
                 }
 
                 //  d - beside spinning children: how many workers the machine stands.
-                if (identifier != gain)
+                if (has ('d') && identifier != gain)
                 {
                     for (const auto others : { 1, 3, 7, 11 })
                     {
@@ -3764,7 +4076,7 @@ TEST_CASE ("M86: what a real plugin needs of a buffer - under a wide limit and t
                         }
 
                         say (name, block, limitUs, "d beside spinning children", children.size(), order.size(),
-                             driveForAllowance (children, order, order.front(), nullptr, block, seconds, channels));
+                             driveForAllowance (children, order, order.front(), nullptr, block, seconds, channels, beside));
                         stopAll (children);
                     }
                 }

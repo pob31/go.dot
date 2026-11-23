@@ -47,6 +47,7 @@
     `/godot/engine/realtimeBy`, and `none` is a warning of "This computer".
 */
 
+#include <cstdint>
 #include <string>
 
 namespace wfg::app
@@ -88,4 +89,32 @@ namespace wfg::app
 
     /** What the kernel keeps of a thread's name: its first fifteen bytes. */
     std::string kernelThreadName (const std::string& name);
+
+    /*  FOR A THREAD THAT NEVER SLEEPS (namespace draft §148): the plugin
+        child's worker on Windows, which looks for its next request without a
+        pause because the parent, on the audio thread, cannot wake it. Windows'
+        multimedia class - what `takeRealtime` asks for there - is made for
+        threads that work and then wait: one that uses its whole share of a
+        processor is dropped to the lowest priorities for the rest of each
+        period, and any ordinary thread that wants its core then has it.
+        `timeCritical` is the plain top of the ordinary range instead, which
+        nothing takes a share from - what the tick thread has had since
+        2026-10-06. `timeCriticalAway` is that, with a wish for a performance
+        core other than the machine's first processor, where its interrupts
+        mostly land: a wish the system may pass over, never a pin. Elsewhere
+        all three are `takeRealtime` for the sound. */
+    enum class SpinClass { multimedia, timeCritical, timeCriticalAway };
+
+    RealtimeBy takeRealtimeSpinning (SpinClass spinClass, double periodMs, double computationMs) noexcept;
+
+    /*  WHERE THE CALLING THREAD IS (namespace draft §148): the processor it is
+        on, ONE MORE than its number, or nought where the system does not say
+        (macOS). Read from the thread's own block, no kernel call. */
+    std::uint32_t processorNow() noexcept;
+
+    /*  WHAT KIND OF CORE THAT IS, for a note: "performance" or "efficiency" on
+        a machine with both (Windows' efficiency classes, the highest being the
+        performance cores), and empty where there is one kind or nobody says.
+        Asks the system once; never on a real-time thread. */
+    std::string coreKindOf (std::uint32_t processorPlusOne);
 }

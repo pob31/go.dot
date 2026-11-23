@@ -149,3 +149,64 @@ period, every wait in a callback ends six tenths of the period after the callbac
 written over and a reset is made apart from the answering, on the child's message thread with its lane
 parked (BHC); the worker naps a tenth of a millisecond between requests where it spun, except on Windows
 (BHG); a late block is said (BHE); and a lane whose cue is over rests (BHF).
+
+## Addendum, 2026-11-23: Windows, and where a late buffer's time went (M89)
+
+*Namespace draft §148. The author's Windows laptop (Core Ultra 7 255H: six performance cores, eight efficiency,
+two low-power; Windows 11, the Balanced plan), Release builds of `80dc5bdb` with §148 on top, no interface: M86's
+rig, extended. Likyū (the author's dynamic EQ, VST3, in the state of his session, keyed) and Unfiltered Audio
+Tails (a reverb, VST3, as it loads).*
+
+**Why.** His session logged Likyū late for 135 buffers in forty minutes and Tails for 46 in one, at 48 kHz and
+128 frames. "Windows does NOT punish the spin" above rested on eight seconds of a gain on a quiet machine.
+
+**What was added to measure with.** The parent stamps each request with the steady clock; the child notes how
+long the request waited for its worker and how long the worker then took, and the lane keeps the longest of
+each (`region::noteTimes`). M86 gained a key, busy ordinary threads beside the row, a second real plugin after
+the first, and the worker's class by `WFG_PROXY_WORKER`. `wait` and `work` below are those longest times.
+
+**Tails takes the time itself.** Alone, the limit wide (20 ms), twenty or thirty seconds a row:
+
+| frames | median | p99 | p99.9 | worst | over 0.3 of the period |
+|---|---|---|---|---|---|
+| 512 | 250 µs | 822 µs | 1.72 ms | 2.08 ms | 0 of 1874 |
+| 128 | 68 µs | 341 µs | 1.46 ms | 1.69 ms | 9 of 7499 |
+| 128, mono | 60 µs | 288 µs | 1.44 ms | 1.76 ms | |
+| 128, again | 71 µs | 333 µs | 1.43 ms | 3.57 ms | |
+
+One burst of 1.4 to 1.8 ms at each onset of the rig's sound (a second of noise, a second of silence), the same
+at either buffer. Under the shipped limit at 128 frames (0.8 ms): 10 late in 20 s, the session's rate; at 512
+(3.2 ms): none. After Likyū on one channel, a minute: 30 late with the worker in the multimedia class, 31
+time-critical. No class mends a plugin that needs more than a lane is allowed.
+
+**Likyū is kept waiting, by the class its worker was in.** Its own work: 10 µs median, 0.2 ms at p99.9. Late
+buffers at 128 frames under the shipped limit, and the longest wait for the worker:
+
+| | multimedia class (as shipped) | time-critical | time-critical, away from the first processor |
+|---|---|---|---|
+| beside 16 busy ordinary threads, 1 min (22499) | **2313**, wait 2.19 ms | **0**, wait 0.04 ms | |
+| beside 6, 1 min | 1 (work 1.04 ms) | 0 | |
+| beside 3, 2 min (44999) | 18, wait 1.24 ms | 1, wait 1.03 ms | |
+| alone, 5 min (112499), three times | 0, 0, 26 | 2, 0, 9 | |
+| two at one moment, 10 min (224999) | 8, work 2.03 ms | 2, wait 0.80 ms | |
+| three at one moment, 10 min | 43, wait 2.02 ms | 4, wait 1.36 ms | 4, wait 0.83 ms |
+
+The two milliseconds are the multimedia class's own: a thread in it that uses its whole share of a processor is
+dropped to priorities 1 to 7 for the rest of each ten milliseconds, and "can continue running only if no
+low-priority threads are ready to run" (Microsoft's words). A worker that never sleeps always uses its whole
+share. Its worst buffers in that class were on efficiency cores, where the system puts what it has demoted. The
+rows "alone" are a machine with a person at it and do not compare run apart - the third of each coincided with
+files being copied to the farm - so the last two were run at one moment.
+
+**What is left under time-critical** is a wait of 0.8 to 1.4 ms a few times in ten minutes, and 13.5 ms once:
+interrupts, on a laptop its owner does not trust for them. The first three were on the machine's first
+processor, so a wish for another performance core was tried (the thread's ideal processor, not a pin): late as
+often, 4 against 4. Not adopted.
+
+**Verdict.** On Windows the worker takes `TIME_CRITICAL` and no multimedia class (BJR). A spell of late buffers
+ends with a note in the session's log that says whether the worker was kept waiting or the plugin took the time
+(BJP). A plugin like Tails needs a larger buffer of its own, at the cost of that much delay: asked for by the
+author the same evening, and the next round's.
+
+**Not run.** The Balanced plan against Best performance; a second Windows machine; an interface. On the farm the
+change itself was built and tested (macOS, GCC 15 strict, Clang 21 with the real-time sanitizer: no report).
