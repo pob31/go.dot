@@ -138,6 +138,34 @@ namespace
     };
 }
 
+TEST_CASE ("show settings UI: the window is named after its show, and is not on top of every window")
+{
+    /*  The author, 2026-11-23, with more than one show open: "put the name of
+        the show in the title bar of the show settings. It's confusing when
+        there is more than one" - and "can they be only on top of its show main
+        window and not all windows of the OS?" (the client associates it with
+        that window). */
+    Rig rig;
+    rig.state.documentName = "Hamlet";
+
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+
+    const juce::String dash { juce::CharPointer_UTF8 (" \xe2\x80\x94 ") };
+    CHECK (panel.getName() == "Show settings" + dash + "Hamlet");
+    CHECK_FALSE (panel.isAlwaysOnTop());
+
+    //  Saved as another name, the title follows.
+    rig.state.documentName = "Hamlet, Paris";
+    panel.refresh (*rig.publish());
+    CHECK (panel.getName() == "Show settings" + dash + "Hamlet, Paris");
+
+    //  A show with no name yet: the window's own name alone.
+    rig.state.documentName.clear();
+    panel.refresh (*rig.publish());
+    CHECK (panel.getName() == "Show settings");
+}
+
 TEST_CASE ("audio settings UI: apply completion and refusal release the controls")
 {
     Rig rig;

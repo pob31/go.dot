@@ -18,8 +18,13 @@ namespace wfg::client::ui
         program; the dialogs it opens - a folder to scan, a preset - go on top
         of it, JUCE seeing to that. Linux cannot change a window's level in
         place (JUCE would rebuild the window), so there it is on top while open. */
-    class ShowSettingsWindow final : public juce::DocumentWindow,
-                                     private juce::Timer
+    /*  SHOW SETTINGS, ONE PER SHOW (the author, 2026-11-23, with more than
+        one show open: "It's confusing when there is more than one"): named
+        after its show in the title bar, and kept above that show's window
+        alone - associate it with the window (`setAssociatedComponent`) and the
+        system keeps it there, as it keeps a window's dialogs, rather than above
+        every window on the screen. */
+    class ShowSettingsWindow final : public juce::DocumentWindow
     {
     public:
         ShowSettingsWindow (const model::Theme&, const tree::TreeSnapshot&,
@@ -35,9 +40,11 @@ namespace wfg::client::ui
         void closeButtonPressed() override;
         bool keyPressed (const juce::KeyPress&) override;
     private:
-        void timerCallback() override;
+        void nameAfter (const tree::TreeSnapshot&);
         class Panel;
         std::unique_ptr<Panel> panel;
         std::function<void()> panic;
+        std::string titledFor;
+        bool titled = false;
     };
 }

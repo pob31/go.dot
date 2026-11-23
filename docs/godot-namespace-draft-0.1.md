@@ -36632,6 +36632,16 @@ circles in each corner (third of the height)?"
   input added landed in front of them. A show born so is put right with 1:1 then Apply - which sent the diagonal back,
   those rows included, and kept the show patched; pressed and not drawn over since, Apply now sends no patch and the
   show follows its list. The same on the output patch. *(Mine.)*
+- **BIP** **Show settings named after their show, and on top of that show alone** (the author, the same day, with more
+  than one show open: "put the name of the show in the title bar of the show settings. It's confusing when there is
+  more than one"; "can they be only on top of its show main window and not all windows of the OS?"; "when closing the
+  app if the show settings are visible, the confirmation window slip in between the app window and the parameter
+  window"). The title reads "Show settings - Hamlet", following a Save As. The window was always on top while Go.dot
+  was in front - above every window on the screen, another show's among them, and above the question a close asks.
+  It is now associated with its show's window (JUCE's `setAssociatedComponent`): owned by it on Windows, a child
+  window on the Mac, transient for it on Linux - kept above that window alone, minimised with it, moved with it when
+  it is dragged, and under the questions that window asks. *(The author's; moving with the show's window is the
+  system's way with an owned window, and mine to accept.)*
 - **Getting started for a new show.** A show New has just made opens its settings on Getting started, which names every
   page there is to set in order. The launcher's empty show, opened only when its interface did not start, still opens on
   the Audio interface page. *(The author's.)*
@@ -36643,9 +36653,9 @@ circles in each corner (third of the height)?"
 
 **Tests**: *a new show takes the interface from this machine's defaults, and not their patches*; *the output patch
 shows what the engine did with it until somebody draws their own*; *a show with no inputs draws no input rows, and 1:1
-then Apply hands a patch back to the list*; *MIDI ports read in the order the show declares them, a new one last*;
-*Identify is a frame in the output's colour and its number, and no cross*; the alignment grid's case, its circles
-added.
+then Apply hands a patch back to the list*; *the window is named after its show, and is not on top of every window*;
+*MIDI ports read in the order the show declares them, a new one last*; *Identify is a frame in the output's colour and
+its number, and no cross*; the alignment grid's case, its circles added.
 
 **Owed.** A look at a wall: Identify all on the projectors, and the grid's circles through a warped mesh. A ring
 drawn in rectangles needs one for every step of its diagonals: the grid is 29 bars of lines and about 3,400 with its

@@ -2501,8 +2501,16 @@ namespace wfg::client
                     return;
 
                 if (! audioSettings)
+                {
                     audioSettings = std::make_unique<ui::ShowSettingsWindow> (theme, *latest,
                         [this] (Event event) { send (std::move (event)); }, [this] { panic(); });
+
+                    /*  ABOVE THIS SHOW'S WINDOW ALONE (the author, 2026-11-23):
+                        owned by it on Windows, a child of it on the Mac, transient
+                        for it on Linux - and a question the show's window asks,
+                        closing, comes up above both. */
+                    audioSettings->setAssociatedComponent (window.get());
+                }
 
                 audioSettings->showProblems (problemPages);
 

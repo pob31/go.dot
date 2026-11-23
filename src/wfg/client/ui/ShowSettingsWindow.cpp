@@ -10894,25 +10894,40 @@ namespace wfg::client::ui
         }
 
         centreWithSize (juce::jmax (740 + Panel::pageListWidth, width), juce::jmax (550, height));
-        setAlwaysOnTop (true);
+        nameAfter (snapshot);
+
+        /*  NO LONGER ALWAYS ON TOP (the author, 2026-11-23: "can they be only on
+            top of its show main window and not all windows of the OS?"). It was,
+            four looks a second while Go.dot was in front - above every window
+            on the screen, another show's among them, and above the question a
+            close asks, which then came up between the show and its settings.
+            The client associates it with its show's window instead, and the
+            system keeps it above that one alone. */
         setVisible (true);
-       #if ! JUCE_LINUX
-        startTimerHz (4);
-       #endif
     }
-    ShowSettingsWindow::~ShowSettingsWindow() { stopTimer(); panel->stopTest(); clearContentComponent(); }
+    ShowSettingsWindow::~ShowSettingsWindow() { panel->stopTest(); clearContentComponent(); }
 
-    /*  ON TOP WHILE GO.DOT IS IN FRONT, and an ordinary window the moment
-        another program is: four looks a second, and a change only when the
-        answer moves. */
-    void ShowSettingsWindow::timerCallback()
+    /*  "Show settings - Hamlet": whose settings, with more than one show open. */
+    void ShowSettingsWindow::nameAfter (const tree::TreeSnapshot& snapshot)
     {
-        const auto wanted = isVisible() && juce::Process::isForegroundProcess();
+        const auto show = model::text (snapshot, "/godot/document/name");
 
-        if (wanted != isAlwaysOnTop())
-            setAlwaysOnTop (wanted);
+        if (titled && show == titledFor)
+            return;
+
+        titled = true;
+        titledFor = show;
+
+        //  The dash as UTF-8 bytes, as the main window's title has it.
+        const juce::String dash { juce::CharPointer_UTF8 (" \xe2\x80\x94 ") };
+        setName (show.empty() ? juce::String ("Show settings") : "Show settings" + dash + juce::String (show));
     }
-    void ShowSettingsWindow::refresh (const tree::TreeSnapshot& snapshot) { panel->refresh (snapshot); }
+
+    void ShowSettingsWindow::refresh (const tree::TreeSnapshot& snapshot)
+    {
+        nameAfter (snapshot);
+        panel->refresh (snapshot);
+    }
     void ShowSettingsWindow::showPage (const std::string& name) { panel->turnTo (juce::String (name)); }
     void ShowSettingsWindow::showProblems (const std::vector<model::PageProblems>& pages) { panel->showProblems (pages); }
     void ShowSettingsWindow::closeButtonPressed() { panel->stopTest(); setVisible (false); }
