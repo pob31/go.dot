@@ -1,8 +1,9 @@
 # Go.dot — Multichannel files and outputs, Ambisonics first: notes before the work starts
 
-**Draft 0.5**, 2026-11-24 (0.1 to 0.4 the same day; 0.2 set aside 0.1's format word on
+**Draft 0.6**, 2026-11-24 (0.1 to 0.5 the same day; 0.2 set aside 0.1's format word on
 outputs after the author's ruling quoted in §4, and 0.3 corrects 0.2's reading of that
-ruling by his own clarification; 0.4 added his answers on summing and on the grid; 0.5 withdraws 0.4's summing patch at his word). Written from a conversation with the author and a read of the code
+ruling by his own clarification; 0.4 added his answers on summing and on the grid; 0.5 withdrew 0.4's summing patch at his word; 0.6 makes the fold a decoder on the cue, after
+his ruling on how a wide file reaches a direct out or a mix). Written from a conversation with the author and a read of the code
 that day (Go.dot at `c3e0263a`, XOA at `e4c3fbd`, spatcore at `v0.4.0-50-g7bdf4ab`). Nothing
 here is built and nothing was run: every claim comes from reading the source. Line numbers are
 those of that day. **Check a claim against the code before relying on it.**
@@ -30,9 +31,9 @@ What is the author's and what is not:
 The playback core is already written for any number of channels: a full matrix at the end
 of every voice, a matrix of any size on a cue. Direct outs and mixes stay what they are, for
 mono and stereo. What is added is **a plain set of outputs after them, reached through a
-matrix**: a wide file arrives there on a diagonal, the user moves the crosspoints, and a
-preset writes the fold of an Ambisonic stream to mono or stereo. No output is given a
-meaning.
+matrix**: a wide file plays there at its full count, on a diagonal the user adjusts. And a
+wide file reaches a direct out or a mix only **through a decoder to mono or stereo**, set on
+the cue. No output is given a meaning.
 
 The one real engine change — voices of two widths, so that one wide bed does not make every
 voice wide — can come last, or never, because the rest works by raising a show setting.
@@ -219,21 +220,42 @@ This sets aside draft 0.1's format word on outputs and slots and its table of ma
    - *What follows:* each raw output takes a hardware channel of its own, beside those of the
      direct outs and mixes. "No channel reserved" then holds for the *use* of the raw outputs
      — any cue, any content — not for the hardware under them.
-   - *An open reading, for the author (§6):* if a wide cue must also be able to land on the
-     very channels a direct out plays on, without summing at the patch, the matrix can run
-     over the rig's whole run of logical outputs instead of a separate set — the matrix at the
-     end of every voice already spans all of them. Not assumed here: his words are "a more raw
-     set of outputs" at "the end of the patch".
+   - *Closed by the author the same day:* "Direct outs and mix channels stay as they are and
+     only going through a decoder to mono or stereo will allow wider files to play through
+     them. Wider files play at their full count in the matrix end of the patch." So the
+     matrix runs over the raw set only, never over the channels of a direct out or a mix.
 6. **A mono or stereo cue into the raw set** costs nothing more — a Route of 1 or 2 rows — and
    is how QLab users expect to reach any output. Open (§6).
 
-### The fold to mono and stereo, without a format word
+### The decoder to mono and stereo
 
-The author's earlier ruling of the same day stands: "a simple way to mix down a full
-Ambisonics stream to mono and stereo." Under the later one it becomes **a preset in the
-grid**: the user picks a direct out or a mix, mono or stereo, and "Ambisonic to stereo" (or mono), says AmbiX or FuMa in
-the same menu, and Go.dot writes the coefficients. What is stored is the coefficients — what
-someone decided (constraint 10) — and no word on the cue.
+The author, 2026-11-24, first: "a simple way to mix down a full Ambisonics stream to mono and
+stereo"; and then, saying where it sits: "Direct outs and mix channels stay as they are and
+only going through a decoder to mono or stereo will allow wider files to play through them."
+
+So a wide file has two ways out, and only two:
+
+- **at its full count**, through the matrix, onto the raw set;
+- **decoded to mono or stereo**, and from there onto direct outs and mixes like any mono or
+  stereo cue.
+
+*(Proposed, the mechanism.)* The decoder is **a choice on the cue**: none, or Ambisonic to
+mono, or Ambisonic to stereo, each in AmbiX or FuMa. With a decoder chosen, the cue presents
+one or two channels to everything that deals with direct outs and mixes: the direct-out menu
+accepts it, a send's pan or width, balance and swap act on it, fades move them, the surfaces
+show their usual pages. Nothing in that machinery learns anything new, because what it sees is
+a mono or a stereo cue. In the engine it is one small matrix (file channels by one or two)
+multiplied into the coefficients `spreadOf` already produces, before they reach `emit`
+(`Runner.cpp:6687-6757`, `6816-6889`); the voice still carries the file's full width, so the
+raw set can be fed from the same cue at the same time.
+
+This is one new attribute on the media cue, default none and not written — and it is the
+choice of a decoder, something someone decided (constraint 10), not a label on the file. The
+same word also tells the waveform, the timbre colour and the dynamics detector that the first
+channel is the one to look at (§3, items 6 and 7).
+
+A wide file with no decoder and a direct out or a send: refused as today ("the cue is wider
+than its direct out"), and the words should now name the two ways out.
 
 AmbiX: channel 0 is W (everything, from every direction), channel 1 is Y (left minus right),
 channel 2 is Z (up minus down), channel 3 is X (front minus back). In SN3D each of them peaks
@@ -257,14 +279,14 @@ direction's component)`, and is at unity on its axis whatever `p`.
   `fumaToAmbixTable`): W is the file's first channel at −3 dB, Y its third. Mono is `√2·W`;
   stereo is `(√2/2)·W ± ½·Y`.
 
-What this gives up against draft 0.1, knowingly:
+What the decoder does not do:
 
-- The fold is Route coefficients, so the send's width, balance and swap do not act on it, and
-  a fade does not move it (`FadeMoves.cpp:218-264` moves sends, not Routes). The cue's level
-  still fades the whole.
-- With no word saying "this is a field", the waveform, the timbre colour and the dynamics
-  detector keep folding every channel together (§3, items 6 and 7).
-- A wider stereo image or another aim is the user's own coefficients.
+- It decodes to mono or stereo only. A wider image, another aim, 5.1 to stereo: the user's
+  own coefficients, or a later decoder in the same menu.
+- The stereo law has one control, the send's existing width (1 is the pair of cardioids, 0 is
+  W on both sides): applying the two-into-two law of `SendPlacement.cpp:94-102` to the pair
+  gives `L = ½W + ½w·Y`, `R = ½W − ½w·Y` with nothing added.
+- No turning of the field.
 
 ### What stays outside
 
@@ -277,7 +299,8 @@ elsewhere.
 
 Each is small enough to build and test alone, in both locales. MC.1 to MC.4 need no change to
 the voices: they work by setting `channelsPerTrack` to the widest file. The document gains one
-value of an existing attribute (a bus's kind), so no existing show and no golden file changes.
+value of an existing attribute (a bus's kind) and one attribute whose default is not written
+(the cue's decoder), so no existing show and no golden file changes.
 
 **MC.0 — Pins and small repairs, no feature.**
 Tests beside M1: a 5.1 WAV with a speaker mask plays channel i to output i; a 16-channel and a
@@ -304,12 +327,20 @@ one undo step; a run of the same crosspoint coalesces as `node.set` does. Slidin
 diagonal is one step. Levels are words and numbers, not colour alone (constraint 8). The words
 are shown to the author before they ship.
 
-**MC.3 — The fold presets.**
-A pure file beside `SendPlacement.h` that returns the coefficients (AmbiX and FuMa, mono and
-stereo); a command that writes them as a Route onto the chosen output, one undo step. Tests:
-the numbers, `L + R = W`, FuMa against XOA's table; a blackbox driver with a 4-channel file
-carrying a tone hard left — heard on the left only through the stereo preset, at unity through
-the mono one.
+**MC.3 — The decoder.**
+A row in `docs/parameters/godot-parameters.csv` near 144 (the media cue), regenerated
+(`scripts/generate-schema.py`). A pure file beside `SendPlacement.h` that returns the decoder's
+matrix (AmbiX and FuMa, mono and stereo). `resolveRouting` multiplies it into what `spreadOf`
+gives for a direct out and for each send (`Runner.cpp:6927, 6939, 7023`), `spreadOf` being
+asked for one or two channels instead of the file's count; `send/placement`
+(`ParameterTree.cpp:917-934`) is derived from the decoded count, so it says `pan`, `stereo` or
+`fold` and no surface or window changes. The refusal's words. The detector, peaks and timbre
+on the first channel when a decoder is set; the analysis cache's key takes it. The decoder in
+the inspector. Tests: the numbers, `L + R = W`, FuMa against XOA's table, width 0 and 1,
+balance, swap; a wide cue with no decoder still refused on a direct out; a blackbox driver
+with a 4-channel file carrying a tone hard left — heard on the left only through the stereo
+decoder into a stereo direct out, at unity through the mono one, and at its four channels on
+the raw set from the same cue.
 
 **MC.4 — Importers, settings, guides.**
 QLab and Ableton imports already raise `channelsPerTrack` to the widest file
@@ -327,7 +358,7 @@ twenty-odd test fakes compile untouched (`Runner.h:717`). The plugin pool stays 
 ordinary width, so a wide voice passes its plugin places dry by the existing rule. A new
 refusal: no wide voice free.
 
-**Not staged:** the 64 ceiling; BHZ; a wide rack, aux, take or key; a format word.
+**Not staged:** the 64 ceiling; BHZ; a wide rack, aux, take or key; a format word on outputs.
 
 ---
 
@@ -337,6 +368,8 @@ refusal: no wide voice free.
 stream to mono and stereo; direct outs and mixes kept as they are; a raw set of outputs at
 the end of the patch reached through a matrix, with a diagonal default the user adjusts, as
 QLab; no output reserved for a use; matching the format is the user's, at the receiving end;
+a wide file reaches a direct out or a mix only through a decoder to mono or stereo, and plays
+at its full count only in the matrix;
 cues may be summed on any output and that is the operator's to manage; no summing at the
 patch.
 
@@ -345,14 +378,14 @@ patch.
 | Question | Recommendation |
 |---|---|
 | The raw set as a third kind of bus, one per show | Yes: the smallest thing that does it; several raw sets only if a rig asks |
-| The raw matrix over a separate set only, or over every logical output (§4, item 5) | A separate set, as he said; the other only if a show needs a bed on a direct out's channels |
 | A trim and a DCA on the raw set | Trim per raw output, no DCA: it is a patch, not a mix |
 | A mono or stereo cue into the raw set | Allow, through the same grid |
-| The fold as a preset that writes coefficients onto a mono or stereo output, with no word on the cue | Yes: it is what the later ruling implies. The cost is listed in §4 |
+| The decoder as a choice on the cue, after which it is a mono or stereo cue to every direct out and mix | Yes: sends, pan and width, fades and surfaces then work with nothing new. The other way, a preset writing coefficients, loses all of those |
+| One decoder per cue, or one per destination | One per cue: a cue is decoded to mono or to stereo, and a stereo cue onto a mono output is already folded (§42) |
 | The 32-channel cap in Tracktion | Patch it to 64 |
 | The stereo law | Two cardioids back to back: plain, sums to the mono fold, never above unity |
-| A centre source is 6 dB down per side in the stereo fold | Accept, and say so in the guides; a make-up is one number in the grid |
-| FuMa among the presets | Yes, order 1 is enough for a fold |
+| A centre source is 6 dB down per side in the stereo decoder | Accept, and say so in the guides; the cue's level makes it up |
+| FuMa among the decoders | Yes; the first four channels are all a decoder to stereo reads |
 | File channels beyond the raw set's last output | No crosspoint, and said in the window; never wrapped |
 | A narrow cue on a free wide voice when the ordinary ones are busy (MC.5) | Allow |
 | A VST3 above 8 channels (BHZ) | Leave open until a plugin asks |
