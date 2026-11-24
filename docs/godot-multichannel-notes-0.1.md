@@ -1,7 +1,8 @@
 # Go.dot — Multichannel files and outputs, Ambisonics first: notes before the work starts
 
-**Draft 0.2**, 2026-11-24 (0.1 the same day; 0.2 follows the author's ruling quoted in §4,
-which set aside 0.1's format word on outputs). Written from a conversation with the author and a read of the code
+**Draft 0.3**, 2026-11-24 (0.1 and 0.2 the same day; 0.2 set aside 0.1's format word on
+outputs after the author's ruling quoted in §4, and 0.3 corrects 0.2's reading of that
+ruling by his own clarification). Written from a conversation with the author and a read of the code
 that day (Go.dot at `c3e0263a`, XOA at `e4c3fbd`, spatcore at `v0.4.0-50-g7bdf4ab`). Nothing
 here is built and nothing was run: every claim comes from reading the source. Line numbers are
 those of that day. **Check a claim against the code before relying on it.**
@@ -13,9 +14,10 @@ What is the author's and what is not:
 - **Decided by the author** (2026-11-24): Go.dot does not become a spatial renderer, **but**
   "we should at least give a simple way to mix down a full Ambisonics stream to mono and
   stereo."
-- **Decided by the author** (2026-11-24, later): handled at the patch as in QLab — a diagonal
-  default the user adjusts, no output reserved for a use, matching the format left to the user
-  at the receiving end. His words are in §4.
+- **Decided by the author** (2026-11-24, later): direct outs and mixes stay as they are, mono
+  and stereo; beside them a rawer set of outputs at the end of the patch, reached through a
+  matrix as in QLab — a diagonal default the user adjusts, no output reserved for a use,
+  matching the format left to the user at the receiving end. His words are in §4.
 - Everything else is a finding or a recommendation. §6 lists what is his to decide.
 - The PRD is not amended by this file. When the work starts: a namespace-draft section (the
   next free is **§150**, the next code **BKE**; stage codes **MC.** are unused), a PRD §3.9b
@@ -25,11 +27,12 @@ What is the author's and what is not:
 
 ## 1. The short of it
 
-The playback core is already written for any number of channels: an output of any width, a
-full matrix at the end of every voice, a matrix of any size on a cue. What is missing is
-small: a default that lays a wide file diagonally across the outputs, a grid in which the
-user moves the crosspoints, and a preset that writes the fold of an Ambisonic stream to mono
-or stereo into that grid. No output is given a meaning and nothing is added to the document.
+The playback core is already written for any number of channels: a full matrix at the end
+of every voice, a matrix of any size on a cue. Direct outs and mixes stay what they are, for
+mono and stereo. What is added is **a plain set of outputs after them, reached through a
+matrix**: a wide file arrives there on a diagonal, the user moves the crosspoints, and a
+preset writes the fold of an Ambisonic stream to mono or stereo. No output is given a
+meaning.
 
 The one real engine change — voices of two widths, so that one wide bed does not make every
 voice wide — can come last, or never, because the rest works by raising a show setting.
@@ -149,48 +152,67 @@ Two worries that turned out not to be:
 > way we don't squat outputs for a single use. It's up to the user to match the format/patch
 > on the receiving end."
 
-Read here as:
+And, correcting draft 0.2, which had laid the diagonal across the existing outputs:
 
-- **Outputs carry no format.** No "Ambisonic output", no run of channels set aside for a bed.
-  An output is what it is today.
-- **A wide file arrives with a diagonal**: file channel 1 to output channel 1, 2 to 2, and so
-  on. The user then moves the crosspoints.
-- **Go.dot checks nothing about meaning.** Whether the sixteen channels that arrive at XOA are
-  the order XOA expects is the user's to match there.
+> "What I meant is keep things as they are for the direct outs (mono/stereo) and mix
+> (mono/stereo) and have a more raw set of outputs accessed through a matrix."
 
-This sets aside draft 0.1's format word on outputs and slots, and its table of matching rules
-(same order, lower order, refused…). They are kept in §9 for the record only.
+So:
+
+- **Direct outs and mixes are untouched.** They stay the mono and stereo outputs they are,
+  with their menus, sends, pan and width, fades and surface pages. A mono or stereo file is
+  imported and routed exactly as today.
+- **A raw set of outputs comes after them** in the patch: plain numbered channels, with no
+  kind, no pairing and no meaning.
+- **A cue reaches them through a matrix**, file channels against raw outputs, which opens on a
+  diagonal (file channel 1 to raw output 1, 2 to 2…) and which the user adjusts.
+- **Nothing is reserved.** Tonight's bed and tomorrow's 5.1 use the same raw outputs; no
+  "Ambisonic output" squats sixteen channels.
+- **Go.dot checks nothing about meaning.** Whether what arrives at XOA is the order XOA
+  expects is the user's to match there.
+
+This sets aside draft 0.1's format word on outputs and slots and its table of matching rules
+(kept in §9 for the record only), and draft 0.2's diagonal across direct outs and mixes.
 
 ### What the ruling needs *(proposed)*
 
-1. **A diagonal that runs across outputs.** A `<Route>` belongs to one bus, and today's
-   default (`ShowDocument::defaultMediaRoute`, `ShowDocument.cpp:2673-2703`; the command
-   `route.default`, `DocumentCommands.cpp:427`) writes the identity onto the *lowest bus
-   only*. For a file wider than that bus the diagonal has to continue onto the next outputs:
-   one Route per bus touched, each holding its piece. With two stereo outputs and a 4-channel
-   file: channels 1-2 on the first, 3-4 on the second. Nothing new in the document — the
-   Routes are what already exists. Channels that fall beyond the last output get no
-   crosspoint, and the window says so.
-2. **The window's import does the same.** `routeImportedMedia` (`Client.cpp:4920-4975`) gives
-   a new cue a direct out to the lowest output, else a send. For a file wider than that
-   output a direct out is refused at GO ("the cue is wider than its direct out"), so a wide
-   file should get the diagonal instead. Mono and stereo files: unchanged.
-3. **A grid to adjust it.** QLab shows cue channels against outputs. On 2026-11-24 no such
+1. **The raw set, in the document.** The smallest way found: a third `bus/kind` beside
+   `direct` and `mix` (CSV row 590) — one bus of that kind, as wide as the user says, packed
+   last so that it sits at the end of the patch. Everything under it already exists: a bus of
+   any width, its place in `audio/outputPatch` (CSV row 563), a `<Route>` holding a matrix of
+   cue channels by bus width (`ShowDocument.cpp:7320-7347`), the engine flattening it
+   (`Runner.cpp:6687-6757`). Whether it is one such bus or may be several, and its name on
+   screen, are open (§6).
+2. **Kept out of the mono and stereo machinery.** A raw bus appears in no direct-out menu and
+   no send list, takes no pan or width, and has no page on a surface. Whether it has a trim
+   and a DCA like other outputs is open (§6).
+3. **The diagonal.** Today's default (`ShowDocument::defaultMediaRoute`,
+   `ShowDocument.cpp:2673-2703`; the command `route.default`, `DocumentCommands.cpp:427`)
+   writes an identity onto the lowest bus. For a file wider than two it writes the diagonal
+   onto the raw set instead; channels beyond the raw set's width get no crosspoint, and the
+   window says so. The window's own import (`routeImportedMedia`, `Client.cpp:4920-4975`)
+   does the same for a wide file, where today it gives a direct out that is then refused at
+   GO ("the cue is wider than its direct out"). A wide file in a show with no raw outputs:
+   said plainly at import, with the way to add them.
+4. **A grid to adjust it.** QLab shows cue channels against outputs. On 2026-11-24 no such
    grid was found on a cue in the desktop window (the only matrix component in
    `src/wfg/client` is the hardware patch in the show settings, spatcore's
    `PatchMatrixComponent`). **To check before building**: what the inspector or the foot
    offers today for a Route's coefficients. If nothing, this is the stage that makes the rest
-   usable — a foot panel, cue channels down, output channels across with the outputs' names
-   as groups, a level per crosspoint.
-4. **Where the diagonal starts.** At the first output, as QLab; moving the whole diagonal
-   along (start at output 9) as one gesture is worth having, since "no channel reserved"
-   means the bed lands wherever the user says tonight.
+   usable — a foot panel, file channels down, raw outputs across, a level per crosspoint.
+   Sliding the whole diagonal along (start at raw output 9) as one gesture is worth having.
+5. **Raw outputs and the hardware.** The patch gives each logical output one hardware
+   channel. **To check**: whether a raw output and a direct out may be patched to the same
+   hardware channel and are summed there. If the patch refuses it, "no output squatted" holds
+   inside Go.dot but each raw output still takes a hardware channel of its own.
+6. **A mono or stereo cue into the raw set** costs nothing more — a Route of 1 or 2 rows — and
+   is how QLab users expect to reach any output. Open (§6).
 
 ### The fold to mono and stereo, without a format word
 
 The author's earlier ruling of the same day stands: "a simple way to mix down a full
 Ambisonics stream to mono and stereo." Under the later one it becomes **a preset in the
-grid**: the user picks an output and "Ambisonic to stereo" (or mono), says AmbiX or FuMa in
+grid**: the user picks a direct out or a mix, mono or stereo, and "Ambisonic to stereo" (or mono), says AmbiX or FuMa in
 the same menu, and Go.dot writes the coefficients. What is stored is the coefficients — what
 someone decided (constraint 10) — and no word on the cue.
 
@@ -235,8 +257,8 @@ elsewhere.
 ## 5. Stages
 
 Each is small enough to build and test alone, in both locales. MC.1 to MC.4 need no change to
-the voices: they work by setting `channelsPerTrack` to the widest file. None adds an attribute
-to the document, so no existing show and no golden file changes.
+the voices: they work by setting `channelsPerTrack` to the widest file. The document gains one
+value of an existing attribute (a bus's kind), so no existing show and no golden file changes.
 
 **MC.0 — Pins and small repairs, no feature.**
 Tests beside M1: a 5.1 WAV with a speaker mask plays channel i to output i; a 16-channel and a
@@ -246,13 +268,16 @@ through `CueMatrix`. The 32 cap: a fourth Tracktion patch raising it to 64
 stack is safe on the reader's path — or wide files stop at 32 channels and the window says so.
 The silent placeholder named by its width.
 
-**MC.1 — The diagonal.**
-`defaultMediaRoute` continues across buses for a file wider than the lowest one; the window's
-import (`routeImportedMedia`) uses it for a file wider than the output it would have given.
-Existing assignments are preserved, as `route.default` already promises. Tests: a 4-channel
-file over two stereo outputs, over one 8-wide output, over a rig too narrow (the remainder
-without crosspoints, and said). Must stay green: `ImportRoutingTests.cpp:149, 179`,
-`GoTests.cpp:1414-1480`.
+**MC.1 — The raw set and the diagonal.**
+The third bus kind in `docs/parameters/godot-parameters.csv` (row 590) and what follows from
+it: packed last, absent from the direct-out menu and the send lists, added and resized in the
+show settings' outputs page (`ShowSettingsWindow.cpp:6356-6370`). `defaultMediaRoute` writes
+the diagonal onto it for a file wider than two; the window's import (`routeImportedMedia`)
+uses it. The default kind is not written, so no existing show and no golden file changes.
+Tests: a 4-channel and a 16-channel file onto a raw set wide enough, and onto one too narrow
+(the remainder without crosspoints, and said); a wide file with no raw set; a show round trip
+in both locales. Must stay green: `ImportRoutingTests.cpp:149, 179`, `GoTests.cpp:1414-1480`,
+`OutputLayoutTests.cpp`.
 
 **MC.2 — The grid.**
 After the check of §4, item 3. Every crosspoint edit is a named command (constraint 11) and
@@ -290,20 +315,24 @@ refusal: no wide voice free.
 ## 6. Decisions
 
 **Decided by the author** (2026-11-24): no spatial renderer; a simple fold of an Ambisonic
-stream to mono and stereo; a diagonal default the user adjusts, as QLab; no output reserved
-for a use; matching the format is the user's, at the receiving end.
+stream to mono and stereo; direct outs and mixes kept as they are; a raw set of outputs at
+the end of the patch reached through a matrix, with a diagonal default the user adjusts, as
+QLab; no output reserved for a use; matching the format is the user's, at the receiving end.
 
 **Still the author's**, each with a recommendation:
 
 | Question | Recommendation |
 |---|---|
-| The fold as a preset that writes coefficients, with no word on the cue | Yes: it is what the later ruling implies. The cost is listed in §4 |
+| The raw set as a third kind of bus, one per show | Yes: the smallest thing that does it; several raw sets only if a rig asks |
+| A trim and a DCA on the raw set | Trim per raw output, no DCA: it is a patch, not a mix |
+| A mono or stereo cue into the raw set | Allow, through the same grid |
+| May a raw output share a hardware channel with a direct out | Yes if the patch can sum; to check |
+| The fold as a preset that writes coefficients onto a mono or stereo output, with no word on the cue | Yes: it is what the later ruling implies. The cost is listed in §4 |
 | The 32-channel cap in Tracktion | Patch it to 64 |
 | The stereo law | Two cardioids back to back: plain, sums to the mono fold, never above unity |
 | A centre source is 6 dB down per side in the stereo fold | Accept, and say so in the guides; a make-up is one number in the grid |
 | FuMa among the presets | Yes, order 1 is enough for a fold |
-| File channels beyond the rig's last output | No crosspoint, and said in the window; never wrapped |
-| The diagonal for a mono or stereo file | Unchanged from today (direct out, or a send) |
+| File channels beyond the raw set's last output | No crosspoint, and said in the window; never wrapped |
 | A narrow cue on a free wide voice when the ordinary ones are busy (MC.5) | Allow |
 | A VST3 above 8 channels (BHZ) | Leave open until a plugin asks |
 | Whether MC.5 is built at all | After the rest has been used on a real bed |
@@ -317,8 +346,10 @@ tests. Any word that reaches the screen is shown to the author before it ships.
 - The 32 cap truncates **silently**, and it has only been read in the source.
 - The grid of MC.2 is the largest piece and has not been looked for thoroughly: check what
   the window already offers for a Route before designing it.
-- A diagonal across several outputs is several Routes; an output deleted or narrowed later
-  must leave the others standing (the load already checks each Route's length).
+- A raw set made narrower later leaves Routes of the old width behind: say what happens to
+  them (the load already checks each Route's length against its bus).
+- Every place that lists buses by kind (`direct` or `mix`) meets a third word: menus, the
+  send mixer, surfaces, both importers. Grep the kind, do not trust a list.
 - MC.5 touches which voice a cue gets, and with it replay.
 - By ear: nothing here has been heard.
 
