@@ -1,8 +1,8 @@
 # Go.dot — Multichannel files and outputs, Ambisonics first: notes before the work starts
 
-**Draft 0.4**, 2026-11-24 (0.1 to 0.3 the same day; 0.2 set aside 0.1's format word on
+**Draft 0.5**, 2026-11-24 (0.1 to 0.4 the same day; 0.2 set aside 0.1's format word on
 outputs after the author's ruling quoted in §4, and 0.3 corrects 0.2's reading of that
-ruling by his own clarification; 0.4 adds his answers on summing and on the grid). Written from a conversation with the author and a read of the code
+ruling by his own clarification; 0.4 added his answers on summing and on the grid; 0.5 withdraws 0.4's summing patch at his word). Written from a conversation with the author and a read of the code
 that day (Go.dot at `c3e0263a`, XOA at `e4c3fbd`, spatcore at `v0.4.0-50-g7bdf4ab`). Nothing
 here is built and nothing was run: every claim comes from reading the source. Line numbers are
 those of that day. **Check a claim against the code before relying on it.**
@@ -201,31 +201,29 @@ This sets aside draft 0.1's format word on outputs and slots and its table of ma
    usable, and the largest: a foot panel, file channels down, raw outputs across, a level per
    crosspoint. Sliding the whole diagonal along (start at raw output 9) as one gesture is
    worth having.
-5. **Raw outputs and the hardware: summing must be possible.** The author, 2026-11-24, asked
-   whether a raw output and a direct out may land on the same hardware channel and be summed
-   there: "I would say the mixing is a possibility. Things should stay flexible." Today it is
-   not possible, in two places, both read that day:
-   - `readPatch` (`audio/AudioSettings.cpp:20-43`) refuses a patch that names a hardware
-     channel twice. The same function reads the input patch, where the rule is harmless.
-   - `patchOutputs` (`AudioSettings.cpp:78-91`) *copies* each logical output onto its hardware
-     channel, so if two shared one the later would replace the earlier.
-
-   What it takes: the output patch allowed to name a hardware channel more than once, and
-   `patchOutputs` adding instead of copying (the destination is already cleared at line 82; an
-   add is no allocation and no lock, so constraint 2 holds). **To check**: the patch grid in
-   the show settings, which may itself allow only one mark per hardware channel, and whatever
-   reads the patch to say a hardware output is free or taken. Summed outputs can exceed full
-   scale where one could not, and nothing limits at the hardware; that is the operator's to
-   manage, by the author's word: "You have to trust the operator to be a responsible
-   technician. Yes summing should be possible. It's up to the user to manage this."
-
-   Summing of *cues* on one output is a different thing and is already there. Every output,
-   direct or mix, is a summing point: the schema's own words for `bus/kind` are "a second
-   cue sent to a direct out is mixed there like anywhere else rather than refused". The
-   author's case for it: "if for instance a media cue is crossfading with another over the
-   same spatial sound object then it makes sense", even if the wording of a direct out does
-   not push towards it. The raw set sums cues the same way, the matrix at the end of every
-   voice being additive.
+5. **Summing: at the outputs, never at the patch.** The author, 2026-11-24, in order: "I would
+   say the mixing is a possibility. Things should stay flexible."; "You have to trust the
+   operator to be a responsible technician. Yes summing should be possible. It's up to the
+   user to manage this."; and then, settling where: **"No summing at the patch level is
+   best."**
+   - *Cues are summed on an output, and that is already there.* Every output, direct or mix,
+     is a summing point: the schema's own words for `bus/kind` are "a second cue sent to a
+     direct out is mixed there like anywhere else rather than refused". His case for it: "if
+     for instance a media cue is crossfading with another over the same spatial sound object
+     then it makes sense", even if the wording of a direct out does not push towards it. The
+     raw set sums cues the same way, the matrix at the end of every voice being additive.
+     Nothing guards against it and nothing should: it is the operator's to manage.
+   - *The hardware patch stays one to one.* `readPatch` (`audio/AudioSettings.cpp:20-43`)
+     refuses a hardware channel named twice and `patchOutputs` (`:78-91`) copies; both stay
+     as they are. (Draft 0.4 proposed making the patch sum. Withdrawn.)
+   - *What follows:* each raw output takes a hardware channel of its own, beside those of the
+     direct outs and mixes. "No channel reserved" then holds for the *use* of the raw outputs
+     — any cue, any content — not for the hardware under them.
+   - *An open reading, for the author (§6):* if a wide cue must also be able to land on the
+     very channels a direct out plays on, without summing at the patch, the matrix can run
+     over the rig's whole run of logical outputs instead of a separate set — the matrix at the
+     end of every voice already spans all of them. Not assumed here: his words are "a more raw
+     set of outputs" at "the end of the patch".
 6. **A mono or stereo cue into the raw set** costs nothing more — a Route of 1 or 2 rows — and
    is how QLab users expect to reach any output. Open (§6).
 
@@ -287,9 +285,7 @@ Tests beside M1: a 5.1 WAV with a speaker mask plays channel i to output i; a 16
 through `CueMatrix`. The 32 cap: a fourth Tracktion patch raising it to 64
 (`patches/tracktion_engine/series`, `scripts/te-patches.py`), after checking the array on the
 stack is safe on the reader's path — or wide files stop at 32 channels and the window says so.
-The silent placeholder named by its width. The output patch sums: a hardware channel may be
-named by more than one logical output (§4, item 5), with a test of two outputs on one
-hardware channel heard as their sum, and the input patch still refusing a repeat.
+The silent placeholder named by its width.
 
 **MC.1 — The raw set and the diagonal.**
 The third bus kind in `docs/parameters/godot-parameters.csv` (row 590) and what follows from
@@ -341,13 +337,15 @@ refusal: no wide voice free.
 stream to mono and stereo; direct outs and mixes kept as they are; a raw set of outputs at
 the end of the patch reached through a matrix, with a diagonal default the user adjusts, as
 QLab; no output reserved for a use; matching the format is the user's, at the receiving end;
-several outputs may be summed onto one hardware channel ("Things should stay flexible").
+cues may be summed on any output and that is the operator's to manage; no summing at the
+patch.
 
 **Still the author's**, each with a recommendation:
 
 | Question | Recommendation |
 |---|---|
 | The raw set as a third kind of bus, one per show | Yes: the smallest thing that does it; several raw sets only if a rig asks |
+| The raw matrix over a separate set only, or over every logical output (§4, item 5) | A separate set, as he said; the other only if a show needs a bed on a direct out's channels |
 | A trim and a DCA on the raw set | Trim per raw output, no DCA: it is a patch, not a mix |
 | A mono or stereo cue into the raw set | Allow, through the same grid |
 | The fold as a preset that writes coefficients onto a mono or stereo output, with no word on the cue | Yes: it is what the later ruling implies. The cost is listed in §4 |
@@ -369,14 +367,6 @@ tests. Any word that reaches the screen is shown to the author before it ships.
 - The 32 cap truncates **silently**, and it has only been read in the source.
 - The grid of MC.2 is the largest piece, and is new: nothing on a cue shows crosspoints
   today.
-- A summing patch changes what the hardware patch means for every show, not only for raw
-  outputs: an existing patch plays as before (none names a channel twice), and a channel
-  named twice is now the operator's choice where it used to be refused. Accepted by the
-  author; the grid should still *show* a shared channel plainly.
-- A raw set made narrower later leaves Routes of the old width behind: say what happens to
-  them (the load already checks each Route's length against its bus).
-- Every place that lists buses by kind (`direct` or `mix`) meets a third word: menus, the
-  send mixer, surfaces, both importers. Grep the kind, do not trust a list.
 - MC.5 touches which voice a cue gets, and with it replay.
 - By ear: nothing here has been heard.
 
