@@ -215,7 +215,17 @@ This sets aside draft 0.1's format word on outputs and slots and its table of ma
    add is no allocation and no lock, so constraint 2 holds). **To check**: the patch grid in
    the show settings, which may itself allow only one mark per hardware channel, and whatever
    reads the patch to say a hardware output is free or taken. Summed outputs can exceed full
-   scale where one could not; nothing limits at the hardware today.
+   scale where one could not, and nothing limits at the hardware; that is the operator's to
+   manage, by the author's word: "You have to trust the operator to be a responsible
+   technician. Yes summing should be possible. It's up to the user to manage this."
+
+   Summing of *cues* on one output is a different thing and is already there. Every output,
+   direct or mix, is a summing point: the schema's own words for `bus/kind` are "a second
+   cue sent to a direct out is mixed there like anywhere else rather than refused". The
+   author's case for it: "if for instance a media cue is crossfading with another over the
+   same spatial sound object then it makes sense", even if the wording of a direct out does
+   not push towards it. The raw set sums cues the same way, the matrix at the end of every
+   voice being additive.
 6. **A mono or stereo cue into the raw set** costs nothing more — a Route of 1 or 2 rows — and
    is how QLab users expect to reach any output. Open (§6).
 
@@ -360,8 +370,9 @@ tests. Any word that reaches the screen is shown to the author before it ships.
 - The grid of MC.2 is the largest piece, and is new: nothing on a cue shows crosspoints
   today.
 - A summing patch changes what the hardware patch means for every show, not only for raw
-  outputs: an existing patch plays as before (none names a channel twice), but a slip in the
-  grid now doubles a channel where it used to be refused.
+  outputs: an existing patch plays as before (none names a channel twice), and a channel
+  named twice is now the operator's choice where it used to be refused. Accepted by the
+  author; the grid should still *show* a shared channel plainly.
 - A raw set made narrower later leaves Routes of the old width behind: say what happens to
   them (the load already checks each Route's length against its bus).
 - Every place that lists buses by kind (`direct` or `mix`) meets a third word: menus, the
