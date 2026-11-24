@@ -116,6 +116,7 @@ def session(report: Report, room: Path, locale: "str | None", name: str, taught:
                 said["before"] = before
 
             went_at = first_sound.frames_on_disk(render)
+            said["went"] = went_at
             hand.send("/godot/cmd/go")
             first_sound.run_for_cue(server, GROUP)
 
@@ -149,7 +150,30 @@ def session(report: Report, room: Path, locale: "str | None", name: str, taught:
     return said
 
 
+def told(said: "dict[str, object]", name: str) -> None:
+    """WHAT THE SESSION SAID OF ITS PLUGIN, printed when a check on what was heard fails: a runner that kept the
+    child from its processor and a lane that lost its place read the same in two frame numbers, and not in these."""
+    log = said.get("log")
+    text = log.read_text(encoding="utf-8", errors="replace") if isinstance(log, Path) and log.exists() else ""
+    lines = [line for line in text.splitlines() if "plugin" in line]
+    print(f"         {name}: GO near frame {said.get('went')}, {said.get('lateBlocks')} late block(s); "
+          f"the log's {len(lines)} line(s) about a plugin:")
+
+    for line in lines[:60]:
+        print(f"           {line[:240]}")
+
+
 def heard(report: Report, said: "dict[str, object]", name: str) -> None:
+    before = len(report.failures)
+
+    try:
+        heard_checks(report, said, name)
+    finally:
+        if len(report.failures) > before:
+            told(said, name)
+
+
+def heard_checks(report: Report, said: "dict[str, object]", name: str) -> None:
     left, right, latency = said.get("left", -1), said.get("right", -1), said.get("latency")
     report.check(left >= 0 and right >= 0, f"{name}: both sounds are heard", f"left from {left}, right from {right}")
 
