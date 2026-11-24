@@ -118,6 +118,12 @@ namespace wfg::plugin
             and a quarter of the block period. */
         std::int64_t deadlineMicroseconds = 0;
 
+        /*  HOW MANY REQUESTS A LANE MAY HAVE OUT AT ONCE (namespace draft
+            §149): the slots of its queue, for a plugin played later than it
+            is sent. `region::queueSlotsMost` unless the plugin is never to be
+            played later, and then none - a region with none is today's. */
+        int queueSlots = region::queueSlotsMost;
+
         /** Where the region file goes: the engine's own folder. */
         std::string regionFolder;
 
@@ -163,6 +169,12 @@ namespace wfg::plugin
             std::uint32_t workMicros = 0;
             std::uint32_t core = 0;
             std::int64_t allowedMicros = 0;
+
+            /*  PLAYED LATER FOR IT (namespace draft §149): how many samples
+                later the lane the spell moved is played now, nought when the
+                spell moved none - a plugin that may not be given more, or one
+                already as late as a lane goes. */
+            int laterSamples = 0;
         };
 
         /*  The spell in one line, for the session's log - a note, which a
@@ -170,7 +182,9 @@ namespace wfg::plugin
             longest wait for its thread 2.30 ms, longest in the plugin 0.05 ms,
             against 0.79 ms allowed; its thread was on a performance core".
             `coreKind` is "performance", "efficiency" or empty
-            (app/RealtimeRights.h), and empty leaves the last part out. */
+            (app/RealtimeRights.h), and empty leaves the last part out. A
+            spell that moved the plugin later ends "; played 256 samples
+            later from now" (§149). */
         using LateNoteHandler = std::function<void (const std::string& note)>;
         static std::string lateNoteOf (const std::string& name, const std::string& pluginId, const LateSpell& spell,
                                        const std::string& coreKind);
@@ -213,7 +227,7 @@ namespace wfg::plugin
         /** Called when a spell of late blocks begins and when it ends, on the polling thread. */
         void onLate (LateHandler handler);
 
-        /** Called once a spell of late blocks is over, with its note, on the polling thread (§147). */
+        /** Called once a spell of late blocks is over, with its note, on the polling thread (§148). */
         void onLateNote (LateNoteHandler handler);
 
         /** The last spell that ended, as it was said; all nought before any has. */

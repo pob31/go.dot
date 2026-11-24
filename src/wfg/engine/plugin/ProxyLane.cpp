@@ -88,6 +88,14 @@ namespace wfg::plugin
         regionChannels = channels;
         regionMaxSamples = maxSamples;
 
+        /*  ITS QUEUE (namespace draft §149), as the region was made: none,
+            and this lane can only wait. Nothing of an earlier child's is
+            still out, and it is as late as the build resolved. */
+        queueSlots = headerToUse != nullptr ? static_cast<int> (headerToUse->queueSlots.load (std::memory_order_relaxed)) : 0;
+        emptyQueue();
+        queueNumber = laneToUse->queueSeq.load (std::memory_order_relaxed);
+        lateNow.store (lateBase.load (std::memory_order_relaxed), std::memory_order_relaxed);
+
         //  Whether its cue has a key (§141), for the child that lays the instance out.
         laneToUse->keyWanted.store (static_cast<std::uint32_t> (keyed.load (std::memory_order_relaxed)),
                                     std::memory_order_relaxed);
@@ -121,6 +129,7 @@ namespace wfg::plugin
         keyArea = nullptr;
         regionChannels = 0;
         regionMaxSamples = 0;
+        queueSlots = 0;
     }
 
     bool ProxyLane::isBound() const noexcept
@@ -597,7 +606,10 @@ namespace wfg::plugin
                 ready, where silence would be a hole at every audition. Any
                 other reset finds the insert in, and is never the dry block. */
             if (dryWhileReset.load (std::memory_order_relaxed) == resetAsked)
+            {
+                passedDryFor = resetAsked;
                 return;
+            }
 
             silenceFrom (channelData, back, 0, numSamples);
             return;
@@ -623,6 +635,9 @@ namespace wfg::plugin
             if (resting.load (std::memory_order_relaxed) == 0)
                 resting.store (1, std::memory_order_relaxed);
 
+            //  And at rest it is as late as the build resolved, no more (§149, BKD); what was out is nobody's.
+            emptyQueue();
+            lateNow.store (lateBase.load (std::memory_order_relaxed), std::memory_order_relaxed);
             return;
         }
 
@@ -632,28 +647,36 @@ namespace wfg::plugin
         if (resting.load (std::memory_order_relaxed) != 0)
             resting.store (0, std::memory_order_relaxed);
 
-        /*  HOW LONG THIS BLOCK MAY WAIT (namespace draft §139, BHB): the
-            lane's cap from now - a share of the block period - unless the
-            callback's own end comes first, and never less than the floor,
-            which is what every lane had before there was an allowance. A
-            wait cut short by the callback is `starved`: other plugins used
-            the time, and this one is not failed for it. */
+        /*  HOW LONG THIS BLOCK MAY WAIT. To the callback's end (namespace
+            draft §149, BJY), and never less than the floor, which is what
+            every lane had before there was an allowance. Until §149 a lane
+            had a share of its own as well (§139, BHB: three tenths of the
+            block period, from when it began), so that one slow plugin could
+            not take the others' time; a plugin that is late is now played
+            later, where it costs the callback no waiting, and the share only
+            made a lone plugin late sooner. It still says which a late block
+            was: a lane that began with less than that share left was
+            `starved` - other plugins used the time, and this one is not
+            failed for it. Where nobody said when the callback ends - a test
+            driving blocks by hand - or the limit was fixed by hand, the
+            lane's own limit is all there is, as before. */
         const auto started = std::chrono::steady_clock::now();
-        auto end = started + std::chrono::microseconds (deadlineUs.load (std::memory_order_relaxed));
+        const auto capUs = deadlineUs.load (std::memory_order_relaxed);
+        const auto leastUs = floorUs.load (std::memory_order_relaxed);
+        auto end = started + std::chrono::microseconds (capUs);
         auto cutShort = false;
 
         if (clock != nullptr && clock->budgetEndNanos > 0)
         {
-            const auto least = started + std::chrono::microseconds (floorUs.load (std::memory_order_relaxed));
+            const auto least = started + std::chrono::microseconds (leastUs);
             const auto byCallback = std::max (least, std::chrono::steady_clock::time_point (
                                                          std::chrono::duration_cast<std::chrono::steady_clock::duration> (
                                                              std::chrono::nanoseconds (clock->budgetEndNanos))));
 
-            if (byCallback < end)
-            {
+            cutShort = byCallback < end;
+
+            if (cutShort || leastUs < capUs)
                 end = byCallback;
-                cutShort = true;
-            }
         }
 
         const auto late = [this, cutShort]
@@ -673,6 +696,42 @@ namespace wfg::plugin
         {
             publishClock (clock->state);
             clockSeqSent = clock->seq;
+        }
+
+        /*  PLAYED LATER (namespace draft §149). A reset made since the queue
+            was last filled empties it (BKC) and gives back what the lane had
+            been given (BKD); what the build resolved is taken when it is
+            more, or when nothing is out. Then, later than nought: sent and
+            not waited for, and what was answered that long ago played. */
+        if (queueSlots > 0)
+        {
+            if (queueReset != resetAsked)
+            {
+                emptyQueue();
+                queueReset = resetAsked;
+                lateNow.store (lateBase.load (std::memory_order_relaxed), std::memory_order_relaxed);
+                /*  The first silence of a lane played later passes as it
+                    came only where this reset's blocks did - an insert
+                    switched in under a sounding cue (BHC), a step and no
+                    hole. A cue's own start is silence: never the dry block
+                    where a plugin's sound is due (CV). */
+                primeDry = passedDryFor == resetAsked;
+            }
+
+            if (const auto set = lateSet.load (std::memory_order_acquire); set != lateSetSeen)
+            {
+                lateSetSeen = set;
+
+                if (const auto base = lateBase.load (std::memory_order_relaxed);
+                    base > lateNow.load (std::memory_order_relaxed) || sentCount == 0)
+                    lateNow.store (base, std::memory_order_relaxed);
+            }
+
+            if (lateNow.load (std::memory_order_relaxed) > 0)
+            {
+                processLater (bound, channelData, channels, back, numSamples, blockStart, key, keyCount, silentIn);
+                return;
+            }
         }
 
         /*  AN ANSWER STILL OWED (BHC). The child answers in the audio it was
@@ -728,6 +787,23 @@ namespace wfg::plugin
                     callback's end and not the lane's own cap that cut it. */
                 late();
                 silenceFrom (channelData, back, offset, numSamples);
+
+                /*  GIVEN MORE AT ONCE (namespace draft §149, BJV): this block
+                    is waited for one more buffer instead of thrown away. The
+                    request stands on the lane; from the next block on the
+                    lane sends through its queue and plays this answer first,
+                    then everything after it in order. Only a block sent
+                    whole: one in pieces has no single answer to keep. */
+                if (offset == 0 && samples == numSamples && queueSlots > 0
+                      && lateGrows.load (std::memory_order_relaxed) != 0)
+                {
+                    emptyQueue();
+                    pushSent (Sent::Kind::waited, seq, numSamples);
+                    queueReset = resetAsked;
+                    lateNow.store (numSamples, std::memory_order_relaxed);
+                    movedCount.fetch_add (1, std::memory_order_relaxed);
+                }
+
                 return;
             }
 
@@ -772,6 +848,287 @@ namespace wfg::plugin
     bool ProxyLane::isResting() const noexcept
     {
         return resting.load (std::memory_order_relaxed) != 0;
+    }
+
+    //==============================================================================
+    //  PLAYED LATER (namespace draft §149).
+    void ProxyLane::setLate (int samples, bool mayBeGivenMore) noexcept
+    {
+        const auto base = std::max (0, samples);
+        lateBase.store (base, std::memory_order_relaxed);
+        lateGrows.store (mayBeGivenMore ? 1 : 0, std::memory_order_relaxed);
+
+        /*  More than it is: said at once, for whoever reads the delay before
+            the next block. Less is the audio thread's to take, when nothing
+            is out (BKD). A block that grows the lane at this very moment may
+            have its step written over - it will find its answer missing
+            again and take it again. */
+        if (base > lateNow.load (std::memory_order_relaxed))
+            lateNow.store (base, std::memory_order_relaxed);
+
+        lateSet.fetch_add (1, std::memory_order_release);
+    }
+
+    int ProxyLane::lateSamples() const noexcept
+    {
+        return queueSlots > 0 ? lateNow.load (std::memory_order_relaxed) : 0;
+    }
+
+    std::uint32_t ProxyLane::movedLater() const noexcept
+    {
+        return movedCount.load (std::memory_order_relaxed);
+    }
+
+    void ProxyLane::emptyQueue() noexcept
+    {
+        sentHead = 0;
+        sentCount = 0;
+        headPlayed = 0;
+        outstanding = 0;
+    }
+
+    void ProxyLane::pushSent (Sent::Kind kind, std::uint64_t number, int samples) noexcept
+    {
+        if (sentCount >= sentRoom)
+            return;     // never: the queue's own room is less than this
+
+        sent[static_cast<std::size_t> ((sentHead + sentCount) % sentRoom)] = { kind, number, samples };
+        ++sentCount;
+        outstanding += samples;
+    }
+
+    void ProxyLane::playedOfHead (int samples) noexcept
+    {
+        headPlayed += samples;
+        outstanding -= samples;
+
+        if (sentCount > 0 && headPlayed >= sent[static_cast<std::size_t> (sentHead)].samples)
+        {
+            sentHead = (sentHead + 1) % sentRoom;
+            --sentCount;
+            headPlayed = 0;
+        }
+    }
+
+    bool ProxyLane::answeredYet (const region::Lane& bound, const Sent& entry) const noexcept
+    {
+        switch (entry.kind)
+        {
+            case Sent::Kind::queued:    return bound.queueDone.load (std::memory_order_acquire) >= entry.number;
+            case Sent::Kind::waited:    return bound.responseSeq.load (std::memory_order_acquire) >= entry.number;
+            case Sent::Kind::hole:      break;
+        }
+
+        return true;
+    }
+
+    const float* ProxyLane::audioOfSent (region::Lane* bound, const Sent& entry) const noexcept
+    {
+        switch (entry.kind)
+        {
+            case Sent::Kind::queued:
+                return region::audioOf (region::slotAt (bound, regionChannels, regionMaxSamples,
+                                                        static_cast<int> (entry.number % static_cast<std::uint64_t> (queueSlots))));
+            case Sent::Kind::waited:    return audio;
+            case Sent::Kind::hole:      break;
+        }
+
+        return nullptr;
+    }
+
+    /*  ONE PIECE INTO THE QUEUE, and not waited for. False when there is no
+        slot to put it in: the request that last lay in the slot is not yet
+        answered, or not yet played - a child that has fallen as far behind
+        as the queue is long. */
+    bool ProxyLane::sendLater (region::Lane* bound, float* const* channelData, int channels, int offset, int samples,
+                               std::int64_t blockStart, const float* const* key, int keyCount) noexcept
+    {
+        const auto number = queueNumber + 1;
+        auto queuedOut = 0;
+
+        for (int i = 0; i < sentCount; ++i)
+            if (sent[static_cast<std::size_t> ((sentHead + i) % sentRoom)].kind == Sent::Kind::queued)
+                ++queuedOut;
+
+        if (queuedOut >= queueSlots || sentCount >= sentRoom
+              || bound->queueDone.load (std::memory_order_acquire) + static_cast<std::uint64_t> (queueSlots) < number)
+            return false;
+
+        auto* slot = region::slotAt (bound, regionChannels, regionMaxSamples,
+                                     static_cast<int> (number % static_cast<std::uint64_t> (queueSlots)));
+        auto* into = region::audioOf (slot);
+
+        for (int channel = 0; channel < channels; ++channel)
+            std::copy_n (channelData[channel] + offset, samples, into + channel * regionMaxSamples);
+
+        auto* keyInto = region::keyOf (slot, regionChannels, regionMaxSamples);
+
+        for (int channel = 0; channel < keyCount; ++channel)
+            std::copy_n (key[channel] + offset, samples, keyInto + channel * regionMaxSamples);
+
+        slot->keyChannels.store (static_cast<std::uint32_t> (keyCount), std::memory_order_relaxed);
+        slot->numChannels.store (static_cast<std::uint32_t> (channels), std::memory_order_relaxed);
+        slot->numSamples.store (static_cast<std::uint32_t> (samples), std::memory_order_relaxed);
+        slot->blockStartSample.store (static_cast<std::uint64_t> (std::max<std::int64_t> (0, blockStart + offset)),
+                                      std::memory_order_relaxed);
+        slot->requestNanos.store (region::steadyNanos(), std::memory_order_relaxed);
+        bound->queueSeq.store (number, std::memory_order_release);
+
+        queueNumber = number;
+        blockCount.fetch_add (1, std::memory_order_relaxed);
+        pushSent (Sent::Kind::queued, number, samples);
+        return true;
+    }
+
+    void ProxyLane::processLater (region::Lane* bound, float* const* channelData, int channels, int back, int numSamples,
+                                  std::int64_t blockStart, const float* const* key, int keyCount, bool silentIn) noexcept
+    {
+        const auto late = lateNow.load (std::memory_order_relaxed);
+
+        /*  FURTHER BEHIND THAN IT IS LATE - blocks went by silent while it
+            was as late as a lane goes: what is oldest and answered is let go
+            of, until the lane is where it would have been. Before this block
+            is sent: the slot it needs may be one of theirs. */
+        for (auto behind = outstanding - late;
+             behind > 0 && sentCount > 0 && answeredYet (*bound, sent[static_cast<std::size_t> (sentHead)]);)
+        {
+            const auto drop = static_cast<int> (std::min<std::int64_t> (
+                                  behind, sent[static_cast<std::size_t> (sentHead)].samples - headPlayed));
+            playedOfHead (drop);
+            behind -= drop;
+        }
+
+        /*  SENT, in pieces when it is longer than the region carries. What
+            cannot be sent takes its place in the order as the silence it
+            will be, so that everything else keeps its moment. */
+        auto unsent = false;
+
+        for (int offset = 0; offset < numSamples;)
+        {
+            const auto samples = std::min (numSamples - offset, regionMaxSamples);
+
+            if (unsent || ! sendLater (bound, channelData, channels, offset, samples, blockStart, key, keyCount))
+            {
+                unsent = true;
+                pushSent (Sent::Kind::hole, 0, samples);
+            }
+
+            offset += samples;
+        }
+
+        const auto due = static_cast<int> (std::clamp<std::int64_t> (outstanding - late, 0, numSamples));
+        const auto quietNow = [this, silentIn, numSamples]
+        {
+            quietSamples = silentIn ? quietSamples + numSamples : 0;
+        };
+
+        /*  NOT YET: the first blocks of a cue through a lane played later are
+            the delay itself (BKC) - silence, or the block as it came where
+            the reset was a switch-in's under a sounding cue (BHC). */
+        if (due == 0)
+        {
+            if (! primeDry)
+                silenceFrom (channelData, back, 0, numSamples);
+
+            quietNow();
+            return;
+        }
+
+        //  IS IT THERE? Everything due, oldest first.
+        auto there = true;
+        auto need = due;
+
+        for (int i = 0; i < sentCount && need > 0; ++i)
+        {
+            const auto& entry = sent[static_cast<std::size_t> ((sentHead + i) % sentRoom)];
+
+            if (! answeredYet (*bound, entry))
+            {
+                there = false;
+                break;
+            }
+
+            need -= entry.samples - (i == 0 ? headPlayed : 0);
+        }
+
+        if (! there)
+        {
+            /*  GIVEN MORE AT ONCE (BJV): one more buffer, this one silent,
+                and the next plays what was missing - unless the lane may not
+                be given more, or is as late as a lane goes (BKB), and then it
+                is a late block as it always was. Counted either way: eight
+                in a row still fail a plugin (BHD). */
+            missCount.fetch_add (1, std::memory_order_relaxed);
+            consecutive.fetch_add (1, std::memory_order_relaxed);
+
+            if (lateGrows.load (std::memory_order_relaxed) != 0
+                  && late + numSamples <= lateBuffersMost * regionMaxSamples)
+            {
+                lateNow.store (late + numSamples, std::memory_order_relaxed);
+                movedCount.fetch_add (1, std::memory_order_relaxed);
+            }
+
+            primeDry = false;
+            silenceFrom (channelData, back, 0, numSamples);
+            quietSamples = 0;
+            return;
+        }
+
+        if (unsent)
+        {
+            missCount.fetch_add (1, std::memory_order_relaxed);
+            consecutive.fetch_add (1, std::memory_order_relaxed);
+        }
+
+        /*  PLAYED: what leads it silent (the last of a first silence), then
+            what is due, across as many answers as it takes, rising over the
+            quick fade when it follows silence. */
+        const auto lead = numSamples - due;
+
+        if (lead > 0 && ! primeDry)
+            silenceFrom (channelData, back, 0, lead);
+
+        primeDry = false;
+        const auto rise = silenced ? std::min (due, fadeSamples) : 0;
+
+        for (int written = lead; written < numSamples && sentCount > 0;)
+        {
+            const auto& entry = sent[static_cast<std::size_t> (sentHead)];
+            const auto take = std::min (numSamples - written, entry.samples - headPlayed);
+            const auto* from = audioOfSent (bound, entry);
+
+            for (int channel = 0; channel < back; ++channel)
+            {
+                auto* out = channelData[channel] + written;
+
+                if (from != nullptr)
+                    std::copy_n (from + channel * regionMaxSamples + headPlayed, take, out);
+                else
+                    std::fill_n (out, take, 0.0f);
+            }
+
+            written += take;
+            playedOfHead (take);
+        }
+
+        for (int channel = 0; channel < back; ++channel)
+        {
+            auto* out = channelData[channel] + lead;
+
+            for (int n = 0; n < rise; ++n)
+                out[n] *= static_cast<float> (n + 1) / static_cast<float> (rise);
+
+            if (channel < maxFadedChannels)
+                lastSample[static_cast<std::size_t> (channel)] = channelData[channel][numSamples - 1];
+        }
+
+        silenced = false;
+        answeredCount.fetch_add (1, std::memory_order_relaxed);
+
+        if (! unsent)
+            consecutive.store (0, std::memory_order_relaxed);
+
+        quietSamples = silentIn && isSilence (channelData, back, numSamples) ? quietSamples + numSamples : 0;
     }
 
     ProxyLane::Worst ProxyLane::takeWorst() noexcept

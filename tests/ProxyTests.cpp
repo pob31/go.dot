@@ -104,19 +104,23 @@ namespace
     /** A region in a vector: what a lane talks to when no child exists. */
     struct VectorRegion
     {
-        VectorRegion (int channels, int maxSamples, int lanes)
-            : bytes (plugin::region::regionBytes (channels, maxSamples, lanes), 0),
-              channelCount (channels), sampleCount (maxSamples), laneCount (lanes)
+        /*  `slots` is the queue each lane is given (namespace draft 149):
+            none unless a case asks, which is the region every case before it
+            was written for. */
+        VectorRegion (int channels, int maxSamples, int lanes, int slots = 0)
+            : bytes (plugin::region::regionBytes (channels, maxSamples, lanes, slots), 0),
+              channelCount (channels), sampleCount (maxSamples), laneCount (lanes), slotCount (slots)
         {
             header = new (bytes.data()) plugin::region::Header {};
+            header->queueSlots.store (static_cast<std::uint32_t> (slots));
 
             for (int i = 0; i < lanes; ++i)
-                new (plugin::region::laneAt (bytes.data(), channels, maxSamples, i)) plugin::region::Lane {};
+                new (plugin::region::laneAt (bytes.data(), channels, maxSamples, i, slots)) plugin::region::Lane {};
         }
 
         plugin::region::Lane* lane (int index)
         {
-            return plugin::region::laneAt (bytes.data(), channelCount, sampleCount, index);
+            return plugin::region::laneAt (bytes.data(), channelCount, sampleCount, index, slotCount);
         }
 
         void bind (plugin::ProxyLane& proxy, int index)
@@ -141,7 +145,7 @@ namespace
         }
 
         std::vector<char> bytes;
-        int channelCount, sampleCount, laneCount;
+        int channelCount, sampleCount, laneCount, slotCount;
         plugin::region::Header* header = nullptr;
     };
 
@@ -166,6 +170,13 @@ namespace
         spec.sampleRate = 48000;
         spec.regionFolder = folder.string();
         spec.launch = launchOfThisBinary();
+
+        /*  NO QUEUE, so its lanes can only wait (namespace draft 149): every
+            case written before a plugin could be played later counts late
+            blocks one after another, which a lane given more at once does
+            not go on having. A case about being played later asks for the
+            queue itself. */
+        spec.queueSlots = 0;
         return spec;
     }
 
@@ -1097,12 +1108,50 @@ TEST_CASE ("proxy: a lane stops at the callback's end but never before its floor
     CHECK (lane.starved() == 1);
     CHECK (lane.misses() == 1);
 
-    //  THE CALLBACK'S END AFTER THE CAP changes nothing: the cap rules.
+    /*  THE CALLBACK'S END AFTER ITS SHARE (namespace draft 149, BJY): the
+        lane waits to the callback's end, not to its share - and late there,
+        with its whole share behind it, it is late by its own doing. */
     region.answer (0);
-    clock.budgetEndNanos = nanosNow() + 1000000000;
-    CHECK (play (clock) >= 3000);
+    clock.budgetEndNanos = nanosNow() + 12000000;
+    CHECK (play (clock) >= 11000);
     CHECK (lane.starved() == 1);
     CHECK (lane.misses() == 2);
+
+    /*  AND AN ANSWER THAT COMES AFTER THE SHARE AND BEFORE THE CALLBACK'S END
+        IS TAKEN, where until 149 it was a late block: the test, as the child,
+        answers five milliseconds in; the share is three. */
+    {
+        region.answer (0);
+        clock.budgetEndNanos = nanosNow() + 400000000;
+        const auto asked = region.lane (0)->requestSeq.load();
+
+        std::thread child ([&region, asked]
+        {
+            for (int i = 0; i < 20000 && region.lane (0)->requestSeq.load() == asked; ++i)
+                std::this_thread::sleep_for (std::chrono::microseconds (50));
+
+            std::this_thread::sleep_for (std::chrono::milliseconds (5));
+            plugin::region::audioOf (region.lane (0))[63] = 0.25f;
+            region.lane (0)->responseSeq.store (region.lane (0)->requestSeq.load());
+        });
+
+        Block block (1, 64, 0.5f);
+        lane.process (block.data(), 1, 64, &clock, 0);
+        child.join();
+        CHECK (block.storage.back() == doctest::Approx (0.25f));
+        CHECK (lane.starved() == 1);
+        CHECK (lane.misses() == 2);
+        CHECK (lane.consecutiveMisses() == 0);
+
+        /*  Late once more, so what follows counts on from where it did -
+            falling to silence from where that answer left it (CV), not
+            silent throughout as the blocks above were. */
+        clock.budgetEndNanos = 0;
+        Block lateAgain (1, 64, 0.5f);
+        lane.process (lateAgain.data(), 1, 64, &clock, 0);
+        CHECK (lateAgain.storage.back() == 0.0f);
+        CHECK (lane.misses() == 3);
+    }
 
     //  A LIMIT ASKED FOR IS FIXED: its floor is itself, and no callback's end comes before it.
     region.answer (0);
@@ -1111,8 +1160,8 @@ TEST_CASE ("proxy: a lane stops at the callback's end but never before its floor
     clock.budgetEndNanos = nanosNow() - 1000000;
     CHECK (play (clock) >= 3000);
     CHECK (lane.starved() == 1);
-    CHECK (lane.misses() == 3);
-    CHECK (lane.consecutiveMisses() == 3);
+    CHECK (lane.misses() == 4);
+    CHECK (lane.consecutiveMisses() == 2);
 }
 
 //==============================================================================
@@ -3548,6 +3597,8 @@ namespace
         int failures = 0;                 // times a child was seen failed
         plugin::ProxyLane::Worst worst;   // its child's longest wait and work in the row, and where (namespace draft 148)
         std::uint32_t firstMisses = 0;    // the lane asked first, when it is not the watched one
+        int laterSamples = 0;             // how much later it is played at the row's end, and how often it was given more (149)
+        std::uint32_t movedLater = 0;
     };
 
     /*  WHAT A ROW IS RUN BESIDE (namespace draft 148): a key for every lane's
@@ -3731,6 +3782,8 @@ namespace
             reading.misses = missesSeen - missesBefore;
             reading.starved = watched->starved() - starvedBefore;
             reading.firstMisses = order.front() != watched ? order.front()->misses() - firstMissesBefore : 0;
+            reading.laterSamples = watched->lateSamples();
+            reading.movedLater = watched->movedLater();
         });
 
         driver.join();
@@ -3830,7 +3883,7 @@ TEST_CASE ("M86: what a real plugin needs of a buffer - under a wide limit and t
              << envText ("WFG_PROXY_WORKER", "as shipped"));
     MESSAGE ("plugin | block | limit | phase | children | lanes | n | p50 us | p99 | p99.9 | max | over 250 us | over 0.3 period"
              " | misses | starved | longest run | failed | resets | reset p50 us | reset max | worst wait us | worst work us | core"
-             " | the first's misses | first late blocks");
+             " | the first's misses | samples later | given more | first late blocks");
 
     auto childIndex = 0;
     std::vector<std::string> saidLayout;
@@ -3853,6 +3906,10 @@ TEST_CASE ("M86: what a real plugin needs of a buffer - under a wide limit and t
         spec.identifier = identifier;
         spec.descriptionXml = xml;
         spec.deadlineMicroseconds = limitUs;
+
+        //  As a show's plugins are given (namespace draft 149): a queue, unless `WFG_M86_QUEUE=0` asks for the lane that only waits.
+        spec.queueSlots = juce::SystemStats::getEnvironmentVariable ("WFG_M86_QUEUE", "1").getIntValue() != 0
+                            ? plugin::region::queueSlotsMost : 0;
         child->host = std::make_unique<plugin::ProxyHost> (spec, pointers, &child->table);
 
         std::string problem;
@@ -3943,7 +4000,8 @@ TEST_CASE ("M86: what a real plugin needs of a buffer - under a wide limit and t
                  << reading.worst.pickupMicros << " | " << reading.worst.workMicros << " | "
                  << (reading.worst.core == 0 ? std::string ("-")
                                              : std::to_string (reading.worst.core - 1) + " " + app::coreKindOf (reading.worst.core))
-                 << " | " << reading.firstMisses << " | " << lateAt);
+                 << " | " << reading.firstMisses << " | " << reading.laterSamples << " | " << reading.movedLater
+                 << " | " << lateAt);
     };
 
     const auto stopAll = [] (std::vector<std::unique_ptr<AllowanceChild>>& children)
@@ -6044,4 +6102,409 @@ TEST_CASE ("key: this cue after its level - its own sound under the level its ou
     std::vector<float> longer (2 * samples, 0.5f);
     const float* tooLong[] { longer.data() };
     CHECK (reader.read (0, 2 * samples, key, tooLong, 1) == 0);
+}
+
+//==============================================================================
+//  A PLUGIN PLAYED LATER (namespace draft 149): the queue.
+
+TEST_CASE ("queue: a region made with a queue has so many slots after each lane's tap, and its hash says so")
+{
+    using namespace plugin::region;
+
+    CHECK (version >= 10u);
+
+    //  None asked for, none there: the lane's stride is what it was.
+    CHECK (laneStride (2, 64, 0) == laneStride (2, 64));
+    CHECK (laneStride (2, 64) == queueOffset (2, 64));
+    CHECK (layoutHashFor (2, 64, 3, 0) == layoutHashFor (2, 64, 3));
+
+    CHECK (slotStride (2, 64) % 64 == 0);
+    CHECK (slotStride (2, 64) >= sizeof (Slot) + (2 + keyChannelsMax) * 64 * sizeof (float));
+    CHECK (laneStride (2, 64, queueSlotsMost) == laneStride (2, 64) + queueSlotsMost * slotStride (2, 64));
+    CHECK (regionBytes (2, 64, 2, queueSlotsMost) == headerBytes() + 2 * laneStride (2, 64, queueSlotsMost));
+    CHECK (layoutHashFor (2, 64, 3, queueSlotsMost) != layoutHashFor (2, 64, 3));
+
+    std::vector<char> bytes (regionBytes (2, 64, 2, queueSlotsMost), 0);
+    auto* header = new (bytes.data()) Header {};
+    header->magic.store (magic);
+    header->version.store (version);
+    header->channels.store (2);
+    header->maxSamples.store (64);
+    header->lanes.store (2);
+    header->queueSlots.store (queueSlotsMost);
+    header->layoutHash.store (layoutHashFor (2, 64, 2, queueSlotsMost));
+    CHECK (looksValid (*header));
+
+    //  A header that says another number of slots is another layout.
+    header->queueSlots.store (queueSlotsMost - 1);
+    CHECK_FALSE (looksValid (*header));
+    header->queueSlots.store (queueSlotsMost + 1);
+    CHECK_FALSE (looksValid (*header));
+    header->queueSlots.store (queueSlotsMost);
+
+    /*  The queue begins after the tap's ring and ends where the next lane
+        begins; a slot's audio follows its head, and its key its audio. */
+    auto* first = laneAt (bytes.data(), 2, 64, 0, queueSlotsMost);
+    auto* second = laneAt (bytes.data(), 2, 64, 1, queueSlotsMost);
+    const auto* tapEnd = tapOf (first, 2, 64) + (tapChannelsMax + keyChannelsMax) * tapFrames;
+    CHECK (reinterpret_cast<const char*> (slotAt (first, 2, 64, 0)) >= reinterpret_cast<const char*> (tapEnd));
+    CHECK (reinterpret_cast<char*> (slotAt (first, 2, 64, queueSlotsMost - 1)) + slotStride (2, 64)
+             == reinterpret_cast<char*> (second));
+    CHECK (reinterpret_cast<char*> (slotAt (first, 2, 64, 1)) - reinterpret_cast<char*> (slotAt (first, 2, 64, 0))
+             == static_cast<std::ptrdiff_t> (slotStride (2, 64)));
+
+    auto* slot = slotAt (first, 2, 64, 3);
+    CHECK (reinterpret_cast<char*> (audioOf (slot)) - reinterpret_cast<char*> (slot) == static_cast<std::ptrdiff_t> (sizeof (Slot)));
+    CHECK (keyOf (slot, 2, 64) == audioOf (slot) + 2 * 64);
+}
+
+namespace
+{
+    /*  THE CHILD'S PART OF THE QUEUE, PLAYED BY HAND (namespace draft 149):
+        every request of a lane's queue not yet answered is, in order, its
+        audio halved in its slot - a gain at a half - and the waiting one the
+        same on the lane itself. */
+    void answerQueueHalved (VectorRegion& region, int index)
+    {
+        using namespace plugin::region;
+        auto* lane = region.lane (index);
+        const auto slots = static_cast<std::uint64_t> (region.slotCount);
+
+        for (auto number = lane->queueDone.load() + 1; number <= lane->queueSeq.load(); ++number)
+        {
+            auto* slot = slotAt (lane, region.channelCount, region.sampleCount, static_cast<int> (number % slots));
+            auto* audio = audioOf (slot);
+
+            for (int n = 0; n < region.channelCount * region.sampleCount; ++n)
+                audio[n] *= 0.5f;
+
+            lane->queueDone.store (number);
+        }
+    }
+
+    void answerWaitingHalved (VectorRegion& region, int index)
+    {
+        using namespace plugin::region;
+        auto* lane = region.lane (index);
+
+        if (lane->responseSeq.load() >= lane->requestSeq.load())
+            return;
+
+        auto* audio = audioOf (lane);
+
+        for (int n = 0; n < region.channelCount * region.sampleCount; ++n)
+            audio[n] *= 0.5f;
+
+        lane->responseSeq.store (lane->requestSeq.load());
+    }
+
+    /** One block of `value` through the lane; what its last sample came back as. */
+    float playLater (plugin::ProxyLane& lane, Block& block, float value)
+    {
+        std::fill (block.storage.begin(), block.storage.end(), value);
+        lane.process (block.data(), 2, 64);
+        return block.storage.back();
+    }
+}
+
+TEST_CASE ("later: a lane played later sends without waiting and plays what was answered that long ago")
+{
+    //  Namespace draft 149, BJW. Two channels of 64 in a region with a queue; the test is the child.
+    using namespace plugin::region;
+
+    plugin::ProxyLane lane;
+    VectorRegion region (2, 64, 1, queueSlotsMost);
+    region.bind (lane, 0);
+    lane.setEnabled (true);
+    region.answerResets();
+    lane.setDeadlineMicroseconds (200000);      // a wait this long would be seen: none is made
+    lane.setLate (64, false);
+    CHECK (lane.lateSamples() == 0 + 64);
+
+    Block block (2, 64, 0.0f);
+    const auto started = std::chrono::steady_clock::now();
+
+    //  THE FIRST BLOCK is the delay itself: sent, and silence back.
+    CHECK (playLater (lane, block, 1.0f) == 0.0f);
+    CHECK (block.allEqual (0.0f));
+    CHECK (region.lane (0)->queueSeq.load() == 1);
+    CHECK (region.lane (0)->requestSeq.load() == 0);    // never the one that waits
+    CHECK (slotAt (region.lane (0), 2, 64, 1)->numSamples.load() == 64);
+    CHECK (audioOf (slotAt (region.lane (0), 2, 64, 1))[0] == 1.0f);
+
+    //  THE SECOND plays the first's answer, rising over the quick fade since it follows silence.
+    answerQueueHalved (region, 0);
+    CHECK (playLater (lane, block, 2.0f) == doctest::Approx (0.5f));
+    CHECK (block.storage.front() == doctest::Approx (0.5f / static_cast<float> (plugin::ProxyLane::fadeSamples)));
+    CHECK (block.storage[static_cast<std::size_t> (plugin::ProxyLane::fadeSamples)] == doctest::Approx (0.5f));
+
+    //  AND SO ON, each a block behind, whole.
+    answerQueueHalved (region, 0);
+    CHECK (playLater (lane, block, 3.0f) == doctest::Approx (1.0f));
+    CHECK (block.allEqual (1.0f));
+    answerQueueHalved (region, 0);
+    CHECK (playLater (lane, block, 4.0f) == doctest::Approx (1.5f));
+
+    CHECK (lane.misses() == 0);
+    CHECK (lane.movedLater() == 0);
+    CHECK (lane.lateSamples() == 64);
+    CHECK (lane.blocks() == 4);
+    CHECK (std::chrono::steady_clock::now() - started < std::chrono::milliseconds (150));
+}
+
+TEST_CASE ("later: a lane that finds its answer missing waits one more buffer at once, and plays the very block that was late")
+{
+    //  Namespace draft 149, BJV. It starts as today's lane, waiting inside the callback.
+    using namespace plugin::region;
+
+    plugin::ProxyLane lane;
+    VectorRegion region (2, 64, 1, queueSlotsMost);
+    region.bind (lane, 0);
+    lane.setEnabled (true);
+    region.answerResets();
+    lane.setDeadlineMicroseconds (200);
+    lane.setLate (0, true);
+
+    Block block (2, 64, 0.0f);
+
+    //  LATE: silent as ever, counted - and given one buffer.
+    CHECK (playLater (lane, block, 1.0f) == 0.0f);
+    CHECK (lane.misses() == 1);
+    CHECK (lane.movedLater() == 1);
+    CHECK (lane.lateSamples() == 64);
+    CHECK (region.lane (0)->requestSeq.load() == 1);
+
+    //  STILL NOT THERE: one more, and this block goes out through the queue meanwhile.
+    CHECK (playLater (lane, block, 2.0f) == 0.0f);
+    CHECK (lane.misses() == 2);
+    CHECK (lane.movedLater() == 2);
+    CHECK (lane.lateSamples() == 128);
+    CHECK (region.lane (0)->queueSeq.load() == 1);
+    CHECK (region.lane (0)->requestSeq.load() == 1);    // the lane itself is not asked again
+
+    //  THE CHILD CATCHES UP: the block that was late first, then every one after it, in order.
+    answerWaitingHalved (region, 0);
+    answerQueueHalved (region, 0);
+    CHECK (playLater (lane, block, 3.0f) == doctest::Approx (0.5f));
+    answerQueueHalved (region, 0);
+    CHECK (playLater (lane, block, 4.0f) == doctest::Approx (1.0f));
+    CHECK (block.allEqual (1.0f));
+    answerQueueHalved (region, 0);
+    CHECK (playLater (lane, block, 5.0f) == doctest::Approx (1.5f));
+
+    CHECK (lane.misses() == 2);                 // nothing since
+    CHECK (lane.consecutiveMisses() == 0);
+    CHECK (lane.lateSamples() == 128);
+
+    /*  A RESET EMPTIES THE QUEUE AND GIVES IT BACK (BKC, BKD): what the
+        build resolved - nought here - so it waits inside the callback again. */
+    lane.requestReset();
+    CHECK (playLater (lane, block, 6.0f) == 0.0f);      // being reset: silent, not called
+    region.answerResets();
+    lane.setDeadlineMicroseconds (200000);
+
+    std::thread child ([&region]
+    {
+        for (int i = 0; i < 2000 && region.lane (0)->requestSeq.load() < 2; ++i)
+            std::this_thread::sleep_for (std::chrono::microseconds (100));
+
+        answerWaitingHalved (region, 0);
+    });
+
+    CHECK (playLater (lane, block, 8.0f) == doctest::Approx (4.0f));    // in the same call
+    child.join();
+    CHECK (lane.lateSamples() == 0);
+    CHECK (region.lane (0)->requestSeq.load() == 2);
+}
+
+TEST_CASE ("later: eight buffers is as late as a lane goes, and a lane that may not be given more is given none")
+{
+    //  Namespace draft 149, BKB.
+    using namespace plugin::region;
+
+    SUBCASE ("as late as a lane goes, then silent blocks as ever, and the stream where it would have been")
+    {
+        plugin::ProxyLane lane;
+        VectorRegion region (2, 64, 1, queueSlotsMost);
+        region.bind (lane, 0);
+        lane.setEnabled (true);
+        region.answerResets();
+        lane.setDeadlineMicroseconds (100);
+        lane.setLate (0, true);
+
+        Block block (2, 64, 0.0f);
+
+        //  Nobody answers for fourteen blocks.
+        for (int k = 1; k <= 14; ++k)
+            CHECK (playLater (lane, block, static_cast<float> (k)) == 0.0f);
+
+        CHECK (lane.lateSamples() == plugin::ProxyLane::lateBuffersMost * 64);
+        CHECK (lane.movedLater() == static_cast<std::uint32_t> (plugin::ProxyLane::lateBuffersMost));
+        CHECK (lane.misses() == 14);
+        CHECK (lane.consecutiveMisses() >= static_cast<std::uint32_t> (plugin::ProxyLane::missesBeforeFailure));
+
+        /*  THE CHILD COMES BACK: block 15 plays what was sent eight blocks
+            before it - block 7's answer - and not the whole backlog, late. */
+        answerWaitingHalved (region, 0);
+        answerQueueHalved (region, 0);
+        CHECK (playLater (lane, block, 15.0f) == doctest::Approx (3.5f));
+        answerQueueHalved (region, 0);
+        CHECK (playLater (lane, block, 16.0f) == doctest::Approx (4.0f));
+        CHECK (lane.consecutiveMisses() == 0);
+        CHECK (lane.lateSamples() == plugin::ProxyLane::lateBuffersMost * 64);
+    }
+
+    SUBCASE ("never played later: a late block is silent and the lane stays where it is")
+    {
+        plugin::ProxyLane lane;
+        VectorRegion region (2, 64, 1, queueSlotsMost);
+        region.bind (lane, 0);
+        lane.setEnabled (true);
+        region.answerResets();
+        lane.setDeadlineMicroseconds (100);
+        lane.setLate (0, false);
+
+        Block block (2, 64, 0.0f);
+        CHECK (playLater (lane, block, 1.0f) == 0.0f);
+        CHECK (playLater (lane, block, 2.0f) == 0.0f);
+        CHECK (lane.misses() == 2);
+        CHECK (lane.movedLater() == 0);
+        CHECK (lane.lateSamples() == 0);
+        CHECK (region.lane (0)->queueSeq.load() == 0);
+    }
+
+    SUBCASE ("a region made without a queue: the lane can only wait, whatever it is told")
+    {
+        plugin::ProxyLane lane;
+        VectorRegion region (2, 64, 1);
+        region.bind (lane, 0);
+        lane.setEnabled (true);
+        region.answerResets();
+        lane.setDeadlineMicroseconds (100);
+        lane.setLate (128, true);
+
+        Block block (2, 64, 0.0f);
+        CHECK (playLater (lane, block, 1.0f) == 0.0f);
+        CHECK (lane.misses() == 1);
+        CHECK (lane.lateSamples() == 0);
+        CHECK (region.lane (0)->requestSeq.load() == 1);
+    }
+}
+
+TEST_CASE ("later: at rest a lane is as late as the build resolved again")
+{
+    //  Namespace draft 149, BKD. A region whose ten seconds are a hundred samples, so the rest comes in two blocks.
+    using namespace plugin::region;
+
+    plugin::ProxyLane lane;
+    VectorRegion region (2, 64, 1, queueSlotsMost);
+    region.header->sampleRate.store (10);
+    region.bind (lane, 0);
+    lane.setEnabled (true);
+    region.answerResets();
+    lane.setDeadlineMicroseconds (100);
+    lane.setLate (0, true);
+
+    Block block (2, 64, 0.0f);
+    CHECK (playLater (lane, block, 1.0f) == 0.0f);      // late: given a buffer
+    CHECK (lane.lateSamples() == 64);
+
+    answerWaitingHalved (region, 0);
+
+    //  Silence in and silence out until it rests.
+    for (int k = 0; k < 6 && ! lane.isResting(); ++k)
+    {
+        answerQueueHalved (region, 0);
+        (void) playLater (lane, block, 0.0f);
+    }
+
+    CHECK (lane.isResting());
+    CHECK (lane.lateSamples() == 0);
+}
+
+TEST_CASE ("later: a plugin too slow for the buffer is moved later, heard whole from then on, and its delay is said with its own")
+{
+    /*  Namespace draft 149, with the real child: the test gain taking a
+        millisecond over every block of 64 at 48 kHz (1.33 ms), where a lane
+        is allowed 0.4 ms. Late at first - and then given the time, at the
+        price of being later. */
+    Folder folder;
+    plugin::PluginTable table;
+    plugin::ProxyLane lane;
+    auto spec = testGainSpec (folder, 1);
+    spec.queueSlots = plugin::region::queueSlotsMost;       // as every plugin of a show is given
+    plugin::ProxyHost host (spec, { &lane }, &table);
+
+    std::vector<std::string> notes;
+    host.onLateNote ([&notes] (const std::string& note) { notes.push_back (note); });
+
+    std::string problem;
+    REQUIRE (host.start (problem));
+    REQUIRE (waitForState (host, "loaded", 5000));
+
+    const auto file = folder.path.getChildFile ("slow.state");
+    REQUIRE (file.replaceWithText (juce::String ("gain=0.5\ndie=0\npad=0\nworkDelayUs=1000\n")));
+    lane.setLate (0, true);
+    lane.setEnabled (true);
+    lane.wantState (file.getFullPathName().toStdString());
+    REQUIRE (waitSettled (host, lane, 10000));
+
+    Block block (2, 64, 0.5f);
+    auto wet = 0, silent = 0, other = 0;
+
+    /*  Four hundred blocks, never nearer one another than an interface's
+        would be, the host polled as the engine polls it. A machine that
+        keeps the child from its processor for a while moves the lane later
+        again - one silent block each time - so what is asked of the second
+        half is what holds on any machine: the gain's 0.25 or silence, never
+        the block as it came, and the gain's nearly always. */
+    for (int k = 0; k < 400; ++k)
+    {
+        std::fill (block.storage.begin(), block.storage.end(), 0.5f);
+        lane.process (block.data(), 2, 64);
+
+        if (k >= 200)
+        {
+            const auto last = block.storage.back();
+
+            if (std::fabs (last - 0.25f) < 1.0e-6f)
+                ++wet;
+            else if (std::fabs (last) < 1.0e-6f)
+                ++silent;
+            else
+                ++other;
+        }
+
+        if (k % 8 == 0)
+            host.poll();
+
+        std::this_thread::sleep_for (std::chrono::microseconds (1333));
+    }
+
+    CHECK (lane.lateSamples() >= 64);
+    CHECK (lane.lateSamples() <= plugin::ProxyLane::lateBuffersMost * 64);
+    CHECK (lane.movedLater() >= 1u);
+    CHECK (other == 0);
+    CHECK (wet >= 150);
+    CHECK (wet + silent == 200);
+    CHECK (host.status().state == "loaded");
+
+    //  ITS DELAY, SAID WITH ITS OWN (BJX): the gain declares none, so the entry's is the lane's.
+    host.poll();
+    CHECK (table.statusOf ("PG7N0001").latencySamples == lane.lateSamples());
+
+    //  AND THE SPELL'S NOTE SAYS IT WAS MOVED.
+    const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds (plugin::ProxyHost::lateSpellEndsAfterMs + 5000);
+
+    while (notes.empty() && std::chrono::steady_clock::now() < until)
+    {
+        host.poll();
+        std::this_thread::sleep_for (std::chrono::milliseconds (10));
+    }
+
+    REQUIRE (notes.size() >= 1);
+    CHECK (notes[0].find (" samples later from now") != std::string::npos);
+    CHECK (host.lastLateSpell().workMicros >= 900u);
+
+    host.stop();
 }

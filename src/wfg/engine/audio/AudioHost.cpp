@@ -1514,6 +1514,14 @@ namespace wfg::audio
             proxySpec.maxSamples = current.blockSize;
             proxySpec.sampleRate = current.sampleRate;
             proxySpec.deadlineMicroseconds = spec.proxyDeadlineMicroseconds;
+
+            /*  A QUEUE ON EVERY LANE (namespace draft §149), so a plugin that
+                cannot answer inside the buffer is played later instead of
+                silenced - but none where a limit was asked for by hand
+                (`--proxy-deadline-us`, a driver's or a bench's): whoever
+                fixes the limit is measuring what happens at it, and a lane
+                that is given more at once has no limit to be measured at. */
+            proxySpec.queueSlots = spec.proxyDeadlineMicroseconds > 0 ? 0 : plugin::region::queueSlotsMost;
             proxySpec.regionFolder = storageFolder.getChildFile ("proxy").getFullPathName().toStdString();
             proxySpec.launch = services.launch;
             proxySpec.catalogues = services.catalogues;

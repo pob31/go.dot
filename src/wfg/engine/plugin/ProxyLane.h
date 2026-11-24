@@ -51,6 +51,12 @@
     a hole). A SWITCHED-OFF LANE COSTS NOTHING: with `enabled` nought process()
     returns before it reads the region - no copy, no signal, no spin.
 
+    SINCE NAMESPACE DRAFT §149 A LATE BLOCK IS NOT THE END OF IT. A plugin that
+    cannot answer inside the buffer is played later instead (`setLate`, below):
+    its lane then sends through a queue in the region, waits for nothing, and
+    plays what was answered so many samples ago. The lane described above is
+    that lane with nought to wait, and every plugin starts as it.
+
     THE HOST'S SWITCH is separate from the cue's. `callEnabled` is the proxy
     host's: cleared when the entry has failed, so a failed strip is not called
     at all (§3.18: the cost of a failure is bounded) and is silent, and set
@@ -108,6 +114,12 @@ namespace wfg::plugin
             (M86, docs/spikes/spike09-plugin-allowance.md). */
         static constexpr double laneCapFraction = 0.30;
         static constexpr double callbackFraction = 0.60;
+
+        /*  SINCE NAMESPACE DRAFT §149 (BJY) a lane waits to the callback's
+            end, wherever in the callback it began: the lane's own share above
+            is no longer where its wait stops, only what tells a block the
+            plugin was late for from one other plugins left no time for, and
+            what a lane is given where nobody says when the callback ends. */
 
         /*  THE QUICK FADE (CV): down to silence when the plugin cannot answer,
             and up again when it does - a millisecond at 48 kHz, a dip and
@@ -342,6 +354,40 @@ namespace wfg::plugin
 
         Worst takeWorst() noexcept;
 
+        /*  PLAYED LATER (namespace draft §149). A plugin that cannot answer
+            inside a buffer is not silenced for it: its lane sends each block
+            without waiting and plays what the child answered so many samples
+            ago, so the plugin has that long over a buffer - at the price of
+            its sound being that much later, which the host says with the
+            delay the plugin declares.
+
+            NOUGHT IS TODAY'S LANE: it waits for the answer inside the
+            callback, and nothing is added. `setLate` is what the build
+            resolved for this lane - nought, or so many samples - and whether
+            it may be given more: a lane that may, and finds an answer missing,
+            waits one more buffer for it AT ONCE (BJV, the author's): that
+            buffer is silent, over the quick fade, and the next plays the very
+            block that was late and everything after it in order. Nothing is
+            lost and nothing repeats. `lateBuffersMost` buffers is as far as it
+            goes (BKB); beyond that a missing answer is a silent block, as
+            ever, and the stream picks up where it would have been.
+
+            WHAT IT WAS GIVEN IT KEEPS WHILE IT SOUNDS, and gives back when
+            nothing does (BKD): at the reset a cue's arm asks for, and at its
+            rest, it returns to what the build resolved - a halt of the
+            machine is not a plugin's need for the rest of a night.
+
+            Any thread but the audio one sets; any thread reads. */
+        static constexpr int lateBuffersMost = 8;
+
+        void setLate (int samples, bool mayBeGivenMore) noexcept;
+
+        /** How many samples later than it is sent this lane's sound is played now. */
+        int lateSamples() const noexcept;
+
+        /** How many times it has been given more since it was bound. */
+        std::uint32_t movedLater() const noexcept;
+
         /*  WHOSE INSERT THIS LANE PLAYS (namespace draft §146): the Fx the last
             arm or hold gave it, empty while it is lent to nobody. The message
             thread's, and the parent's alone - the child never reads it. What
@@ -363,6 +409,49 @@ namespace wfg::plugin
 
     private:
         void publishClock (const cue::BeatClockState& state) noexcept WFG_AUDIO_THREAD;
+
+        /*  THE LANE PLAYED LATER (§149), the audio thread's own. What has
+            been sent and not yet played, oldest first: a request of the
+            queue, the one request that was waiting when the lane was first
+            given more - its answer lies on the lane itself - or a block that
+            could not be sent, which plays as the silence it is. */
+        struct Sent
+        {
+            enum class Kind { queued, waited, hole };
+            Kind kind = Kind::hole;
+            std::uint64_t number = 0;
+            int samples = 0;
+        };
+
+        void processLater (region::Lane* bound, float* const* channelData, int channels, int back, int numSamples,
+                           std::int64_t blockStart, const float* const* key, int keyCount,
+                           bool silentIn) noexcept;
+        bool sendLater (region::Lane* bound, float* const* channelData, int channels, int offset, int samples,
+                        std::int64_t blockStart, const float* const* key, int keyCount) noexcept;
+        void emptyQueue() noexcept;
+        void pushSent (Sent::Kind kind, std::uint64_t number, int samples) noexcept;
+        void playedOfHead (int samples) noexcept;
+        bool answeredYet (const region::Lane& bound, const Sent& entry) const noexcept;
+        const float* audioOfSent (region::Lane* bound, const Sent& entry) const noexcept;
+
+        static constexpr int sentRoom = region::queueSlotsMost + 4;
+        std::array<Sent, sentRoom> sent {};
+        int sentHead = 0;                   ///< the oldest entry's place in `sent`
+        int sentCount = 0;
+        int headPlayed = 0;                 ///< samples of the oldest entry already played
+        std::int64_t outstanding = 0;       ///< samples sent and not yet played
+        std::uint64_t queueNumber = 0;      ///< requests ever put in the queue
+        std::uint32_t queueReset = 0;       ///< the reset the queue was last emptied for
+        bool primeDry = false;              ///< the first silence of a switch-in passes as it came (BHC)
+        std::uint32_t passedDryFor = 0;     ///< the reset during which this thread passed a block as it came
+        int queueSlots = 0;                 ///< the region's; nought, and the lane can only wait
+
+        std::atomic<int> lateBase { 0 };
+        std::atomic<int> lateNow { 0 };
+        std::atomic<int> lateGrows { 1 };
+        std::atomic<std::uint32_t> lateSet { 0 };       ///< moved by `setLate`; the audio thread takes the base when it sees it move
+        std::uint32_t lateSetSeen = 0;
+        std::atomic<std::uint32_t> movedCount { 0 };
 
         std::atomic<region::Lane*> lane { nullptr };
         std::uint64_t clockSeqSent = 0;     ///< the audio thread's: the count of the clock in the header

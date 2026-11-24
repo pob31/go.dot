@@ -37044,8 +37044,14 @@ How, all mine and his to overrule:
   the buffer and the eight-in-a-row rule (BHD) fails it, as today.
 - **BKC** **A reset or a state empties the queue**: what was in flight is the last cue's. A cue through a lane
   played later begins with that much silence - which is the delay itself.
-- **BKD** **Never less while the graph stands.** What a lane was moved to it keeps until the graph is built again,
-  which resolves it afresh from the measure. Nothing moves a cue's sound earlier in the middle of a show.
+- **BKD** **Never less while it sounds, and what the machine cost is handed back** (the author, 2026-11-24:
+  "Maybe we can have a maximum lateness so we don't put a 2s buffer for a once a night even?"). Eight buffers is
+  that maximum (BKB), so a halt of two seconds is two seconds of silence and never a delay. But a halt would still
+  have left every plugin it touched at the maximum for the rest of the night, so: a lane goes back to what the
+  build resolved for it at the next moment nothing sounds through it - the reset a cue's arm asks for, or its rest
+  (BHF: silence in and out for ten seconds) - unless the plugin's own work was what took the time, in which case
+  the measure itself has been raised (BJZ) and that is where it goes back to. Nothing moves a cue's sound earlier
+  while it sounds.
 
 **Stages.** LB.1 the region carries several requests a lane (version 10: a ring of slots, each with its own
 shape, start and stamp; the child answers them in order; the waiting lane unchanged in what it does). LB.2 the
@@ -37053,6 +37059,52 @@ lane played later: the queue, the first silence, growing at once, the most, rese
 counted, the delay reported. LB.3 BJY. LB.4 `plugin/buffer`, resolved at the build; the children's grouping; the
 Plugins and Rack tabs, the web page. LB.5 the measure, its file, what it learns. LB.6 M90 (Tails at 128 frames:
 one gap, then none; Likyū not delayed), a driver for the delay declared and lined up, the guides.
+
+**Built 2026-11-24, LB.1 to LB.3** (the queue, the lane played later, the wait to the callback's end). Until LB.4
+gives a plugin its `buffer` and LB.5 its measure, every plugin of a show starts as today's lane and may be given
+more: BJT and BJV whole, BJU not yet.
+
+- **The queue is beside the request that waits, not in its place** (`region::Slot`, `queueSeq`/`queueDone`, region
+  version 10; twelve slots a lane). The lane that waits inside the callback is the code it was, and its request
+  is answered before any of the queue's - it was asked first. That is what lets a lane be given more without
+  losing the block it was late for: the request stands on the lane, and the lane's next blocks go out through
+  the queue behind it (`ProxyLane::processLater`).
+- **How late is counted in samples**, and a lane given more is given the length of the block it found missing:
+  the next block then plays exactly what was missing, whatever the block's length.
+- **A lane further behind than it is late** - blocks that went by silent while it was as late as a lane goes -
+  lets go of what is oldest and answered until it is where it would have been. A block that cannot be sent (the
+  child as far behind as the queue is long) takes its place in the order as the silence it will be.
+- **The first silence of a lane played later** is silence at a cue's start, never the block as it came (CV); only
+  an insert switched in under a sounding cue, whose blocks passed as they came while it was reset (BHC), goes on
+  passing them through it - a step and no hole.
+- **A limit fixed by hand has no queue** (`--proxy-deadline-us`, what a driver or a bench asks): whoever fixes the
+  limit is measuring what happens at it. So every driver that fixes one is what it was.
+- **A spell's note says when it moved the plugin**: "...; played 256 samples later from now". The entry's
+  `latencySamples` is the plugin's own plus the lane's, the poll it changes (BJX).
+
+M90, this laptop, 128 frames, a minute each unless said (M86 as a show gives its plugins: a queue):
+
+| | before §149 | LB.2 | LB.3 |
+|---|---|---|---|
+| Tails alone | 30 silent buffers a minute, as long as it plays | 2 in all, then none; 256 samples later | the same |
+| Likyū then Tails on one channel: Tails / Likyū | 30 a minute / 1 | 2 in all / 1 | 2 in all / 0 |
+| Likyū alone | 2 min: 2 (waits of 0.8 ms), 256 later | | 5 min: 2 (one stall of 1.65 ms), 256 later |
+| the audio thread's time in the lane, Tails, median | 68 µs, waiting | 1.4 µs | 1.5 µs |
+
+A stall of this laptop still moves Likyū, which needs nothing: until its cue's next arm, or its rest (BKD). On a
+machine that does not stall it stays where it was.
+
+**Tests.** `queue: a region made with a queue has so many slots…`; `later: a lane played later sends without
+waiting and plays what was answered that long ago`; `later: a lane that finds its answer missing waits one more
+buffer at once, and plays the very block that was late` (and the reset that gives it back); `later: eight buffers
+is as late as a lane goes…` (the stream where it would have been; never played later; a region without a queue);
+`later: at rest a lane is as late as the build resolved again`; `later: a plugin too slow for the buffer is moved
+later, heard whole from then on, and its delay is said with its own` (the real child); and BHB's case, which now
+has the lane wait to the callback's end and take an answer that comes after its share.
+
+**Owed.** LB.4 (`plugin/buffer`, the tabs), LB.5 (the measure at the scan), LB.6 (the guides, a driver in a
+served show). The author's try: Tails on the mic's channel at 128 frames - two short gaps as it starts, then none,
+and the foot saying how much later it is.
 
 **Words that ship, the author's to confirm before they do:** the row's name and its choices; what the strip says
 when a plugin has been moved later.

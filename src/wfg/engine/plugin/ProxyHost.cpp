@@ -88,7 +88,11 @@ namespace wfg::plugin
             PluginTable::Status status;
             status.state = wordFor (state);
             status.problem = problem;
-            status.latencySamples = latencySamples;
+            /*  WHAT GO.DOT ADDS, SAID WITH WHAT THE PLUGIN DECLARES (namespace
+                draft §149, BJX): the latest of this child's lanes, so the
+                foot's words, the rack's budget and a timeline's line-up have
+                one figure. */
+            status.latencySamples = latencySamples + laterTold;
             status.paramCount = paramCount;
             status.stateLoadMs = stateLoadMs;
             status.stateProblem = stateProblem;
@@ -109,7 +113,8 @@ namespace wfg::plugin
             with an empty log. */
         void watchLate (std::uint32_t now)
         {
-            std::uint32_t missed = 0, starved = 0;
+            std::uint32_t missed = 0, starved = 0, moved = 0;
+            auto later = 0;
             ProxyLane::Worst worst;
 
             for (auto* lane : lanes)
@@ -119,10 +124,20 @@ namespace wfg::plugin
 
                 missed += lane->misses();
                 starved += lane->starved();
+                moved += lane->movedLater();
+                later = std::max (later, lane->lateSamples());
                 foldWorst (worst, lane->takeWorst());
             }
 
             foldWorst (worstSeen, worst);
+
+            /*  PLAYED LATER, OR BACK WHERE IT WAS (§149): the delay the entry
+                says moves with the lane's, the poll it is seen. */
+            if (later != laterTold)
+            {
+                laterTold = later;
+                publish();
+            }
 
             const auto total = missed + starved;
             const auto fresh = total != lateBlocksSeen;
@@ -139,12 +154,14 @@ namespace wfg::plugin
                     spellBeganAt = now;
                     spellMissedBefore = missedSeen;
                     spellStarvedBefore = starvedSeen;
+                    spellMovedBefore = movedSeen;
                     tellLate();
                 }
             }
 
             missedSeen = missed;
             starvedSeen = starved;
+            movedSeen = moved;
 
             /*  WHERE THE SPELL'S TIME WENT (namespace draft §148): the longest
                 wait and the longest work of every poll from the one that saw
@@ -163,11 +180,25 @@ namespace wfg::plugin
                 spell.missed = missed - spellMissedBefore;
                 spell.starved = starved - spellStarvedBefore;
                 spell.seconds = static_cast<double> (lateLastAt - spellBeganAt) / 1000.0;
-                spell.allowedMicros = deadlineUs;
+                spell.allowedMicros = allowedUs();
+                spell.laterSamples = moved != spellMovedBefore ? later : 0;
             }
 
             if (! fresh && lateSpell && now - lateLastAt > static_cast<std::uint32_t> (lateSpellEndsAfterMs))
                 endLateSpell();
+        }
+
+        /*  What a plugin has of a buffer, for the note: to the callback's
+            end (§149, BJY) - six tenths of the block period, less whatever
+            came before it in the callback - or the limit fixed by hand. */
+        std::int64_t allowedUs() const noexcept
+        {
+            if (spec.deadlineMicroseconds > 0 || spec.sampleRate <= 0 || spec.maxSamples <= 0)
+                return deadlineUs;
+
+            return std::max (deadlineUs, static_cast<std::int64_t> (
+                                             ProxyLane::callbackFraction * 1000000.0 * static_cast<double> (spec.maxSamples)
+                                               / static_cast<double> (spec.sampleRate)));
         }
 
         static void foldWorst (ProxyLane::Worst& into, const ProxyLane::Worst& from) noexcept
@@ -238,7 +269,8 @@ namespace wfg::plugin
             regionFile = folder.getChildFile ("proxy-" + juce::String (spec.pluginId) + juce::String (spec.regionTag)
                                               + "-" + juce::String (process::currentId()) + ".shm");
 
-            const auto bytes = region::regionBytes (spec.channels, spec.maxSamples, spec.lanes);
+            spec.queueSlots = std::clamp (spec.queueSlots, 0, region::queueSlotsMost);
+            const auto bytes = region::regionBytes (spec.channels, spec.maxSamples, spec.lanes, spec.queueSlots);
 
             {
                 juce::FileOutputStream out (regionFile);
@@ -281,14 +313,15 @@ namespace wfg::plugin
             header->channels.store (static_cast<std::uint32_t> (spec.channels), std::memory_order_relaxed);
             header->maxSamples.store (static_cast<std::uint32_t> (spec.maxSamples), std::memory_order_relaxed);
             header->lanes.store (static_cast<std::uint32_t> (spec.lanes), std::memory_order_relaxed);
+            header->queueSlots.store (static_cast<std::uint32_t> (spec.queueSlots), std::memory_order_relaxed);
             header->sampleRate.store (static_cast<std::uint32_t> (spec.sampleRate), std::memory_order_relaxed);
             header->blockSize.store (static_cast<std::uint32_t> (spec.maxSamples), std::memory_order_relaxed);
-            header->layoutHash.store (region::layoutHashFor (spec.channels, spec.maxSamples, spec.lanes),
+            header->layoutHash.store (region::layoutHashFor (spec.channels, spec.maxSamples, spec.lanes, spec.queueSlots),
                                       std::memory_order_release);
 
             for (int i = 0; i < spec.lanes; ++i)
             {
-                auto* lane = new (region::laneAt (base, spec.channels, spec.maxSamples, i)) region::Lane {};
+                auto* lane = new (region::laneAt (base, spec.channels, spec.maxSamples, i, spec.queueSlots)) region::Lane {};
 
                 for (auto& value : lane->params)
                     value.store (region::useBaseline, std::memory_order_relaxed);
@@ -299,7 +332,7 @@ namespace wfg::plugin
                 if (lanes[i] == nullptr)
                     continue;
 
-                auto* lane = region::laneAt (base, spec.channels, spec.maxSamples, static_cast<int> (i));
+                auto* lane = region::laneAt (base, spec.channels, spec.maxSamples, static_cast<int> (i), spec.queueSlots);
                 lanes[i]->setAllowance (deadlineUs, floorUs);
                 lanes[i]->setCallEnabled (false);
                 lanes[i]->bind (header, lane, region::audioOf (lane), spec.channels, spec.maxSamples);
@@ -705,6 +738,10 @@ namespace wfg::plugin
         std::uint32_t missedSeen = 0, starvedSeen = 0;
         std::uint32_t spellMissedBefore = 0, spellStarvedBefore = 0;
 
+        /** How often the lanes have been given more, as last seen and when the spell began; and the delay last said (§149). */
+        std::uint32_t movedSeen = 0, spellMovedBefore = 0;
+        int laterTold = 0;
+
         /** The longest wait and work of any lane since `takeWorstSeen` last asked. */
         ProxyLane::Worst worstSeen;
 
@@ -793,6 +830,9 @@ namespace wfg::plugin
 
         if (! coreKind.empty())
             note += "; its thread was on " + std::string (coreKind == "efficiency" ? "an " : "a ") + coreKind + " core";
+
+        if (spell.laterSamples > 0)
+            note += "; played " + std::to_string (spell.laterSamples) + " samples later from now";
 
         return note;
     }

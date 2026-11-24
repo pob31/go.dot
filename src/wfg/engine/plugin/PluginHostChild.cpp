@@ -149,13 +149,15 @@ namespace wfg::plugin
                   channels (static_cast<int> (header.channels.load (std::memory_order_relaxed))),
                   maxSamples (static_cast<int> (header.maxSamples.load (std::memory_order_relaxed))),
                   count (static_cast<int> (header.lanes.load (std::memory_order_relaxed))),
+                  queueSlots (static_cast<int> (header.queueSlots.load (std::memory_order_relaxed))),
                   control (std::make_unique<LaneControl[]> (static_cast<std::size_t> (std::max (1, count))))
             {
                 laneOf.reserve (static_cast<std::size_t> (count));
                 answeredAtStart.reserve (static_cast<std::size_t> (count));
+                queuedAtStart.reserve (static_cast<std::size_t> (count));
 
                 for (int i = 0; i < count; ++i)
-                    laneOf.push_back (region::laneAt (base, channels, maxSamples, i));
+                    laneOf.push_back (region::laneAt (base, channels, maxSamples, i, queueSlots));
 
                 /*  WHAT THE LAST CHILD WAS ASKED AND NEVER ANSWERED IS NOBODY'S
                     BLOCK NOW (namespace draft §139, BHC): a child relaunched
@@ -171,13 +173,18 @@ namespace wfg::plugin
                     answeredAtStart.push_back (asked);
                     lane->responseSeq.store (asked, std::memory_order_release);
                     lane->resetDoneSeq.store (lane->resetSeq.load (std::memory_order_acquire), std::memory_order_release);
+
+                    //  And what was in its queue (namespace draft §149): the same, each of them.
+                    const auto queued = lane->queueSeq.load (std::memory_order_acquire);
+                    queuedAtStart.push_back (queued);
+                    lane->queueDone.store (queued, std::memory_order_release);
                 }
             }
 
             /*  The worker's side of the gate, before anything else about a
                 lane: grants a load that asks, and while one runs answers the
                 lane's blocks dry. True when the lane is parked this pass. */
-            bool parked (int i, std::uint64_t request, std::uint64_t& answered) const
+            bool parked (int i, std::uint64_t request, std::uint64_t& answered, std::uint64_t& queued) const
             {
                 auto& gate = control[static_cast<std::size_t> (i)].gate;
                 const auto g = gate.load (std::memory_order_acquire);
@@ -188,13 +195,69 @@ namespace wfg::plugin
                 if (g == 1)
                     gate.store (2, std::memory_order_release);
 
+                auto* lane = laneOf[static_cast<std::size_t> (i)];
+
                 if (request > answered)
                 {
                     answered = request;
-                    laneOf[static_cast<std::size_t> (i)]->responseSeq.store (request, std::memory_order_release);
+                    lane->responseSeq.store (request, std::memory_order_release);
+                }
+
+                /*  And its queue (namespace draft §149, BKC): what was sent
+                    before a reset or a state is the last cue's, answered as
+                    it came and never played. */
+                if (const auto asked = lane->queueSeq.load (std::memory_order_acquire); asked > queued)
+                {
+                    queued = asked;
+                    lane->queueDone.store (asked, std::memory_order_release);
                 }
 
                 return true;
+            }
+
+            /*  ONE REQUEST AS THE WORKER SEES IT (namespace draft §149): the
+                one waiting on the lane itself, or one of its queue's - where
+                its audio and its key lie, its shape, and when it was asked. */
+            struct Request
+            {
+                float* audio = nullptr;
+                float* key = nullptr;
+                int numChannels = 0;
+                int numSamples = 0;
+                int keyChannels = 0;
+                std::int64_t asked = 0;
+            };
+
+            Request waiting (int i) const noexcept
+            {
+                auto* lane = laneOf[static_cast<std::size_t> (i)];
+                Request request;
+                request.audio = region::audioOf (lane);
+                request.key = region::keyOf (lane, channels, maxSamples);
+                request.numChannels = static_cast<int> (lane->numChannels.load (std::memory_order_relaxed));
+                request.numSamples = static_cast<int> (lane->numSamples.load (std::memory_order_relaxed));
+                request.keyChannels = static_cast<int> (lane->keyChannels.load (std::memory_order_relaxed));
+                request.asked = lane->requestNanos.load (std::memory_order_relaxed);
+                return request;
+            }
+
+            /*  The queue's request `number`, in its slot; and the lane told
+                where it starts, which is what the instance's playhead reads
+                (GridPlayHead) while this thread plays it. */
+            Request queuedRequest (int i, std::uint64_t number) const noexcept
+            {
+                auto* lane = laneOf[static_cast<std::size_t> (i)];
+                auto* slot = region::slotAt (lane, channels, maxSamples,
+                                             static_cast<int> (number % static_cast<std::uint64_t> (std::max (1, queueSlots))));
+                Request request;
+                request.audio = region::audioOf (slot);
+                request.key = region::keyOf (slot, channels, maxSamples);
+                request.numChannels = static_cast<int> (slot->numChannels.load (std::memory_order_relaxed));
+                request.numSamples = static_cast<int> (slot->numSamples.load (std::memory_order_relaxed));
+                request.keyChannels = static_cast<int> (slot->keyChannels.load (std::memory_order_relaxed));
+                request.asked = slot->requestNanos.load (std::memory_order_relaxed);
+                lane->blockStartSample.store (slot->blockStartSample.load (std::memory_order_relaxed), std::memory_order_relaxed);
+                return request;
             }
 
             /*  Real-time priority for the answering thread, the same class the
@@ -336,6 +399,7 @@ namespace wfg::plugin
             region::Header& header;
             WorkgroupFollower workgroup;
             int channels, maxSamples, count;
+            int queueSlots;     ///< how many slots each lane's queue has, nought for none (§149)
             const bool napsBetweenRequests = napFits (header);
             std::chrono::steady_clock::time_point lastAsked {};
 
@@ -345,6 +409,7 @@ namespace wfg::plugin
 
             std::vector<region::Lane*> laneOf;
             std::vector<std::uint64_t> answeredAtStart;     ///< each lane's request count when this child came up
+            std::vector<std::uint64_t> queuedAtStart;       ///< and its queue's
             std::unique_ptr<LaneControl[]> control;
         };
 
@@ -361,11 +426,9 @@ namespace wfg::plugin
         /** The lane's channels as pointers: the region is channel-major. */
         constexpr int maxLaneChannels = 64;
 
-        void pointersOf (region::Lane* lane, int channels, int maxSamples,
-                         std::array<float*, maxLaneChannels>& into) noexcept
+        void pointersFrom (float* audio, int channels, int maxSamples,
+                           std::array<float*, maxLaneChannels>& into) noexcept
         {
-            auto* audio = region::audioOf (lane);
-
             for (int channel = 0; channel < std::min (channels, maxLaneChannels); ++channel)
                 into[static_cast<std::size_t> (channel)] = audio + channel * maxSamples;
         }
@@ -379,6 +442,7 @@ namespace wfg::plugin
             float gain = 0.5f;
             std::uint32_t paramsSeen = 0;
             std::uint64_t answered = 0;
+            std::uint64_t queued = 0;       ///< how many of its queue's requests it has answered (§149)
             std::uint32_t epochSeen = 0;
 
             /*  WHAT ITS STATE SAYS (TestGainState): where Gain rests when the
@@ -440,6 +504,7 @@ namespace wfg::plugin
                 {
                     instances[i].restingGain = baseline0;
                     instances[i].answered = lanes.answeredAtStart[i];
+                    instances[i].queued = lanes.queuedAtStart[i];
                 }
             }
 
@@ -529,16 +594,25 @@ namespace wfg::plugin
                         auto& instance = instances[static_cast<std::size_t> (i)];
                         const auto request = lane->requestSeq.load (std::memory_order_acquire);
 
-                        if (lanes.parked (i, request, instance.answered))
+                        if (lanes.parked (i, request, instance.answered, instance.queued))
                         {
                             any = true;
                             continue;
                         }
 
-                        if (request <= instance.answered)
+                        /*  THE ONE THAT WAITS FIRST - it was asked first - then
+                            one of the queue's, in the order they were asked
+                            (namespace draft §149); one a pass, so the other
+                            lanes of this child are looked at in between. */
+                        const auto fromQueue = request <= instance.answered;
+                        const auto queuedNumber = instance.queued + 1;
+
+                        if (fromQueue && (lanes.queueSlots <= 0
+                                            || lane->queueSeq.load (std::memory_order_acquire) < queuedNumber))
                             continue;
 
                         any = true;
+                        const auto asked = fromQueue ? lanes.queuedRequest (i, queuedNumber) : lanes.waiting (i);
 
                         if (instance.takeDelayUs > 0)
                             spinFor (instance.takeDelayUs);
@@ -570,16 +644,16 @@ namespace wfg::plugin
                                 std::abort();
                         }
 
-                        const auto numChannels = std::min<int> (lanes.channels, static_cast<int> (lane->numChannels.load (std::memory_order_relaxed)));
-                        const auto numSamples = std::min<int> (lanes.maxSamples, static_cast<int> (lane->numSamples.load (std::memory_order_relaxed)));
-                        auto* audio = region::audioOf (lane);
+                        const auto numChannels = std::min<int> (lanes.channels, asked.numChannels);
+                        const auto numSamples = std::min<int> (lanes.maxSamples, asked.numSamples);
+                        auto* audio = asked.audio;
 
                         /*  WHAT IT WAS GIVEN, kept for the plugin's window while
                             the parent asks (namespace draft §146) - before the
                             gain is put on it in place. */
                         if (instance.tap.open (*lane, numSamples, static_cast<int> (lanes.header.sampleRate.load (std::memory_order_relaxed))))
                             region::tapBlock (lane, lanes.channels, lanes.maxSamples, numChannels, numSamples,
-                                              static_cast<int> (lane->keyChannels.load (std::memory_order_relaxed)));
+                                              asked.keyChannels, asked.audio, asked.key);
 
                         const auto factor = instance.gain * instance.padFactor;
                         const lanemap::Shape shape { numChannels, inputs, outputs, lanes.channels };
@@ -587,10 +661,9 @@ namespace wfg::plugin
                         /*  THE DUCKER'S KEY (§141): how loud it is, sample by
                             sample, the louder of its sides. */
                         const auto keyChannels = duck && instance.keyWidth > 0
-                                                   ? std::min<int> (region::keyChannelsMax,
-                                                                    static_cast<int> (lane->keyChannels.load (std::memory_order_relaxed)))
+                                                   ? std::min<int> (region::keyChannelsMax, asked.keyChannels)
                                                    : 0;
-                        const auto* key = region::keyOf (lane, lanes.channels, lanes.maxSamples);
+                        const auto* key = asked.key;
 
                         if (inputs == lanes.channels && outputs == lanes.channels)
                         {
@@ -658,13 +731,22 @@ namespace wfg::plugin
                                 sides[1][n] = x * factor * 0.5f;
                             }
 
-                            pointersOf (lane, lanes.channels, lanes.maxSamples, lanePointers);
+                            pointersFrom (asked.audio, lanes.channels, lanes.maxSamples, lanePointers);
                             lanemap::backInto (sides, shape, lanePointers.data(), numSamples);
                         }
 
-                        instance.answered = request;
-                        region::noteTimes (*lane, takenAt, region::steadyNanos(), app::processorNow());
-                        lane->responseSeq.store (request, std::memory_order_release);
+                        region::noteTimesFrom (*lane, asked.asked, takenAt, region::steadyNanos(), app::processorNow());
+
+                        if (fromQueue)
+                        {
+                            instance.queued = queuedNumber;
+                            lane->queueDone.store (queuedNumber, std::memory_order_release);
+                        }
+                        else
+                        {
+                            instance.answered = request;
+                            lane->responseSeq.store (request, std::memory_order_release);
+                        }
                     }
 
                     lanes.restAfterIdlePass (any);
@@ -886,6 +968,7 @@ namespace wfg::plugin
             {
                 std::uint32_t paramsSeen = 0;
                 std::uint64_t answered = 0;
+                std::uint64_t queued = 0;       ///< how many of its queue's requests it has answered (§149)
                 std::uint32_t epochSeen = 0;
                 std::vector<float> applied;
 
@@ -916,6 +999,7 @@ namespace wfg::plugin
                 {
                     state[i].applied.assign (baseline.size(), -2.0f);
                     state[i].answered = lanes.answeredAtStart[i];
+                    state[i].queued = lanes.queuedAtStart[i];
                 }
 
                 /*  NO SUBNORMALS IN THE PLUGINS' ARITHMETIC: a reverb's tail
@@ -938,16 +1022,25 @@ namespace wfg::plugin
                         auto& instance = *instances[static_cast<std::size_t> (i)];
                         const auto request = lane->requestSeq.load (std::memory_order_acquire);
 
-                        if (lanes.parked (i, request, s.answered))
+                        if (lanes.parked (i, request, s.answered, s.queued))
                         {
                             any = true;
                             continue;
                         }
 
-                        if (request <= s.answered)
+                        /*  THE ONE THAT WAITS FIRST - it was asked first - then
+                            one of the queue's, in the order they were asked
+                            (namespace draft §149); one a pass, so the other
+                            lanes of this child are looked at in between. */
+                        const auto fromQueue = request <= s.answered;
+                        const auto queuedNumber = s.queued + 1;
+
+                        if (fromQueue && (lanes.queueSlots <= 0
+                                            || lane->queueSeq.load (std::memory_order_acquire) < queuedNumber))
                             continue;
 
                         any = true;
+                        const auto asked = fromQueue ? lanes.queuedRequest (i, queuedNumber) : lanes.waiting (i);
 
                         /*  TAKEN (namespace draft §148): how long the request
                             waited for this thread ends here, and what follows -
@@ -989,9 +1082,8 @@ namespace wfg::plugin
                             }
                         }
 
-                        const auto numChannels = std::min<int> (lanes.channels, static_cast<int> (lane->numChannels.load (std::memory_order_relaxed)));
-                        const auto numSamples = std::min<int> ({ lanes.maxSamples, scratchSamples,
-                                                                 static_cast<int> (lane->numSamples.load (std::memory_order_relaxed)) });
+                        const auto numChannels = std::min<int> (lanes.channels, asked.numChannels);
+                        const auto numSamples = std::min<int> ({ lanes.maxSamples, scratchSamples, asked.numSamples });
 
                         /*  BY THE RULES OF LaneMapping.h (2026-09-26): the cue's
                             channels into the main inputs - a mono cue into all
@@ -1008,10 +1100,10 @@ namespace wfg::plugin
                                 is written back over them. */
                             if (s.tap.open (*lane, numSamples, static_cast<int> (lanes.header.sampleRate.load (std::memory_order_relaxed))))
                                 region::tapBlock (lane, lanes.channels, lanes.maxSamples, numChannels, numSamples,
-                                                  keyWidth[static_cast<std::size_t> (i)] > 0
-                                                      ? static_cast<int> (lane->keyChannels.load (std::memory_order_relaxed)) : 0);
+                                                  keyWidth[static_cast<std::size_t> (i)] > 0 ? asked.keyChannels : 0,
+                                                  asked.audio, asked.key);
 
-                            pointersOf (lane, lanes.channels, lanes.maxSamples, lanePointers);
+                            pointersFrom (asked.audio, lanes.channels, lanes.maxSamples, lanePointers);
                             fitScratch (scratch, numSamples);
                             scratch.clear();
                             lanemap::feedInto (lanePointers.data(), shape, scratch.getArrayOfWritePointers(), numSamples);
@@ -1021,10 +1113,9 @@ namespace wfg::plugin
                                 other block its sidechain is the silence above. */
                             if (const auto sidechain = keyWidth[static_cast<std::size_t> (i)]; sidechain > 0)
                             {
-                                const auto keyChannels = std::min<int> (region::keyChannelsMax,
-                                                                        static_cast<int> (lane->keyChannels.load (std::memory_order_relaxed)));
+                                const auto keyChannels = std::min<int> (region::keyChannelsMax, asked.keyChannels);
                                 const auto& at = keyIndex[static_cast<std::size_t> (i)].at;
-                                auto* key = region::keyOf (lane, lanes.channels, lanes.maxSamples);
+                                auto* key = asked.key;
                                 const float* keys[2] = { key, key + lanes.maxSamples };
                                 float* into[2] = { nullptr, nullptr };
                                 auto usable = 0;
@@ -1046,9 +1137,18 @@ namespace wfg::plugin
                             lanemap::backInto (scratch.getArrayOfReadPointers(), shape, lanePointers.data(), numSamples);
                         }
 
-                        s.answered = request;
-                        region::noteTimes (*lane, takenAt, region::steadyNanos(), app::processorNow());
-                        lane->responseSeq.store (request, std::memory_order_release);
+                        region::noteTimesFrom (*lane, asked.asked, takenAt, region::steadyNanos(), app::processorNow());
+
+                        if (fromQueue)
+                        {
+                            s.queued = queuedNumber;
+                            lane->queueDone.store (queuedNumber, std::memory_order_release);
+                        }
+                        else
+                        {
+                            s.answered = request;
+                            lane->responseSeq.store (request, std::memory_order_release);
+                        }
                     }
 
                     lanes.restAfterIdlePass (any);
@@ -1303,7 +1403,8 @@ namespace wfg::plugin
         const auto maxSamples = static_cast<int> (header.maxSamples.load (std::memory_order_relaxed));
         const auto laneCount = static_cast<int> (header.lanes.load (std::memory_order_relaxed));
 
-        if (mapping.getSize() < region::regionBytes (channels, maxSamples, laneCount))
+        if (mapping.getSize() < region::regionBytes (channels, maxSamples, laneCount,
+                                                     static_cast<int> (header.queueSlots.load (std::memory_order_relaxed))))
         {
             reportFailure (header, "the shared region is shorter than its header says");
             return 3;

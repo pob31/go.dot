@@ -71,8 +71,20 @@ namespace wfg::plugin::region
         plugin's window to hear (the tap, namespace draft §146).
         9 since 2026-11-24: when each request was made, and the longest a
         request waited for the worker and was then worked on (namespace draft
-        §147). */
-    constexpr std::uint32_t version = 9;
+        §148). 10 since 2026-11-24: a queue of requests on every lane, for a
+        plugin played later than it is sent (namespace draft §149). */
+    constexpr std::uint32_t version = 10;
+
+    /*  THE QUEUE (namespace draft §149, BJW). A plugin that cannot answer
+        inside a buffer is played later: the lane sends its block and does
+        not wait, and plays what was answered so many samples ago. So more
+        than one request is out at a time, each in a slot of its own after
+        the tap's ring - its shape, where it starts and when it was asked at
+        the slot's head, its audio and its key after that. Eight buffers
+        later is the most a lane goes (BKB), and the slots are that, the one
+        being sent, and room for a child that fell behind to be found out. A
+        region made with none has no queue, and its lanes can only wait. */
+    constexpr int queueSlotsMost = 12;
 
     /*  THE WIDEST KEY A LANE CARRIES (namespace draft §141, BHT): one channel
         or two. A wider input or cue is folded to two before it is sent. */
@@ -112,6 +124,9 @@ namespace wfg::plugin::region
         std::atomic<std::uint32_t> channels;
         std::atomic<std::uint32_t> maxSamples;
         std::atomic<std::uint32_t> lanes;
+
+        /** How many slots each lane's queue has (§149): nought, or `queueSlotsMost`. Part of the shape. */
+        std::atomic<std::uint32_t> queueSlots;
 
         std::atomic<std::uint32_t> sampleRate;
         std::atomic<std::uint32_t> blockSize;
@@ -278,6 +293,17 @@ namespace wfg::plugin::region
         std::atomic<std::uint32_t> workMaxMicros;
         std::atomic<std::uint32_t> worstCore;
 
+        /*  THE QUEUE'S TWO COUNTS (namespace draft §149). `queueSeq`, the
+            parent's: how many requests it has ever put in the queue, stored
+            with release once request `n` is whole in slot `n % queueSlots`.
+            `queueDone`, the child's: how many it has answered, in the order
+            they were asked, each in its own slot. The parent never writes a
+            slot whose request is not yet answered, so what is out is at most
+            the slots there are. A request waiting the old way (`requestSeq`)
+            is answered before any in the queue: it was asked first. */
+        std::atomic<std::uint64_t> queueSeq;
+        std::atomic<std::uint64_t> queueDone;
+
         /*  A CUE'S WHOLE STATE, loaded onto this lane's instance before the cue
             may launch (the author's decision of 2026-09-25). One in flight:
             the parent writes `statePath` - absolute, empty for the preset's
@@ -334,7 +360,22 @@ namespace wfg::plugin::region
         return alignUp (sizeof (Header));
     }
 
-    constexpr std::size_t laneStride (int channels, int maxSamples) noexcept
+    /*  THE HEAD OF A QUEUED REQUEST (namespace draft §149): what the lane
+        says of the one request that waits - how wide, how long, how much key,
+        where it starts, when it was asked - said here of each, since several
+        are out at once. Written by the parent before `queueSeq` moves. */
+    struct Slot
+    {
+        std::atomic<std::uint32_t> numChannels;
+        std::atomic<std::uint32_t> numSamples;
+        std::atomic<std::uint32_t> keyChannels;
+        std::atomic<std::uint32_t> spare;
+        std::atomic<std::uint64_t> blockStartSample;
+        std::atomic<std::int64_t> requestNanos;
+    };
+
+    /** Where a lane's queue begins: after its audio, its key and its tap, on a cache line. */
+    constexpr std::size_t queueOffset (int channels, int maxSamples) noexcept
     {
         return alignUp (sizeof (Lane)
                         + (static_cast<std::size_t> (channels + keyChannelsMax) * static_cast<std::size_t> (maxSamples)
@@ -342,9 +383,22 @@ namespace wfg::plugin::region
                             * sizeof (float));
     }
 
-    constexpr std::size_t regionBytes (int channels, int maxSamples, int lanes) noexcept
+    /** A slot: its head, its audio, its key. */
+    constexpr std::size_t slotStride (int channels, int maxSamples) noexcept
     {
-        return headerBytes() + static_cast<std::size_t> (lanes) * laneStride (channels, maxSamples);
+        return alignUp (sizeof (Slot)
+                        + static_cast<std::size_t> (channels + keyChannelsMax) * static_cast<std::size_t> (maxSamples) * sizeof (float));
+    }
+
+    constexpr std::size_t laneStride (int channels, int maxSamples, int queueSlots = 0) noexcept
+    {
+        return queueOffset (channels, maxSamples)
+             + static_cast<std::size_t> (queueSlots > 0 ? queueSlots : 0) * slotStride (channels, maxSamples);
+    }
+
+    constexpr std::size_t regionBytes (int channels, int maxSamples, int lanes, int queueSlots = 0) noexcept
+    {
+        return headerBytes() + static_cast<std::size_t> (lanes) * laneStride (channels, maxSamples, queueSlots);
     }
 
     inline Header* headerOf (void* base) noexcept
@@ -352,10 +406,27 @@ namespace wfg::plugin::region
         return static_cast<Header*> (base);
     }
 
-    inline Lane* laneAt (void* base, int channels, int maxSamples, int index) noexcept
+    inline Lane* laneAt (void* base, int channels, int maxSamples, int index, int queueSlots = 0) noexcept
     {
         return reinterpret_cast<Lane*> (static_cast<char*> (base) + headerBytes()
-                                        + static_cast<std::size_t> (index) * laneStride (channels, maxSamples));
+                                        + static_cast<std::size_t> (index) * laneStride (channels, maxSamples, queueSlots));
+    }
+
+    /** Slot `index` of a lane's queue (§149); the region must have been made with that many. */
+    inline Slot* slotAt (Lane* lane, int channels, int maxSamples, int index) noexcept
+    {
+        return reinterpret_cast<Slot*> (reinterpret_cast<char*> (lane) + queueOffset (channels, maxSamples)
+                                        + static_cast<std::size_t> (index) * slotStride (channels, maxSamples));
+    }
+
+    inline float* audioOf (Slot* slot) noexcept
+    {
+        return reinterpret_cast<float*> (reinterpret_cast<char*> (slot) + sizeof (Slot));
+    }
+
+    inline float* keyOf (Slot* slot, int channels, int maxSamples) noexcept
+    {
+        return audioOf (slot) + static_cast<std::size_t> (channels) * static_cast<std::size_t> (maxSamples);
     }
 
     inline float* audioOf (Lane* lane) noexcept
@@ -384,8 +455,16 @@ namespace wfg::plugin::region
         answer over it: the first `tapChannelsMax` of the cue's channels, then
         the key's. A copy into memory both sides already have - no lock, no
         allocation, no call (PRD §4.2). */
-    inline void tapBlock (Lane* lane, int channels, int maxSamples, int numChannels, int numSamples, int keyChannels) noexcept
+    inline void tapBlock (Lane* lane, int channels, int maxSamples, int numChannels, int numSamples, int keyChannels,
+                          const float* audio = nullptr, const float* keyAudio = nullptr) noexcept
     {
+        //  A queued request's block lies in its slot (namespace draft §149); the waiting one's on the lane.
+        if (audio == nullptr)
+            audio = audioOf (lane);
+
+        if (keyAudio == nullptr)
+            keyAudio = keyOf (lane, channels, maxSamples);
+
         if (numSamples <= 0 || numSamples > tapFrames)
             return;
 
@@ -408,10 +487,10 @@ namespace wfg::plugin::region
         };
 
         for (int c = 0; c < cue; ++c)
-            copy (audioOf (lane) + static_cast<std::size_t> (c) * static_cast<std::size_t> (maxSamples), c);
+            copy (audio + static_cast<std::size_t> (c) * static_cast<std::size_t> (maxSamples), c);
 
         for (int c = 0; c < key; ++c)
-            copy (keyOf (lane, channels, maxSamples) + static_cast<std::size_t> (c) * static_cast<std::size_t> (maxSamples),
+            copy (keyAudio + static_cast<std::size_t> (c) * static_cast<std::size_t> (maxSamples),
                   tapChannelsMax + c);
 
         lane->tapChannels.store (static_cast<std::uint32_t> (cue < 0 ? 0 : cue), std::memory_order_relaxed);
@@ -462,10 +541,9 @@ namespace wfg::plugin::region
         made it - the longest of each kept, and where the worker was (`core`,
         one more than the processor's number, nought when the system does not
         say). Before `responseSeq`, on the worker. */
-    inline void noteTimes (Lane& lane, std::int64_t takenNanos, std::int64_t doneNanos, std::uint32_t core) noexcept
+    inline void noteTimesFrom (Lane& lane, std::int64_t asked, std::int64_t takenNanos, std::int64_t doneNanos,
+                               std::uint32_t core) noexcept
     {
-        const auto asked = lane.requestNanos.load (std::memory_order_relaxed);
-
         if (asked <= 0)
             return;
 
@@ -495,8 +573,14 @@ namespace wfg::plugin::region
             lane.worstCore.store (core, std::memory_order_relaxed);
     }
 
+    /** The same for the request that waits on the lane itself, asked when `requestNanos` says. */
+    inline void noteTimes (Lane& lane, std::int64_t takenNanos, std::int64_t doneNanos, std::uint32_t core) noexcept
+    {
+        noteTimesFrom (lane, lane.requestNanos.load (std::memory_order_relaxed), takenNanos, doneNanos, core);
+    }
+
     /** FNV-1a over everything a layout depends on. */
-    constexpr std::uint32_t layoutHashFor (int channels, int maxSamples, int lanes) noexcept
+    constexpr std::uint32_t layoutHashFor (int channels, int maxSamples, int lanes, int queueSlots = 0) noexcept
     {
         std::uint32_t hash = 2166136261u;
 
@@ -519,6 +603,8 @@ namespace wfg::plugin::region
         mix (static_cast<std::uint32_t> (channels));
         mix (static_cast<std::uint32_t> (maxSamples));
         mix (static_cast<std::uint32_t> (lanes));
+        mix (static_cast<std::uint32_t> (sizeof (Slot)));
+        mix (static_cast<std::uint32_t> (queueSlots > 0 ? queueSlots : 0));
         return hash;
     }
 
@@ -528,10 +614,11 @@ namespace wfg::plugin::region
         const auto channels = static_cast<int> (header.channels.load (std::memory_order_relaxed));
         const auto samples = static_cast<int> (header.maxSamples.load (std::memory_order_relaxed));
         const auto lanes = static_cast<int> (header.lanes.load (std::memory_order_relaxed));
+        const auto queueSlots = static_cast<int> (header.queueSlots.load (std::memory_order_relaxed));
 
         return header.magic.load (std::memory_order_relaxed) == magic
             && header.version.load (std::memory_order_relaxed) == version
-            && channels > 0 && samples > 0 && lanes > 0
-            && header.layoutHash.load (std::memory_order_relaxed) == layoutHashFor (channels, samples, lanes);
+            && channels > 0 && samples > 0 && lanes > 0 && queueSlots >= 0 && queueSlots <= queueSlotsMost
+            && header.layoutHash.load (std::memory_order_relaxed) == layoutHashFor (channels, samples, lanes, queueSlots);
     }
 }

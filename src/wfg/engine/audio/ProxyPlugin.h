@@ -38,7 +38,9 @@
     parameters - the values are atomics on the lane that the tick thread
     writes, as it writes the level. Zero declared latency, deliberately: the
     round trip is absorbed inside the block, and a plugin's own latency
-    arrives uncompensated (§17.6). No sidechain, the width and the slot carried
+    arrives uncompensated (§17.6) - as does what its lane adds when the
+    plugin is played later (namespace draft §149): Tracktion is told nothing,
+    and the entry says the two together (ProxyHost). No sidechain, the width and the slot carried
     on the state because PluginCreationInfo carries nothing else, and the
     `getNumOutputChannelsGivenInputs` override that actually sizes the buffer.
 
