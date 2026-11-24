@@ -76,7 +76,10 @@ namespace wfg::app
 
         /*  The presentation options are the application's, not a display's: on
             while any covering window is on a display with a menu bar. The
-            system applies them only while Go.dot is in front. */
+            system applies them only while Go.dot is in front. Given back as
+            Default, not as what was read before: a Mac set to hide its menu bar
+            by itself reads 4 (auto-hide menu bar) under Default, and 4 alone is
+            a combination AppKit refuses to be set. */
         void changeMenuBarHiders (int delta)
         {
             const auto before = menuBarHiders;
@@ -105,10 +108,7 @@ namespace wfg::app
             if (covering.hidesMenuBar)
                 changeMenuBarHiders (+1);
 
-            /*  No title bar and no resizing, but still closable and still
-                minimisable: a window made only Borderless cannot be put in the
-                Dock, and the cue list's own minimise button went dead while it
-                covered (the Mac mini, 2026-11-24). */
+            //  No title bar and no resizing; closable and minimisable still (see replacementMiniaturize).
             [window setStyleMask: covering.styleMask & ~(NSWindowStyleMaskTitled | NSWindowStyleMaskResizable
                                                          | NSWindowStyleMaskFullSizeContentView)];
             [window setFrame: [screen frame] display: YES];
@@ -167,6 +167,22 @@ namespace wfg::app
             return true;
         }
 
+        IMP originalMiniaturize = nullptr;
+        IMP originalPerformMiniaturize = nullptr;
+
+        /*  AppKit will not put a window without a title bar in the Dock, whatever
+            its style says (WFS-DIY measured it, 76a8a28a): the cover comes off
+            first, and the window goes to the Dock as the window it was. Cmd+M,
+            the minimise button and JUCE's setMinimised all come here. */
+        void replacementMiniaturize (id self, SEL command, id sender)
+        {
+            uncover ((NSWindow*) self, true);
+
+            if (auto original = (command == @selector (performMiniaturize:) ? originalPerformMiniaturize
+                                                                            : originalMiniaturize))
+                ((void (*) (id, SEL, id)) original) (self, command, sender);
+        }
+
         void replacementToggleFullScreen (id self, SEL command, id sender)
         {
             if (toggleCover ((NSWindow*) self))
@@ -221,6 +237,12 @@ namespace wfg::app
 
         originalToggleFullScreen = method_setImplementation (method, (IMP) replacementToggleFullScreen);
 
+        if (Method miniaturize = class_getInstanceMethod ([NSWindow class], @selector (miniaturize:)))
+            originalMiniaturize = method_setImplementation (miniaturize, (IMP) replacementMiniaturize);
+
+        if (Method perform = class_getInstanceMethod ([NSWindow class], @selector (performMiniaturize:)))
+            originalPerformMiniaturize = method_setImplementation (perform, (IMP) replacementMiniaturize);
+
         /*  Ctrl+Cmd+F: AppKit only offers it through a menu named View, which
             Go.dot's menu bar may not have, so it is listened for here. */
         [NSEvent addLocalMonitorForEventsMatchingMask: NSEventMaskKeyDown
@@ -250,7 +272,7 @@ namespace wfg::app
                              queue: nil
                         usingBlock: ^(NSNotification* note) { uncover ((NSWindow*) [note object], false); }];
 
-        //  A window put in the Dock leaves no menu bar hidden behind it.
+        //  And a window put in the Dock some other way leaves no menu bar hidden behind it.
         [centre addObserverForName: NSWindowDidMiniaturizeNotification
                             object: nil
                              queue: nil

@@ -37204,7 +37204,12 @@ four flags and sits at level 101, over the menu bar (24) and the Dock (20). One 
 WFS-DIY covers - the style made Borderless - the window could no longer be minimised, so the cue list's own
 minimise button did nothing while it covered. The cover now takes away only the title bar and the resizing. (A Mac
 set to hide its menu bar by itself reports that among the application's options: the test compares with what was
-there before.)
+there before.) WFS-DIY then found that for ITS windows - the system's title bar - that was not enough, AppKit
+refusing to put any window without a title bar in the Dock, and took the cover off inside `miniaturize:` itself
+(76a8a28a). Go.dot's cue list, whose title bar is JUCE's own, did go to the Dock with the mask alone (`isMiniaturized`,
+measured before and after, 35 of 35 both times); the same hook is taken anyway, so the two programs stay alike and
+a window of the system's kind with a maximise button would be covered too. The options are given back as Default,
+not as read before: Default reads back 4 on such a Mac, and 4 alone is a combination AppKit refuses to be set.
 
 **Owed.** The author's try on the Mac: the cue list's maximise, double-click and Ctrl+Cmd+F cover on the same Space and come
 back; Cmd+Tab away shows the other application's bars; a projector stays through a change of Space, Mission

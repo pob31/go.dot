@@ -188,15 +188,31 @@ TEST_CASE ("spaces: the cue list's full screen covers its display on the Space i
     pump (1.5);
     CHECK (same ([ns frame], before));
 
-    //  Minimised while covering: the bars come back, the frame with them.
-    [ns toggleFullScreen: nil];
-    pump (1.0);
-    [ns miniaturize: nil];
-    pump (1.5);
-    CHECK ([NSApp presentationOptions] == optionsBefore);
-    [ns deminiaturize: nil];
-    pump (1.0);
-    CHECK (same ([ns frame], before));
+    /*  Minimised while covering - AppKit's miniaturize: (Cmd+M, the Dock) and
+        JUCE's setMinimised (its own minimise button): really in the Dock, the
+        bars back, and back from it as the window it was. */
+    for (int how = 0; how < 2; ++how)
+    {
+        CAPTURE (how);
+        [ns toggleFullScreen: nil];
+        pump (1.0);
+        REQUIRE (same ([ns frame], screen));
+
+        if (how == 0)
+            [ns miniaturize: nil];
+        else
+            window.setMinimised (true);
+
+        pump (1.5);
+        CHECK ([ns isMiniaturized]);
+        CHECK ([NSApp presentationOptions] == optionsBefore);
+
+        [ns deminiaturize: nil];
+        pump (1.5);
+        CHECK (! [ns isMiniaturized]);
+        CHECK (same ([ns frame], before));
+        CHECK ([ns styleMask] == styleBefore);
+    }
 }
 
 TEST_CASE ("spaces: a projector's window is on every Space of its display, and has no full screen of its own (§150)")
