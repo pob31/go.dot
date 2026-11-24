@@ -1,9 +1,10 @@
 # Go.dot — Multichannel files and outputs, Ambisonics first: notes before the work starts
 
-**Draft 0.6**, 2026-11-24 (0.1 to 0.5 the same day; 0.2 set aside 0.1's format word on
+**Draft 0.7**, 2026-11-24 (0.1 to 0.6 the same day; 0.2 set aside 0.1's format word on
 outputs after the author's ruling quoted in §4, and 0.3 corrects 0.2's reading of that
 ruling by his own clarification; 0.4 added his answers on summing and on the grid; 0.5 withdrew 0.4's summing patch at his word; 0.6 makes the fold a decoder on the cue, after
-his ruling on how a wide file reaches a direct out or a mix). Written from a conversation with the author and a read of the code
+his ruling on how a wide file reaches a direct out or a mix; 0.7 adds the list of decoders he
+asked for). Written from a conversation with the author and a read of the code
 that day (Go.dot at `c3e0263a`, XOA at `e4c3fbd`, spatcore at `v0.4.0-50-g7bdf4ab`). Nothing
 here is built and nothing was run: every claim comes from reading the source. Line numbers are
 those of that day. **Check a claim against the code before relying on it.**
@@ -279,10 +280,61 @@ direction's component)`, and is at unity on its axis whatever `p`.
   `fumaToAmbixTable`): W is the file's first channel at −3 dB, Y its third. Mono is `√2·W`;
   stereo is `(√2/2)·W ± ½·Y`.
 
+### Which decoders
+
+The author, 2026-11-24: "Ambisonics or LCR, 4.0, 5.1, 7.1, ATMOS if there's an available codec
+for it."
+
+All but the last are a table of coefficients each, file channels by one or two, so they are
+the same mechanism as the Ambisonic one and cost a row apiece. The usual downmix (ITU-R
+BS.775, **to be checked against the text before it is built**) keeps left and right at unity
+and brings centre and surrounds in 3 dB down:
+
+| Decoder | File channels, in a WAV's order | To stereo | To mono |
+|---|---|---|---|
+| Ambisonic, AmbiX | W Y Z X … | above | W |
+| Ambisonic, FuMa | W X Y Z … | above | √2·W |
+| LCR | L R C | L + 0.707·C, R + 0.707·C | L + R + C, scaled |
+| 4.0 (quad) | L R Ls Rs | L + 0.707·Ls, R + 0.707·Rs | the four, scaled |
+| 5.1 | L R C LFE Ls Rs | L + 0.707·C + 0.707·Ls, the same on the right; LFE left out | the stereo pair summed, scaled |
+| 7.1 | L R C LFE, back pair, side pair | as 5.1, with both surround pairs at 0.707 | the same |
+
+Three things a table does not settle, each in §6:
+
+- **Channel order.** A WAV's own order for 5.1 is L R C LFE Ls Rs; film stems are often
+  L C R Ls Rs LFE; "4.0" is quad to some and L C R S to others. Tracktion keeps the file's
+  order (§3), and Go.dot does not guess (constraint 10), so either each order is its own entry
+  in the menu or the user says the order once on the cue.
+- **Level.** These sums are not normalised: a 5.1 file loud in every channel comes out of the
+  stereo decoder up to 7.6 dB above one channel. That is the standard's own behaviour, and
+  the operator's to manage with the cue's level.
+- **The LFE.** Left out by the standard downmix; some want it in at −10 dB or so.
+
+**Atmos is a different kind of thing.** It is not a channel layout but a bed plus moving
+objects, and it reaches a theatre in three forms:
+
+- *As a delivery codec* (Dolby Digital Plus with JOC, TrueHD, AC-4). The decoders are
+  Dolby's, under licence. FFmpeg — which Go.dot already uses to turn compressed sound into WAV
+  — reads the 5.1 or 7.1 core of such a stream and, by what a search of 2026-11-24 found,
+  recognises the Atmos part without decoding it (a patch for TrueHD object data was posted in
+  March 2025; whether it was merged was not established). **No freely usable Atmos decoder was
+  found; check again when the work starts.**
+- *As a master* (ADM BWF, a wide WAV carrying its description). Its first channels are the
+  bed, plain PCM in a known layout (7.1.2 as a rule); the rest are objects whose positions are
+  in the file's metadata.
+- *Rendered*, by Dolby's renderer or a processor, onto loudspeakers or to a stereo or
+  binaural file.
+
+What Go.dot can do without a codec, and without becoming a renderer: convert a delivery file
+at import to its 5.1 or 7.1 core, which then plays through those decoders, with a plain word
+that the objects were left behind; and play an ADM master's channels at their full count into
+the raw set, for a renderer downstream, or decode its **bed only** to stereo. Placing the
+objects is rendering, and stays outside (PRD §1).
+
 What the decoder does not do:
 
-- It decodes to mono or stereo only. A wider image, another aim, 5.1 to stereo: the user's
-  own coefficients, or a later decoder in the same menu.
+- It decodes to mono or stereo only: no 7.1 to 5.1, no Ambisonic to 5.1. A wider image or
+  another aim is the user's own coefficients in the matrix.
 - The stereo law has one control, the send's existing width (1 is the pair of cardioids, 0 is
   W on both sides): applying the two-into-two law of `SendPlacement.cpp:94-102` to the pair
   gives `L = ½W + ½w·Y`, `R = ½W − ½w·Y` with nothing added.
@@ -330,7 +382,8 @@ are shown to the author before they ship.
 **MC.3 — The decoder.**
 A row in `docs/parameters/godot-parameters.csv` near 144 (the media cue), regenerated
 (`scripts/generate-schema.py`). A pure file beside `SendPlacement.h` that returns the decoder's
-matrix (AmbiX and FuMa, mono and stereo). `resolveRouting` multiplies it into what `spreadOf`
+matrices (AmbiX and FuMa first, then LCR, 4.0, 5.1 and 7.1, each to mono and to stereo).
+`resolveRouting` multiplies it into what `spreadOf`
 gives for a direct out and for each send (`Runner.cpp:6927, 6939, 7023`), `spreadOf` being
 asked for one or two channels instead of the file's count; `send/placement`
 (`ParameterTree.cpp:917-934`) is derived from the decoded count, so it says `pan`, `stereo` or
@@ -381,6 +434,9 @@ patch.
 | A trim and a DCA on the raw set | Trim per raw output, no DCA: it is a patch, not a mix |
 | A mono or stereo cue into the raw set | Allow, through the same grid |
 | The decoder as a choice on the cue, after which it is a mono or stereo cue to every direct out and mix | Yes: sends, pan and width, fades and surfaces then work with nothing new. The other way, a preset writing coefficients, loses all of those |
+| Channel order for LCR, 4.0, 5.1, 7.1 | One menu entry per order, named by its channels ("5.1 — L R C LFE Ls Rs"), rather than a second control |
+| The LFE in a stereo or mono decode | Left out, as the standard; the matrix says otherwise for who wants it |
+| Atmos | No decoder: none is free to use. At import, the 5.1 or 7.1 core of a delivery file, said plainly; an ADM master at full count into the raw set, or its bed decoded. Look again for a codec when the work starts |
 | One decoder per cue, or one per destination | One per cue: a cue is decoded to mono or to stereo, and a stereo cue onto a mono output is already folded (§42) |
 | The 32-channel cap in Tracktion | Patch it to 64 |
 | The stereo law | Two cardioids back to back: plain, sums to the mono fold, never above unity |
