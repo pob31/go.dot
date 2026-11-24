@@ -105,7 +105,12 @@ namespace wfg::app
             if (covering.hidesMenuBar)
                 changeMenuBarHiders (+1);
 
-            [window setStyleMask: NSWindowStyleMaskBorderless];
+            /*  No title bar and no resizing, but still closable and still
+                minimisable: a window made only Borderless cannot be put in the
+                Dock, and the cue list's own minimise button went dead while it
+                covered (the Mac mini, 2026-11-24). */
+            [window setStyleMask: covering.styleMask & ~(NSWindowStyleMaskTitled | NSWindowStyleMaskResizable
+                                                         | NSWindowStyleMaskFullSizeContentView)];
             [window setFrame: [screen frame] display: YES];
             [window makeKeyAndOrderFront: nil];
         }

@@ -244,6 +244,12 @@ if(WIN32)
     target_sources(wfg_tests PRIVATE VideoSpoutTests.cpp)
 endif()
 
+# No window goes to a Space of its own (namespace draft §150): real windows on a
+# Mac's desktop, run only when WFG_MAC_WINDOW_TESTS is set - never on a hosted runner.
+if(APPLE)
+    target_sources(wfg_tests PRIVATE SpacesTests.mm)
+endif()
+
 # These native-window checks need a Windows desktop and exercise the actual
 # settings panel with a live device; keep the ordinary unit runner headless.
 if(WIN32)

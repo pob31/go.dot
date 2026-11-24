@@ -37196,8 +37196,17 @@ double-click on its title bar and Ctrl+Cmd+F all went through `toggleFullScreen:
 
 Nothing on Windows or Linux: no Spaces, and both functions do nothing there.
 
-**Owed.** Built on Windows only (the Mac mini was away); the Mac half's first compile is CI's macOS job. The
-author's try on the Mac: the cue list's maximise, double-click and Ctrl+Cmd+F cover on the same Space and come
+**Measured on the Mac mini, 2026-11-24** (`tests/SpacesTests.mm`, real windows, only with
+`WFG_MAC_WINDOW_TESTS=1`; 25 of 25 in both locales): a window made as the cue list is covers the display's whole
+frame (1920x1200 points) and no full-screen Space appears, through `setFullScreen` and through AppKit's
+`toggleFullScreen:` alike; the second press puts its frame and style back; a projector-made window carries the
+four flags and sits at level 101, over the menu bar (24) and the Dock (20). One fault found and mended: covered as
+WFS-DIY covers - the style made Borderless - the window could no longer be minimised, so the cue list's own
+minimise button did nothing while it covered. The cover now takes away only the title bar and the resizing. (A Mac
+set to hide its menu bar by itself reports that among the application's options: the test compares with what was
+there before.)
+
+**Owed.** The author's try on the Mac: the cue list's maximise, double-click and Ctrl+Cmd+F cover on the same Space and come
 back; Cmd+Tab away shows the other application's bars; a projector stays through a change of Space, Mission
 Control and another application's full screen on its display.
 
