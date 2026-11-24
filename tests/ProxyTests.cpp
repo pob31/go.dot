@@ -51,6 +51,7 @@
 #include <wfg/engine/cue/InsertChain.h>
 #include <wfg/engine/plugin/LaneMapping.h>
 #include <wfg/engine/plugin/PluginLoad.h>
+#include <wfg/engine/plugin/PluginMeasure.h>
 #include <wfg/engine/plugin/ProxyHost.h>
 #include <wfg/engine/plugin/ProxyLane.h>
 #include <wfg/engine/plugin/ScratchBlock.h>
@@ -3910,6 +3911,9 @@ TEST_CASE ("M86: what a real plugin needs of a buffer - under a wide limit and t
         //  As a show's plugins are given (namespace draft 149): a queue, unless `WFG_M86_QUEUE=0` asks for the lane that only waits.
         spec.queueSlots = juce::SystemStats::getEnvironmentVariable ("WFG_M86_QUEUE", "1").getIntValue() != 0
                             ? plugin::region::queueSlotsMost : 0;
+
+        //  And as late from the start as `WFG_M86_LATE` says, in samples: what a build makes of a plugin's measure.
+        spec.lateSamples = std::max (0, juce::SystemStats::getEnvironmentVariable ("WFG_M86_LATE", "0").getIntValue());
         child->host = std::make_unique<plugin::ProxyHost> (spec, pointers, &child->table);
 
         std::string problem;
@@ -6433,6 +6437,7 @@ TEST_CASE ("later: a plugin too slow for the buffer is moved later, heard whole 
     plugin::ProxyLane lane;
     auto spec = testGainSpec (folder, 1);
     spec.queueSlots = plugin::region::queueSlotsMost;       // as every plugin of a show is given
+    spec.engineFolder = folder.string();                    // and where what it teaches is kept
     plugin::ProxyHost host (spec, { &lane }, &table);
 
     std::vector<std::string> notes;
@@ -6506,5 +6511,177 @@ TEST_CASE ("later: a plugin too slow for the buffer is moved later, heard whole 
     CHECK (notes[0].find (" samples later from now") != std::string::npos);
     CHECK (host.lastLateSpell().workMicros >= 900u);
 
+    /*  AND IT TAUGHT THE MACHINE (BJZ): the gain's own work, a millisecond,
+        is this plugin's measure now, so a build that reads it starts the
+        lane a buffer later and it is never silent for it again. */
+    plugin::PluginMeasure learnt;
+    REQUIRE (plugin::measure::find (folder.string(), plugin::Catalogue::testGainIdentifier(), learnt));
+    CHECK (learnt.workMicros >= 900u);
+    CHECK (learnt.blockSize == 64);
+    CHECK (learnt.by == "show");
+    CHECK (plugin::measure::lateSamplesFor (learnt.workMicros, 48000, 64) >= 64);
+
     host.stop();
+}
+
+//==============================================================================
+//  WHAT A PLUGIN NEEDS OF A BUFFER, MEASURED (namespace draft 149, BJU and BJZ).
+
+TEST_CASE ("measure: a plugin is played later from the start by as many whole buffers as its measured work needs, and no more than eight")
+{
+    using plugin::measure::lateSamplesFor;
+
+    //  Never measured, or nothing to measure against: not later at all.
+    CHECK (lateSamplesFor (0, 48000, 128) == 0);
+    CHECK (lateSamplesFor (1500, 0, 128) == 0);
+    CHECK (lateSamplesFor (1500, 48000, 0) == 0);
+
+    /*  128 frames at 48 kHz: a period of 2667 microseconds, of which a lane
+        has six tenths, 1600. A measure is planned for at a quarter more. */
+    CHECK (lateSamplesFor (100, 48000, 128) == 0);
+    CHECK (lateSamplesFor (1270, 48000, 128) == 0);         // 1588 with the margin: it fits
+    CHECK (lateSamplesFor (1300, 48000, 128) == 128);
+    CHECK (lateSamplesFor (1769, 48000, 128) == 128);       // Tails, as M89 found it
+    CHECK (lateSamplesFor (3570, 48000, 128) == 256);       // and its worst
+    CHECK (lateSamplesFor (60000, 48000, 128) == plugin::ProxyLane::lateBuffersMost * 128);
+
+    //  The same plugin on a larger buffer fits it; on a smaller one it needs the more.
+    CHECK (lateSamplesFor (1769, 48000, 512) == 0);
+    CHECK (lateSamplesFor (1769, 48000, 64) == 2 * 64);
+    CHECK (lateSamplesFor (1000, 48000, 64) == 64);
+
+    //  What the lane and the measure each call the callback's share, and the most, are one.
+    CHECK (plugin::measure::callbackShare == doctest::Approx (plugin::ProxyLane::callbackFraction));
+    CHECK (plugin::measure::buffersMost == plugin::ProxyLane::lateBuffersMost);
+}
+
+TEST_CASE ("measure: what this machine measured is kept a line a plugin, raised by a show and never lowered by one")
+{
+    Folder folder;
+    const auto engine = folder.string();
+    const std::string tails = "VST3-Unfiltered Audio Tails-2565c3d5-dbbf6a19";     // identifiers carry spaces
+    const std::string likyu = "VST3-Likyu-2aee588c-59639613";
+
+    plugin::PluginMeasure found;
+    CHECK_FALSE (plugin::measure::find (engine, tails, found));
+    CHECK (plugin::measure::readAll (engine).empty());
+
+    //  THE SCAN'S.
+    plugin::PluginMeasure scanned;
+    scanned.workMicros = 1500;
+    scanned.by = "scan";
+    scanned.fileTime = 1763900000123;
+    CHECK (plugin::measure::keep (engine, tails, scanned, false));
+
+    plugin::PluginMeasure other;
+    other.workMicros = 12;
+    CHECK (plugin::measure::keep (engine, likyu, other, false));
+
+    REQUIRE (plugin::measure::find (engine, tails, found));
+    CHECK (found.workMicros == 1500);
+    CHECK (found.blockSize == 128);
+    CHECK (found.sampleRate == 48000);
+    CHECK (found.by == "scan");
+    CHECK (found.fileTime == 1763900000123);
+    CHECK (plugin::measure::readAll (engine).size() == 2);
+
+    //  A SHOW THAT SAW LESS teaches nothing.
+    plugin::PluginMeasure learnt;
+    learnt.workMicros = 900;
+    learnt.blockSize = 64;
+    learnt.by = "show";
+    CHECK_FALSE (plugin::measure::keep (engine, tails, learnt, true));
+    REQUIRE (plugin::measure::find (engine, tails, found));
+    CHECK (found.workMicros == 1500);
+    CHECK (found.by == "scan");
+
+    //  ONE THAT SAW MORE raises it, and what the scan said of the file stands.
+    learnt.workMicros = 3570;
+    CHECK (plugin::measure::keep (engine, tails, learnt, true));
+    REQUIRE (plugin::measure::find (engine, tails, found));
+    CHECK (found.workMicros == 3570);
+    CHECK (found.blockSize == 64);
+    CHECK (found.by == "show");
+    CHECK (found.fileTime == 1763900000123);
+
+    //  The other plugin's line is as it was.
+    REQUIRE (plugin::measure::find (engine, likyu, found));
+    CHECK (found.workMicros == 12);
+
+    //  A NEW SCAN'S MEASURE replaces, lower or not.
+    scanned.workMicros = 1400;
+    CHECK (plugin::measure::keep (engine, tails, scanned, false));
+    REQUIRE (plugin::measure::find (engine, tails, found));
+    CHECK (found.workMicros == 1400);
+
+    //  A file somebody wrote half a line into is read for what reads.
+    plugin::measure::fileIn (engine).appendText ("not a line\n12 128\n", false, false, "\n");
+    CHECK (plugin::measure::readAll (engine).size() == 2);
+}
+
+TEST_CASE ("measure: a child measures one plugin alone, and a host starts its lanes as late as the measure says")
+{
+    Folder folder;
+
+    /*  MEASURED AS IT IS PLAYED, the test gain through a hosting child of
+        its own - this binary, as everywhere here - for a little under a
+        second: a gain's own handful of microseconds, whatever they are on
+        this machine today, and something. A plugin the scan does not know
+        is nought, and says so. */
+    std::string why;
+    CHECK (plugin::measurePlugin (folder.string(), plugin::Catalogue::testGainIdentifier(), why, 0.8) > 0u);
+    CHECK (why.empty());
+    CHECK (plugin::measurePlugin (folder.string(), "VST3-Nothing Here-00000000-00000000", why, 0.8) == 0u);
+    CHECK (why.find ("does not know") != std::string::npos);
+
+    //  Two at one moment, each its own figure, in the order they were asked.
+    std::vector<std::string> problems;
+    const auto both = plugin::measurePlugins (folder.string(),
+                                              { plugin::Catalogue::testGainIdentifier(), "VST3-Nothing Here-00000000-00000000",
+                                                plugin::Catalogue::testDuckIdentifier() },
+                                              problems, 0.8);
+    REQUIRE (both.size() == 3);
+    REQUIRE (problems.size() == 3);
+    CHECK (both[0] > 0u);
+    CHECK (both[1] == 0u);
+    CHECK (both[2] > 0u);
+    CHECK (problems[0].empty());
+    CHECK (problems[1].find ("does not know") != std::string::npos);
+    CHECK (problems[2].empty());
+
+    //  A HOST GIVEN A MEASURE'S WORTH starts every lane that late, and may give it more.
+    {
+        plugin::PluginTable table;
+        plugin::ProxyLane lane;
+        auto spec = testGainSpec (folder, 1);
+        spec.queueSlots = plugin::region::queueSlotsMost;
+        spec.lateSamples = plugin::measure::lateSamplesFor (1000, spec.sampleRate, spec.maxSamples);
+        REQUIRE (spec.lateSamples == 64);
+        plugin::ProxyHost host (spec, { &lane }, &table);
+
+        std::string problem;
+        REQUIRE (host.start (problem));
+        REQUIRE (waitForState (host, "loaded", 5000));
+        CHECK (lane.lateSamples() == 64);
+
+        //  And the entry says so before a block has gone through it.
+        host.poll();
+        CHECK (table.statusOf ("PG7N0001").latencySamples == 64);
+        host.stop();
+    }
+
+    //  WITHOUT A QUEUE the measure is nothing to it: its lanes can only wait.
+    {
+        plugin::PluginTable table;
+        plugin::ProxyLane lane;
+        auto spec = testGainSpec (folder, 1);
+        spec.lateSamples = 64;
+        plugin::ProxyHost host (spec, { &lane }, &table);
+
+        std::string problem;
+        REQUIRE (host.start (problem));
+        REQUIRE (waitForState (host, "loaded", 5000));
+        CHECK (lane.lateSamples() == 0);
+        host.stop();
+    }
 }

@@ -83,6 +83,7 @@
 #include <wfg/engine/plugin/PluginCommands.h>
 #include <wfg/engine/plugin/PluginEditorChild.h>
 #include <wfg/engine/plugin/PluginHostChild.h>
+#include <wfg/engine/plugin/PluginMeasure.h>
 #include <wfg/engine/plugin/PluginScan.h>
 #include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/plugin/ScanJob.h>
@@ -2886,6 +2887,36 @@ namespace
         if (args.containsOption ("--catalogue"))
             return runPluginCatalogue (args.getValueForOption ("--catalogue").toStdString(), storage);
 
+        /*  `wfg plugins --measure=<identifier>` (namespace draft §149): one
+            plugin measured again by hand, as the scan measures each, and
+            kept; and what that makes of it at the usual buffers. */
+        if (args.containsOption ("--measure"))
+        {
+            const auto identifier = args.getValueForOption ("--measure").toStdString();
+            std::string why;
+            const auto micros = wfg::plugin::measurePlugin (storage, identifier, why);
+
+            if (micros == 0)
+            {
+                std::cerr << "wfg plugins: " << identifier << ": " << why << std::endl;
+                return 2;
+            }
+
+            wfg::plugin::PluginMeasure measured;
+            measured.workMicros = micros;
+            measured.by = "scan";
+            wfg::plugin::measure::keep (storage, identifier, measured, false);
+
+            std::cout << "# " << identifier << " | longest block " << micros << " us (128 frames, 48 kHz) | kept in "
+                      << wfg::plugin::measure::fileIn (storage).getFullPathName() << std::endl;
+            std::cout << "# frames at 48 kHz | played later by (samples)" << std::endl;
+
+            for (const auto block : { 64, 128, 256, 512, 1024 })
+                std::cout << block << " | " << wfg::plugin::measure::lateSamplesFor (micros, 48000, block) << std::endl;
+
+            return 0;
+        }
+
         std::vector<wfg::plugin::KnownPlugin> known;
 
         if (args.containsOption ("--scan"))
@@ -2906,6 +2937,7 @@ namespace
             options.retryFile = optionText ("--retry");
             options.progressFile = optionText ("--progress");
             options.stopFile = optionText ("--stop-file");
+            options.measure = ! args.containsOption ("--no-measure");
 
             std::string problem;
             std::vector<std::string> skipped;

@@ -16,6 +16,7 @@
 
 #include <wfg/engine/plugin/ProxyHost.h>
 #include <wfg/engine/plugin/ChildLaunch.h>
+#include <wfg/engine/plugin/PluginMeasure.h>
 #include <wfg/engine/plugin/ProcessUtil.h>
 #include <wfg/engine/app/RealtimeRights.h>
 
@@ -223,6 +224,29 @@ namespace wfg::plugin
             if (lateNote)
                 lateNote (ProxyHost::lateNoteOf (spec.name.empty() ? spec.identifier : spec.name, spec.pluginId, spell,
                                                  app::coreKindOf (spell.core)));
+
+            /*  WHAT THE SPELL TAUGHT (namespace draft §149, BJZ). The plugin's
+                own work, with the margin a measure is planned at, was longer
+                than a buffer leaves it: that becomes its measure where it is
+                more than what is kept, and the next build starts this plugin
+                as late as it ended up needing. A spell whose time was all in
+                the waiting - the machine's - teaches nothing; the lane gives
+                that back at its next reset (BKD). The wait is not compared
+                with the work: a plugin played later has its next request
+                queued behind the one it is at, so its waits are as long as
+                its work and say nothing of whose the time was (the driver
+                tests/blackbox/later.py found that the first rule never
+                taught a served show anything). */
+            if (! spec.engineFolder.empty()
+                  && static_cast<double> (spell.workMicros) * measure::margin > static_cast<double> (allowedUs()))
+            {
+                PluginMeasure learnt;
+                learnt.workMicros = spell.workMicros;
+                learnt.blockSize = spec.maxSamples;
+                learnt.sampleRate = spec.sampleRate;
+                learnt.by = "show";
+                measure::keep (spec.engineFolder, spec.identifier, learnt, true);
+            }
         }
 
         void tellLate()
@@ -334,6 +358,9 @@ namespace wfg::plugin
 
                 auto* lane = region::laneAt (base, spec.channels, spec.maxSamples, static_cast<int> (i), spec.queueSlots);
                 lanes[i]->setAllowance (deadlineUs, floorUs);
+
+                //  As late as the measure says from the start, and more at once where that is not enough (§149).
+                lanes[i]->setLate (spec.queueSlots > 0 ? spec.lateSamples : 0, spec.queueSlots > 0);
                 lanes[i]->setCallEnabled (false);
                 lanes[i]->bind (header, lane, region::audioOf (lane), spec.channels, spec.maxSamples);
             }

@@ -37102,9 +37102,67 @@ is as late as a lane goes…` (the stream where it would have been; never played
 later, heard whole from then on, and its delay is said with its own` (the real child); and BHB's case, which now
 has the lane wait to the callback's end and take an answer that comes after its share.
 
-**Owed.** LB.4 (`plugin/buffer`, the tabs), LB.5 (the measure at the scan), LB.6 (the guides, a driver in a
-served show). The author's try: Tails on the mic's channel at 128 frames - two short gaps as it starts, then none,
-and the foot saying how much later it is.
 
-**Words that ship, the author's to confirm before they do:** the row's name and its choices; what the strip says
-when a plugin has been moved later.
+**Built 2026-11-24, LB.5 (the measure): BJU and BJZ.**
+
+- **A plugin is measured as it is played, or the measure is of no use to the plugin it is for.** What was built
+  first ran a plugin alone in a child, as fast as it would go, twice: Tails read 0.09 to 0.38 ms. Alone again but a
+  block a period, at a worker's priority: 0.26 to 0.33 ms. Through a hosting child - the one a show gives it, its
+  message loop running and its worker answering a lane: 1.37, 1.38 and 1.39 ms in three runs, which is what M89
+  heard. Whatever Tails does that makes it late it does only where it is hosted as a show hosts it; its own timers
+  on the child's message loop are the likeliest cause, and are not Go.dot's to see. So the measure is taken through
+  the real path (`plugin::measurePlugins`): a `ProxyHost` and a lane a plugin, a block of 128 at 48 kHz a period for
+  eight seconds - a second of noise, a second of silence - and what is kept is what the child itself notes
+  (§148's `workMaxMicros`): the median of the last three quarters' worst block. The first quarter is the plugin
+  waking; the median passes over one block the machine held up. The child has no measuring mode of its own.
+- **The scan measures every plugin of its list that has no measure, or whose file has changed**, once the list is
+  written, four at a time (`ScanOptions::measure`, `measuredAtOnce`); its progress says a plugin's file and one
+  more done of so many, as for its own files, and its stop file stops it. `wfg plugins --scan --no-measure` leaves
+  it out; `wfg plugins --measure=<identifier>` measures one again and says what that makes at the usual buffers.
+  The author's 67 plugins: 3 min 48 s the first time, 63 measured (four would not come up); nothing after that
+  but what is new. Tails 1.73 ms, smartReverb 1.29, entropyEQ+ 0.53, proximityEQ+ 0.49, the rest under 0.25 -
+  Seventh Heaven and Likyū among them.
+- **Kept in `plugins/measures.txt` under the engine's folder** (`PluginMeasure.h`): a plugin a line - the figure,
+  the block and rate it was taken at, `scan` or `show`, the file's time, the identifier to the line's end. This
+  machine's, like the scan's list; never the show's.
+- **The build makes of it how much later the plugin starts** (`measure::lateSamplesFor`, read in `proxySpecFor`,
+  `ProxySpec::lateSamples`, `setLate` as the lanes are bound): a quarter more than the measure, against the six
+  tenths of the period a lane has (BJY); nought while that fits, otherwise as many whole buffers as the work is
+  long, eight at most. Tails: one buffer later at 64 and 128 frames, none from 256 up.
+- **A show raises it** (`ProxyHost::endLateSpell`): when a spell's longest work, with the margin, was longer than a
+  buffer leaves, that is the plugin's measure from then on where it is more than what is kept, and the next build
+  starts it where this one ended. A spell whose time was all in the waiting teaches nothing. The first rule also
+  asked that the work be longer than the wait, to tell the plugin's time from the machine's; the driver found it
+  never taught a served show anything - a plugin played later has its next request queued behind the one it is
+  at, so its waits are as long as its work.
+- **One figure, whatever the interface's buffer.** It is taken at 128 frames and used as it is at any other: a
+  larger buffer costs a plugin more work a block than was measured, and where that matters the lane is given more
+  at once and the show's own figure replaces the scan's.
+- **BKA is not built.** A setting on each plugin (`plugin/buffer`) was mine, and the author asked for something that
+  measures itself, not for a setting; with the measure, more at once and the giving back there is nothing yet a
+  setting would be needed for. `ProxyLane::setLate` takes "never more" already, for the day it is.
+
+M90, ended: Tails at 128 frames for two minutes. Started a buffer later, as its measure says: one silent buffer in
+all (a burst of 2.5 ms, longer than its measure - which that spell then raises, so the next build starts it two
+buffers later). Started as before §149's measure: two. Before §149: sixty.
+
+**Tests.** `measure: a plugin is played later from the start by as many whole buffers as its measured work
+needs…`; `measure: what this machine measured is kept a line a plugin, raised by a show and never lowered by one`;
+`measure: a child measures one plugin alone, and a host starts its lanes as late as the measure says` (the test
+gain and the ducker through hosting children of their own, two at one moment; a plugin the scan does not know);
+and the real child too slow for its buffer now also teaches the machine its measure.
+
+**LB.6, the driver** (`tests/blackbox/later.py`, in both locales, among the drivers that do not run side by side):
+a served show whose cue goes through the test gain taking 0.9 ms over every block of 64. The entry says how many
+samples later it is played; the side through the plugin is heard that long after the other; once it began it is
+heard whole but for a buffer each time it was moved again; the plugin is never failed; the log's note says it was
+moved and where the time went; the machine keeps the measure; and a second session, in the same engine folder, is
+not late again to find it out. It is the one plugin driver that fixes no limit, so the one that runs with the
+queue every show has.
+
+**Owed.** The author's first scan on this version (some four minutes, once) and his try with Tails. The four plugins that would not come up to be measured, by name. Whether the Plugins tab
+should show a plugin's measure - no word of it is on screen yet.
+
+**Words on screen: none new.** A plugin's strip and the Plugins tab say "N samples late" as they did of a plugin's
+own delay; the figure now holds what Go.dot adds as well (BJX). The note is the log's. The guides' sentences are
+mine, in both languages.

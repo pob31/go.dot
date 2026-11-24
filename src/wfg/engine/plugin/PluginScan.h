@@ -47,6 +47,7 @@
     with no device to do the work; reading the list needs none.
 */
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -155,7 +156,51 @@ namespace wfg::plugin
         std::string retryFile;
         std::string progressFile;
         std::string stopFile;
+
+        /*  EVERY PLUGIN THE SCAN LISTS IS MEASURED (namespace draft §149, BJU;
+            the author: "Can we test this when scanning to have a preset?"):
+            once the list is written, each plugin that has no measure yet - or
+            whose file has changed since it was measured - is played for a few
+            seconds as a show plays it, and what it needs of a buffer kept
+            (PluginMeasure.h). `measuredAtOnce` of them at a time, so a first
+            scan of sixty plugins is some three minutes longer and not ten; a
+            second scan measures only what is new. Off for a caller that wants
+            the list and nothing else. */
+        bool measure = true;
     };
+
+    /** How many plugins are measured at one moment, and for how long. */
+    constexpr int measuredAtOnce = 4;
+    constexpr double measureRunSeconds = 8.0;
+
+    /** How long a plugin has to come up before it is given up on. */
+    constexpr int measureSeconds = 30;
+
+    /*  PLUGINS MEASURED AS THEY ARE PLAYED (namespace draft §149, BJZ). Each
+        in a hosting child of its own, the very one a show gives it - its
+        message loop running, its worker answering a lane - and all of them
+        sent a block of 128 at 48 kHz a period, from this thread: a second of
+        noise, a second of silence, and again, for `seconds`. What is kept is
+        what the child itself notes (§148): the longest it took over one
+        block, in microseconds - the median of the last three quarters' worst,
+        so that the plugin's waking and one block the machine held up are
+        neither of them its measure.
+
+        NOT A PLUGIN RUN ALONE AND AS FAST AS IT GOES, which is what was built
+        first: Tails read 0.3 ms that way, at any pace, and 1.8 through a
+        child. What makes it late it does only where it is hosted as a show
+        hosts it.
+
+        One figure an identifier, in their order; nought, with a sentence in
+        `problems`, for one the scan does not know or that would not come up.
+        Keeps nothing: the caller does. The calling thread is held for the
+        whole of it. */
+    std::vector<std::uint32_t> measurePlugins (const std::string& storageFolder, const std::vector<std::string>& identifiers,
+                                               std::vector<std::string>& problems, double seconds = measureRunSeconds);
+
+    /** One of them. */
+    std::uint32_t measurePlugin (const std::string& storageFolder, const std::string& identifier, std::string& problem,
+                                 double seconds = measureRunSeconds);
 
     std::vector<KnownPlugin> scanPlugins (const std::string& storageFolder, const ScanOptions& options,
                                           std::vector<std::string>& skipped, std::string& problem);

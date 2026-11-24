@@ -479,7 +479,7 @@ is for checking, converting and testing.
 | `tree <bundle>` | Prints the parameter tree as OSCQuery JSON, with no server in the way |
 | `replay <log>` | Replays a session's log into a fresh engine and checks it reproduces itself |
 | `analyse <bundle>` | Works out the spectral colour of every sound a show names, and caches it |
-| `plugins` | Scans for VST3, AU and LV2 plugins, out of process, or lists the last scan |
+| `plugins` | Scans for VST3, AU and LV2 plugins, out of process, and measures what each needs of a buffer; lists the last scan; `--measure=<identifier>` measures one again |
 | `import-als`, `import-qlab` | Ableton Live sets, or a QLab 4 or 5 workspace, into a new show |
 | `template` | A performance against its show's template cue list: what differs, or bring changes in |
 | `associate` | Linux: makes `.wfg` shows open with this copy of Go.dot |

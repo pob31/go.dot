@@ -124,6 +124,16 @@ namespace wfg::plugin
             played later, and then none - a region with none is today's. */
         int queueSlots = region::queueSlotsMost;
 
+        /*  HOW MUCH LATER ITS LANES ARE PLAYED FROM THE START (§149, BJU): what
+            this machine's measure of the plugin says it needs at this rate and
+            block (PluginMeasure.h), nought for a plugin that fits its buffer
+            or was never measured. And the engine's folder, where that measure
+            is kept: a spell of late blocks that the plugin's own work explains
+            raises it there, so the next build starts where this one ended.
+            Empty, and nothing is kept. */
+        int lateSamples = 0;
+        std::string engineFolder;
+
         /** Where the region file goes: the engine's own folder. */
         std::string regionFolder;
 

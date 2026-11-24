@@ -2062,6 +2062,22 @@ add_test(NAME blackbox.lineup.fr_FR
 set_tests_properties(blackbox.lineup.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
+# A plugin too slow for the buffer is played later, in a served show (namespace draft
+# 149): the test gain taking most of a millisecond over every block of 64. It is moved
+# later and not silenced, its entry says how much, the log notes it, the machine keeps
+# what it needed, and a second session starts it that late. The one plugin driver that
+# fixes no limit: a limit fixed by hand has no queue.
+add_test(NAME blackbox.later.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/later.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.later.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.later.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/later.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.later.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
 # Finishing plugin hosting, stage 3 (the author's decision of 2026-09-26: a Scan
 # button in the app): `plugin.scan lv2 <folder>` runs the command line's own scan
 # as a child of a serve with an engine folder of its own, /godot/plugin/scan/...
@@ -2404,7 +2420,7 @@ message(STATUS "Go.dot: the drivers that judge an engine's time run ${WFG_REALTI
 set(WFG_REALTIME_DRIVERS
     first-sound phase3 phase4 phase6-sampler phase9a-eq doh
     lane-level lane-send lane-record rate-speed timecode timegroup
-    phase9a-fx phase9b-width phase9b-mic phase9c-take
+    phase9a-fx phase9b-width phase9b-mic phase9c-take later
     pair-link pair-follow pair-seat redundancy-failover
     osc-curves process)
 

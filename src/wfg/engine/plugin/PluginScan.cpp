@@ -15,6 +15,13 @@
 */
 
 #include <wfg/engine/plugin/PluginScan.h>
+#include <wfg/engine/plugin/Catalogue.h>
+#include <wfg/engine/plugin/PluginHostChild.h>
+#include <wfg/engine/plugin/PluginMeasure.h>
+#include <wfg/engine/plugin/PluginTable.h>
+#include <wfg/engine/plugin/ProxyHost.h>
+#include <wfg/engine/plugin/ProxyLane.h>
+#include <wfg/engine/clock/FineWait.h>
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_core/juce_core.h>
@@ -22,6 +29,7 @@
 #include <tracktion_engine/tracktion_engine.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -29,6 +37,8 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <thread>
+#include <vector>
 
 #if JUCE_WINDOWS
  #ifndef WIN32_LEAN_AND_MEAN
@@ -704,6 +714,245 @@ namespace wfg::plugin
         return scanPlugins (storageFolder, options, skipped, problem);
     }
 
+    namespace
+    {
+        /** What a plugin is measured at: the block and the rate, and one plugin's hosting while it is. */
+        constexpr int measureBlock = 128;
+        constexpr int measureRate = 48000;
+
+        struct MeasuredHost
+        {
+            MeasuredHost() : samples (static_cast<std::size_t> (2 * measureBlock), 0.0f) {}
+
+            PluginTable table;
+            ProxyLane lane;
+            std::unique_ptr<ProxyHost> host;
+            std::vector<float> samples;
+            std::array<std::uint32_t, 3> worst { { 0, 0, 0 } };
+            bool up = false;
+        };
+    }
+
+    std::vector<std::uint32_t> measurePlugins (const std::string& storageFolder, const std::vector<std::string>& identifiers,
+                                               std::vector<std::string>& problems, double seconds)
+    {
+        using Run = MeasuredHost;
+        const int block = measureBlock;
+        const int rate = measureRate;
+        const int oneSecond = rate / block;
+
+        const juce::ScopedJuceInitialiser_GUI juceForTheHosts;
+        std::vector<std::uint32_t> measures (identifiers.size(), 0);
+        problems.assign (identifiers.size(), std::string());
+
+        //  The regions' folder, this run's alone.
+        const auto room = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                              .getChildFile ("godot-measure-" + juce::String::toHexString (juce::Random::getSystemRandom().nextInt64()));
+        room.createDirectory();
+
+        std::vector<std::unique_ptr<Run>> runs (identifiers.size());
+
+        for (std::size_t i = 0; i < identifiers.size(); ++i)
+        {
+            ProxySpec spec;
+            spec.pluginId = "MEASURE" + std::to_string (i);
+            spec.identifier = identifiers[i];
+            spec.name = identifiers[i];
+            spec.lanes = 1;
+            spec.channels = 2;
+            spec.maxSamples = block;
+            spec.sampleRate = rate;
+            spec.deadlineMicroseconds = 20000;      // wide: what is wanted is how long it takes, never a late block
+            spec.queueSlots = 0;
+            spec.regionFolder = room.getFullPathName().toStdString();
+
+            if (! Catalogue::isTestIdentifier (identifiers[i]))
+            {
+                spec.descriptionXml = describePlugin (storageFolder, identifiers[i]);
+
+                if (spec.descriptionXml.empty())
+                {
+                    problems[i] = "this machine's scan does not know " + identifiers[i];
+                    continue;
+                }
+            }
+
+            auto run = std::make_unique<Run>();
+            run->host = std::make_unique<ProxyHost> (spec, std::vector<ProxyLane*> { &run->lane }, &run->table);
+
+            if (std::string why; ! run->host->start (why))
+            {
+                problems[i] = why.empty() ? std::string ("could not start the plugin host") : why;
+                continue;
+            }
+
+            runs[i] = std::move (run);
+        }
+
+        const auto pollAll = [&runs]
+        {
+            for (auto& run : runs)
+                if (run != nullptr)
+                    run->host->poll();
+        };
+
+        /*  UP, each of them, or given up on: a plugin that does not load in
+            the time is not measured, and neither is one whose lane will not
+            settle. */
+        for (const auto until = juce::Time::getMillisecondCounter() + static_cast<std::uint32_t> (measureSeconds * 1000);;)
+        {
+            pollAll();
+            auto waiting = false;
+
+            for (std::size_t i = 0; i < runs.size(); ++i)
+            {
+                if (runs[i] == nullptr || runs[i]->up)
+                    continue;
+
+                const auto status = runs[i]->host->status();
+
+                if (status.state == "loaded")
+                {
+                    runs[i]->up = true;
+                    runs[i]->lane.setDeadlineMicroseconds (20000);
+                    runs[i]->lane.setEnabled (true);
+                }
+                else if (status.state == "failed" || status.state == "missing")
+                {
+                    problems[i] = status.problem.empty() ? std::string ("the plugin would not load") : status.problem;
+                    runs[i]->host->stop();
+                    runs[i].reset();
+                }
+                else
+                {
+                    waiting = true;
+                }
+            }
+
+            if (! waiting || juce::Time::getMillisecondCounter() > until)
+                break;
+
+            juce::Thread::sleep (10);
+        }
+
+        for (std::size_t i = 0; i < runs.size(); ++i)
+        {
+            if (runs[i] != nullptr && ! runs[i]->up)
+            {
+                problems[i] = "no answer in " + std::to_string (measureSeconds) + " s";
+                runs[i]->host->stop();
+                runs[i].reset();
+            }
+        }
+
+        for (const auto until = juce::Time::getMillisecondCounter() + 10000u;;)
+        {
+            pollAll();
+            auto settled = true;
+
+            for (auto& run : runs)
+                settled = settled && (run == nullptr || run->lane.stateSettled());
+
+            if (settled || juce::Time::getMillisecondCounter() > until)
+                break;
+
+            juce::Thread::sleep (5);
+        }
+
+        /*  PLAYED, a block a period, the hosts polled as the engine polls
+            them. Four quarters: the first is the plugin waking, and each of
+            the others' worst block is taken as it ends. */
+        const auto blocks = std::max (4, static_cast<int> (seconds * rate / block));
+        const auto quarter = std::max (1, blocks / 4);
+        const auto period = std::chrono::nanoseconds (1000000000ll * block / rate);
+        auto next = std::chrono::steady_clock::now();
+        std::uint32_t noise = 0x9e3779b9u;
+        std::vector<float> source (static_cast<std::size_t> (2 * block), 0.0f);
+
+       #if defined (_WIN32)
+        wfg::FineWait fineWait;
+       #endif
+
+        for (int n = 0; n < 4 * quarter; ++n)
+        {
+            next += period;
+
+           #if defined (_WIN32)
+            if (const auto left = std::chrono::duration_cast<std::chrono::nanoseconds> (next - std::chrono::steady_clock::now());
+                left > std::chrono::nanoseconds (0))
+                fineWait.wait (left);
+           #else
+            std::this_thread::sleep_until (next);
+           #endif
+
+            const auto sounding = (n / oneSecond) % 2 == 0;
+
+            for (auto& sample : source)
+            {
+                noise ^= noise << 13;
+                noise ^= noise >> 17;
+                noise ^= noise << 5;
+                sample = sounding ? (static_cast<float> (noise & 0xffffu) / 65535.0f - 0.5f) * 0.5f : 0.0f;
+            }
+
+            for (auto& run : runs)
+            {
+                if (run == nullptr)
+                    continue;
+
+                run->samples = source;
+                float* channels[2] = { run->samples.data(), run->samples.data() + block };
+                run->lane.process (channels, 2, block);
+            }
+
+            if (n % 4 == 3)
+                pollAll();
+
+            if ((n + 1) % quarter == 0)
+            {
+                pollAll();
+                const auto ended = (n + 1) / quarter - 1;
+
+                for (auto& run : runs)
+                    if (run != nullptr)
+                        if (const auto worst = run->host->takeWorstSeen(); ended >= 1)
+                            run->worst[static_cast<std::size_t> (ended - 1)] = worst.workMicros;
+            }
+        }
+
+        for (std::size_t i = 0; i < runs.size(); ++i)
+        {
+            if (runs[i] == nullptr)
+                continue;
+
+            if (runs[i]->host->status().state != "loaded")
+            {
+                problems[i] = "the plugin stopped answering while it was measured";
+            }
+            else
+            {
+                auto worst = runs[i]->worst;
+                std::sort (worst.begin(), worst.end());
+                measures[i] = std::max<std::uint32_t> (1, worst[1]);
+            }
+
+            runs[i]->host->stop();
+            runs[i].reset();
+        }
+
+        room.deleteRecursively();
+        return measures;
+    }
+
+    std::uint32_t measurePlugin (const std::string& storageFolder, const std::string& identifier, std::string& problem,
+                                 double seconds)
+    {
+        std::vector<std::string> problems;
+        const auto measures = measurePlugins (storageFolder, { identifier }, problems, seconds);
+        problem = problems.empty() ? std::string() : problems.front();
+        return measures.empty() ? 0u : measures.front();
+    }
+
     std::vector<KnownPlugin> scanPlugins (const std::string& storageFolder, const ScanOptions& options,
                                           std::vector<std::string>& skipped, std::string& problem)
     {
@@ -789,13 +1038,78 @@ namespace wfg::plugin
         if (! writeList (storage, manager.knownPluginList, thread.bundles))
             problem = "the scan could not write " + knownListPath (storageFolder);
 
+        /*  AND EACH PLUGIN OF THE LIST MEASURED (namespace draft §149, BJU),
+            that has no measure or whose file has changed: a child a plugin,
+            so one that hangs or falls takes nothing with it, and several at
+            a time, since each is six seconds of mostly waiting. Said in the
+            progress as the scan's own files are - a plugin's file, one more
+            done of so many - and stopped by the same file. */
+        const auto known = knownFrom (manager.knownPluginList, thread.bundles);
+
+        if (options.measure && ! thread.stopped && problem.empty())
+        {
+            const auto fileTimeOf = [] (const KnownPlugin& plugin)
+            {
+                return juce::File (juce::String::fromUTF8 (plugin.path.c_str())).getLastModificationTime().toMilliseconds();
+            };
+
+            const auto kept = measure::readAll (storageFolder);
+            std::vector<const KnownPlugin*> owed;
+
+            for (const auto& plugin : known)
+                if (const auto found = kept.find (plugin.identifier);
+                    found == kept.end() || (found->second.fileTime != 0 && found->second.fileTime != fileTimeOf (plugin)))
+                    owed.push_back (&plugin);
+
+            thread.progress.total += static_cast<int> (owed.size());
+
+            for (std::size_t at = 0; at < owed.size() && ! thread.stopped; at += static_cast<std::size_t> (measuredAtOnce))
+            {
+                if (thread.stopAsked())
+                {
+                    thread.stopped = true;
+                    break;
+                }
+
+                const auto count = std::min (owed.size() - at, static_cast<std::size_t> (measuredAtOnce));
+                std::vector<std::string> identifiers;
+
+                for (std::size_t i = 0; i < count; ++i)
+                    identifiers.push_back (owed[at + i]->identifier);
+
+                thread.progress.file = owed[at]->path;
+                thread.progress.format = owed[at]->format;
+                thread.publish();
+
+                std::vector<std::string> problems;
+                const auto measures = measurePlugins (storageFolder, identifiers, problems);
+
+                for (std::size_t i = 0; i < count && i < measures.size(); ++i)
+                {
+                    if (measures[i] == 0)
+                        continue;
+
+                    PluginMeasure measured;
+                    measured.workMicros = measures[i];
+                    measured.by = "scan";
+                    measured.fileTime = fileTimeOf (*owed[at + i]);
+                    measure::keep (storageFolder, owed[at + i]->identifier, measured, false);
+                }
+
+                thread.progress.done += static_cast<int> (count);
+            }
+
+            thread.progress.file.clear();
+        }
+
         /*  THE LAST WORD, after the list is on disk: whoever reads `finished`
             and then the list finds this scan's list. */
         thread.progress.state = thread.stopped ? "stopped" : "finished";
         thread.publish();
 
-        return knownFrom (manager.knownPluginList, thread.bundles);
+        return known;
     }
+
 
     std::vector<KnownPlugin> knownPlugins (const std::string& storageFolder)
     {

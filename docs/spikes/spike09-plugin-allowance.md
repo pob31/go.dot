@@ -210,3 +210,43 @@ author the same evening, and the next round's.
 
 **Not run.** The Balanced plan against Best performance; a second Windows machine; an interface. On the farm the
 change itself was built and tested (macOS, GCC 15 strict, Clang 21 with the real-time sanitizer: no report).
+
+## Addendum, 2026-11-24: a plugin played later, and how it is measured (M90)
+
+*Namespace draft §149. The same laptop and plugins as M89, Release builds of `cea84b63` and what followed. M86 as
+a show gives its plugins: a queue on the lane (`WFG_M86_QUEUE`), and `WFG_M86_LATE` to start a lane as late as a
+build would from a measure.*
+
+**Played later.** 128 frames, the shipped limit, a minute each unless said:
+
+| | before §149 | a queue, more at once (LB.2) | and the wait to the callback's end (LB.3) |
+|---|---|---|---|
+| Tails alone: silent buffers | 30 a minute, as long as it plays | 2 in all, then none | 2 in all, then none |
+| where it ends | - | 256 samples later | 256 samples later |
+| Likyū then Tails on one channel: Tails / Likyū | 30 a minute / 1 | 2 in all / 1 | 2 in all / 0 |
+| Likyū alone | 2 min: 2 (waits of 0.8 ms) | 2 min: 2, 256 later | 5 min: 2 (one stall of 1.65 ms), 256 later |
+| the audio thread's time in Tails' lane, median | 68 µs, waiting | 1.4 µs | 1.5 µs |
+
+A lane played later costs the callback a copy and nothing else. What moves Likyū is the laptop, and the lane gives
+it back at the cue's next arm or its rest.
+
+**How Tails has to be measured.** The longest block of 128 at 48 kHz, three runs each:
+
+| | Tails | Likyū |
+|---|---|---|
+| alone in a child, as fast as it goes, the lesser of two passes | 0.09 / 0.20 / 0.38 ms | 6 / 68 / 13 µs |
+| alone, a block a period, an ordinary thread, the worst of one pass | 1.4 / 2.6 / 3.0 ms | 0.24 / 0.33 / 0.31 ms |
+| alone, a block a period, a worker's class, the lesser of two onsets | 0.26 / 0.33 / 0.26 ms | 0.15 / 0.15 / 0.16 ms |
+| through a hosting child, as a show plays it, the median of three quarters | **1.38 / 1.39 / 1.37 ms** | **34 / 24 / 31 µs** |
+
+The second row is the measuring thread being held up, not the plugin; the third is the plugin with nothing to
+hold it up. Only the last sees what M89 saw. The difference between the third and the last is the hosting child's
+message loop, which a plugin's own timers run on. So the scan measures through the real path, eight seconds a
+plugin and four at a time: 3 min 48 s for the author's 67 plugins, 63 measured, once.
+
+**Started where its measure says** (two minutes at 128 frames): Tails one buffer later from the start, one silent
+buffer in all - a burst of 2.5 ms, which that spell then makes its measure; started as before, two.
+
+**Verdict.** A plugin that cannot answer inside the buffer is played later, more at once when that is not enough,
+eight buffers at most, and given back when nothing sounds through it (§149). Its measure is taken as it is
+played, at the scan, and raised by what a show shows.

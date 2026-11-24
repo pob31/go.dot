@@ -293,6 +293,7 @@ add_library(wfg_engine STATIC
     wfg/engine/plugin/PluginTable.h
     wfg/engine/plugin/Catalogue.h
     wfg/engine/plugin/Catalogue.cpp
+    wfg/engine/plugin/PluginMeasure.h
     wfg/engine/plugin/PluginScan.h
     wfg/engine/plugin/PluginScan.cpp
     wfg/engine/plugin/KnownList.h

@@ -28,6 +28,7 @@
 #include <wfg/engine/audio/TakeReaderPlugin.h>
 #include <wfg/engine/audio/ProxyPlugin.h>
 #include <wfg/engine/plugin/BlockFence.h>
+#include <wfg/engine/plugin/PluginMeasure.h>
 #include <wfg/engine/audio/LoopVoice.h>
 #include <wfg/engine/audio/RateVoice.h>
 #include <wfg/engine/clock/AudioClockSource.h>
@@ -1522,6 +1523,18 @@ namespace wfg::audio
                 fixes the limit is measuring what happens at it, and a lane
                 that is given more at once has no limit to be measured at. */
             proxySpec.queueSlots = spec.proxyDeadlineMicroseconds > 0 ? 0 : plugin::region::queueSlotsMost;
+
+            /*  AND AS LATE FROM THE START AS THIS MACHINE MEASURED THE PLUGIN TO
+                NEED (BJU, the author's: "Can we test this when scanning to
+                have a preset?"): the scan's measure, or what a show has
+                taught since, against this interface's rate and block. Read
+                here, when the graph is built, and never while it stands. */
+            proxySpec.engineFolder = storageFolder.getFullPathName().toStdString();
+
+            if (plugin::PluginMeasure measured;
+                proxySpec.queueSlots > 0 && plugin::measure::find (proxySpec.engineFolder, entry.identifier, measured))
+                proxySpec.lateSamples = plugin::measure::lateSamplesFor (measured.workMicros, current.sampleRate,
+                                                                         current.blockSize);
             proxySpec.regionFolder = storageFolder.getChildFile ("proxy").getFullPathName().toStdString();
             proxySpec.launch = services.launch;
             proxySpec.catalogues = services.catalogues;
