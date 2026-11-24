@@ -37182,11 +37182,16 @@ double-click on its title bar and Ctrl+Cmd+F all went through `toggleFullScreen:
 
 - **BKE** **Maximise covers the screen on the Space the window is on**, the menu bar and Dock hiding, each coming
   back when the pointer reaches its edge; the same gesture puts the window back where it was. *(The author's pick
-  of three - over "fill the usable area" and "bars gone"; the options' wording mine.)*
+  of three - over "fill the usable area" and "bars gone"; the options' wording mine.)* **Changed the same day,
+  after his try of v0.1.31:** the bars are HIDDEN, not auto-hiding - "Once in full screen (green pill) it's hard to
+  revert to a smaller screen. Could we keep the top bar with the pills", and "We did this on WFS-DIY already"
+  (its beaaff9d). An auto-hiding menu bar came down over the cue list's title bar when the pointer went for its
+  buttons; hidden, it never does, and the title bar with its buttons stays at the top of the display. The menu bar
+  is out of reach while the window covers; the green button, a double-click or Ctrl+Cmd+F bring it back.
 - **BKF** **WFS-DIY's way, carried over** (`Source/gui/WindowUtils.mm`, a5b754fa): NSWindow's `toggleFullScreen:`
   is answered by Go.dot for the whole process (`app::installCoverTheScreen`, `app/Spaces_mac.mm`), so every JUCE
   window's maximise, title-bar double-click, Ctrl+Cmd+F and `setFullScreen` cover instead; windows not JUCE's keep
-  AppKit's. Differences, mine: the bars AUTO-hide (BKE; WFS-DIY hides them outright), a JUCE window is known by its
+  AppKit's. Differences, mine: a JUCE window is known by its
   class name, and minimising lets go of the cover. Closing lets go too; a display changed or gone refits or lets
   go.
 - **BKG** **A projector is on every Space of its display**: `CanJoinAllSpaces | Stationary | IgnoresCycle |
@@ -37210,6 +37215,10 @@ refusing to put any window without a title bar in the Dock, and took the cover o
 measured before and after, 35 of 35 both times); the same hook is taken anyway, so the two programs stay alike and
 a window of the system's kind with a maximise button would be covered too. The options are given back as Default,
 not as read before: Default reads back 4 on such a Mac, and 4 alone is a combination AppKit refuses to be set.
+
+**The bars hidden** (after the author's try): measured again on the Mac mini, 36 of 36 in both locales - the
+menu bar and Dock hidden, not auto-hiding, while the window covers, Default after. v0.1.31's tag moved to this
+commit and its installers built again (the author the only one to have fetched the first).
 
 **Owed.** The author's try on the Mac: the cue list's maximise, double-click and Ctrl+Cmd+F cover on the same Space and come
 back; Cmd+Tab away shows the other application's bars; a projector stays through a change of Space, Mission

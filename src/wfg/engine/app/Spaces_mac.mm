@@ -17,8 +17,12 @@
 /*
     THE MAC'S HALF OF Spaces.h (§150), carried over from WFS-DIY's
     Source/gui/WindowUtils.mm (a5b754fa, the same author's, GPL-3), so the two
-    programs cover a screen the same way. What differs: the menu bar and Dock
-    AUTO-hide here (the author's pick for Go.dot, 2026-11-24), a JUCE window is
+    programs cover a screen the same way: the menu bar and Dock HIDDEN, not
+    auto-hidden, so nothing slides down over the window's own title bar at the
+    top of the display (the author, 2026-11-24, after his try of v0.1.31 with
+    them auto-hiding: "once in full screen (green pill) it's hard to revert to
+    a smaller screen. Could we keep the top bar with the pills" - WFS-DIY's
+    beaaff9d). What differs: a JUCE window is
     known by its class and not looked up among JUCE's components, so no JUCE
     is needed in this file, and minimising lets go of the cover.
 
@@ -75,7 +79,9 @@ namespace wfg::app
         }
 
         /*  The presentation options are the application's, not a display's: on
-            while any covering window is on a display with a menu bar. The
+            while any covering window is on a display with a menu bar. Hidden,
+            not auto-hidden: an auto-hiding menu bar came down over the cue
+            list's buttons when the pointer went for them. The
             system applies them only while Go.dot is in front. Given back as
             Default, not as what was read before: a Mac set to hide its menu bar
             by itself reads 4 (auto-hide menu bar) under Default, and 4 alone is
@@ -86,8 +92,8 @@ namespace wfg::app
             menuBarHiders = std::max (0, menuBarHiders + delta);
 
             if ((before > 0) != (menuBarHiders > 0))
-                [NSApp setPresentationOptions: menuBarHiders > 0 ? (NSApplicationPresentationAutoHideMenuBar
-                                                                      | NSApplicationPresentationAutoHideDock)
+                [NSApp setPresentationOptions: menuBarHiders > 0 ? (NSApplicationPresentationHideMenuBar
+                                                                      | NSApplicationPresentationHideDock)
                                                                  : NSApplicationPresentationDefault];
         }
 

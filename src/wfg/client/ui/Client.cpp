@@ -971,7 +971,7 @@ namespace wfg::client
 
                 /*  FULL SCREEN STAYS ON ITS SPACE (§150): on the Mac the cue
                     list's maximise covers its display where it is, the menu bar
-                    and Dock hiding, instead of moving the window to a Space of
+                    and Dock hidden, instead of moving the window to a Space of
                     its own. For every window of this process, before the first. */
                 wfg::app::installCoverTheScreen();
 

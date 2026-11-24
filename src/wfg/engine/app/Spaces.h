@@ -35,9 +35,9 @@ namespace wfg::app
         toggleFullScreen: is answered by Go.dot, so the maximise button, a
         title-bar double-click, Ctrl+Cmd+F and ResizableWindow::setFullScreen
         all make a JUCE window borderless over its display instead, with the
-        menu bar and Dock hiding - each coming back when the pointer reaches
-        its edge (the author's pick, 2026-11-24) - while it covers a display
-        that has them. The same gestures bring the old frame back; so do
+        menu bar and Dock hidden while it covers a display that has them -
+        hidden, not auto-hiding, so its own title bar and buttons stay in
+        reach at the top (the author, 2026-11-24, after trying v0.1.31). The same gestures bring the old frame back; so do
         closing, minimising, and its display going away. Windows that are not
         JUCE's (an open panel, an alert) keep AppKit's own. Once, before the
         first window opens; again does nothing. */

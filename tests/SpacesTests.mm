@@ -163,8 +163,10 @@ TEST_CASE ("spaces: the cue list's full screen covers its display on the Space i
     CHECK (([ns styleMask] & NSWindowStyleMaskFullScreen) == 0);
     CHECK (([ns styleMask] & (NSWindowStyleMaskTitled | NSWindowStyleMaskResizable)) == 0);
     CHECK (([ns styleMask] & NSWindowStyleMaskMiniaturizable) != 0);
-    CHECK (([NSApp presentationOptions] & NSApplicationPresentationAutoHideMenuBar) != 0);
-    CHECK (([NSApp presentationOptions] & NSApplicationPresentationAutoHideDock) != 0);
+    //  Hidden, not auto-hiding: nothing comes down over the title bar's buttons.
+    CHECK (([NSApp presentationOptions] & NSApplicationPresentationHideMenuBar) != 0);
+    CHECK (([NSApp presentationOptions] & NSApplicationPresentationHideDock) != 0);
+    CHECK (([NSApp presentationOptions] & NSApplicationPresentationAutoHideMenuBar) == 0);
     CHECK (fullScreenSpaces() == spacesBefore);
     MESSAGE ("covering: " << std::string ([NSStringFromRect ([ns frame]) UTF8String]) << " on "
                << std::string ([NSStringFromRect (screen) UTF8String])
