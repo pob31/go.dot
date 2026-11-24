@@ -104,6 +104,7 @@
 #include <wfg/client/ui/PluginEditors.h>
 #include <wfg/client/ui/Shell.h>
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/app/Spaces.h>
 #include <wfg/engine/audio/CompressedSound.h>
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/audio/TakePictures.h>
@@ -967,6 +968,12 @@ namespace wfg::client
 
                 editors = std::make_unique<ui::PluginEditors> (std::move (editing), host.describePlugin,
                                                                host.pluginWorkFolder);
+
+                /*  FULL SCREEN STAYS ON ITS SPACE (§150): on the Mac the cue
+                    list's maximise covers its display where it is, the menu bar
+                    and Dock hiding, instead of moving the window to a Space of
+                    its own. For every window of this process, before the first. */
+                wfg::app::installCoverTheScreen();
 
                 window = std::make_unique<ui::MainWindow> (titleFor (""),
                                                             ui::Look::colour (theme, "ground"),

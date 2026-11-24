@@ -22,7 +22,7 @@ What is the author's and what is not:
   matching the format left to the user at the receiving end. His words are in §4.
 - Everything else is a finding or a recommendation. §6 lists what is his to decide.
 - The PRD is not amended by this file. When the work starts: a namespace-draft section (the
-  next free is **§150**, the next code **BKE**; stage codes **MC.** are unused), a PRD §3.9b
+  next free is **§151**, the next code **BKH**; stage codes **MC.** are unused), a PRD §3.9b
   amendment, never §4.
 
 ---

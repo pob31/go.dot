@@ -83,6 +83,8 @@ add_library(wfg_engine STATIC
     wfg/engine/app/Raise.h
     wfg/engine/app/RecentShows.cpp
     wfg/engine/app/RecentShows.h
+    wfg/engine/app/Spaces.cpp
+    wfg/engine/app/Spaces.h
     wfg/engine/app/StartupReport.cpp
     wfg/engine/app/StartupReport.h
     wfg/engine/app/WindowApplication.cpp
@@ -703,8 +705,8 @@ namespace wfg::app
     unset(_wfg_folder_icon)
 endif()
 
-# The Mac's halves of app/FolderIcon.h, app/MachinePower.h, app/Raise.h and
-# app/WindowApplication.h, which need AppKit or Foundation; the .cpp halves
+# The Mac's halves of app/FolderIcon.h, app/MachinePower.h, app/Raise.h,
+# app/Spaces.h and app/WindowApplication.h, which need AppKit or Foundation; the .cpp halves
 # compile to nothing there. And of plugin/WorkgroupShare.h, Objective-C++
 # because JUCE's workgroup is.
 if(APPLE)
@@ -712,6 +714,7 @@ if(APPLE)
         wfg/engine/app/FolderIcon_mac.mm
         wfg/engine/app/MachinePower_mac.mm
         wfg/engine/app/Raise_mac.mm
+        wfg/engine/app/Spaces_mac.mm
         wfg/engine/app/WindowApplication_mac.mm
         wfg/engine/plugin/WorkgroupShare_mac.mm
         wfg/engine/video/Displays_mac.mm)

@@ -37166,3 +37166,39 @@ should show a plugin's measure - no word of it is on screen yet.
 **Words on screen: none new.** A plugin's strip and the Plugins tab say "N samples late" as they did of a plugin's
 own delay; the figure now holds what Go.dot adds as well (BJX). The note is the log's. The guides' sentences are
 mine, in both languages.
+
+## 150. No window goes to a Space of its own (macOS)
+
+**Asked 2026-11-24** by the author: "are the windows skipping the native fullscreen that moved the window to its
+own Space", with "fake fullscreen" as the way out - a borderless window over the screen's frame, menu bar and Dock
+hidden, on the current Space. Then: "This concerns the cuelist window too. It can't go on its own separate Space
+either." And: "WFS-DIY is using an app wide hook." For v0.1.31.
+
+What was there: the projectors' windows were already borderless over their display and never asked for macOS's
+full screen; JUCE puts a temporary window kept on top at the pop-up menu's level, above the menu bar and the Dock,
+so they covered both with no presentation options (which would not have worked anyway: the render child is never
+the application in front). But each was tied to the one Space it opened on. The cue list's maximise button, a
+double-click on its title bar and Ctrl+Cmd+F all went through `toggleFullScreen:` - a Space of its own.
+
+- **BKE** **Maximise covers the screen on the Space the window is on**, the menu bar and Dock hiding, each coming
+  back when the pointer reaches its edge; the same gesture puts the window back where it was. *(The author's pick
+  of three - over "fill the usable area" and "bars gone"; the options' wording mine.)*
+- **BKF** **WFS-DIY's way, carried over** (`Source/gui/WindowUtils.mm`, a5b754fa): NSWindow's `toggleFullScreen:`
+  is answered by Go.dot for the whole process (`app::installCoverTheScreen`, `app/Spaces_mac.mm`), so every JUCE
+  window's maximise, title-bar double-click, Ctrl+Cmd+F and `setFullScreen` cover instead; windows not JUCE's keep
+  AppKit's. Differences, mine: the bars AUTO-hide (BKE; WFS-DIY hides them outright), a JUCE window is known by its
+  class name, and minimising lets go of the cover. Closing lets go too; a display changed or gone refits or lets
+  go.
+- **BKG** **A projector is on every Space of its display**: `CanJoinAllSpaces | Stationary | IgnoresCycle |
+  FullScreenNone`, said again each second with the cover (JUCE says its own again in some paths). A change of
+  Space, Mission Control, or another application's full screen on that display leaves the picture where it is.
+  *(Mine.)*
+
+Nothing on Windows or Linux: no Spaces, and both functions do nothing there.
+
+**Owed.** Built on Windows only (the Mac mini was away); the Mac half's first compile is CI's macOS job. The
+author's try on the Mac: the cue list's maximise, double-click and Ctrl+Cmd+F cover on the same Space and come
+back; Cmd+Tab away shows the other application's bars; a projector stays through a change of Space, Mission
+Control and another application's full screen on its display.
+
+**Words on screen: none.**

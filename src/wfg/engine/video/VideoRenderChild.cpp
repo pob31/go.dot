@@ -17,6 +17,7 @@
 #include <wfg/engine/video/VideoRenderChild.h>
 
 #include <wfg/engine/app/MachinePower.h>
+#include <wfg/engine/app/Spaces.h>
 #include <wfg/engine/plugin/ProcessUtil.h>
 #include <wfg/engine/video/Compositor.h>
 #include <wfg/engine/video/Displays.h>
@@ -1149,6 +1150,9 @@ namespace wfg::video
                 setAlwaysOnTop (true);
                 setVisible (true);
 
+                //  On every Space of its display, never one of its own (§150).
+                app::keepOnEverySpace (getWindowHandle());
+
                 /*  And on the display's own pixels, whatever its scale, reaching
                     a pixel past one edge so the driver never takes it for a
                     full-screen program (Displays.h, §39). */
@@ -1161,6 +1165,7 @@ namespace wfg::video
             void keepCovering()
             {
                 coverDisplay (getWindowHandle(), covering, overhang);
+                app::keepOnEverySpace (getWindowHandle());
             }
 
             ~OutputWindow() override
@@ -2381,6 +2386,14 @@ namespace wfg::video
                 setAlwaysOnTop (true);
                 setVisible (true);
 
+                /*  ON EVERY SPACE OF ITS DISPLAY, NEVER ONE OF ITS OWN (§150): a
+                    borderless window over the display's whole frame, above the
+                    menu bar and Dock by its level (JUCE's for a temporary window
+                    on top) - not macOS's full screen, which would move it to a
+                    Space of its own - and left in place by a change of Space or
+                    by Mission Control on that display. */
+                app::keepOnEverySpace (getWindowHandle());
+
                 coverDisplay (getWindowHandle(), covering, overhang);
                 view = render::makeNativeView (getWindowHandle(), pixelWidth(), pixelHeight());
                 render::fitNativeView (view, getWindowHandle(), pixelWidth(), pixelHeight());
@@ -2413,6 +2426,7 @@ namespace wfg::video
             void keepCovering()
             {
                 coverDisplay (getWindowHandle(), covering, overhang);
+                app::keepOnEverySpace (getWindowHandle());
                 render::fitNativeView (view, getWindowHandle(), pixelWidth(), pixelHeight());
             }
 
