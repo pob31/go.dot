@@ -1,6 +1,7 @@
 # Go.dot — Multichannel files and outputs, Ambisonics first: notes before the work starts
 
-**Draft 0.1**, 2026-11-24. Written from a conversation with the author and a read of the code
+**Draft 0.2**, 2026-11-24 (0.1 the same day; 0.2 follows the author's ruling quoted in §4,
+which set aside 0.1's format word on outputs). Written from a conversation with the author and a read of the code
 that day (Go.dot at `c3e0263a`, XOA at `e4c3fbd`, spatcore at `v0.4.0-50-g7bdf4ab`). Nothing
 here is built and nothing was run: every claim comes from reading the source. Line numbers are
 those of that day. **Check a claim against the code before relying on it.**
@@ -12,6 +13,9 @@ What is the author's and what is not:
 - **Decided by the author** (2026-11-24): Go.dot does not become a spatial renderer, **but**
   "we should at least give a simple way to mix down a full Ambisonics stream to mono and
   stereo."
+- **Decided by the author** (2026-11-24, later): handled at the patch as in QLab — a diagonal
+  default the user adjusts, no output reserved for a use, matching the format left to the user
+  at the receiving end. His words are in §4.
 - Everything else is a finding or a recommendation. §6 lists what is his to decide.
 - The PRD is not amended by this file. When the work starts: a namespace-draft section (the
   next free is **§150**, the next code **BKE**; stage codes **MC.** are unused), a PRD §3.9b
@@ -21,10 +25,11 @@ What is the author's and what is not:
 
 ## 1. The short of it
 
-The playback core is already written for any number of channels. What is missing is not
-width but **meaning**: nothing in a show says "these four channels are an Ambisonic field" or
-"these six are 5.1". With a word that says it, the fold to mono and stereo is a handful of
-matrix coefficients, and everything else in the path is as it stands.
+The playback core is already written for any number of channels: an output of any width, a
+full matrix at the end of every voice, a matrix of any size on a cue. What is missing is
+small: a default that lays a wide file diagonally across the outputs, a grid in which the
+user moves the crosspoints, and a preset that writes the fold of an Ambisonic stream to mono
+or stereo into that grid. No output is given a meaning and nothing is added to the document.
 
 The one real engine change — voices of two widths, so that one wide bed does not make every
 voice wide — can come last, or never, because the rest works by raising a show setting.
@@ -100,7 +105,7 @@ is folded unasked.
    `ProxyLane.h:474`, `PluginHostChild.cpp:427`, the CSV range). Order 7. XOA runs order 10
    (121 channels). Raising it touches all of those: not recommended.
 3. **A voice's width is show-wide.** One 16-channel bed makes every voice carry 16 buffers
-   through EQ, dynamics and every plugin place. See MC.6.
+   through EQ, dynamics and every plugin place. See MC.5.
 4. **Edges that are one or two channels wide, and stay so:**
 
    | Edge | Where |
@@ -134,7 +139,211 @@ Two worries that turned out not to be:
 
 ---
 
-## 4. The design *(proposed)*
+## 4. The design
+
+### The author's ruling (2026-11-24, after draft 0.1)
+
+> "For multichannel, right now I'd say this be at the end of the patch and managed by the user
+> in a similar fashion to what happens in QLab. There the user is presented with diagonal
+> default patches and makes the adjustments. No channel is reserved for a specific use. This
+> way we don't squat outputs for a single use. It's up to the user to match the format/patch
+> on the receiving end."
+
+Read here as:
+
+- **Outputs carry no format.** No "Ambisonic output", no run of channels set aside for a bed.
+  An output is what it is today.
+- **A wide file arrives with a diagonal**: file channel 1 to output channel 1, 2 to 2, and so
+  on. The user then moves the crosspoints.
+- **Go.dot checks nothing about meaning.** Whether the sixteen channels that arrive at XOA are
+  the order XOA expects is the user's to match there.
+
+This sets aside draft 0.1's format word on outputs and slots, and its table of matching rules
+(same order, lower order, refused…). They are kept in §9 for the record only.
+
+### What the ruling needs *(proposed)*
+
+1. **A diagonal that runs across outputs.** A `<Route>` belongs to one bus, and today's
+   default (`ShowDocument::defaultMediaRoute`, `ShowDocument.cpp:2673-2703`; the command
+   `route.default`, `DocumentCommands.cpp:427`) writes the identity onto the *lowest bus
+   only*. For a file wider than that bus the diagonal has to continue onto the next outputs:
+   one Route per bus touched, each holding its piece. With two stereo outputs and a 4-channel
+   file: channels 1-2 on the first, 3-4 on the second. Nothing new in the document — the
+   Routes are what already exists. Channels that fall beyond the last output get no
+   crosspoint, and the window says so.
+2. **The window's import does the same.** `routeImportedMedia` (`Client.cpp:4920-4975`) gives
+   a new cue a direct out to the lowest output, else a send. For a file wider than that
+   output a direct out is refused at GO ("the cue is wider than its direct out"), so a wide
+   file should get the diagonal instead. Mono and stereo files: unchanged.
+3. **A grid to adjust it.** QLab shows cue channels against outputs. On 2026-11-24 no such
+   grid was found on a cue in the desktop window (the only matrix component in
+   `src/wfg/client` is the hardware patch in the show settings, spatcore's
+   `PatchMatrixComponent`). **To check before building**: what the inspector or the foot
+   offers today for a Route's coefficients. If nothing, this is the stage that makes the rest
+   usable — a foot panel, cue channels down, output channels across with the outputs' names
+   as groups, a level per crosspoint.
+4. **Where the diagonal starts.** At the first output, as QLab; moving the whole diagonal
+   along (start at output 9) as one gesture is worth having, since "no channel reserved"
+   means the bed lands wherever the user says tonight.
+
+### The fold to mono and stereo, without a format word
+
+The author's earlier ruling of the same day stands: "a simple way to mix down a full
+Ambisonics stream to mono and stereo." Under the later one it becomes **a preset in the
+grid**: the user picks an output and "Ambisonic to stereo" (or mono), says AmbiX or FuMa in
+the same menu, and Go.dot writes the coefficients. What is stored is the coefficients — what
+someone decided (constraint 10) — and no word on the cue.
+
+AmbiX: channel 0 is W (everything, from every direction), channel 1 is Y (left minus right),
+channel 2 is Z (up minus down), channel 3 is X (front minus back). In SN3D each of them peaks
+at 1 as W does. A virtual microphone aimed along a direction is `p·W + (1−p)·(that
+direction's component)`, and is at unity on its axis whatever `p`.
+
+- **Mono: W alone, at unity.** An omnidirectional microphone: every source at the level it was
+  encoded.
+- **Stereo: two cardioids back to back**, aimed left and right:
+
+  ```
+  L = ½·W + ½·Y
+  R = ½·W − ½·Y
+  ```
+
+  A source hard left is full on the left and silent on the right. A source in the centre is
+  6 dB down on each side. Nothing exceeds unity. And `L + R = W`: the stereo fold summed is
+  exactly the mono fold. One coefficient is negative; no test yet says the matrix passes one.
+
+- **FuMa** — the table is XOA's (`D:\dev\XOA\Source\DSP\AmbiConventions.h`,
+  `fumaToAmbixTable`): W is the file's first channel at −3 dB, Y its third. Mono is `√2·W`;
+  stereo is `(√2/2)·W ± ½·Y`.
+
+What this gives up against draft 0.1, knowingly:
+
+- The fold is Route coefficients, so the send's width, balance and swap do not act on it, and
+  a fade does not move it (`FadeMoves.cpp:218-264` moves sends, not Routes). The cue's level
+  still fades the whole.
+- With no word saying "this is a field", the waveform, the timbre colour and the dynamics
+  detector keep folding every channel together (§3, items 6 and 7).
+- A wider stereo image or another aim is the user's own coefficients.
+
+### What stays outside
+
+Decoding to a loudspeaker rig, binaural, rotation, distance: XOA, a plugin, or a decoder
+elsewhere.
+
+---
+
+## 5. Stages
+
+Each is small enough to build and test alone, in both locales. MC.1 to MC.4 need no change to
+the voices: they work by setting `channelsPerTrack` to the widest file. None adds an attribute
+to the document, so no existing show and no golden file changes.
+
+**MC.0 — Pins and small repairs, no feature.**
+Tests beside M1: a 5.1 WAV with a speaker mask plays channel i to output i; a 16-channel and a
+36-channel file (the second fails on the 32 cap until it is lifted); a negative coefficient
+through `CueMatrix`. The 32 cap: a fourth Tracktion patch raising it to 64
+(`patches/tracktion_engine/series`, `scripts/te-patches.py`), after checking the array on the
+stack is safe on the reader's path — or wide files stop at 32 channels and the window says so.
+The silent placeholder named by its width.
+
+**MC.1 — The diagonal.**
+`defaultMediaRoute` continues across buses for a file wider than the lowest one; the window's
+import (`routeImportedMedia`) uses it for a file wider than the output it would have given.
+Existing assignments are preserved, as `route.default` already promises. Tests: a 4-channel
+file over two stereo outputs, over one 8-wide output, over a rig too narrow (the remainder
+without crosspoints, and said). Must stay green: `ImportRoutingTests.cpp:149, 179`,
+`GoTests.cpp:1414-1480`.
+
+**MC.2 — The grid.**
+After the check of §4, item 3. Every crosspoint edit is a named command (constraint 11) and
+one undo step; a run of the same crosspoint coalesces as `node.set` does. Sliding the whole
+diagonal is one step. Levels are words and numbers, not colour alone (constraint 8). The words
+are shown to the author before they ship.
+
+**MC.3 — The fold presets.**
+A pure file beside `SendPlacement.h` that returns the coefficients (AmbiX and FuMa, mono and
+stereo); a command that writes them as a Route onto the chosen output, one undo step. Tests:
+the numbers, `L + R = W`, FuMa against XOA's table; a blackbox driver with a 4-channel file
+carrying a tone hard left — heard on the left only through the stereo preset, at unity through
+the mono one.
+
+**MC.4 — Importers, settings, guides.**
+QLab and Ableton imports already raise `channelsPerTrack` to the widest file
+(`QlabImport.cpp:415`, `AlsImport.cpp:691`); the QLab import keeps crosspoints as Routes of
+any width already (`QlabWalk.cpp:1584-1622`). The audio settings say what `channelsPerTrack`
+costs. Both tester guides.
+
+**MC.5 — Voices of two widths. Later.**
+`Audio/@wideTracks` (default 0) and `@wideChannels`: a few wide voices after the ordinary
+ones. `buildEdit` takes a width per track (`AudioHost.cpp:568, 677, 700, 723, 754, 780, 794`).
+The voice is picked as the lowest free one wide enough, ordinary voices first
+(`Runner.cpp:6310`, `RunTable::lowestFreeTrack` at `Run.cpp:389`) — this must stay
+deterministic, replay depends on it. `Player` gains a width per track with a default, so the
+twenty-odd test fakes compile untouched (`Runner.h:717`). The plugin pool stays at the
+ordinary width, so a wide voice passes its plugin places dry by the existing rule. A new
+refusal: no wide voice free.
+
+**Not staged:** the 64 ceiling; BHZ; a wide rack, aux, take or key; a format word.
+
+---
+
+## 6. Decisions
+
+**Decided by the author** (2026-11-24): no spatial renderer; a simple fold of an Ambisonic
+stream to mono and stereo; a diagonal default the user adjusts, as QLab; no output reserved
+for a use; matching the format is the user's, at the receiving end.
+
+**Still the author's**, each with a recommendation:
+
+| Question | Recommendation |
+|---|---|
+| The fold as a preset that writes coefficients, with no word on the cue | Yes: it is what the later ruling implies. The cost is listed in §4 |
+| The 32-channel cap in Tracktion | Patch it to 64 |
+| The stereo law | Two cardioids back to back: plain, sums to the mono fold, never above unity |
+| A centre source is 6 dB down per side in the stereo fold | Accept, and say so in the guides; a make-up is one number in the grid |
+| FuMa among the presets | Yes, order 1 is enough for a fold |
+| File channels beyond the rig's last output | No crosspoint, and said in the window; never wrapped |
+| The diagonal for a mono or stereo file | Unchanged from today (direct out, or a send) |
+| A narrow cue on a free wide voice when the ordinary ones are busy (MC.5) | Allow |
+| A VST3 above 8 channels (BHZ) | Leave open until a plugin asks |
+| Whether MC.5 is built at all | After the rest has been used on a real bed |
+
+**The implementer's:** file layout, command names, the placeholder's name, the shape of the
+tests. Any word that reaches the screen is shown to the author before it ships.
+---
+
+## 7. Risks
+
+- The 32 cap truncates **silently**, and it has only been read in the source.
+- The grid of MC.2 is the largest piece and has not been looked for thoroughly: check what
+  the window already offers for a Route before designing it.
+- A diagonal across several outputs is several Routes; an output deleted or narrowed later
+  must leave the others standing (the load already checks each Route's length).
+- MC.5 touches which voice a cue gets, and with it replay.
+- By ear: nothing here has been heard.
+
+---
+
+## 8. What the sibling projects give
+
+| From | What | State |
+|---|---|---|
+| XOA `Source/DSP/AmbiConventions.h` | N3D ↔ SN3D at any order; FuMa → AmbiX to order 3, checked against two sources | lift the table |
+| XOA `Source/Parameters/XoaParameterIDs.h:107`, `Source/Audio/PatchRouting.h` | a format per input (mono, or an order) and the flattening of groups onto channels | what the user matches at the receiving end |
+| XOA `tests/XoaFileFormatTests.cpp` | 121- and 128-channel WAV through stock JUCE | says JUCE's reader is not the limit |
+| XOA, removed at `a5e1062` | a multichannel file player (128 channels), dropped because "XOA is a processor; program material arrives via device inputs" | Go.dot is that player |
+| XOA decoders, binaural, rotation | a whole renderer | not for Go.dot |
+| spatcore | `MultiChannelEQBank`, `DynamicsModule::processKeyed` (N channels, linked) | the second is already in use |
+| spatcore, WFS-DIY | no Ambisonics, no channel-layout type | nothing to take |
+
+XOA is under construction: take the table and the idea, not a dependency.
+
+---
+
+## 9. Set aside: draft 0.1's format word on outputs
+
+*Kept for the record. The author's ruling of 2026-11-24 (§4) replaced this: outputs carry
+no format and nothing is matched by rule. The fold's mathematics moved to §4.*
 
 ### A word for what the channels mean
 
@@ -214,118 +423,3 @@ direction's component)`, and is at unity on its axis whatever `p`.
 Decoding to a loudspeaker rig, binaural, rotation, distance: XOA, a plugin, or a decoder
 elsewhere. Go.dot carries the field to an output or a slot of the right width and format.
 XOA's inputs already have the same notion (`inputFormat`: mono, or order 1 to 10).
-
----
-
-## 5. Stages
-
-Each is small enough to build and test alone, in both locales. MC.1 to MC.5 need no change to
-the voices: they work by setting `channelsPerTrack` to the widest file.
-
-**MC.0 — Pins and small repairs, no feature.**
-Tests beside M1: a 5.1 WAV with a speaker mask plays channel i to output i; a 16-channel and a
-36-channel file (the second fails on the 32 cap until it is lifted); a negative coefficient
-through `CueMatrix` (the stereo fold needs one, and no test says it passes). The 32 cap: a
-fourth Tracktion patch raising it to 64 (`patches/tracktion_engine/series`,
-`scripts/te-patches.py`), after checking the array on the stack is safe on the reader's path —
-or `ambix` stops at order 4. The placeholder named by its width.
-
-**MC.1 — The word, in the document only. Nothing heard changes.**
-Rows in `docs/parameters/godot-parameters.csv` near 144 (media), 592 (bus), 612 (slot);
-regenerate (`scripts/generate-schema.py`). Row 555 already speaks of a first-order bed and
-wants rewording. Warnings, never a refused load: `ambix` on a count that is not a square;
-`fuma` on other than 4, 9 or 16; `ambix` on a mix bus. Tests: round trip in both locales with
-the default omitted, the enum in OSCQuery, the warnings.
-
-**MC.2 — The rules. The engine stage.**
-`cue/ChannelFormat.h/.cpp`, pure, no JUCE. `spreadOf` takes the destination's format (three
-call sites: `Runner.cpp:6927, 6939, 7023`); an aux is always discrete. The placement word
-(`SendPlacement.cpp:60`, `ParameterTree.cpp:917-934`, CSV row 643). Tests: every row of the
-table, FuMa against XOA's numbers, `L + R = W`, width 0 and 1, balance, swap; a blackbox
-driver with a 4-channel file carrying a tone hard left — heard on the left only into a stereo
-output, at unity into a mono one, untouched into a 4-wide Ambisonic one. Must stay green:
-`GoTests.cpp:1414-1480, 1662, 15212, 15270`; `ImportRoutingTests.cpp:149, 179`.
-
-**MC.3 — Words, windows, surfaces.**
-The output's width word (`client/model/OutputList.cpp:90`): "Ambisonic order 3 · 16 channels".
-A format row in the inspector and the offer when the count is a square. A format menu on
-outputs in the show settings (`ShowSettingsWindow.cpp:6356-6370`). Everything that switches on
-`send/placement` learns the new value: `Sends.cpp:62-65`, `FadeMix.cpp:355`,
-`SendMixerComponent.cpp:878-879`, `SurfaceBridge.cpp:1187-1192, 1330`,
-`DeckBridge.cpp:997, 1163-1168`, `clients/console/views/inspector.js:168`. **A missed one
-loses its page silently** — grep the word, do not trust this list. Both tester guides.
-
-**MC.4 — What listens and what is drawn.**
-On an `ambix` cue the dynamics detector hears W only; peaks and timbre show W; the analysis
-cache's key takes the format.
-
-**MC.5 — Importers and settings.**
-QLab and Ableton imports already raise `channelsPerTrack` to the widest file
-(`QlabImport.cpp:415`, `AlsImport.cpp:691`) and never write a format; add a note when a file's
-count is a square. The audio settings say what `channelsPerTrack` costs.
-
-**MC.6 — Voices of two widths. Later.**
-`Audio/@wideTracks` (default 0) and `@wideChannels`: a few wide voices after the ordinary
-ones. `buildEdit` takes a width per track (`AudioHost.cpp:568, 677, 700, 723, 754, 780, 794`).
-The voice is picked as the lowest free one wide enough, ordinary voices first
-(`Runner.cpp:6310`, `RunTable::lowestFreeTrack` at `Run.cpp:389`) — this must stay
-deterministic, replay depends on it. `Player` gains a width per track with a default, so the
-twenty-odd test fakes compile untouched (`Runner.h:717`). The plugin pool stays at the
-ordinary width, so a wide voice passes its plugin places dry by the existing rule. A new
-refusal: no wide voice free.
-
-**Not staged:** the 64 ceiling; BHZ; a wide rack, aux, take or key.
-
----
-
-## 6. Decisions
-
-**The author's**, each with a recommendation:
-
-| Question | Recommendation |
-|---|---|
-| The 32-channel cap in Tracktion | Patch it to 64, rather than stop at order 4 |
-| The stereo law | Two cardioids back to back: plain, sums to the mono fold, never above unity |
-| A centre source is 6 dB down per side in the stereo fold | Accept, and say so in the guides; a make-up is one coefficient if wanted |
-| A mono or stereo cue onto an Ambisonic output | Refuse: encoding is XOA's |
-| An Ambisonic cue onto an unlabelled output at least as wide | Pass channel to channel, as today |
-| FuMa | Yes, on the cue, order 3 at most |
-| At import | Never guess; offer |
-| Turning the field | Not now |
-| The waveform and the timbre colour of an Ambisonic file | W |
-| A narrow cue on a free wide voice when the ordinary ones are busy (MC.6) | Allow |
-| A VST3 above 8 channels (BHZ) | Leave open until a plugin asks |
-| Whether MC.6 is built at all | After the rest has been used on a real bed |
-
-**The implementer's:** attribute names, the word `soundfield`, a derived read-only `order`,
-file layout, the placeholder's name, the shape of the tests. Any word that reaches the screen
-is shown to the author before it ships.
-
----
-
-## 7. Risks
-
-- The 32 cap truncates **silently**, and it has only been read in the source.
-- A new value of `send/placement` reaches every switch on it.
-- The identity Route that some imports write (`ShowDocument::defaultMediaRoute`,
-  `ShowDocument.cpp:2673-2703` — the QLab import, takes, a movie's sound) puts W on the left
-  and Y on the right for an Ambisonic file: wrong, and the offer of MC.3 should replace an
-  untouched one.
-- MC.6 touches which voice a cue gets, and with it replay.
-- By ear: nothing here has been heard.
-
----
-
-## 8. What the sibling projects give
-
-| From | What | State |
-|---|---|---|
-| XOA `Source/DSP/AmbiConventions.h` | N3D ↔ SN3D at any order; FuMa → AmbiX to order 3, checked against two sources | lift the table |
-| XOA `Source/Parameters/XoaParameterIDs.h:107`, `Source/Audio/PatchRouting.h` | a format per input (mono, or an order) and the flattening of groups onto channels | the same idea as §4 |
-| XOA `tests/XoaFileFormatTests.cpp` | 121- and 128-channel WAV through stock JUCE | says JUCE's reader is not the limit |
-| XOA, removed at `a5e1062` | a multichannel file player (128 channels), dropped because "XOA is a processor; program material arrives via device inputs" | Go.dot is that player |
-| XOA decoders, binaural, rotation | a whole renderer | not for Go.dot |
-| spatcore | `MultiChannelEQBank`, `DynamicsModule::processKeyed` (N channels, linked) | the second is already in use |
-| spatcore, WFS-DIY | no Ambisonics, no channel-layout type | nothing to take |
-
-XOA is under construction: take the table and the idea, not a dependency.
