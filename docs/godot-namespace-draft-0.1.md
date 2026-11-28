@@ -37273,7 +37273,7 @@ cue; §35.9 listed it as not yet done. Done here.
   from its fade-in (§35.5: nothing to remember). A **movie** is paused by Esc as persistent media is (PRD §3.29,
   K8) and carried on at the next step from the second of its file it had reached, or inside the range it was in,
   in the same pass; its locked sounds come back at the same point, over the de-click. *(Mine: the PRD's "persistent
-  media" read as including a movie - to be put to the author.)* A double Esc takes the picture off at once and the
+  media" read as including a movie - approved by the author, 2026-11-28: "wording and video pause is good".)* A double Esc takes the picture off at once and the
   next GO puts it up from the top. A sound locked to a movie is the movie's: the section asserts the movie and
   never the sound alone. What stays on top is the cue's `layer`, as anywhere (§35.3).
 - **BKL** *(mine)* **The cue list's band takes every kind the engine asserts**: video, and the Pd process, script
@@ -37293,7 +37293,7 @@ groups can be persistent, so … stays where it is" (mine). `wfg validate` no lo
   either way in any time box whichever is shown, a comma taken for the point; "1:75" is refused as a slip.
 - **BKN** *(mine)* **Seconds is the look there was**, editors included: the range table and the waveform already
   went to `1:04.2` past a minute and still do; only *clock* changes anything. The words "Times shown as",
-  "Seconds" and "Hours, minutes, seconds" on the Playback page are mine, to be put to the author. Timecode labels
+  "Seconds" and "Hours, minutes, seconds" on the Playback page are mine, approved by the author (2026-11-28). Timecode labels
   keep their frames (§59), and the Rack's "2 min 5 s" is prose, not a reading. The format is the process's - one
   show a process (§106) - written by the window's refresh.
 
@@ -37314,7 +37314,15 @@ groups can be persistent, so … stays where it is" (mine). `wfg validate` no lo
   same cell, puts it back; it ends with its cue - done, failed or gone from the pane (the author's pick). View
   state of the window, never the show's (§4.10). A press on a time that moves is still a scrub; one let go where
   it was pressed is the click. *Show > Big elapsed time* and *Big remaining time* do the same for the newest
-  running cue (§4.11). *(Mine: the band's height, the words, the menu items.)*
+  running cue (§4.11). *(Mine: the band's height, the words, the menu items; the words approved by the author,
+  2026-11-28.)*
 
 **Words on screen:** "elapsed", "remaining", "Big elapsed time", "Big remaining time", and the page's "… left"
 (mine).
+
+### 151.5 The Android remote
+
+The author, 2026-11-28: "You can adjust the Android app for the time format." go.dot-remote 0.1.13 (926be6c): the
+cue list's waits and durations and the header's and running cues' clocks follow `/godot/list/timeFormat`; a wait's
+box shows the clock and takes a time typed either way, sent as its seconds. Seconds is the look the app had - its
+header already wrote `m:ss.t`; the clock adds the hours past an hour.
