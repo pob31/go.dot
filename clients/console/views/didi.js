@@ -240,14 +240,14 @@ function timeCell(id, name) {
     return '<div class="when ro" title="' + note + '">' + esc(shown) + "</div>";
   }
 
-  /*  AS A CLOCK WHEN THE SHOW SAYS SO (§151, BKM): a text box, `1:23.5`,
-      read back to seconds when committed (views/values.js, `data-time`). */
+  /*  AS A CLOCK WHEN THE SHOW SAYS SO (§151, BKM): `1:23.5`, read back to
+      seconds when committed (views/values.js, `data-time`). A text box in either
+      format, so it takes a colon and the units, `1h34m3s1` (BKQ). */
   const clock = clockShown();
   const shown = Number(value) === 0 ? "" : clock ? clockTime(Number(value), 3, true) : value;
 
   return '<div class="when">' +
-           '<input type="' + (clock ? "text" : "number") + '" step="any" min="0" data-blank-zero="yes" data-time="yes"' +
-           (clock ? ' inputmode="decimal"' : "") +
+           '<input type="text" data-blank-zero="yes" data-time="yes" autocomplete="off" spellcheck="false"' +
            ' data-set="/godot/cue/' + esc(id) + "/" + esc(name) + '"' +
            ' value="' + esc(shown) + '"' +
            ' title="' + note + '">' +

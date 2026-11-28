@@ -37326,3 +37326,13 @@ The author, 2026-11-28: "You can adjust the Android app for the time format." go
 cue list's waits and durations and the header's and running cues' clocks follow `/godot/list/timeFormat`; a wait's
 box shows the clock and takes a time typed either way, sent as its seconds. Seconds is the look the app had - its
 header already wrote `m:ss.t`; the clock adds the hours past an hour.
+
+### 151.6 A time typed with its units
+
+- **BKQ** **`1h34m3s1` is 1:34:03.1** (the author, 2026-11-28: "Could we also type in 1h34m3s1 and convert to
+  1:34:03.1?"). In any time box of the window, the page and the Android remote, whatever the format shown:
+  numbers each followed by `h`, `m` or `s`, in that order, either case, spaces allowed, a comma for the point;
+  the digits after the `s` are its fraction; a number after the last unit with none of its own is the next place
+  down - `2m30` is 2:30, `1h30` 1:30:00 *(mine)*; `90s` and `4m` alone are times. Below the first place a count
+  stays under sixty, and a unit out of order is refused as a slip. The page's and the remote's time boxes are text
+  boxes in either format now, so they take the letters.

@@ -62,8 +62,61 @@ export function readingWords(seconds) {
   return clockShown() ? clockTime(seconds, 1) : seconds.toFixed(1) + " s";
 }
 
-/*  A time as typed: `83.5`, `83,5`, `1:23.5`, `1:02:03.5`. NaN for what is not one. */
+/*  Whether a box holds a clock or a time with its units, rather than a plain number. */
+export function typedAsClock(text) {
+  return /[:hms]/i.test(String(text));
+}
+
+/*  A TIME WITH ITS UNITS (§151, BKQ; the author: "Could we also type in 1h34m3s1 and
+    convert to 1:34:03.1?"): numbers each followed by h, m or s, in that order; the
+    digits after the s are its fraction (`3s1` is 3.1); a number after the last unit
+    with none of its own is the next place down (`2m30`, `1h30`). As the window reads it. */
+function unitTime(typed) {
+  const text = String(typed).replace(/\s+/g, "").replace(/,/g, ".").toLowerCase();
+  const weight = { h: 3600, m: 60, s: 1 };
+  const order = { h: 3, m: 2, s: 1 };
+  const word = { 3: "h", 2: "m", 1: "s" };
+  let total = 0;
+  let place = 0;
+  let at = 0;
+
+  while (at < text.length) {
+    const found = /^[0-9.]+/.exec(text.slice(at));
+    if (!found) return NaN;
+    const value = Number(found[0]);
+    if (!Number.isFinite(value) || value < 0) return NaN;
+    at += found[0].length;
+
+    let unit;
+    if (at < text.length) {
+      const c = text[at++];
+      if (!(c in order)) return NaN;
+      unit = order[c];
+    } else {
+      unit = place - 1;
+    }
+
+    if (unit <= 0 || (place !== 0 && unit >= place)) return NaN;
+    if (place !== 0 && value >= 60) return NaN;
+
+    total += value * weight[word[unit]];
+    place = unit;
+
+    if (unit === 1 && at < text.length) {
+      const tail = text.slice(at);
+      if (Math.floor(value) !== value || !/^[0-9]+$/.test(tail)) return NaN;
+      total += Number("0." + tail);
+      at = text.length;
+    }
+  }
+
+  return place !== 0 ? total : NaN;
+}
+
+/*  A time as typed: `83.5`, `83,5`, `1:23.5`, `1:02:03.5`, `1h34m3s1`. NaN for what is not one. */
 export function typedTime(text) {
+  if (/[hms]/i.test(String(text))) return unitTime(text);
+
   const parts = String(text).trim().split(":");
   if (parts.length > 3 || parts.some((p) => p.trim() === "")) return NaN;
 

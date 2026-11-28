@@ -436,12 +436,14 @@ function controlFor(field) {
         box, `1:23.5`, read back to seconds when committed (views/values.js). */
     const seconds = Array.isArray(node.UNIT) && node.UNIT[0] === "s";
 
-    if (seconds && clockShown() && value !== "" && Number.isFinite(Number(value)))
-      return '<input type="text" inputmode="decimal" data-time="yes"' + set + all +
-             ' value="' + esc(clockTime(Number(value), 3, true)) + '">';
+    /*  A text box in either format, so it takes a colon and the units (BKQ). */
+    if (seconds)
+      return '<input type="text" data-time="yes" autocomplete="off" spellcheck="false"' + set + all +
+             ' value="' + esc(clockShown() && value !== "" && Number.isFinite(Number(value))
+                                ? clockTime(Number(value), 3, true) : value) + '">';
 
     return '<input type="number" step="' + step + '"' + min + max + set + all +
-           (seconds ? ' data-time="yes"' : "") + ' value="' + esc(value) + '">';
+           ' value="' + esc(value) + '">';
   }
 
   return '<input type="text"' + set + all + ' value="' + esc(value) + '">';

@@ -63,6 +63,16 @@ test("typed either way; what is not a time is NaN", () => {
   assert.ok(Number.isNaN(typedTime("1:75")));
   assert.ok(Number.isNaN(typedTime("1.5:20")));
   assert.ok(Number.isNaN(typedTime("soon")));
+
+  //  With its units (BKQ), the author's own example first.
+  assert.equal(clockTime(typedTime("1h34m3s1")), "1:34:03.1");
+  assert.equal(typedTime("2m30"), 150);
+  assert.equal(typedTime("1h30"), 5400);
+  assert.equal(typedTime("90s"), 90);
+  assert.equal(typedTime("1H 5M 2,5S"), 3902.5);
+  assert.ok(Number.isNaN(typedTime("3s1m")));
+  assert.ok(Number.isNaN(typedTime("1m75s")));
+  assert.ok(Number.isNaN(typedTime("3.5s1")));
 });
 
 test("a time box shows a clock and writes its seconds back", () => {
@@ -81,6 +91,9 @@ test("a time box shows a clock and writes its seconds back", () => {
 
   box.value = "12";
   assert.equal(commitText(box), "12");
+
+  box.value = "1h34m3s1";
+  assert.equal(Number(commitText(box)), 5643.1);
 
   format("seconds");
   assert.equal(shownValue(node, box), 83.5);

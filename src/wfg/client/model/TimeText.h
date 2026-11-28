@@ -72,11 +72,12 @@ namespace wfg::client::model
     std::string readingTime (double seconds);
 
     /*  A time as somebody types it, in either format whatever is shown: `83.5`,
-        `83,5`, `1:23.5`, `1:02:03.5`. Nothing for what is not a time, for a
+        `83,5`, `1:23.5`, `1:02:03.5` - or with its units, `1h34m3s1` (1:34:03.1),
+        `2m30`, `90s` (§151, BKQ). Nothing for what is not a time, for a
         negative one, and for sixty or more in a place below the first ("1:75"
         is a slip, not a minute and a quarter). */
     std::optional<double> typedTime (const std::string& typed);
 
-    /*  Whether `typed` is written as a clock: it has a colon. */
+    /*  Whether `typed` is written as a clock: it has a colon, or a unit. */
     bool typedAsClock (const std::string& typed);
 }

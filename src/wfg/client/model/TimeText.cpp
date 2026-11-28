@@ -20,7 +20,9 @@
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
+#include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cmath>
 #include <vector>
 
@@ -134,9 +136,90 @@ namespace wfg::client::model
         return clockShown() ? clockTime (seconds, 1) : tenthsReading (seconds);
     }
 
+    namespace
+    {
+        bool isUnit (char c)
+        {
+            return c == 'h' || c == 'H' || c == 'm' || c == 'M' || c == 's' || c == 'S';
+        }
+
+        /*  A TIME WITH ITS UNITS (§151, BKQ; the author, 2026-11-28: "Could we also
+            type in 1h34m3s1 and convert to 1:34:03.1?"): numbers each followed by h,
+            m or s, in that order, spaces between allowed. Digits after the s are its
+            tenths and on, as after a point - `3s1` is 3.1. A number after the last
+            unit with none of its own is the next place down: `2m30` is 2:30, `1h30`
+            1:30:00. Below the first place a count stays under sixty. */
+        std::optional<double> unitTime (const std::string& typed)
+        {
+            std::string text;
+
+            for (const auto c : typed)
+                if (c != ' ' && c != '\t')
+                    text += c == ',' ? '.' : static_cast<char> (std::tolower (static_cast<unsigned char> (c)));
+
+            double total = 0.0;
+            int place = 0;                 // 0 none yet, 3 hours, 2 minutes, 1 seconds
+            std::size_t at = 0;
+
+            while (at < text.size())
+            {
+                const auto from = at;
+
+                while (at < text.size() && (std::isdigit (static_cast<unsigned char> (text[at])) || text[at] == '.'))
+                    ++at;
+
+                if (at == from)
+                    return std::nullopt;
+
+                const auto value = number (text.substr (from, at - from));
+
+                if (! value.has_value() || *value < 0.0)
+                    return std::nullopt;
+
+                //  Its unit: the letter after it, or the place below the last one.
+                int unit = 0;
+
+                if (at < text.size())
+                {
+                    const auto c = text[at++];
+                    unit = c == 'h' ? 3 : c == 'm' ? 2 : c == 's' ? 1 : -1;
+                }
+                else
+                {
+                    unit = place - 1;
+                }
+
+                if (unit <= 0 || (place != 0 && unit >= place))
+                    return std::nullopt;
+
+                if (place != 0 && *value >= 60.0)
+                    return std::nullopt;
+
+                total += *value * (unit == 3 ? 3600.0 : unit == 2 ? 60.0 : 1.0);
+                place = unit;
+
+                //  Digits after the s are its fraction: `3s1` is 3.1.
+                if (unit == 1 && at < text.size())
+                {
+                    const auto tail = text.substr (at);
+
+                    if (std::floor (*value) < *value
+                          || tail.find_first_not_of ("0123456789") != std::string::npos)
+                        return std::nullopt;
+
+                    total += *number ("0." + tail);
+                    at = text.size();
+                }
+            }
+
+            return place != 0 ? std::optional<double> (total) : std::nullopt;
+        }
+    }
+
     bool typedAsClock (const std::string& typed)
     {
-        return typed.find (':') != std::string::npos;
+        return typed.find (':') != std::string::npos
+                 || std::any_of (typed.begin(), typed.end(), isUnit);
     }
 
     std::optional<double> typedTime (const std::string& typed)
@@ -145,6 +228,9 @@ namespace wfg::client::model
 
         if (text.empty())
             return std::nullopt;
+
+        if (std::any_of (text.begin(), text.end(), isUnit))
+            return unitTime (text);
 
         std::vector<std::string> parts;
         std::size_t from = 0;

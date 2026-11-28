@@ -17838,6 +17838,24 @@ TEST_CASE ("client: a time is written in seconds or as a clock, the hours only p
     CHECK_FALSE (model::typedTime ("soon").has_value());
     CHECK_FALSE (model::typedTime ("").has_value());
     CHECK (model::timeFrom ("1:02:03") == doctest::Approx (3723.0));
+
+    //  With its units (§151, BKQ; the author's own example).
+    CHECK (model::typedTime ("1h34m3s1") == doctest::Approx (5643.1));
+    CHECK (model::clockTime (*model::typedTime ("1h34m3s1")) == "1:34:03.1");
+    CHECK (model::typedTime ("2m30") == doctest::Approx (150.0));
+    CHECK (model::typedTime ("1h30") == doctest::Approx (5400.0));
+    CHECK (model::typedTime ("90s") == doctest::Approx (90.0));
+    CHECK (model::typedTime ("3.1s") == doctest::Approx (3.1));
+    CHECK (model::typedTime ("1H 5M 2,5S") == doctest::Approx (3902.5));
+    CHECK (model::typedTime ("4m") == doctest::Approx (240.0));
+    CHECK (model::typedAsClock ("2m30"));
+    CHECK_FALSE (model::typedAsClock ("83.5"));
+    CHECK_FALSE (model::typedTime ("3s1m").has_value());   // out of order
+    CHECK_FALSE (model::typedTime ("1m75s").has_value());  // a slip
+    CHECK_FALSE (model::typedTime ("1h2h").has_value());
+    CHECK_FALSE (model::typedTime ("3.5s1").has_value());  // two fractions
+    CHECK_FALSE (model::typedTime ("1x").has_value());
+    CHECK_FALSE (model::typedTime ("m").has_value());
 }
 
 TEST_CASE ("client: the cue list's times follow the show's format, and nought stays blank where it was")
