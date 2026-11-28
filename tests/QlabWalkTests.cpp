@@ -788,7 +788,7 @@ TEST_CASE ("qlab walk: a picture placed - offsets a % of its canvas, a picture a
     CHECK (said (plan, "% across and 50 % up and down"));
 }
 
-TEST_CASE ("qlab walk: a movie's timing its Ranges, its held last frame and its sound said (§62, ALH)")
+TEST_CASE ("qlab walk: a movie's timing its Ranges, its held last frame kept and its sound said (§62, ALH; §151.7)")
 {
     auto movie = picture ("video/CH1.mov", "VIEW-1");
     movie.startTime = 2.5;
@@ -806,7 +806,13 @@ TEST_CASE ("qlab walk: a movie's timing its Ranges, its held last frame and its 
     CHECK (item.ranges[0].in == doctest::Approx (2.5));
     CHECK (item.ranges[0].out == doctest::Approx (30.0));
     CHECK (item.ranges[0].loops == 3);
-    CHECK (said (plan, "QLab held its last frame"));
+    CHECK (attribute (item, "holdLast") == "true");
+    CHECK_FALSE (said (plan, "QLab held its last frame"));
+
+    //  And one that did not hold has no switch thrown.
+    movie.holdLastFrame = false;
+    const auto plain = walk (withStages ({ movie }));
+    CHECK (attribute (top (plain)[0], "holdLast").empty());
     CHECK (said (plan, "its sound played in QLab, at -6 dB"));
 }
 

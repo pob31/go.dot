@@ -2143,6 +2143,15 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="holdLast">
+          <a:documentation>A movie that holds its last frame (namespace draft 151.7, BKR; the author, 2026-11-28): at the end of its last pass the picture stays up and the cue keeps running, holding, as a still does, until Esc, a stop cue or a kill takes it down - so a post-wait, an auto-follow or a group waiting on it waits as long as the picture is up (his pick). Its locked sounds end as they do. Off by default: the picture goes with the last pass. A movie only; QLab-s hold at end is imported to it.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="hue">
           <a:documentation>Its colours turned round the colour wheel, in degrees; nought changes nothing.</a:documentation>
           <data type="double">

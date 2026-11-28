@@ -742,9 +742,9 @@ namespace wfg::import::qlab
                         item.attributes.push_back ({ "rate", number (std::clamp (cue.rate, -20.0, 20.0), 4) });
                     ranges (cue, item);
 
+                    //  QLab's hold at end is Go.dot's own switch (§151.7, BKR).
                     if (cue.holdLastFrame)
-                        note (Note::Kind::approximated, cue, "QLab held its last frame: a Go.dot movie ends with its last "
-                              "pass, its picture going with it");
+                        item.attributes.push_back ({ "holdLast", "true" });
 
                     const auto main = std::find_if (cue.levels.begin(), cue.levels.end(),
                                                     [] (const Level& l) { return l.row == 0 && l.column == 0; });

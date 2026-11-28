@@ -1623,6 +1623,58 @@ TEST_CASE ("video: a movie with no Range plays once from its start offset at its
     CHECK (playedFor == doctest::Approx (0.75).epsilon (0.05));
 }
 
+TEST_CASE ("video: a movie that holds its last frame stays up and keeps running at its end, until it is stopped (§151.7)")
+{
+    /*  The author, 2026-11-28: "Can we add a toggle for video cues to hold the
+        last frame when getting to the end of the cue?" - and the cue keeps
+        running, holding as a still does (his pick, BKR). */
+    VideoRig rig;
+
+    const std::map<std::string, double> lengths { { "clip.mov", 1.0 } };
+    rig.runner.setMediaDurations (&lengths);
+
+    REQUIRE (rig.submitAndTick ("cue.create", { osc::Value::string ("VD000001"), osc::Value::int32 (0),
+                                                osc::Value::string ("video"), osc::Value::string ("Logo"),
+                                                osc::Value::string ("VD000070"),
+                                                osc::Value::string ("source"), osc::Value::string ("movie"),
+                                                osc::Value::string ("canvas"), osc::Value::string ("VD000011"),
+                                                osc::Value::string ("file"), osc::Value::string ("clip.mov"),
+                                                osc::Value::string ("holdLast"), osc::Value::string ("true") }).applied >= 1);
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000070") });
+    rig.ticks (3);
+
+    const auto* run = rig.runOf ("VD000070");
+    REQUIRE (run != nullptr);
+    const auto id = run->id;
+
+    //  Two seconds on, well past its one: still up, still running, on its last frame.
+    rig.ticks (100);
+    CHECK_FALSE (rig.runs.find (id)->isFinished());
+    CHECK (rig.sink.removed.empty());
+
+    const auto& times = rig.sink.geometry[id][video::Property::time];
+    REQUIRE_FALSE (times.empty());
+    CHECK (times.back().value == doctest::Approx (1.0));
+
+    //  Nothing more is placed while it holds.
+    const auto placed = times.size();
+    rig.ticks (20);
+    CHECK (rig.sink.geometry[id][video::Property::time].size() == placed);
+
+    //  A stop takes it down, as it takes a still.
+    rig.submitAndTick ("run.stop", { osc::Value::string (id) });
+    rig.ticks (4);
+    CHECK (rig.runs.find (id)->isFinished());
+    REQUIRE (rig.sink.removed.size() == 1);
+
+    //  And with the switch off, the picture goes with the last pass, as it always did.
+    REQUIRE (rig.document.setAttribute ("/godot/cue/VD000070/holdLast", "false").ok);
+    rig.submitAndTick ("cue.fire", { osc::Value::string ("VD000070") });
+    rig.ticks (100);
+    CHECK (rig.runOf ("VD000070")->isFinished());
+}
+
 TEST_CASE ("video: a movie's Ranges play as a sound's - each for its passes, then the next, and the run ends after the last")
 {
     VideoRig rig;

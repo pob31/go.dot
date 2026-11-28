@@ -37336,3 +37336,21 @@ header already wrote `m:ss.t`; the clock adds the hours past an hour.
   down - `2m30` is 2:30, `1h30` 1:30:00 *(mine)*; `90s` and `4m` alone are times. Below the first place a count
   stays under sixty, and a unit out of order is refused as a slip. The page's and the remote's time boxes are text
   boxes in either format now, so they take the letters.
+
+### 151.7 A movie that holds its last frame
+
+The author, 2026-11-28: "Can we add a toggle for video cues to hold the last frame when getting to the end of the
+cue?", then "Update the QLab import with the hold last frame."
+
+- **BKR** **`video/holdLast`**, off by default. On, a movie at the end of its last pass keeps its last frame up and
+  its run playing, holding as a still does (VJ), until Esc, a stop cue or a kill takes it down - so a post-wait,
+  an auto-follow or a group waiting on it waits as long as the picture is up *(the author's pick, offered as "Keeps
+  running" over "Counts as ended, picture stays")*. Its locked sounds end as they do. Read off the cue at the end,
+  so a switch thrown while it plays is honoured. A seek or a restart lets go of the hold and plays on. In the
+  persistent section a held movie is up, and is left alone. Greyed on a still, which has no last frame. The
+  inspector's words "hold last frame" are mine.
+- **QLab's hold at end** (`holdLastFrame`, read since §62) is imported to it; the note saying Go.dot could not hold
+  is gone.
+
+And to the author's question the same day - "Can the scripts and Pure Data cues be added to the permanent
+section?" - yes: the engine asserted them already (§51, §66), and the band takes them since BKL (151.2).

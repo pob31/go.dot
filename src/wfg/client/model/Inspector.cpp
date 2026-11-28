@@ -110,7 +110,7 @@ namespace wfg::client::model
                                "fit", "layer", "blend", "opacity", "dca",
                                "dcaCurve", "dcaOffset",
                                "videoInsert", "paint", "fadeIn",
-                               "startOffset", "rate", "delay", "delayBy",
+                               "startOffset", "rate", "delay", "delayBy", "holdLast",
                                "scale", "offsetX", "offsetY", "rotation", "flipH", "flipV",
                                "contrast", "saturation", "gamma", "hue",
                                "curveLuma", "curveRed", "curveGreen", "curveBlue",
@@ -242,6 +242,8 @@ namespace wfg::client::model
                 { "doh", "on Doh!" },
                 /*  A MOVIE'S SOUND (namespace draft 37.5, WJ). */
                 { "lockedTo", "locked to movie" },
+                //  A movie at its end (§151.7, BKR): the picture stays, the cue holding.
+                { "holdLast", "hold last frame" },
                 /*  A CAPTURE'S INPUT AND A CUE'S INSERT (namespace draft §44):
                     the author's words, the rows' names kept apart from a
                     sound's `input` and `insert`. */
@@ -1509,6 +1511,10 @@ namespace wfg::client::model
                     field.applies = ! dca.empty() && (kind == "video" || kind == "group");
                 else if (field.name == "dcaOffset")
                     field.applies = ! dca.empty() && (kind != "video" || source == "movie");
+
+                //  A still has no last frame to hold (§151.7, BKR).
+                else if (field.name == "holdLast")
+                    field.applies = source == "movie";
             }
         }
 

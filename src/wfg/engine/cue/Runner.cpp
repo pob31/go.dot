@@ -4305,6 +4305,9 @@ namespace wfg::cue
         if (job->removed || job->movieEnded)
             return true;
 
+        //  A movie holding its last frame plays on from where it is sought to (§151.7, BKR).
+        job->holding = false;
+
         double duration = 0.0;
 
         if (const auto* known = handlerDurations())
@@ -22488,6 +22491,10 @@ namespace wfg::cue
         const auto at = videoSampleAhead();
         const auto rate = videoSampleRate();
 
+        //  Holding its last frame (§151.7, BKR): nothing moves until it is sought or stopped.
+        if (job.holding)
+            return;
+
         if (at < 0 || rate <= 0 || at <= job.movieAt)
             return;
 
@@ -22646,6 +22653,17 @@ namespace wfg::cue
             placeVideoPoint (job, video::Property::time, { reaches, end });
             job.moviePosition = end;
             job.movieAt = reaches;
+
+            /*  UNLESS IT HOLDS ITS LAST FRAME (§151.7, BKR, the author's pick):
+                the picture stays and the run with it, holding as a still holds,
+                until Esc, a stop cue or a kill takes it down. Read off the cue
+                now, so a switch thrown while it plays is honoured at its end. */
+            if (static_cast<bool> (document.findById (job.cue)[juce::Identifier ("holdLast")]))
+            {
+                job.holding = true;
+                return;
+            }
+
             job.movieEnded = true;
 
             if (! job.removed)

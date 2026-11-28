@@ -3911,6 +3911,10 @@ namespace wfg::cue
             int bounce = 1;
             double pieceStart = 0.0;
 
+            /*  AT ITS END AND HOLDING ITS LAST FRAME (§151.7, BKR): up, and its run
+                playing, until something stops it or a seek moves it on. */
+            bool holding = false;
+
             /*  WHAT THE DCAS ABOVE IT LEAVE OF ITS OPACITY (namespace draft
                 37.5, WE), as last placed: all of it until one says less. */
             double dcaFactor = 1.0;
