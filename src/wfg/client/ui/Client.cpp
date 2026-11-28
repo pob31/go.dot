@@ -133,6 +133,7 @@
 #include <thread>
 #include <initializer_list>
 #include <utility>
+#include <tuple>
 #include <vector>
 
 namespace wfg::client
@@ -181,6 +182,11 @@ namespace wfg::client
             /*  THE CART DRAWN AS PADS, OR AS ITS LIST (namespace draft §125,
                 BEZ): the tabs' switch, in the menu too (§4.11). */
             menuCartPads,
+
+            /*  THE BIG TIME (namespace draft §151, BKP): the newest running cue's
+                elapsed or remaining time across the running cues' column - the
+                click on a time, in the menu too (§4.11). */
+            menuBigElapsed, menuBigRemaining,
 
             /*  THE SHOWS OPEN RECENT OFFERS, newest first, numbered from here
                 (§106): ten at most (app/RecentShows.h), so well short of 1000. */
@@ -1211,6 +1217,8 @@ namespace wfg::client
                     case menuRevert:
                     case menuRemoveList:
                     case menuCartPads:
+                    case menuBigElapsed:
+                    case menuBigRemaining:
                     case menuShowSettings:
                     case menuSurfaces:
                     case menuNetworkMonitor:
@@ -1344,6 +1352,11 @@ namespace wfg::client
                     /*  A CART AS PADS, under the lock too: pressing a pad is
                         playing the show (§125). Only while a cart is drawn. */
                     case menuCartPads:  return cartDrawn();
+
+                    /*  A TIME MADE BIG, under the lock too: reading the show is
+                        not editing it (§151). While a running cue has one. */
+                    case menuBigElapsed:   return shell->runs.canEnlarge ("elapsed");
+                    case menuBigRemaining: return shell->runs.canEnlarge ("remaining");
 
                     /*  Whenever the engine has a tap to read: watching the wire
                         changes nothing, under the lock or not. */
@@ -1633,6 +1646,17 @@ namespace wfg::client
                     //  THE CART DRAWN, AS PADS OR AS ITS LIST (§125, BEZ).
                     addMenuItem (menu, menuCartPads, juce::String (model::cartViewWords (shell->padsShown())));
 
+                    /*  THE BIG TIME (§151, BKP), ticked while it is up. The words are mine. */
+                    for (const auto& [item, which, words] : { std::tuple { menuBigElapsed, "elapsed", "Big elapsed time" },
+                                                              std::tuple { menuBigRemaining, "remaining", "Big remaining time" } })
+                    {
+                        juce::PopupMenu::Item entry { words };
+                        entry.itemID = item;
+                        entry.isEnabled = menuItemEnabled (item);
+                        entry.isTicked = shell->runs.enlargedWhich() == which;
+                        menu.addItem (entry);
+                    }
+
                     /*  WHAT CROSSED THE WIRE (author, 2026-09-30): OSC and MIDI,
                         in and out, in a window of its own. */
                     menu.addSeparator();
@@ -1721,6 +1745,8 @@ namespace wfg::client
                     case menuDeleteCue: removeChosen(); break;
                     case menuRemoveList: removeList (listShown()); break;
                     case menuCartPads:   setCartView (listDrawn, ! shell->padsShown()); break;
+                    case menuBigElapsed:   shell->runs.enlargeNewest ("elapsed"); break;
+                    case menuBigRemaining: shell->runs.enlargeNewest ("remaining"); break;
                     case menuLock:      send (gesture::setLocked (! model::isYes (last.locked))); break;
                     case menuGoDoh:     doh(); break;
                     case menuGoPause:   send (last.showPaused() ? gesture::play() : gesture::pause()); break;

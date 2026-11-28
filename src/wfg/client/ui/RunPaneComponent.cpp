@@ -182,7 +182,137 @@ namespace wfg::client::ui
 
     int RunPaneComponent::heightOf (const model::RunRow& entry) const
     {
-        return rowHeight() + (hasWaveform (entry) ? stripHeight() : 0);
+        return rowHeight() + (hasWaveform (entry) ? stripHeight() : 0)
+                 + (! bigRun.empty() && entry.id == bigRun ? bigHeight() : 0);
+    }
+
+    int RunPaneComponent::heightOfRow (int index) const
+    {
+        return index >= 0 && index < static_cast<int> (rows.size())
+                 ? heightOf (rows[static_cast<std::size_t> (index)]) : 0;
+    }
+
+    int RunPaneComponent::bigHeight() const noexcept
+    {
+        /*  THREE LINES OF THE ROW, a figure read from the back of a room - and
+            no more, so the rest of the pane stays in reach. Mine (BKP). */
+        return rowHeight() * 3;
+    }
+
+    RunPaneComponent::TimeCells RunPaneComponent::timeCellsOf (const model::RunRow& entry, int width) const
+    {
+        /*  THE SAME CUTS `paintRow` MAKES, in its order: the kill cross off the
+            right, the remaining time beside it; the state off the left, the
+            elapsed time beside it. */
+        const auto unit = juce::roundToInt (theme.type * 7.0);
+        const auto pad = unit / 2;
+        const auto font = Look::font (theme, 12.0f);
+
+        auto area = juce::Rectangle<int> (0, 0, width, rowHeight()).reduced (pad, 0);
+        area.removeFromLeft (pad);
+        area.removeFromRight (unit * 3);
+
+        const auto measure = [&font, unit] (const std::string& words)
+        {
+            return words.empty() ? 0
+                                 : juce::jmax (unit * 5, juce::GlyphArrangement::getStringWidthInt (
+                                                             font, juce::String (juce::CharPointer_UTF8 (words.c_str()))) + unit);
+        };
+
+        TimeCells cells;
+        cells.remaining = area.removeFromRight (measure (entry.remainingWords()));
+        area.removeFromLeft (unit * 6);
+        cells.elapsed = area.removeFromLeft (measure (entry.elapsedWords()));
+        return cells;
+    }
+
+    void RunPaneComponent::paintBigTime (const model::RunRow& entry, juce::Graphics& g,
+                                         juce::Rectangle<int> band, juce::Colour tint)
+    {
+        const auto remaining = bigWhich == "remaining";
+        const auto words = remaining ? entry.remainingWords() : entry.elapsedWords();
+        const auto unit = juce::roundToInt (theme.type * 7.0);
+
+        /*  WHICH OF THE TWO IT IS, in a word beside it - never the figure's
+            colour alone (§4.8). The words are mine. */
+        auto inner = band.reduced (unit, 0);
+        auto said = inner.removeFromLeft (unit * 9);
+
+        g.setColour (Look::colour (theme, "ink-dim"));
+        g.setFont (Look::font (theme, 11.0f));
+        g.drawText (remaining ? "remaining" : "elapsed", said, juce::Justification::centredLeft, false);
+
+        /*  THE FIGURE, AS LARGE AS THE BAND TAKES IT and fitted to the width the
+            column has: a wide pane reads it from further away. */
+        g.setColour (remaining ? tint : Look::colour (theme, "ink"));
+        g.setFont (Look::font (theme, 12.0f).withHeight (static_cast<float> (band.getHeight()) * 0.86f));
+        g.drawFittedText (juce::String (juce::CharPointer_UTF8 (words.c_str())), inner,
+                          juce::Justification::centredRight, 1, 0.5f);
+    }
+
+    juce::String RunPaneComponent::elapsedOf (int index) const
+    {
+        if (index < 0 || index >= static_cast<int> (rows.size()))
+            return {};
+
+        return juce::String (juce::CharPointer_UTF8 (rows[static_cast<std::size_t> (index)].elapsedWords().c_str()));
+    }
+
+    juce::String RunPaneComponent::remainingOf (int index) const
+    {
+        if (index < 0 || index >= static_cast<int> (rows.size()))
+            return {};
+
+        return juce::String (juce::CharPointer_UTF8 (rows[static_cast<std::size_t> (index)].remainingWords().c_str()));
+    }
+
+    void RunPaneComponent::enlargeTime (const std::string& runId, const std::string& which)
+    {
+        if (runId.empty() || (which != "elapsed" && which != "remaining"))
+        {
+            bigRun.clear();
+            bigWhich.clear();
+        }
+        else
+        {
+            bigRun = runId;
+            bigWhich = which;
+        }
+
+        layOutRows();
+        canvas.repaint();
+    }
+
+    bool RunPaneComponent::canEnlarge (const std::string& which) const
+    {
+        if (bigWhich == which && ! bigRun.empty())
+            return true;
+
+        return std::any_of (rows.begin(), rows.end(), [&which] (const model::RunRow& row)
+        {
+            return row.state != "done" && row.state != "failed"
+                     && ! (which == "remaining" ? row.remainingWords() : row.elapsedWords()).empty();
+        });
+    }
+
+    bool RunPaneComponent::enlargeNewest (const std::string& which)
+    {
+        if (bigWhich == which && ! bigRun.empty())
+        {
+            enlargeTime ({}, {});
+            return true;
+        }
+
+        //  The newest: the last drawn, the pane being in the order things happened.
+        for (auto at = rows.rbegin(); at != rows.rend(); ++at)
+            if (at->state != "done" && at->state != "failed"
+                  && ! (which == "remaining" ? at->remainingWords() : at->elapsedWords()).empty())
+            {
+                enlargeTime (at->id, which);
+                return true;
+            }
+
+        return false;
     }
 
     int RunPaneComponent::topOf (int index) const
@@ -283,7 +413,11 @@ namespace wfg::client::ui
     void RunPaneComponent::hovered (const juce::MouseEvent& event)
     {
         const auto index = rowAt (event.y);
-        const auto over = index >= 0 && overCross (event.x)
+
+        //  Not over the big time's band, which has no cross (§151, BKP).
+        const auto onBig = index >= 0 && rows[static_cast<std::size_t> (index)].id == bigRun
+                             && event.y >= topOf (index) + heightOfRow (index) - bigHeight();
+        const auto over = index >= 0 && ! onBig && overCross (event.x)
                             ? rows[static_cast<std::size_t> (index)].id
                             : std::string {};
 
@@ -306,7 +440,7 @@ namespace wfg::client::ui
         {
             const auto& entry = rows[static_cast<std::size_t> (index)];
 
-            if (stripFor (entry, canvas.getWidth(), heightOf (entry))
+            if (! onBig && stripFor (entry, canvas.getWidth(), heightOf (entry) - (entry.id == bigRun ? bigHeight() : 0))
                     .translated (0, topOf (index)).contains (event.getPosition()))
             {
                 if (scrubbable (entry))
@@ -875,6 +1009,20 @@ namespace wfg::client::ui
 
         rows = std::move (runs);
 
+        /*  THE BIG TIME ENDS WITH ITS CUE (§151, BKP, the author's pick): gone
+            from the pane, done or failed, and the pane is as it was. */
+        if (! bigRun.empty())
+        {
+            const auto still = std::find_if (rows.begin(), rows.end(),
+                                             [this] (const model::RunRow& row) { return row.id == bigRun; });
+
+            if (still == rows.end() || still->state == "done" || still->state == "failed")
+            {
+                bigRun.clear();
+                bigWhich.clear();
+            }
+        }
+
         /*  The heights can change without the set changing - a media run's
             analysis arriving gives it a band - so the canvas is re-measured
             every pass. It is a sum over a dozen rows. */
@@ -896,6 +1044,17 @@ namespace wfg::client::ui
         const auto pad = unit / 2;
 
         g.fillAll (Look::colour (theme, "panel-runs"));
+
+        /*  THE BIG TIME TAKES A BAND AT THE FOOT OF ITS ROW (§151, BKP): the
+            row above it as it always is, the figure under it across the column. */
+        const auto big = ! bigRun.empty() && entry.id == bigRun;
+        auto bigBand = juce::Rectangle<int> {};
+
+        if (big)
+        {
+            bigBand = { 0, height - bigHeight(), width, bigHeight() };
+            height -= bigHeight();
+        }
 
         /*  WHERE THE STRIP GOES, and there are two answers. A WAVEFORM takes
             a band of its own under the words, which is what the taller row
@@ -974,12 +1133,17 @@ namespace wfg::client::ui
             run its code's own label, `01:00:12:04` (namespace draft §59),
             which is wider than a sound's seconds: the cell grows to it rather
             than cutting the frames off, which are the part that moves. */
-        const auto clock = clockFor (entry);
-        g.setColour (Look::colour (theme, "ink-faint"));
+        /*  AND SINCE §151 (BKO) WHAT IS LEFT takes this place, a minus and the
+            time to the end - nothing where there is none, a mic or a loop for
+            ever - and elapsed goes on the left, after the state. */
+        const auto cells = timeCellsOf (entry, width);
         g.setFont (Look::font (theme, 12.0f));
 
-        auto positionCell = area.removeFromRight (clockWidth (entry, g.getCurrentFont()));
-        g.drawText (clock, positionCell, juce::Justification::centredRight, false);
+        const auto remainingWords = entry.remainingWords();
+        g.setColour (Look::colour (theme, big && bigWhich == "remaining" ? "ink" : "ink-faint"));
+        g.drawText (juce::String (juce::CharPointer_UTF8 (remainingWords.c_str())), cells.remaining,
+                    juce::Justification::centredRight, false);
+        area.removeFromRight (cells.remaining.getWidth());
 
         /*  The mark, or the word for every state that is not one of the two.
 
@@ -988,6 +1152,17 @@ namespace wfg::client::ui
             to know what is happening (author's screenshot, 2026-09-18). A mark
             is a glyph and never needs it; only the words do. */
         auto stateCell = area.removeFromLeft (unit * 6);
+
+        //  Elapsed, after the state (§151, BKO).
+        {
+            const auto elapsedWords = entry.elapsedWords();
+            g.setColour (Look::colour (theme, big && bigWhich == "elapsed" ? "ink" : "ink-faint"));
+            g.setFont (Look::font (theme, 12.0f));
+            g.drawText (juce::String (juce::CharPointer_UTF8 (elapsedWords.c_str())), cells.elapsed,
+                        juce::Justification::centredLeft, false);
+            area.removeFromLeft (cells.elapsed.getWidth());
+        }
+
         g.setColour (tint);
         g.setFont (Look::font (theme, entry.mark().empty() ? 11.0f : 13.0f));
 
@@ -1043,6 +1218,12 @@ namespace wfg::client::ui
             g.fillRect (area.getX(), area.getCentreY() + juce::roundToInt (theme.type * 7.0), wide, 1);
         }
 
+        if (big)
+        {
+            paintBigTime (entry, g, bigBand, tint);
+            height += bigHeight();
+        }
+
         g.setColour (Look::colour (theme, "rule").withAlpha (0.5f));
         g.fillRect (0, height - 1, width, 1);
     }
@@ -1066,12 +1247,43 @@ namespace wfg::client::ui
             anywhere on the row is a cue an operator did not mean to stop. */
         const auto unit = juce::roundToInt (theme.type * 7.0);
 
+        /*  THE BIG TIME, PRESSED, IS PUT BACK (§151, BKP) - first, and right
+            across: no cross is drawn on its band, so none is pressed there. */
+        const auto top = topOf (index);
+
+        if (! bigRun.empty() && entry.id == bigRun && y >= top + heightOf (entry) - bigHeight())
+        {
+            enlargeTime ({}, {});
+            return;
+        }
+
         if (x >= canvas.getWidth() - unit * 3)
         {
             if (actions.kill)
                 actions.kill (entry.id);
 
             return;
+        }
+
+        //  A time cell on the name line makes that time big, or puts it back when it already is.
+
+        if (y < top + rowHeight())
+        {
+            const auto cells = timeCellsOf (entry, canvas.getWidth());
+            const auto at = juce::Point<int> (x, y - top);
+            const auto which = cells.elapsed.contains (at)   ? std::string ("elapsed")
+                             : cells.remaining.contains (at) ? std::string ("remaining")
+                                                             : std::string {};
+
+            if (! which.empty())
+            {
+                if (entry.id == bigRun && which == bigWhich)
+                    enlargeTime ({}, {});
+                else
+                    enlargeTime (entry.id, which);
+
+                return;
+            }
         }
 
         /*  THE NAME AIMS A SURFACE'S ROTARIES at the cue (author, 2026-09-25:
@@ -1205,7 +1417,24 @@ namespace wfg::client::ui
             return;
 
         const auto& entry = rows[static_cast<std::size_t> (index)];
-        const auto strip = stripFor (entry, canvas.getWidth(), heightOf (entry))
+
+        /*  A PRESS ON THE BIG TIME IS A CLICK AND NEVER A GRAB (§151, BKP). One
+            on a time cell may be either - the strip of a one-line row lies under
+            the cells too - so it is noted, and a release that has not moved is
+            the click (`released`). */
+        {
+            const auto top = topOf (index);
+            const auto cells = timeCellsOf (entry, canvas.getWidth());
+            const auto at = juce::Point<int> (event.x, event.y - top);
+
+            if (entry.id == bigRun && event.y >= top + heightOf (entry) - bigHeight())
+                return;
+
+            pressedOnTime = event.y < top + rowHeight() && (cells.elapsed.contains (at) || cells.remaining.contains (at));
+            pressedAt = event.getPosition();
+        }
+
+        const auto strip = stripFor (entry, canvas.getWidth(), heightOf (entry) - (entry.id == bigRun ? bigHeight() : 0))
                                .translated (0, topOf (index));
 
         if (! scrubbable (entry) || ! strip.contains (event.getPosition()))
@@ -1318,6 +1547,18 @@ namespace wfg::client::ui
             clicked (event);
             return;
         }
+
+        /*  A TIME CELL PRESSED AND LET GO WHERE IT WAS PRESSED is a click on the
+            time (§151, BKP), not a grab: nothing is sought. */
+        if (pressedOnTime && event.getPosition().getDistanceFrom (pressedAt) <= 3)
+        {
+            pressedOnTime = false;
+            endScrub();
+            clicked (event);
+            return;
+        }
+
+        pressedOnTime = false;
 
         /*  Letting go sends where the head settled - once, whether or not the
             throttle would have - and a press that never moved sends nothing:

@@ -106,6 +106,27 @@ namespace wfg::client::ui
             test reads what a hand would see. Empty past the end. */
         juce::String besideOf (int index) const;
 
+        /*  ELAPSED ON THE LEFT, REMAINING ON THE RIGHT (namespace draft §151,
+            BKO), and the one a click made big across the column (BKP; the
+            author, 2026-11-28: "could clicking on either time of a running cue
+            enlarge it to the full width of the running cues column? This helps
+            a technician see from afar"). The painter's words, public so a test
+            reads what a hand would see; empty past the end. */
+        juce::String elapsedOf (int index) const;
+        juce::String remainingOf (int index) const;
+
+        /*  THE BIG TIME: a run's `elapsed` or `remaining`, or nothing. One at a
+            time; it ends with its run (the author's pick). View state, never
+            the show's (§4.10). `enlargeNewest` is the menu's way to it (§4.11):
+            the newest running cue with that time, or off when it is already
+            that one; false when there is nothing to enlarge. */
+        void enlargeTime (const std::string& runId, const std::string& which);
+        bool enlargeNewest (const std::string& which);
+        bool canEnlarge (const std::string& which) const;
+        const std::string& enlargedRun() const noexcept { return bigRun; }
+        const std::string& enlargedWhich() const noexcept { return bigWhich; }
+        int heightOfRow (int index) const;
+
         /*  WHAT THE GHOST HEAD'S BOX SAYS while a scrub is held - the clock of
             the second a release sends, or a timecode run's label there (§59) -
             and empty otherwise. Public so a test reads what a hand would see. */
@@ -306,6 +327,24 @@ namespace wfg::client::ui
 
         /** The run whose cross the pointer rests on; empty when none. */
         std::string hoverKill;
+
+        //  The big time (§151, BKP): which run, and `elapsed` or `remaining`.
+        std::string bigRun, bigWhich;
+
+        //  A press on a time cell, and where: let go there, it is a click on the time.
+        bool pressedOnTime = false;
+        juce::Point<int> pressedAt;
+        int bigHeight() const noexcept;
+
+        //  Where a row's two time cells are, on its name line, for the painter and the hit test alike.
+        struct TimeCells
+        {
+            juce::Rectangle<int> elapsed, remaining;
+        };
+
+        TimeCells timeCellsOf (const model::RunRow& entry, int width) const;
+        void paintBigTime (const model::RunRow& entry, juce::Graphics& g, juce::Rectangle<int> band,
+                           juce::Colour tint);
 
         /** The run whose strip the pointer rests on and could scrub; empty when none. */
         std::string hoverScrub;

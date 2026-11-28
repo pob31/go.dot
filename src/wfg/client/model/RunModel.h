@@ -44,6 +44,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 #include <map>
@@ -256,6 +257,22 @@ namespace wfg::client::model
         /*  WHAT THE ROW'S CLOCK SAYS: a timecode run's label once it has been
             let go, else `position` - the seconds - as for every other run. */
         std::string clockWords() const;
+
+        /*  ELAPSED AND REMAINING (namespace draft §151, BKO; the author,
+            2026-11-28: "For running cues, could we show elapsed time (left
+            side) and remaining time (right side)?"), in seconds of the room:
+            a wait's, counted down; a sound's or a movie's through its file or
+            its ranges, passes and all, at the speed it plays; a code's to its
+            length. Nothing where there is no end to count to - a mic, a range
+            looping for ever, a code that runs until it is stopped - or no start. */
+        std::optional<double> elapsedSeconds() const;
+        std::optional<double> remainingSeconds() const;
+
+        /*  The two as the pane writes them, in the show's format: elapsed, or
+            the clock words when there is no count; remaining after a minus,
+            empty when there is none. */
+        std::string elapsedWords() const;
+        std::string remainingWords() const;
     };
 
     /*  Every run the engine is publishing, nested by parent and ordered the

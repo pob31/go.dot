@@ -37299,3 +37299,22 @@ groups can be persistent, so … stays where it is" (mine). `wfg validate` no lo
 
 **Words on screen:** the Playback page's choice and its sentence: "Every time in the show: 83.5 in seconds, or
 1:23.5 - with the hours past an hour, 1:02:03.5. A time can be typed either way." (mine).
+
+### 151.4 The running cues: elapsed, remaining, and one of them big
+
+- **BKO** **Elapsed on the left, after the state; remaining on the right, beside the cross**, a minus before it,
+  both in the show's format (§151.3). Remaining is counted through the file from where it is to where it stops,
+  or through its ranges - the passes left of the one it is in and every range after it - at the speed it plays;
+  a wait is counted down; a timecode run's elapsed is its label (§59) and its remaining is to its length. No
+  remaining where there is no end: a mic, an OSC or MIDI process, a range looping for ever, a code running until
+  it is stopped. The position that sat on the right is the elapsed now. The web page's running line adds what is
+  left for a sound with no ranges. *(The minus and the cells' places are mine.)*
+- **BKP** **A click on either time draws it big** across the running cues' column, in a band three lines high at
+  the foot of its row, the word "elapsed" or "remaining" beside it (§4.8). One at a time; a click on it, or on the
+  same cell, puts it back; it ends with its cue - done, failed or gone from the pane (the author's pick). View
+  state of the window, never the show's (§4.10). A press on a time that moves is still a scrub; one let go where
+  it was pressed is the click. *Show > Big elapsed time* and *Big remaining time* do the same for the newest
+  running cue (§4.11). *(Mine: the band's height, the words, the menu items.)*
+
+**Words on screen:** "elapsed", "remaining", "Big elapsed time", "Big remaining time", and the page's "… left"
+(mine).

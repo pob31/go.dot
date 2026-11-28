@@ -44,6 +44,7 @@
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/Timecode.h>
+#include <wfg/client/model/TimeText.h>
 #include <wfg/client/ui/CueListComponent.h>
 
 #include <wfg/engine/audio/MediaInfo.h>
@@ -4291,6 +4292,178 @@ TEST_CASE ("run pane: a click on a running cue's name aims the rotaries, and on 
 
     pane.clickAt (60, row / 2);
     CHECK (aimed == std::vector<std::string> { "CUE00001", "" });
+}
+
+//==============================================================================
+/*  ELAPSED ON THE LEFT, REMAINING ON THE RIGHT, AND ONE OF THEM BIG (namespace
+    draft §151, BKO-BKP; the author, 2026-11-28: "For running cues, could we
+    show elapsed time (left side) and remaining time (right side)? And could
+    clicking on either time of a running cue enlarge it to the full width of the
+    running cues column?"; the big time ends with its cue, his pick). */
+namespace
+{
+    struct ShownInSeconds
+    {
+        ShownInSeconds()  { model::setShownTimeFormat (model::TimeFormat::seconds); }
+        ~ShownInSeconds() { model::setShownTimeFormat (model::TimeFormat::seconds); }
+    };
+
+    model::RunRow soundAt (const char* id, double seconds, double length)
+    {
+        model::RunRow row;
+        row.id = id;
+        row.cueId = std::string ("C") + (id + 1);
+        row.cueName = "Bed";
+        row.kind = "media";
+        row.state = "playing";
+        row.file = "rain.wav";
+        row.seconds = seconds;
+        row.position = model::tenthsReading (seconds);
+        row.length = length;
+        row.playTo = length;
+        return row;
+    }
+}
+
+TEST_CASE ("run pane: a run's elapsed and remaining time - through its file, its ranges and their passes, a wait, at its speed")
+{
+    ShownInSeconds shown;
+
+    auto bed = soundAt ("RUN00001", 12.3, 45.0);
+    CHECK (bed.elapsedWords() == "12.3");
+    CHECK (bed.remainingWords() == "\xe2\x88\x92" "32.7");
+
+    //  From a start offset: the seconds before it are never heard.
+    bed.playFrom = 10.0;
+    CHECK (*bed.elapsedSeconds() == doctest::Approx (2.3));
+
+    //  At double speed, in the room's seconds.
+    bed.playFrom = 0.0;
+    bed.rate = 2.0;
+    CHECK (*bed.remainingSeconds() == doctest::Approx (16.35));
+
+    //  Ranges and their passes: ten seconds twice, then ten once; the second pass, four seconds in.
+    auto looped = soundAt ("RUN00002", 4.0, 60.0);
+    looped.ranges = { { "R1", "", 0.0, 10.0, 2 }, { "R2", "", 10.0, 20.0, 1 } };
+    looped.rangeIndex = 0;
+    looped.rangeIteration = 2;
+    CHECK (*looped.elapsedSeconds() == doctest::Approx (14.0));
+    CHECK (*looped.remainingSeconds() == doctest::Approx (16.0));
+
+    //  A range looping for ever has no end to count to; elapsed still counts.
+    looped.ranges[1].loops = 0;
+    CHECK_FALSE (looped.remainingSeconds().has_value());
+    CHECK (looped.remainingWords().empty());
+    CHECK (looped.elapsedSeconds().has_value());
+
+    //  A wait, counted down.
+    model::RunRow wait;
+    wait.id = "RUN00003";
+    wait.kind = "memo";
+    wait.state = "waiting";
+    wait.remaining = 3.0;
+    wait.waitTotal = 5.0;
+    CHECK (*wait.elapsedSeconds() == doctest::Approx (2.0));
+    CHECK (wait.remainingWords() == "\xe2\x88\x92" "3.0");
+
+    //  A mic: its clock as ever, and no end.
+    model::RunRow mic;
+    mic.id = "RUN00004";
+    mic.kind = "mic";
+    mic.state = "playing";
+    mic.position = "5.0";
+    mic.seconds = 5.0;
+    CHECK (mic.elapsedWords() == "5.0");
+    CHECK (mic.remainingWords().empty());
+
+    //  And in the show's clock (§151, BKM).
+    model::setShownTimeFormat (model::TimeFormat::clock);
+    bed.rate = 1.0;
+    CHECK (bed.elapsedWords() == "0:12.3");
+    CHECK (bed.remainingWords() == "\xe2\x88\x92" "0:32.7");
+}
+
+TEST_CASE ("run pane: a click on a running cue's elapsed or remaining time makes it big across the column, until clicked again or its cue ends")
+{
+    ShownInSeconds shown;
+    std::vector<std::string> aimed, killed;
+
+    ui::RunPaneComponent::Actions actions;
+    actions.aim = [&aimed] (const std::string& cueId) { aimed.push_back (cueId); };
+    actions.kill = [&killed] (const std::string& runId) { killed.push_back (runId); };
+
+    auto bed = soundAt ("RUN00001", 12.3, 45.0);
+
+    model::RunRow mic;
+    mic.id = "RUN00002";
+    mic.cueId = "CUE00002";
+    mic.cueName = "Voice";
+    mic.kind = "mic";
+    mic.state = "playing";
+
+    ui::RunPaneComponent pane (model::Theme {}, actions);
+    pane.setSize (450, 300);
+    pane.show ({ bed, mic }, {});
+
+    const auto row = juce::roundToInt (model::Theme {}.row * model::Theme {}.type);
+    const auto unit = juce::roundToInt (model::Theme {}.type * 7.0);
+
+    CHECK (pane.elapsedOf (0) == "12.3");
+    CHECK (pane.remainingOf (0) == juce::String (juce::CharPointer_UTF8 ("\xe2\x88\x92" "32.7")));
+    CHECK (pane.remainingOf (1).isEmpty());
+    CHECK (pane.heightOfRow (0) == row);
+
+    //  The elapsed cell, after the state: big, the row three lines taller, nothing aimed.
+    const auto elapsedX = unit + unit * 6 + unit;
+    pane.clickAt (elapsedX, row / 2);
+    CHECK (pane.enlargedRun() == "RUN00001");
+    CHECK (pane.enlargedWhich() == "elapsed");
+    CHECK (pane.heightOfRow (0) == row * 4);
+    CHECK (aimed.empty());
+
+    //  Painted, the figure across the band.
+    {
+        juce::Image canvas (juce::Image::ARGB, 450, 300, true);
+        juce::Graphics g (canvas);
+        pane.paintEntireComponent (g, true);
+    }
+
+    //  The remaining cell, beside the cross: that one instead. The cross still kills.
+    const auto remainingX = 450 - unit * 3 - unit;
+    pane.clickAt (remainingX, row / 2);
+    CHECK (pane.enlargedWhich() == "remaining");
+    CHECK (killed.empty());
+
+    //  A click on the band puts it back - and at its right end, where the cross is on a row, kills nothing.
+    pane.clickAt (445, row * 2);
+    CHECK (pane.enlargedRun().empty());
+    CHECK (killed.empty());
+    CHECK (pane.heightOfRow (0) == row);
+
+    //  The same cell twice: big, then back.
+    pane.clickAt (elapsedX, row / 2);
+    pane.clickAt (elapsedX, row / 2);
+    CHECK (pane.enlargedRun().empty());
+
+    //  The menu's way (§4.11): the newest running cue with that time - the mic has none to count down.
+    CHECK (pane.canEnlarge ("remaining"));
+    CHECK (pane.enlargeNewest ("remaining"));
+    CHECK (pane.enlargedRun() == "RUN00001");
+    CHECK (pane.enlargeNewest ("remaining"));     // asked again: back
+    CHECK (pane.enlargedRun().empty());
+    CHECK (pane.enlargeNewest ("elapsed"));
+    CHECK (pane.enlargedRun() == "RUN00001");    // the mic has no clock yet either
+
+    //  It ends with its cue: done, or gone from the pane.
+    bed.state = "done";
+    pane.show ({ bed, mic }, {});
+    CHECK (pane.enlargedRun().empty());
+
+    bed.state = "playing";
+    pane.show ({ bed, mic }, {});
+    pane.enlargeTime ("RUN00001", "elapsed");
+    pane.show ({ mic }, {});
+    CHECK (pane.enlargedRun().empty());
 }
 
 //==============================================================================

@@ -358,6 +358,145 @@ namespace wfg::client::model
         return position;
     }
 
+    namespace
+    {
+        struct Count
+        {
+            double elapsed = 0.0;
+            std::optional<double> remaining;
+        };
+
+        /*  HOW FAR IT HAS GOT AND HOW FAR IS LEFT, in seconds of its file (§151, BKO). */
+        std::optional<Count> countOf (const RunRow& row)
+        {
+            if (row.isWaiting())
+            {
+                if (! (row.waitTotal > 0.0))
+                    return std::nullopt;
+
+                return Count { std::max (0.0, row.waitTotal - row.remaining), std::max (0.0, row.remaining) };
+            }
+
+            if (! row.launched() || row.position.empty())
+                return std::nullopt;
+
+            if (row.kind == "timecode")
+            {
+                Count count { std::max (0.0, row.seconds), std::nullopt };
+
+                if (row.length > 0.0)
+                    count.remaining = std::max (0.0, row.length - row.seconds);
+
+                return count;
+            }
+
+            if (row.file.empty())
+                return std::nullopt;
+
+            if (row.ranges.empty())
+            {
+                Count count { std::max (0.0, row.seconds - row.playFrom), std::nullopt };
+
+                if (row.playTo > 0.0)
+                    count.remaining = std::max (0.0, row.playTo - row.seconds);
+
+                return count;
+            }
+
+            const auto current = row.rangeIndex;
+
+            if (current < 0 || static_cast<std::size_t> (current) >= row.ranges.size())
+                return std::nullopt;
+
+            const auto pass = std::max (row.rangeIteration, 1);
+            const auto& here = row.ranges[static_cast<std::size_t> (current)];
+            const auto length = std::max (0.0, here.length());
+
+            //  A bouncing range goes back on its even passes (§41).
+            const auto back = here.pingPong && pass % 2 == 0;
+            const auto into = std::clamp (back ? here.out - row.seconds : row.seconds - here.in, 0.0, length);
+
+            Count count;
+            auto forever = false;
+            double before = 0.0;
+            double after = 0.0;
+
+            for (std::size_t at = 0; at < row.ranges.size(); ++at)
+            {
+                const auto& range = row.ranges[at];
+                const auto whole = std::max (0.0, range.length()) * std::max (range.loops, 1);
+
+                if (static_cast<int> (at) < current)
+                    before += whole;
+                else if (static_cast<int> (at) > current)
+                {
+                    forever = forever || range.loops == 0;
+                    after += whole;
+                }
+            }
+
+            count.elapsed = before + static_cast<double> (pass - 1) * length + into;
+
+            if (here.loops == 0 || forever)
+                return count;
+
+            count.remaining = static_cast<double> (std::max (here.loops - pass, 0)) * length + (length - into) + after;
+            return count;
+        }
+
+        //  The run's speed, as a size: a file's seconds over the room's.
+        std::optional<double> speedOf (const RunRow& row)
+        {
+            if (row.isWaiting() || row.kind == "timecode")
+                return 1.0;
+
+            const auto size = std::abs (row.rate);
+            return size > 0.0 ? std::optional<double> (size) : std::nullopt;
+        }
+    }
+
+    std::optional<double> RunRow::elapsedSeconds() const
+    {
+        const auto count = countOf (*this);
+        const auto speed = speedOf (*this);
+
+        if (! count.has_value() || ! speed.has_value())
+            return std::nullopt;
+
+        return count->elapsed / *speed;
+    }
+
+    std::optional<double> RunRow::remainingSeconds() const
+    {
+        const auto count = countOf (*this);
+        const auto speed = speedOf (*this);
+
+        if (! count.has_value() || ! speed.has_value() || ! count->remaining.has_value())
+            return std::nullopt;
+
+        return *count->remaining / *speed;
+    }
+
+    std::string RunRow::elapsedWords() const
+    {
+        //  A code's own label, never its seconds (§59).
+        if (kind == "timecode" && ! timecode.empty() && launched())
+            return timecode;
+
+        if (const auto elapsed = elapsedSeconds())
+            return readingTime (*elapsed);
+
+        return clockWords();
+    }
+
+    std::string RunRow::remainingWords() const
+    {
+        if (const auto left = remainingSeconds())
+            return "\xe2\x88\x92" + readingTime (*left);       // a minus sign, U+2212
+
+        return {};
+    }
+
     bool RunRow::isWaiting() const noexcept
     {
         /*  The two states a run can be counted down in. They are the same

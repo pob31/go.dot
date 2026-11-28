@@ -183,6 +183,15 @@ function runRow(id, depth, out) {
 
     bits.push("at " + clockOrSeconds(position)
                 + (timed ? " of " + clockOrSeconds(length) : ""));
+
+    /*  AND WHAT IS LEFT, as the window's running cues say it (§151, BKO):
+        through the file, at the speed it plays. Its ranges are the window's to
+        count; a run with ranges says no more than it did. */
+    const rate = Math.abs(Number(tree.run(id, "rate", 1)));
+    const ranged = Number.isFinite(Number(tree.run(id, "range", NaN)));
+
+    if (timed && !ranged && rate > 0 && position <= length)
+      bits.push("−" + clockOrSeconds((length - position) / rate) + " left");
   }
 
   const clock = sceneClock(id);
