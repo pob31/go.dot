@@ -1155,6 +1155,13 @@ namespace wfg::cue
             and `deClickOwed` are the arm's and the scheduler's bookkeeping,
             never logged: levels are not, and the ramp submits nothing. */
         bool deClick = false;
+
+        /*  CARRIED ON BY A PERSISTENT ASSERTION (K8; namespace draft §151, BKK):
+            `startOffset`, `startRange` and `sliceFrom` are where Esc paused it.
+            A movie's job reads its playhead from them rather than from the cue,
+            and hands them to its locked sounds. Set by the handler that makes the
+            run. */
+        bool resumed = false;
         double deClickTo = 0.0;
         bool deClickOwed = false;
 

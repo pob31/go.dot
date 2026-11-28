@@ -804,6 +804,151 @@ TEST_CASE ("video: a double Esc clears every canvas at once, and a stop takes th
     }
 }
 
+//==============================================================================
+/*  A PICTURE IN THE PERSISTENT SECTION (namespace draft §151, BKK; the author,
+    2026-11-28: "a logo overlay (still or animated), some masking, a video
+    background (still or animated)"). Put up at the first step, left up while it
+    is, brought down by Esc with everything else and put up again by the next
+    step from its fade-in - a still has nothing to remember (§35.5) - and by a
+    double Esc the same, at once (PRD §3.29). */
+namespace
+{
+    struct PersistentVideoRig : VideoRig
+    {
+        PersistentVideoRig()
+        {
+            const auto made = document.createPersistent ("VD000001");
+            REQUIRE (made.ok);
+            section = made.id;
+        }
+
+        //  A step: the pointer on the memo and a GO, which is what makes the section check.
+        void step()
+        {
+            REQUIRE (submitAndTick ("standby.set", { osc::Value::string ("VD000003") }).applied == 1);
+            REQUIRE (submitAndTick ("go").applied >= 1);
+            ticks (30);
+        }
+
+        std::string section;
+    };
+}
+
+TEST_CASE ("video: a still in the persistent section is up from the first step, and back at the next after Esc or a double Esc")
+{
+    PersistentVideoRig rig;
+
+    const auto logo = rig.document.createCue (rig.section, 0, "video", "Logo").id;
+    REQUIRE_FALSE (logo.empty());
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + logo + "/canvas", "VD000011").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + logo + "/layer", "10").ok);
+
+    //  Not a warning any more: the section puts it up.
+    for (const auto& problem : rig.document.validate())
+        CHECK (problem.find ("does not put up a video cue") == std::string::npos);
+
+    rig.step();
+
+    const auto* first = rig.runOf (logo);
+    REQUIRE (first != nullptr);
+    CHECK (first->asserted);
+    CHECK_FALSE (first->isFinished());
+    const auto firstId = first->id;
+
+    //  Left up at the next step: one run, the same one.
+    rig.step();
+    CHECK (rig.runOf (logo)->id == firstId);
+
+    //  Esc takes it down over the panic fade, and the next step puts it up again.
+    rig.submitAndTick ("run.stopAll");
+    rig.ticks (80);
+    CHECK (rig.runs.find (firstId)->isFinished());
+
+    rig.step();
+    const auto* again = rig.runOf (logo);
+    REQUIRE (again != nullptr);
+    CHECK (again->id != firstId);
+    CHECK (again->asserted);
+    CHECK_FALSE (again->resumed);          // a still is put up, not carried on
+    CHECK_FALSE (again->isFinished());
+    const auto againId = again->id;
+
+    //  A double Esc: off at once, and back at the next step.
+    rig.submitAndTick ("run.killAll");
+    rig.ticks (2);
+    CHECK (rig.runs.find (againId)->isFinished());
+
+    rig.step();
+    const auto* third = rig.runOf (logo);
+    REQUIRE (third != nullptr);
+    CHECK (third->id != againId);
+    CHECK_FALSE (third->isFinished());
+}
+
+TEST_CASE ("video: a movie in the persistent section paused by Esc carries on from where it was at the next step, its locked sound with it")
+{
+    PersistentVideoRig rig;
+
+    const std::map<std::string, double> lengths { { "clip.mov", 20.0 }, { "clip (sound).wav", 20.0 } };
+    rig.runner.setMediaDurations (&lengths);
+
+    const auto movie = rig.document.createCue (rig.section, 0, "video", "Background").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + movie + "/source", "movie").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + movie + "/canvas", "VD000011").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + movie + "/file", "clip.mov").ok);
+
+    const auto sound = rig.document.createCue (rig.section, 1, "media", "Background sound").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + sound + "/file", "clip (sound).wav").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + sound + "/lockedTo", movie).ok);
+
+    rig.step();
+
+    const auto* first = rig.runOf (movie);
+    REQUIRE (first != nullptr);
+    CHECK (first->asserted);
+    const auto firstId = first->id;
+
+    //  The sound is the movie's: under it, and never asserted on its own.
+    const auto* firstSound = rig.runOf (sound);
+    REQUIRE (firstSound != nullptr);
+    CHECK (firstSound->parent == firstId);
+
+    const auto started = rig.runs.find (firstId)->startedAtTick;
+    REQUIRE (started >= 0);
+
+    rig.ticks (100);
+
+    const auto pressedAt = rig.tick;
+    rig.submitAndTick ("run.stopAll");
+    rig.ticks (80);
+    REQUIRE (rig.runs.find (firstId)->isFinished());
+
+    rig.step();
+
+    const auto* again = rig.runOf (movie);
+    REQUIRE (again != nullptr);
+    CHECK (again->id != firstId);
+    CHECK (again->asserted);
+    CHECK (again->resumed);
+
+    /*  WITH NO AUDIO SIDE the second is counted from the run's start at its
+        speed, as a bed's is (K8's fallback). */
+    const auto expected = static_cast<double> (pressedAt - started) / 50.0;
+    CHECK (again->startOffset == doctest::Approx (expected));
+
+    //  The picture comes up there.
+    const auto& times = rig.sink.geometry[again->id][video::Property::time];
+    REQUIRE_FALSE (times.empty());
+    CHECK (times.front().value == doctest::Approx (expected).epsilon (0.02));
+
+    //  And its sound with it, at the same second, under the new run.
+    const auto* againSound = rig.runOf (sound);
+    REQUIRE (againSound != nullptr);
+    CHECK (againSound->parent == again->id);
+    CHECK (againSound->startOffset == doctest::Approx (expected));
+    CHECK (againSound->resumed);
+}
+
 TEST_CASE ("video: with no picture side a video cue still runs, holds and stops - a replay's configuration")
 {
     VideoRig rig;

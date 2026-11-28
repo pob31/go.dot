@@ -4040,7 +4040,7 @@ TEST_CASE ("time group: kept by a persistent section, named for what starts it")
 
     const auto ignored = document.createCue (section.id, 1, "group", "Scene", {}, { { "mode", "timeline" } }).id;
     CHECK (anySays (document.warnings(), "Persistent/Group[" + ignored + "]: a persistent section asserts media,"
-                                         " mic, osc, midi and process cues and time groups"));
+                                         " mic, osc, midi, process and video cues and time groups"));
 
     //  The automatic name: what starts its members (implementer's words).
     const auto onLtc = timeGroup (document, listId, 0);

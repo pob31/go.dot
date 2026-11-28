@@ -91,7 +91,8 @@ namespace wfg::client::model
     };
 
     /*  WHAT A PERSISTENT SECTION KEEPS RUNNING (PRD §3.29, decision S; mic
-        since Phase 9b): media, mic, OSC and MIDI cues - the kinds the engine's
+        since Phase 9b; video, process, script and time groups since §151):
+        media, mic, video, OSC, MIDI, process and script cues and time groups - the kinds the engine's
         `solvePersistent` re-asserts. A fade asserts nothing, a stop is what
         SUSPENDS an assertion and a group is a lifetime rather than a state, so
         the engine takes any of them into the section and then ignores it, with

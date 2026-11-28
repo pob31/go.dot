@@ -14051,7 +14051,7 @@ TEST_CASE ("persistent: a fade in the section warns and is never asserted")
     auto said = false;
 
     for (const auto& problem : rig.document.warnings())
-        if (problem.find ("asserts media, mic, osc, midi and process cues") != std::string::npos)
+        if (problem.find ("asserts media, mic, osc, midi, process and video cues") != std::string::npos)
             said = true;
 
     CHECK (said);

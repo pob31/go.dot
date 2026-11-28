@@ -7573,7 +7573,7 @@ namespace wfg::doc
                 if (node.getType().toString() == "Persistent")
                 {
                     /*  MEDIA, MIC, OSC AND MIDI ARE WHAT A SECTION CAN ASSERT (§13.11; mic
-                        since Phase 9b).
+                        since Phase 9b; a video cue since §151, BKK).
                         A fade asserts nothing, a stop is the thing that
                         SUSPENDS an assertion, and a group is a lifetime rather
                         than a state. Each is left where it is and ignored, and
@@ -7581,19 +7581,6 @@ namespace wfg::doc
                     for (const auto& child : node)
                     {
                         const auto element = child.getType().toString().toStdString();
-
-                        /*  A VIDEO CUE WILL BE ASSERTED (namespace draft 35.5:
-                            an always-on matte is a mask cue here) and is not
-                            yet: said, so nobody waits for a picture that the
-                            section does not put up. */
-                        if (element == "Video")
-                        {
-                            problems.push_back ("/Show/.../Persistent/Video["
-                                                  + child[idProperty].toString().toStdString()
-                                                  + "]: a persistent section does not put up a video cue yet,"
-                                                    " so this one is ignored - fire it from the list instead");
-                            continue;
-                        }
 
                         /*  NOR TIMECODE (namespace draft §59, AHT): re-asserted at
                             every step, a code would take its own output over
@@ -7624,7 +7611,7 @@ namespace wfg::doc
                         problems.push_back (
                             "/Show/.../Persistent/" + element + "["
                               + child[idProperty].toString().toStdString()
-                              + "]: a persistent section asserts media, mic, osc, midi and process cues and"
+                              + "]: a persistent section asserts media, mic, osc, midi, process and video cues and"
                                 " time groups and nothing else - a fade asserts nothing, a stop is what"
                                 " suspends an assertion, any other group is a lifetime rather than a state - so"
                                 " this one is ignored");

@@ -2124,8 +2124,19 @@ namespace wfg::cue
             /*  A PROCESS CUE IS ASSERTED AS A SOUND IS (namespace draft §51,
                 ACL; PRD §3.29): relaunched when it is not running, from its
                 patch's beginning. */
+            /*  A SOUND LOCKED TO A MOVIE IS ITS MOVIE'S (namespace draft §37.5,
+                WJ): the movie fires it, so the section asserts the movie and
+                leaves the sound to it (§151, BKK). */
+            if (element == "Media")
+                if (const auto movie = cue[juce::Identifier ("lockedTo")].toString();
+                    movie.isNotEmpty() && document.findById (movie.toStdString()).hasType ("Video"))
+                    continue;
+
+            /*  AND A PICTURE (§151, BKK; namespace draft §35.3): put up at the
+                first step and again when it is not up - a logo, a mask, a
+                background, still or moving. */
             if (element == "Media" || element == "Midi" || element == "Mic" || element == "Process"
-                  || element == "Script")
+                  || element == "Script" || element == "Video")
             {
                 PlannedRun run;
                 run.cue = id;

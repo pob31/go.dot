@@ -1408,7 +1408,7 @@ TEST_CASE ("client: the persistent band takes what the section keeps running, an
 
     SUBCASE ("with no section yet, a kept kind asks for one, named for the list")
     {
-        for (const auto* kind : { "media", "mic", "osc", "midi" })
+        for (const auto* kind : { "media", "mic", "osc", "midi", "video", "process", "script" })
         {
             CAPTURE (kind);
             const auto drop = model::dropFor (band, cueOf ("MED1A001", kind, "Bed"), 0.5);
@@ -1437,11 +1437,18 @@ TEST_CASE ("client: the persistent band takes what the section keeps running, an
             const auto drop = model::dropFor (band, cueOf ("F4DE0001", kind, "Lights down"), 0.5);
 
             CHECK (drop.kind == model::DropKind::none);
-            CHECK (drop.refused == "only media, mic, OSC and MIDI cues can be persistent, so Lights down"
-                                   " stays where it is");
+            CHECK (drop.refused == "only media, mic, video, OSC, MIDI, process and script cues and time groups"
+                                   " can be persistent, so Lights down stays where it is");
 
             //  The sentence is what `describe` says for it, so the list has one place to ask.
             CHECK (model::describe (drop, band, false) == drop.refused);
+        }
+
+        //  A time group is kept (§60), as the engine keeps it; a group of any other mode is not.
+        {
+            auto timeGroup = cueOf ("F4DE0002", "group", "Clock");
+            timeGroup.mode = "time";
+            CHECK (model::dropFor (band, timeGroup, 0.5).kind == model::DropKind::persistent);
         }
 
         //  A cue with no name is named by its identifier.

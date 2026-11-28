@@ -1167,9 +1167,15 @@ namespace wfg::cue
             cue as it always did, and the next pass has nothing to carry on. */
         if (fireAtOnce)
         {
-            if (resumeNext.has_value() && kind == "media")
+            /*  AND A MOVIE ESC PAUSED (§151, BKK): the same point, read by the
+                video job as it comes up (`resumedMovieAt`) and handed to its locked
+                sounds. No de-click: a picture has no level to cut into. */
+            const auto movieResumed = kind == "video" && textOf (cue, "source") == "movie";
+
+            if (resumeNext.has_value() && (kind == "media" || movieResumed))
             {
                 const auto ranges = rangesOf (cue);
+                run->resumed = true;
                 const auto slices = static_cast<int> (ranges.size());
 
                 if (resumeNext->range >= 0 && slices > 0)
@@ -1206,7 +1212,7 @@ namespace wfg::cue
                     §24, GQ): armed at silence, up to its level over a tenth
                     of a second once it is heard. A bed the hook started from
                     its top had no resume point, and arrives as it always has. */
-                run->deClick = true;
+                run->deClick = kind == "media";
             }
 
             paused.erase (cueId);
@@ -2106,16 +2112,26 @@ namespace wfg::cue
             the one it was armed into. */
         for (const auto& run : runs.all())
         {
+            /*  AND A MOVIE IS PAUSED AS A BED IS (namespace draft §151, BKK):
+                a background or an animated logo carries on from where it was,
+                its locked sounds with it. A still, a fill, a mask has nothing
+                to remember - the next step puts it up again from its fade-in
+                (§35.5) - and is not noted here. */
+            const auto movie = run.kind == "video" && isMovieRun (run.id);
+
             if (run.isFinished() || run.state == runState::preparing || run.takenBack || run.stopAsked
-                  || ! run.parent.empty() || (run.kind != "media" && run.kind != "mic")
+                  || ! run.parent.empty() || (run.kind != "media" && run.kind != "mic" && ! movie)
                   || ! inPersistentSection (run.cue))
                 continue;
 
             PausedBed bed;
             bed.run = run.id;
-            bed.media = run.media;
 
-            if (run.kind == "media")
+            /*  A movie's run keeps no file name - it is the job's - so the one the cue
+                plays now is noted, for the resume to tell a file swapped since. */
+            bed.media = movie ? playedMediaOf (document.findById (run.cue), durations, renders).name : run.media;
+
+            if (run.kind == "media" || movie)
             {
                 const auto cue = document.findById (run.cue);
                 const auto heard = run.startedAtTick >= 0;
@@ -2193,6 +2209,33 @@ namespace wfg::cue
                 continue;
 
             const auto* run = runs.find (bed.run);
+
+            /*  A MOVIE'S PLAYHEAD (§151, BKK) is the one it publishes (`publishMoviePlayhead`):
+                the second of its file, and the range and pass it is in. */
+            if (run != nullptr && run->kind == "video" && run->startedAtTick >= 0 && isMovieRun (run->id))
+            {
+                ResumePoint at;
+                at.from = std::max (0.0, run->position);
+
+                if (const auto ranges = rangesOf (document.findById (run->cue));
+                    ! ranges.empty() && run->range >= 0 && static_cast<std::size_t> (run->range) < ranges.size())
+                {
+                    const auto& slice = ranges[static_cast<std::size_t> (run->range)];
+                    const auto length = slice.out - slice.in;
+                    const auto pass = std::max (run->rangeIteration - 1, 0);
+
+                    /*  Seconds of the slice since its first pass began, passes not wrapped -
+                        `sliceFrom`'s measure. A bouncing pass going back counts from its end. */
+                    const auto into = slice.pingPong && pass % 2 == 1 ? slice.out - run->position
+                                                                       : run->position - slice.in;
+
+                    at.range = run->range;
+                    at.from = length > 0.0 ? static_cast<double> (pass) * length + std::clamp (into, 0.0, length) : 0.0;
+                }
+
+                playheads[bed.run] = at;
+                continue;
+            }
 
             if (run == nullptr || run->kind != "media" || run->launchedAtSample <= 0)
                 continue;
@@ -2503,7 +2546,8 @@ namespace wfg::cue
                     everything else, and the next step arms it again. A stop cue
                     before the pointer suspends it, as it suspends a bed; the
                     pane's kill for the session. */
-                if (kind == "media" || kind == "mic" || isProcessLike (kind) || kind == "group")
+                if (kind == "media" || kind == "mic" || isProcessLike (kind) || kind == "group"
+                      || kind == "video")
                 {
                     /*  STILL SOUNDING, and left alone - unless it is the run
                         Esc paused, still on its way out over the panic fade:
@@ -6008,6 +6052,31 @@ namespace wfg::cue
                 job.rate = start.rate;
                 job.pieceStart = start.pieceStart;
                 job.rangeId = start.rangeId;
+
+                /*  CARRIED ON WHERE ESC PAUSED IT (§151, BKK): a second of the
+                    file, or the slice it was in at the same point and pass. */
+                if (const auto* made = runs.find (runId); made != nullptr && made->resumed)
+                {
+                    const auto ranges = rangesOf (cue);
+
+                    if (ranges.empty())
+                    {
+                        job.moviePosition = std::max (0.0, made->startOffset);
+                    }
+                    else if (made->startRange >= 0 && static_cast<std::size_t> (made->startRange) < ranges.size())
+                    {
+                        const auto& slice = ranges[static_cast<std::size_t> (made->startRange)];
+                        const auto length = slice.out - slice.in;
+                        const auto pass = length > 0.0 ? static_cast<int> (std::floor (made->sliceFrom / length)) : 0;
+                        const auto into = length > 0.0 ? made->sliceFrom - static_cast<double> (pass) * length : 0.0;
+                        const auto back = slice.pingPong && pass % 2 == 1;
+
+                        job.rangeId = slice.id;
+                        job.pass = pass;
+                        job.bounce = back ? -1 : 1;
+                        job.moviePosition = back != (job.rate < 0.0) ? slice.out - into : slice.in + into;
+                    }
+                }
             }
 
             /*  IN %, the author's unit (VR): the renderer's opacity is 0..1. */
@@ -18894,7 +18963,17 @@ namespace wfg::cue
                     continue;
             }
 
-            if (const auto made = spawnChild (engine, movieRun, soundCue, id, tick); ! made.empty())
+            /*  A MOVIE ESC PAUSED CARRIES ITS SOUNDS ON WITH IT (§151, BKK):
+                at the same point - they carry copies of its ranges - over the
+                de-click a bed carried on arrives over; armed there by
+                `spawnChild`. A sound armed already was armed where it was. */
+            if (const auto* movie = runs.find (movieRun); movie != nullptr && movie->resumed)
+                carryNextSound = CarriedPoint { movie->startOffset, movie->startRange, movie->sliceFrom };
+
+            const auto made = spawnChild (engine, movieRun, soundCue, id, tick);
+            carryNextSound.reset();
+
+            if (! made.empty())
             {
                 /*  ON THE SAMPLE THE CODE PUT ITS MOVIE ON (namespace draft §60,
                     TG.7): a time group's movie comes up where the code reaches its
@@ -19246,6 +19325,19 @@ namespace wfg::cue
                 parent != nullptr && parent->sampler && parent->kind == "video" && followsAMovie (cue))
                 if (auto* sound = runs.find (id))
                     sound->waitsForVoice = true;
+
+        /*  WHERE ITS MOVIE WAS CARRIED ON FROM (§151, BKK), set before the arm. */
+        if (kind == "media" && carryNextSound.has_value())
+            if (auto* sound = runs.find (id))
+            {
+                sound->startOffset = carryNextSound->startOffset;
+                sound->startRange = carryNextSound->startRange;
+                sound->sliceFrom = carryNextSound->sliceFrom;
+                sound->armedOrigin = sound->startOffset > 0.0 ? sound->startOffset : numberOf (cue, "startOffset");
+                sound->preWaitTicks = 0;
+                sound->resumed = true;
+                sound->deClick = true;
+            }
 
         if (kind == "media")
             armMedia (engine, cue, id);

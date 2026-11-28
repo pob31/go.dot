@@ -102,12 +102,17 @@ namespace wfg::client::model
 
     bool persists (const Row& cue)
     {
-        return cue.kind == "media" || cue.kind == "mic" || cue.kind == "osc" || cue.kind == "midi";
+        /*  AND WHAT THE SECTION HAS ASSERTED SINCE, which the window went on
+            refusing: a Pd patch and a script (§51, §66), a time group (§60) and
+            now a picture (§151, BKK). */
+        return cue.kind == "media" || cue.kind == "mic" || cue.kind == "osc" || cue.kind == "midi"
+                 || cue.kind == "video" || cue.kind == "process" || cue.kind == "script"
+                 || (cue.kind == "group" && cue.mode == "time");
     }
 
     std::string notPersistent (const Row& cue)
     {
-        return "only media, mic, OSC and MIDI cues can be persistent, so "
+        return "only media, mic, video, OSC, MIDI, process and script cues and time groups can be persistent, so "
                + (cue.name.empty() ? cue.id : cue.name) + " stays where it is";
     }
 

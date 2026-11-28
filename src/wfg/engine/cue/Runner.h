@@ -4542,6 +4542,18 @@ namespace wfg::cue
         /*  The resume point `assertCue` hands the run it is about to make. */
         std::optional<ResumePoint> resumeNext;
 
+        /*  WHERE A CARRIED-ON MOVIE IS (§151, BKK), handed by `fireLockedSounds`
+            to the sound `spawnChild` is about to arm, and taken back after the
+            one call: the movie's `startOffset`, `startRange` and `sliceFrom`. */
+        struct CarriedPoint
+        {
+            double startOffset = 0.0;
+            int startRange = 0;
+            double sliceFrom = 0.0;
+        };
+
+        std::optional<CarriedPoint> carryNextSound;
+
         /*  The hook's half of putting a persistent cue back: `run.assert`,
             carrying where a paused bed carries on from - unless the log knows
             its file is all but over there, when it starts from the top. */

@@ -21013,8 +21013,9 @@ deeper than eight bits; a still with a duration; editing a mesh from the tablet.
   GO puts it up again **from its fade-in**, not over the 0.1 s de-click VK drew - a still has no
   playhead to carry on from, and its fade-in is what somebody wrote. A picture caught before it came up
   is never shown.
-- **The persistent section does not put up a video cue yet**: `wfg validate` says so, and the cue is
-  fired from the list. An always-on matte waits for this.
+- **The persistent section puts up a video cue** since §151 (BKK): a still, a fill or a mask at its
+  fade-in at every step it is not up; a movie paused by Esc carried on from where it was, its locked
+  sounds with it.
 - **The window is the output sink**: the canvas is drawn straight into each output's window, in
   8-bit, with no offscreen canvas yet. The offscreen canvas - half-float, dithered - arrives with the
   mesh (V.5), which is the first thing that needs one.
@@ -37260,3 +37261,23 @@ with its cue; the Fletcher Machine's port left blank.
 `VERIFIED` stays off until a unit has answered.
 
 **Words on screen: none new** - the preset's own descriptions, in the device's terms.
+
+### 151.2 Pictures in the persistent section
+
+PRD §3.29 named "a video overlay" among the section's typical content, and §35.3 said the section takes a video
+cue; §35.9 listed it as not yet done. Done here.
+
+- **BKK** **A video cue is asserted as a sound is**: put up at the first step, left up while it is, put up
+  again at the next step when it is not - a stop cue before the pointer and the pane's kill suspend it as they
+  suspend a bed. A **still, fill, mask, text or blur** comes down with Esc over the panic fade and comes back
+  from its fade-in (§35.5: nothing to remember). A **movie** is paused by Esc as persistent media is (PRD §3.29,
+  K8) and carried on at the next step from the second of its file it had reached, or inside the range it was in,
+  in the same pass; its locked sounds come back at the same point, over the de-click. *(Mine: the PRD's "persistent
+  media" read as including a movie - to be put to the author.)* A double Esc takes the picture off at once and the
+  next GO puts it up from the top. A sound locked to a movie is the movie's: the section asserts the movie and
+  never the sound alone. What stays on top is the cue's `layer`, as anywhere (§35.3).
+- **BKL** *(mine)* **The cue list's band takes every kind the engine asserts**: video, and the Pd process, script
+  and time group the band had gone on refusing since §51, §66 and §60; the refusal names them.
+
+**Words on screen:** the band's refusal, "only media, mic, video, OSC, MIDI, process and script cues and time
+groups can be persistent, so … stays where it is" (mine). `wfg validate` no longer warns of a persistent video cue.
