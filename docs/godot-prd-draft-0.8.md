@@ -4422,8 +4422,7 @@ role words a preset's nodes claim (`scene.recall`, `strip.level`, …, AFM), min
 and not yet the author's; a run to a closed TCP link failing rather than ending
 `not-sent`, since the Runner cannot see the link (AFJ); a retarget of a whole
 show from one desk to another by those roles; SSL Live taking a scene recall over
-OSC (to ask SSL), the Fletcher Machine's native OSC (to ask Adamson), and the
-grandMA1's remote (its manual).
+OSC (to ask SSL), and the grandMA1's remote (its manual).
 
 Added 2026-10-10, with authoring from a processor (§3.26; namespace draft §56):
 an OSC cue that waits for the processor's own report that a recall landed (a

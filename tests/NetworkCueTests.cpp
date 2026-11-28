@@ -4579,6 +4579,77 @@ TEST_CASE ("network cue: a curve on a preset's node plays through the described 
 }
 
 //==============================================================================
+/*  THE FLETCHER MACHINE'S OWN OSC (namespace draft §151, 2026-11-28): its
+    addresses put the object's number LAST - /fm/obj/pos/xyz/3 - where ADM-OSC
+    puts it in the middle, so this is the case that a curve still finds the
+    node: one argument of object 3's position and its level in dB, and a
+    snapshot recalled by a fractional number, the page's own example. */
+TEST_CASE ("network cue: the Fletcher Machine preset takes a curve on an object's position and level, its number last, and a snapshot by a fraction")
+{
+    NetworkRig rig;
+
+    tree::PresetTable presets;
+    presets.scan (std::string (WFG_REPO_ROOT) + "/presets/devices");
+    const auto* fletcher = presets.find ("adamson-fletcher-osc");
+    REQUIRE (fletcher != nullptr);
+    REQUIRE (fletcher->usable());
+    CHECK (fletcher->rootRow() == "/fm");
+
+    tree::MountDeclaration machine;
+    machine.id = "FLETCH01";
+    machine.prefix = fletcher->rootRow();
+    machine.namespaceFile = "namespaces/adamson-fletcher-osc-v1.json";
+    machine.host = "127.0.0.1";
+    machine.port = rig.listener.port();
+    REQUIRE (rig.mounts.load (machine, fletcher->text).ok);
+    CHECK (rig.mounts.nodeCount ("FLETCH01") == static_cast<std::size_t> (fletcher->nodeCount));
+
+    //  Object 3's X alone, from the left edge to the right, over a second.
+    const auto position = rig.makeOsc ("/fm/obj/pos/xyz/3", "f:0 f:0.5 f:0.5", "none");
+    curveOn (rig, position, 0, "0 0 1 1");
+
+    //  Object 3's level, from -84 dB to 0 dB.
+    const auto level = rig.makeOsc ("/fm/obj/level/3", "f:-84", "none");
+    curveOn (rig, level, 0, "0 -84 1 0");
+
+    rig.fire (position);
+    rig.fire (level);
+
+    for (int n = 0; n < 24; ++n)
+        rig.tickOnce();
+
+    const auto* xyz = rig.mounts.valueOf ("/fm/obj/pos/xyz/3");
+    REQUIRE (xyz != nullptr);
+    REQUIRE (xyz->size() == 3u);
+    CHECK ((*xyz)[0].getFloat32() == doctest::Approx (0.5f).epsilon (0.05));
+    CHECK ((*xyz)[1].getFloat32() == doctest::Approx (0.5f));
+    CHECK (faderOf (rig, "/fm/obj/level/3") == doctest::Approx (-42.0f).epsilon (0.05));
+
+    for (int n = 0; n < 40; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runOf (position)->state == cue::runState::done);
+    CHECK ((*rig.mounts.valueOf ("/fm/obj/pos/xyz/3"))[0].getFloat32() == doctest::Approx (1.0f));
+    CHECK (faderOf (rig, "/fm/obj/level/3") == doctest::Approx (0.0f));
+    CHECK (waitForSentTo (rig, "/fm/obj/pos/xyz/3", 25u));
+    CHECK (waitForSentTo (rig, "/fm/obj/level/3", 25u));
+
+    //  A snapshot between two, as the page's 5.4, 5.5, 5.6.
+    const auto snapshot = rig.makeOsc ("/fm/snapshot/num", "f:5.5", "none");
+    rig.fire (snapshot);
+    rig.tickOnce();
+    CHECK (waitForSentTo (rig, "/fm/snapshot/num", 1u));
+
+    //  An object the preset was not written with is refused at GO.
+    const auto nowhere = rig.makeOsc ("/fm/obj/level/999", "f:0", "none");
+    rig.fire (nowhere);
+    rig.tickOnce();
+    REQUIRE (rig.runOf (nowhere) != nullptr);
+    CHECK (rig.runOf (nowhere)->state == cue::runState::failed);
+    CHECK (rig.runOf (nowhere)->error == reason::badAddress);
+}
+
+//==============================================================================
 /*  DP.6: A DEVICE OVER A CONNECTION (namespace draft §57, AFJ) is sent to as
     one on a serial port is - its packets handed to a sink, serve's links table
     - and a link that cannot take them fails the run, as a closed port does. */

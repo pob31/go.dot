@@ -1466,7 +1466,7 @@ made from presets with no socket; every shipped preset loads and names its sourc
 
 **Needs from the author:** the role words (AFM) before they ship; a bench on the desks at hand (the
 S21; Eos Nomad, grandMA onPC, Maillot's X32 emulator and L-ISA Controller need no hardware); the asks
-to SSL, Adamson and the grandMA1 manual.
+to SSL and the grandMA1 manual (Adamson published the Fletcher Machine's OSC; its preset, namespace draft §151).
 
 ---
 

@@ -25132,13 +25132,13 @@ help pages (MIT; read for the command surface, never copied) and S21_HiJack's ow
 | Holophonix | OSC over UDP 4003: `/{element}/{id}/{param}` - `/track/1/xyz fff`, `/track/1/aed fff`, `/track/1/gain f`, `/track/1/mute`, `/stereo`, `/multi`, `/bus/2/gain`, `/master`, `/get <pattern>`, OSC patterns; ADM-OSC v1 since 2.4.0 | changes pushed to configured destinations | docs.holophonix.xyz |
 | L-ISA Controller | OSC over UDP 8880: `/ext/src/<n>/p`, `/w`, `/d`, `/e`, `/s` (pan, width, distance, elevation, sub), `/ext/config/src/<n>/…`, `/ext/solo/src/<n>`, `/ext/master/gain`, `/ext/currentsnap/id` back; ADM-OSC | | L-Acoustics "L-ISA Controller OSC API" |
 | d&b Soundscape DS100 | OSC over UDP 50010 in, 50011 out: `/dbaudio1/coordinatemapping/source_position_xy/<area>/<obj> ff`, `/dbaudio1/positioning/source_spread/<obj> f`, `/dbaudio1/matrixinput/reverbsendgain/<obj> f`, `/dbaudio1/matrixinput/gain|mute/<obj>`, `/dbaudio1/scene/recall ii`, `next`, `previous`; ADM-OSC through En-Bridge | | d&b DOC05325 v1.3.10 |
-| Adamson Fletcher Machine | ADM-OSC; its native OSC and MIDI are not public | | **ask Adamson** |
+| Adamson Fletcher Machine | its own OSC, published 2026 (§151): `/fm/obj/pos/xyz/<n> fff` (and `x`, `y`, `z`, `xy`, `azim`, `elev`, `dist`, `aed`), `/fm/obj/level/<n>`, `/fm/obj/on/<n>`, curves, jitter, rendering, `/fm/rev/<k>/obj/level/<n>` (and `aux`, `layer`), `/fm/vca/<k>/level`, `/fm/master/level`, `/fm/snapshot/num f`; ADM-OSC too; MIDI not public | 0..1, dB, degrees | Adamson, Fletcher Machine manual v2, Quick start - OSC (2.0.261002) |
 | FLUX:: Spat Revolution | OSC over UDP, the port set per connection: `/source/<n>/xyz fff`, `/source/<n>/aed fff`, `/source/<n>/gain f`, `/source/<n>/mute`, `/room/<n>/…`, `/master/…`, `/snapshot/…`; index-as-argument (`/source/xyz ifff`); `/source/<n>/relative/<param>`; ADM-OSC v1.0 as an input grammar since 25.01 | | doc.flux.audio, FLUX's public OSC table |
 | ADM-OSC, any processor | `/adm/obj/<n>/azim`, `elev`, `dist`, `aed`, `x`, `y`, `z`, `xy`, `xyz`, `w`, `gain`, `dref`, `dmax`, `mute`, `name`; `/adm/env/change s`; `/adm/lis/xyz`, `ypr` | normalised −1..1 | the v1.0 living standard |
 | MIDI Show Control, any desk | SysEx `F0 7F <device> 02 <format> <command> <data> F7`: Go, Stop, Resume, Timed_Go, Load, Set, Fire, All_Off, Restore, Reset, Go_Off; on a port, and in a datagram to MA desks | | MMA MSC 1.0 |
 
 What the survey changes in the request: the HD96 and SSL Live are MIDI-only for Go.dot's purposes,
-Fletcher Machine starts as ADM-OSC, grandMA1 is MSC. Chataigne's modules add nothing Companion's lack
+Fletcher Machine starts as ADM-OSC (its own OSC since §151), grandMA1 is MSC. Chataigne's modules add nothing Companion's lack
 for these devices; its DS100 and Holophonix modules are the two worth reading for the spatial grammar.
 
 ### 57.2 Decisions
@@ -37225,3 +37225,38 @@ back; Cmd+Tab away shows the other application's bars; a projector stays through
 Control and another application's full screen on its display.
 
 **Words on screen: none.**
+
+## 151. After the trade show: times, the running cues' clocks, pictures that stay, the Fletcher Machine
+
+**Asked 2026-11-28** by the author, back from a trade show: (1) times either in seconds or in hours, minutes and
+seconds, "toggle in the show parameters"; (2) for running cues, elapsed time on the left and remaining on the right,
+and a click on either "enlarge[s] it to the full width of the running cues column. This helps a technician see from
+afar without enlarging everything or making yet another toggle in the cue settings"; (3) video cues in the
+persistent section - "a logo overlay (still or animated), some masking, a video background (still or animated)";
+(4) the Fletcher Machine's OSC, now public, added.
+
+*The author's picks, from options worded by me:* hours shown only past an hour, tenths kept (`1:23.5`,
+`1:02:03.5`); the setting reaches every time on screen, an editor keeping its own precision; an enlarged time ends
+with its cue; the Fletcher Machine's port left blank.
+
+### 151.1 The Fletcher Machine over its own OSC
+
+- **BKH** **A preset of its own**, `adamson-fletcher-osc` (`scripts/presets/adamson_fletcher.py`), from Adamson's
+  OSC page (manual 2.0.261002): every address under `/fm` - objects' positions in both coordinate systems, level and
+  on, pairs, trajectories, curves, jitter, rendering, the three reverbs' and the aux and layer sends, groups, VCAs,
+  the master, snapshots, the binaural listener, the format, the requests. The number of the thing addressed is the
+  LAST part (`/fm/obj/pos/xyz/3`), so a cue's menus pick the parameter first and the object after it. Its ADM-OSC
+  grammar stays the `adm-osc` preset. Curves play on its nodes as on any preset's (AFI; the case in
+  `tests/NetworkCueTests.cpp`).
+- **BKI** *(mine)* **What the page leaves open**: 64 objects, 8 groups and 8 aux sends by default (`--objects`,
+  `--groups`, `--aux`), layers and VCAs written for the largest unit (12, 16); angle ranges written high to low read
+  as the same span; `/fm/obj/curve/snapshot` an integer; `/fm/snapshot/rewrite`, typed `t` on the page, sent as the
+  integer 1 as every other one-shot is; the page's "sent by remote" column not read in; no port (`0`, the author's
+  pick); not heard back - `/fm/requestall` is described, how the answers come is not.
+- **BKJ** *(mine)* **Roles**: positions `xyz` and `aed` `object.position`, an object's level `object.gain`, its sends
+  `send.level`, a VCA's level `dca.level`, the master's `master.level`, `snapshot/num` `scene.recall`, `next` and
+  `previous` `scene.next` and `scene.previous`. An object's `on` claims no role: it is the inverse of a mute.
+
+`VERIFIED` stays off until a unit has answered.
+
+**Words on screen: none new** - the preset's own descriptions, in the device's terms.
