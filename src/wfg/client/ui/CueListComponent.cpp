@@ -16,6 +16,7 @@
 
 #include <wfg/client/ui/CueListComponent.h>
 
+#include <wfg/client/model/Text.h>
 #include <wfg/client/model/TimeText.h>
 
 #include <wfg/client/model/Video.h>
