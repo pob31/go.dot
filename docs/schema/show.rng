@@ -123,6 +123,15 @@
           </data>
         </attribute>
       </optional>
+      <optional>
+        <attribute name="timeFormat">
+          <a:documentation>How the show-s times are shown (namespace draft 151, BKM; the author, 2026-11-28): seconds, 83.5, or clock - minutes and seconds, 1:23.5, with the hours only past an hour, 1:02:03.5 - tenths kept either way, an editor keeping its own precision. Every time on screen follows it: the cue list, the running cues, the inspector, the foot panels, the waveform and range editors, the history and the web page. A time is typed either way whatever it says. Seconds by default.</a:documentation>
+          <choice>
+            <value>seconds</value>
+            <value>clock</value>
+          </choice>
+        </attribute>
+      </optional>
       <zeroOrMore>
         <ref name="List"/>
       </zeroOrMore>
