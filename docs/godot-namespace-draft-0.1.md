@@ -37281,3 +37281,21 @@ cue; §35.9 listed it as not yet done. Done here.
 
 **Words on screen:** the band's refusal, "only media, mic, video, OSC, MIDI, process and script cues and time
 groups can be persistent, so … stays where it is" (mine). `wfg validate` no longer warns of a persistent video cue.
+
+### 151.3 Times in seconds or as a clock
+
+- **BKM** **One show row, `/godot/list/timeFormat`**, `seconds` or `clock`, saved with the show and undone as any
+  show setting is; seconds by default, so a show already made looks as it did. *Clock* is minutes and seconds with
+  the hours only past an hour, tenths kept - `1:23.5`, `1:02:03.5` (the author's pick, worded by me). It reaches
+  every time on screen (his pick): the cue list's waits and durations, the running cues, the inspector, the foot
+  panels, the waveform's and the timeline's rulers, the range table, the take panel, the web page's list, inspector
+  and running scenes. An editor keeps its precision - a range to the millisecond, `1:04.25`. A time is typed
+  either way in any time box whichever is shown, a comma taken for the point; "1:75" is refused as a slip.
+- **BKN** *(mine)* **Seconds is the look there was**, editors included: the range table and the waveform already
+  went to `1:04.2` past a minute and still do; only *clock* changes anything. The words "Times shown as",
+  "Seconds" and "Hours, minutes, seconds" on the Playback page are mine, to be put to the author. Timecode labels
+  keep their frames (§59), and the Rack's "2 min 5 s" is prose, not a reading. The format is the process's - one
+  show a process (§106) - written by the window's refresh.
+
+**Words on screen:** the Playback page's choice and its sentence: "Every time in the show: 83.5 in seconds, or
+1:23.5 - with the hours past an hour, 1:02:03.5. A time can be typed either way." (mine).

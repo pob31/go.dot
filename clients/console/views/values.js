@@ -23,6 +23,7 @@
     "what this value looks like" would eventually disagree about one of them. */
 
 import { tree } from "../plumbing/tree.js";
+import { clockShown, clockTime, typedTime } from "../model/time.js";
 
 /*  A LIST NODE - a route's `gains`, a fade's `points` - carries one type tag
     per element, so its TYPE is as long as its value (§14.6). */
@@ -56,6 +57,11 @@ function shownValue(node, element) {
         && value !== "" && Number(value) === 0)
     return "";
 
+  /*  A TIME AS A CLOCK when the show says so (§151, BKM). */
+  if (element && element.dataset && element.dataset.time === "yes" && clockShown()
+        && value !== "" && Number.isFinite(Number(value)))
+    return clockTime(Number(value), 3, true);
+
   return value;
 }
 
@@ -80,6 +86,13 @@ function commitText(element) {
   if (element.value === "" && ! unreadable
         && element.dataset && element.dataset.blankZero === "yes")
     return "0";
+
+  /*  A TIME TYPED AS A CLOCK is written as its seconds (§151, BKM); one that
+      is not a time is sent as typed, and refused as it deserves. */
+  if (element.dataset && element.dataset.time === "yes" && element.value.indexOf(":") >= 0) {
+    const seconds = typedTime(element.value);
+    if (Number.isFinite(seconds)) return String(seconds);
+  }
 
   return element.value;
 }

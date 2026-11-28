@@ -18,6 +18,7 @@
 
 #include <wfg/client/model/Rack.h>
 #include <wfg/client/model/Text.h>
+#include <wfg/client/model/TimeText.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
@@ -173,6 +174,10 @@ namespace wfg::client::model
 
     std::string tenthsOfSeconds (double seconds)
     {
+        //  In the show's format (§151, BKM): `0:12.3`.
+        if (clockShown())
+            return clockTime (std::max (0.0, seconds), 1);
+
         const auto tenths = std::llround (std::max (0.0, seconds) * 10.0);
         return std::to_string (tenths / 10) + "." + std::to_string (tenths % 10) + " s";
     }

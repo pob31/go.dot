@@ -420,9 +420,10 @@ export function aimReach(seconds) {
     it done, seconds to a tenth under a minute, and the clock past it, as the
     window spells a step under the aimed cue (model/LoadToTime's offsetText).
     Tenths are counted whole first so 70.3 is never 70 and two tenths. */
-export function offsetText(seconds) {
+export function offsetText(seconds, clock = false) {
   if (!(seconds >= 0)) return "before";
-  if (seconds < 60) return seconds.toFixed(1) + " s";
+  //  As a clock from nought when the show shows times so (§151, BKM).
+  if (seconds < 60 && !clock) return seconds.toFixed(1) + " s";
 
   const tenths = Math.floor(seconds * 10 + 1e-6);
   const whole = Math.floor(tenths / 10);

@@ -102,4 +102,9 @@ namespace wfg::client::model
         a number below one, so a speed of 0.04961 keeps its figures - with the
         zeros at the end left off. In no locale's spelling. */
     std::string shownNumber (double value, std::string_view unit);
+
+    /*  The same number as it is WRITTEN to a row: a time always in seconds, for
+        `shownNumber` shows one in the show's format (§151) and the engine takes
+        a number. */
+    std::string writtenNumber (double value, std::string_view unit);
 }

@@ -16,6 +16,8 @@
 
 #include <wfg/client/ui/InspectorComponent.h>
 
+#include <wfg/client/model/TimeText.h>
+
 #include <wfg/client/ui/KeyNames.h>
 #include <wfg/client/ui/Look.h>
 #include <wfg/client/ui/MenuHold.h>
@@ -1092,8 +1094,16 @@ namespace wfg::client::ui
             layOut();
     }
 
-    void InspectorComponent::commitField (const model::Field& field, const std::string& text)
+    void InspectorComponent::commitField (const model::Field& field, const std::string& typed)
     {
+        /*  A TIME TYPED AS A CLOCK (§151, BKM) - `1:23.5`, as the box shows it
+            in that format - is written as its seconds, the row's number. */
+        auto text = typed;
+
+        if (field.unit == "s" && model::typedAsClock (typed))
+            if (const auto seconds = model::typedTime (typed))
+                text = model::writtenNumber (*seconds, "s");
+
         /*  A CHOICE THAT MOVES MORE THAN ITS OWN ROW (namespace draft 45): the
             cue's address and each further message's, together. */
         if (! field.alongsideCue.empty() && field.addresses.empty() && actions.setMany && actions.alongside)

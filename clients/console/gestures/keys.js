@@ -216,8 +216,11 @@ document.addEventListener("keydown", (event) => {
       box is for and an operator typing a wait wants them. So do the
       accelerators. What says which is which is the transport, in words, for
       as long as a box holds the keys (views/transport.js). */
+  /*  AND A TIME BOX WRITTEN AS A CLOCK (§151, BKM) is a text box only so it can
+      hold a colon; a time has no space in it either, so Space is GO there too. */
   const numberBox = !!held && held.tagName === "INPUT"
-                      && String(held.type || "").toLowerCase() === "number";
+                      && (String(held.type || "").toLowerCase() === "number"
+                            || (held.dataset && held.dataset.time === "yes"));
 
   const spaceIsGo = numberBox && event.code === "Space"
                       && !event.ctrlKey && !event.metaKey && !event.altKey;

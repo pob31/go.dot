@@ -16,6 +16,7 @@
 
 #include <wfg/client/model/Text.h>
 
+#include <wfg/client/model/TimeText.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <algorithm>
@@ -117,6 +118,16 @@ namespace wfg::client::model
     }
 
     std::string shownNumber (double value, std::string_view unit)
+    {
+        /*  A TIME IN THE SHOW'S FORMAT (§151, BKM): to the millisecond as the
+            seconds are, the noughts after it taken off - `1:23.5`, `0:05`. */
+        if (unit == "s" && clockShown() && std::isfinite (value))
+            return clockTime (value, 3, true);
+
+        return writtenNumber (value, unit);
+    }
+
+    std::string writtenNumber (double value, std::string_view unit)
     {
         if (! std::isfinite (value))
             return osc::formatDouble (value);

@@ -110,6 +110,7 @@
 #include <wfg/client/model/Text.h>
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/model/Timecode.h>
+#include <wfg/client/model/TimeText.h>
 #include <wfg/client/model/Transport.h>
 #include <wfg/client/model/UndoHistory.h>
 #include <wfg/client/model/Waveform.h>
@@ -17780,4 +17781,100 @@ TEST_CASE ("client: a range's end is drawn as it plays, sent as the end when it 
     const auto outside = model::readinessMark ("partial", "range-outside", "media");
     CHECK (outside.text == "outside the file");
     CHECK (outside.meaning.find ("begins at or past the end") != std::string::npos);
+}
+
+//==============================================================================
+/*  TIMES IN SECONDS OR AS A CLOCK (namespace draft §151, BKM; the author,
+    2026-11-28: "Could times be either in seconds or in hours, minutes and
+    seconds (toggle in the show parameters)", his picks: the hours only past an
+    hour, tenths kept). */
+namespace
+{
+    //  The format is the process's: put back as every other case expects it.
+    struct SecondsAfter
+    {
+        ~SecondsAfter() { model::setShownTimeFormat (model::TimeFormat::seconds); }
+    };
+}
+
+TEST_CASE ("client: a time is written in seconds or as a clock, the hours only past an hour, and typed either way")
+{
+    SecondsAfter after;
+
+    CHECK (model::tenthsReading (83.46) == "83.5");
+    CHECK (model::tenthsReading (-0.4) == "-0.4");
+    CHECK (model::clockTime (83.46) == "1:23.5");
+    CHECK (model::clockTime (5.0) == "0:05.0");
+    CHECK (model::clockTime (59.96) == "1:00.0");          // rounded once: never 0:60.0
+    CHECK (model::clockTime (3599.96) == "1:00:00.0");
+    CHECK (model::clockTime (3723.5) == "1:02:03.5");
+    CHECK (model::clockTime (-4.0) == "-0:04.0");
+    CHECK (model::clockTime (64.25, 3, true) == "1:04.25");
+    CHECK (model::clockTime (7.0, 3, true) == "0:07");
+
+    model::setShownTimeFormat (model::TimeFormat::seconds);
+    CHECK (model::readingTime (83.5) == "83.5");
+    CHECK (model::shownNumber (83.5, "s") == "83.5");
+    CHECK (model::timeText (187.4) == "3:07.4");           // the range table's own look, as it was
+
+    model::setShownTimeFormat (model::TimeFormat::clock);
+    CHECK (model::readingTime (83.5) == "1:23.5");
+    CHECK (model::shownNumber (83.5, "s") == "1:23.5");
+    CHECK (model::shownNumber (83.5, "dB") == "83.5");     // a level is no time
+    CHECK (model::writtenNumber (83.5, "s") == "83.5");    // and what is written is the seconds
+    CHECK (model::timeText (7.4) == "0:07.4");
+    CHECK (model::tenthsOfSeconds (12.34) == "0:12.3");
+
+    //  Typed either way, whatever is shown.
+    CHECK (model::typedTime ("83.5") == doctest::Approx (83.5));
+    CHECK (model::typedTime ("83,5") == doctest::Approx (83.5));
+    CHECK (model::typedTime (" 1:23.5 ") == doctest::Approx (83.5));
+    CHECK (model::typedTime ("1:02:03.5") == doctest::Approx (3723.5));
+    CHECK (model::typedTime ("90:00") == doctest::Approx (5400.0));
+    CHECK_FALSE (model::typedTime ("1:75").has_value());
+    CHECK_FALSE (model::typedTime ("1.5:20").has_value());
+    CHECK_FALSE (model::typedTime ("1:2:3:4").has_value());
+    CHECK_FALSE (model::typedTime ("-3").has_value());
+    CHECK_FALSE (model::typedTime ("soon").has_value());
+    CHECK_FALSE (model::typedTime ("").has_value());
+    CHECK (model::timeFrom ("1:02:03") == doctest::Approx (3723.0));
+}
+
+TEST_CASE ("client: the cue list's times follow the show's format, and nought stays blank where it was")
+{
+    SecondsAfter after;
+    Rig rig;
+    const std::string list = "7K2QM9X4";
+
+    const auto memo = rig.document.createCue (list, 0, "memo", "Note", {}, { { "preWait", "83.5" }, { "postWait", "3725.25" } });
+    REQUIRE (memo.ok);
+
+    const auto rowOf = [&rig, &list] (std::int64_t tick, const std::string& id)
+    {
+        rig.parameters.markStale();
+        model::ShowModel show;
+        show.refresh (*rig.publish (tick), list);
+        const auto at = show.indexOf (id);
+        REQUIRE (at >= 0);
+        return show.rows()[static_cast<std::size_t> (at)];
+    };
+
+    auto row = rowOf (1, memo.id);
+    CHECK_FALSE (model::clockShown());
+    CHECK (row.preWait == "83.5");
+    CHECK (row.postWait == "3725.3");
+
+    REQUIRE (rig.document.setAttribute ("/godot/list/timeFormat", "clock").ok);
+    row = rowOf (2, memo.id);
+    CHECK (model::clockShown());
+    CHECK (row.preWait == "1:23.5");
+    CHECK (row.postWait == "1:02:05.3");
+
+    REQUIRE (rig.document.setAttribute ("/godot/list/timeFormat", "seconds").ok);
+    row = rowOf (3, memo.id);
+    CHECK_FALSE (model::clockShown());
+    CHECK (row.preWait == "83.5");
+
+    //  Saved with the show: a word the row does not take is refused.
+    CHECK_FALSE (rig.document.setAttribute ("/godot/list/timeFormat", "minutes").ok);
 }

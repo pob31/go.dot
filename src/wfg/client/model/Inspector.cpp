@@ -1848,7 +1848,7 @@ namespace wfg::client::model
 
         /*  As the box shows a number, so a tenth of a second written is "0.6"
             and not the arithmetic's 0.6000000000000001. */
-        return shownNumber (next, field.unit);
+        return writtenNumber (next, field.unit);
     }
 
     int wheelNotches (float deltaY, float& carried)

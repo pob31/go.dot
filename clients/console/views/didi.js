@@ -18,6 +18,7 @@
     focused list, the groups inside it, and their headers and footers. */
 
 import { tree } from "../plumbing/tree.js";
+import { clockShown, clockTime, readingTime } from "../model/time.js";
 import { selection } from "../model/selection.js";
 import { folded } from "../model/remember.js";
 import { goList, isCart, shownList } from "../model/lists.js";
@@ -234,15 +235,21 @@ function timeCell(id, name) {
     const heard = Number.isFinite(speed) && speed > 0 ? number / speed : Infinity;
 
     const shown = value === "" || !Number.isFinite(number) || number === 0
-                    ? "" : Number.isFinite(heard) ? heard.toFixed(1) : "∞";
+                    ? "" : Number.isFinite(heard) ? readingTime(heard) : "∞";
 
     return '<div class="when ro" title="' + note + '">' + esc(shown) + "</div>";
   }
 
+  /*  AS A CLOCK WHEN THE SHOW SAYS SO (§151, BKM): a text box, `1:23.5`,
+      read back to seconds when committed (views/values.js, `data-time`). */
+  const clock = clockShown();
+  const shown = Number(value) === 0 ? "" : clock ? clockTime(Number(value), 3, true) : value;
+
   return '<div class="when">' +
-           '<input type="number" step="any" min="0" data-blank-zero="yes"' +
+           '<input type="' + (clock ? "text" : "number") + '" step="any" min="0" data-blank-zero="yes" data-time="yes"' +
+           (clock ? ' inputmode="decimal"' : "") +
            ' data-set="/godot/cue/' + esc(id) + "/" + esc(name) + '"' +
-           ' value="' + esc(Number(value) === 0 ? "" : value) + '"' +
+           ' value="' + esc(shown) + '"' +
            ' title="' + note + '">' +
          "</div>";
 }

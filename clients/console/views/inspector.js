@@ -20,6 +20,7 @@
     mixed-value semantics §3.5 asks for. */
 
 import { tree } from "../plumbing/tree.js";
+import { clockShown, clockTime } from "../model/time.js";
 import { str } from "../plumbing/osc.js";
 import { panel } from "../model/remember.js";
 import { selection } from "../model/selection.js";
@@ -431,8 +432,16 @@ function controlFor(field) {
     const min = range && range.MIN !== undefined ? ' min="' + esc(range.MIN) + '"' : "";
     const max = range && range.MAX !== undefined ? ' max="' + esc(range.MAX) + '"' : "";
 
+    /*  A TIME IN SECONDS, AS A CLOCK when the show says so (§151, BKM): a text
+        box, `1:23.5`, read back to seconds when committed (views/values.js). */
+    const seconds = Array.isArray(node.UNIT) && node.UNIT[0] === "s";
+
+    if (seconds && clockShown() && value !== "" && Number.isFinite(Number(value)))
+      return '<input type="text" inputmode="decimal" data-time="yes"' + set + all +
+             ' value="' + esc(clockTime(Number(value), 3, true)) + '">';
+
     return '<input type="number" step="' + step + '"' + min + max + set + all +
-           ' value="' + esc(value) + '">';
+           (seconds ? ' data-time="yes"' : "") + ' value="' + esc(value) + '">';
   }
 
   return '<input type="text"' + set + all + ' value="' + esc(value) + '">';

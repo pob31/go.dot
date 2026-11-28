@@ -17,6 +17,7 @@
 #include <wfg/client/model/Surfaces.h>
 
 #include <wfg/client/model/Text.h>
+#include <wfg/client/model/TimeText.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/surface/DcaColour.h>
 #include <wfg/engine/surface/StreamDeckReport.h>
@@ -520,6 +521,10 @@ namespace wfg::client::model
             a say in the decimal point. */
         std::string tenthsText (double seconds)
         {
+            //  In the show's format (§151, BKM): `0:12.0` from nought.
+            if (clockShown())
+                return clockTime (std::max (0.0, seconds), 1);
+
             const auto tenths = static_cast<long long> (std::llround (std::max (0.0, seconds) * 10.0));
             const auto whole = tenths / 10;
             const auto tenth = std::to_string (tenths % 10);

@@ -18,6 +18,7 @@
     group's run holding its members'. */
 
 import { tree } from "../plumbing/tree.js";
+import { clockShown, clockTime } from "../model/time.js";
 import { el, esc, shownName } from "./common.js";
 import { reconcile } from "./reconcile.js";
 
@@ -86,6 +87,11 @@ function stateMark(state) {
          '" role="img" aria-label="' + esc(state) + '">' + mark + "</span>";
 }
 
+/*  A RUN'S SECOND IN THE SHOW'S FORMAT (§151, BKM): `12.3s`, or `0:12.3`. */
+function clockOrSeconds(seconds) {
+  return clockShown() ? clockTime(seconds, 1) : seconds.toFixed(1) + "s";
+}
+
 /*  A RUNNING SCENE'S CLOCK (K9's review, 2026-10-03, namespace draft §23.18):
     the second its seek box means - the scene's own, since it started, across
     its rounds - read off the run's `position`, which is where the desktop
@@ -99,7 +105,7 @@ function sceneClock(id) {
   if (state !== "playing" && state !== "stopping") return "";
 
   const position = Number(tree.run(id, "position", NaN));
-  return Number.isFinite(position) ? "at " + position.toFixed(1) + "s" : "";
+  return Number.isFinite(position) ? "at " + clockOrSeconds(position) : "";
 }
 
 /*  WHETHER A RUN'S ROW OFFERS THE SEEK BOX: playing, and the engine says a
@@ -175,8 +181,8 @@ function runRow(id, depth, out) {
   if (kind === "media" && launched(state) && Number.isFinite(position)) {
     const timed = Number.isFinite(length) && length > 0;
 
-    bits.push("at " + position.toFixed(1) + "s"
-                + (timed ? " of " + length.toFixed(1) + "s" : ""));
+    bits.push("at " + clockOrSeconds(position)
+                + (timed ? " of " + clockOrSeconds(length) : ""));
   }
 
   const clock = sceneClock(id);

@@ -918,6 +918,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/RunModel.cpp
     wfg/client/model/Scrub.h
     wfg/client/model/Scrub.cpp
+    wfg/client/model/TimeText.h
+    wfg/client/model/TimeText.cpp
     wfg/client/model/Pointers.h
     wfg/client/model/Pointers.cpp
     wfg/client/model/FingerDrag.h

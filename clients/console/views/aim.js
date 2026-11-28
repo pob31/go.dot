@@ -18,6 +18,7 @@
     the engine answers them with. */
 
 import { tree } from "../plumbing/tree.js";
+import { clockShown, readingWords } from "../model/time.js";
 import { dbl, str } from "../plumbing/osc.js";
 import { selection } from "../model/selection.js";
 import { goList, membersOf } from "../model/lists.js";
@@ -158,11 +159,11 @@ function renderAim() {
     slider.value = String(atOffset);
   }
 
-  el("aim-offset-text").textContent = offsetText(Number(slider.value));
+  el("aim-offset-text").textContent = offsetText(Number(slider.value), clockShown());
 
   const landed = String(tree.get("/godot/list/" + focus + "/statePosition", ""));
   el("aim-landed").textContent = loadedCue
-    ? "loaded: " + cueName(loadedCue) + " at " + offsetText(Number(loaded.slice(loadedSpace + 1))) +
+    ? "loaded: " + cueName(loadedCue) + " at " + offsetText(Number(loaded.slice(loadedSpace + 1)), clockShown()) +
       " — GO plays from here"
     : landed && landed !== aim
       ? "landed at " + landed.replace(/ /, " + ") + " s"
@@ -194,9 +195,9 @@ function renderAim() {
 
   for (const run of solved.runs || []) {
     const where = run.when === "sounding"
-      ? Number(run.offset).toFixed(1) + " s in"
+      ? readingWords(Number(run.offset)) + " in"
       : run.when === "due"
-        ? "in " + Number(run.startsIn).toFixed(1) + " s"
+        ? "in " + readingWords(Number(run.startsIn))
         : "over";
 
     lines.push('<div class="line"><b>' + esc(cueName(run.cue)) + "</b> — " +

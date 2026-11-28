@@ -41,6 +41,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_pair_state[] = { "alone", "following", "leading", "bothSending", "waiting" };
     inline constexpr std::string_view enum_pair_peerInStep[] = { "unknown", "yes", "no" };
     inline constexpr std::string_view enum_pair_peerShowMatch[] = { "unknown", "yes", "no" };
+    inline constexpr std::string_view enum_lists_timeFormat[] = { "seconds", "clock" };
     inline constexpr std::string_view enum_list_kind[] = { "show", "cart" };
     inline constexpr std::string_view enum_cue_kind[] = { "memo", "group", "media", "fade", "transport", "osc", "midi", "start", "mic", "video", "process", "timecode", "script" };
     inline constexpr std::string_view enum_cue_quantise[] = { "none", "beat", "bar", "2bars", "4bars", "8bars" };
@@ -902,6 +903,14 @@ namespace wfg::doc::generated
           "s", 1.0, false, "park",
           "",
           "How long after a GO, Doh! may still take it back, in seconds (PRD 3.32; the author, 2026-09-30). Doh! takes back the LAST GO only - the pointer, the list-s finished flag, the GO debounce and the history go back to where that GO found them, and what it started comes down - and only while it is this recent: a press later than this is refused as too-late and the line at the foot of the window says so. Ten seconds unless the show says otherwise, nought turns Doh! off (both the implementer-s calls). Set on Show settings > Playback, right after the GO debounce, and saved with the show, so the lock refuses an edit of it as it refuses any setting." },
+        { "lists", "timeFormat",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
+          true, "seconds",
+          false, 0.0, false, 0.0,
+          enum_lists_timeFormat, 2,
+          "", 1.0, false, "park",
+          "",
+          "How the show-s times are shown (namespace draft 151, BKM; the author, 2026-11-28): seconds, 83.5, or clock - minutes and seconds, 1:23.5, with the hours only past an hour, 1:02:03.5 - tenths kept either way, an editor keeping its own precision. Every time on screen follows it: the cue list, the running cues, the inspector, the foot panels, the waveform and range editors, the history and the web page. A time is typed either way whatever it says. Seconds by default." },
         { "lists", "processBudget",
           ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show, Scope::show,
           true, "2",

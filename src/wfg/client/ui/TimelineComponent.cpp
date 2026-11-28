@@ -16,6 +16,7 @@
 
 #include <wfg/client/ui/TimelineComponent.h>
 
+#include <wfg/client/model/TimeText.h>
 #include <wfg/client/ui/Look.h>
 #include <wfg/engine/osc/OscValue.h>
 
@@ -41,6 +42,10 @@ namespace wfg::client::ui
         /** Seconds as a ruler says them: "0", "2.5", "1:04". */
         std::string tickText (double seconds)
         {
+            //  In the show's format (§151, BKM): "0:00", "0:02.5", "1:04".
+            if (model::clockShown())
+                return model::clockTime (seconds, 1, true);
+
             if (seconds < 60.0)
                 return osc::formatDouble (std::round (seconds * 10.0) / 10.0);
 

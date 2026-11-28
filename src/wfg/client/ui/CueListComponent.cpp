@@ -16,6 +16,8 @@
 
 #include <wfg/client/ui/CueListComponent.h>
 
+#include <wfg/client/model/TimeText.h>
+
 #include <wfg/client/model/Video.h>
 #include <wfg/client/model/Flags.h>
 #include <wfg/client/model/Icons.h>
@@ -644,8 +646,17 @@ namespace wfg::client::ui
                        : attribute == "at"       ? entry.duration     // a time group's member's (§60)
                                                  : entry.postWait;
 
+        /*  A TIME TYPED AS A CLOCK (§151, BKM) - `1:23.5`, as the column shows
+            it in that format - is written as its seconds, the row's number. A
+            clock that is not a time is sent as typed, and refused as it was. */
+        auto written = text;
+
+        if (attribute != "number" && attribute != "name" && model::typedAsClock (text))
+            if (const auto seconds = model::typedTime (text))
+                written = model::writtenNumber (*seconds, "s");
+
         if (text != was && actions.setValue)
-            actions.setValue ("/godot/cue/" + id + "/" + attribute, text);
+            actions.setValue ("/godot/cue/" + id + "/" + attribute, written);
 
         grabKeyboardFocus();   // the arrows and Space are the shell's again
     }

@@ -4,6 +4,7 @@
 
 #include <wfg/client/model/Fader.h>
 #include <wfg/client/model/Text.h>
+#include <wfg/client/model/TimeText.h>
 #include <wfg/client/ui/Look.h>
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/audio/Timbre.h>
@@ -60,6 +61,10 @@ namespace wfg::client::ui
         /** A time, as a ruler writes it: 1.5 s, or 1:04.2 once there are minutes. */
         juce::String clockText (double seconds)
         {
+            //  In the show's format (§151, BKM): the clock from nought, `0:01.5`.
+            if (model::clockShown())
+                return juce::String (model::clockTime (seconds, 1));
+
             const auto whole = static_cast<int> (std::floor (std::abs (seconds)));
             const auto tenths = static_cast<int> (std::floor ((std::abs (seconds) - whole) * 10.0));
             const auto sign = seconds < 0.0 ? "-" : "";

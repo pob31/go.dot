@@ -8750,6 +8750,29 @@ namespace wfg::client::ui
             PlaybackPage (const model::Theme& themeToUse, std::function<void (Event)> dispatch)
                 : send (std::move (dispatch))
             {
+                /*  HOW TIMES ARE SHOWN (namespace draft §151, BKM; the author,
+                    2026-11-28): seconds, or hours, minutes and seconds - for the
+                    whole show and every panel of it. The words are mine. */
+                timeFormatLabel.setText ("Times shown as", juce::dontSendNotification);
+                timeFormat.addItem ("Seconds", 1);
+                timeFormat.addItem ("Hours, minutes, seconds", 2);
+                timeFormat.setTitle ("Times shown as");
+                timeFormat.onChange = [this]
+                {
+                    const auto word = timeFormat.getSelectedId() == 2 ? std::string ("clock") : std::string ("seconds");
+
+                    if (send && timeFormat.isEnabled() && word != timeFormatShown)
+                        send (gesture::setNode ("/godot/list/timeFormat", word));
+                };
+                timeFormatExplanation.setText ("Every time in the show: 83.5 in seconds, or 1:23.5 - with the hours"
+                                               " past an hour, 1:02:03.5. A time can be typed either way.",
+                                               juce::dontSendNotification);
+                timeFormatExplanation.setJustificationType (juce::Justification::topLeft);
+                timeFormatExplanation.setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink-dim"));
+                addAndMakeVisible (timeFormatLabel);
+                addAndMakeVisible (timeFormat);
+                addAndMakeVisible (timeFormatExplanation);
+
                 debounce.address = "/godot/list/goDebounce";
                 debounce.label.setText ("Least time between two GOs", juce::dontSendNotification);
                 debounce.explanation.setText ("A GO pressed sooner than this after the last one is ignored, and"
@@ -8815,8 +8838,13 @@ namespace wfg::client::ui
 
             void show (const std::string& debounceNow, const std::string& dohWindowNow,
                        const std::string& panicFadeNow, const std::string& budgetNow,
-                       const std::string& stuckAfterNow, bool editable)
+                       const std::string& stuckAfterNow, bool editable,
+                       const std::string& timeFormatNow = "seconds")
             {
+                timeFormatShown = timeFormatNow == "clock" ? "clock" : "seconds";
+                timeFormat.setSelectedId (timeFormatShown == "clock" ? 2 : 1, juce::dontSendNotification);
+                timeFormat.setEnabled (editable);
+
                 for (auto [field, now] : { std::pair { &debounce, &debounceNow },
                                            std::pair { &dohWindow, &dohWindowNow },
                                            std::pair { &panicFade, &panicFadeNow },
@@ -8837,6 +8865,14 @@ namespace wfg::client::ui
             void resized() override
             {
                 auto area = getLocalBounds().reduced (22);
+
+                {
+                    auto line = area.removeFromTop (30);
+                    timeFormatLabel.setBounds (line.removeFromLeft (230));
+                    timeFormat.setBounds (line.removeFromLeft (220).reduced (0, 2));
+                    timeFormatExplanation.setBounds (area.removeFromTop (36).withTrimmedLeft (4));
+                    area.removeFromTop (14);
+                }
 
                 for (auto* field : { &debounce, &dohWindow, &panicFade, &processBudget, &processStuckAfter })
                 {
@@ -8877,6 +8913,9 @@ namespace wfg::client::ui
             }
 
             std::function<void (Event)> send;
+            juce::Label timeFormatLabel, timeFormatExplanation;
+            juce::ComboBox timeFormat;
+            std::string timeFormatShown = "seconds";
             Field debounce, dohWindow, panicFade, processBudget, processStuckAfter;
         };
 
@@ -10543,7 +10582,8 @@ namespace wfg::client::ui
                             model::text (snapshot, "/godot/audio/panicFade"),
                             model::text (snapshot, "/godot/list/processBudget"),
                             model::text (snapshot, "/godot/list/processStuckAfter"),
-                            ! model::isYes (model::flag (snapshot, "/godot/document/locked")));
+                            ! model::isYes (model::flag (snapshot, "/godot/document/locked")),
+                            model::text (snapshot, "/godot/list/timeFormat"));
 
             if (readCapabilities (snapshot)) capabilities();
             const auto state = model::text (snapshot, "/godot/audio/settingsStatus");

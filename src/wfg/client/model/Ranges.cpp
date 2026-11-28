@@ -17,6 +17,7 @@
 #include <wfg/client/model/Ranges.h>
 
 #include <wfg/client/model/Text.h>
+#include <wfg/client/model/TimeText.h>
 #include <wfg/engine/cue/RangeEnd.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
@@ -232,6 +233,10 @@ namespace wfg::client::model
         const auto rounded = std::round (std::max (0.0, secondsIn) * 1000.0) / 1000.0;
         const auto whole = static_cast<long long> (std::floor (rounded));
 
+        //  In the show's format (§151, BKM): the clock from nought, hours past an hour.
+        if (clockShown())
+            return clockTime (rounded, 3, true);
+
         if (whole < 60)
             return osc::formatDouble (rounded);
 
@@ -251,33 +256,9 @@ namespace wfg::client::model
 
     std::optional<double> timeFrom (const std::string& typed)
     {
-        const auto first = typed.find_first_not_of (" \t");
-
-        if (first == std::string::npos)
-            return std::nullopt;
-
-        const auto trimmed = typed.substr (first, typed.find_last_not_of (" \t") - first + 1);
-        const auto colon = trimmed.find (':');
-
-        if (colon == std::string::npos)
-        {
-            const auto plain = osc::parseDouble (trimmed);
-            return plain.has_value() && *plain >= 0.0 ? plain : std::nullopt;
-        }
-
-        const auto minutes = osc::parseDouble (trimmed.substr (0, colon));
-        const auto rest = osc::parseDouble (trimmed.substr (colon + 1));
-
-        if (! minutes.has_value() || ! rest.has_value())
-            return std::nullopt;
-
-        /*  "1:75" is not a time. Sixty-one seconds into a minute is a typing
-            slip and not a minute and a quarter, and guessing which it was
-            would be the panel deciding what somebody meant. */
-        if (*minutes < 0.0 || *rest < 0.0 || *rest >= 60.0)
-            return std::nullopt;
-
-        return *minutes * 60.0 + *rest;
+        /*  EITHER FORMAT, WHATEVER IS SHOWN (§151, BKM): `83.5`, `1:23.5` and
+            `1:02:03.5`; "1:75" is a slip and not a minute and a quarter. */
+        return typedTime (typed);
     }
 
     std::vector<RangeWrite> copyLengthToNext (const std::vector<RangeRow>& rows, std::size_t index,

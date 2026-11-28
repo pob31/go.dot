@@ -17,6 +17,7 @@
 #include <wfg/client/model/ShowModel.h>
 
 #include <wfg/client/model/Text.h>
+#include <wfg/client/model/TimeText.h>
 #include <wfg/client/model/Timecode.h>
 #include <wfg/engine/cue/GroupMode.h>
 #include <wfg/engine/tree/Node.h>
@@ -44,6 +45,12 @@ namespace wfg::client::model
             return text (snapshot, "/godot/cue/" + cueId + "/" + name);
         }
 
+        /*  WHAT NOUGHT IS WRITTEN AS, in either format (§151): "0.0", "0:00.0". */
+        bool isNought (const std::string& written)
+        {
+            return written == "0.0" || written == "-0.0" || written == "0:00.0";
+        }
+
         /*  THE PAGE'S RULE FOR A TIME COLUMN, so the two clients spell the same
             number the same way (didi.js:176-196). One decimal, and a READ-ONLY
             nought is blank - otherwise the column says nothing in two ways: an
@@ -67,12 +74,9 @@ namespace wfg::client::model
 
             /*  One decimal, written by hand rather than through a locale: a
                 stream under fr_FR would put a comma where the page puts a
-                point, and the two clients would disagree about a cue's wait. */
-            const auto tenths = static_cast<long long> (seconds * 10.0 + (seconds < 0 ? -0.5 : 0.5));
-            const auto whole = tenths / 10;
-            const auto fraction = tenths % 10;
-            const auto written = std::to_string (whole) + "."
-                               + std::to_string (fraction < 0 ? -fraction : fraction);
+                point, and the two clients would disagree about a cue's wait.
+                In the show's format (§151, BKM): `83.5`, or `1:23.5`. */
+            const auto written = readingTime (seconds);
 
             /*  AND A READ-ONLY NOUGHT IS BLANK, or the column spells nothing in
                 two ways: an empty box where a fade waits for none, and "0.0"
@@ -87,7 +91,7 @@ namespace wfg::client::model
             const auto writable = (static_cast<int> (node->access)
                                      & static_cast<int> (tree::Access::write)) != 0;
 
-            if (! writable && (written == "0.0" || written == "-0.0"))
+            if (! writable && isNought (written))
                 return {};
 
             return written;
@@ -116,7 +120,7 @@ namespace wfg::client::model
         std::string codeTime (const tree::TreeSnapshot& snapshot, const std::string& cueId)
         {
             const auto written = timeText (snapshot, cueId, "length");
-            return written == "0.0" || written == "-0.0" ? std::string {} : written;
+            return isNought (written) ? std::string {} : written;
         }
     }
 
@@ -129,6 +133,11 @@ namespace wfg::client::model
     bool ShowModel::refresh (const tree::TreeSnapshot& snapshot, std::string_view listIdToDraw)
     {
         std::uint64_t now = 0;
+
+        /*  THE SHOW'S TIME FORMAT (§151, BKM), for every painter of this window
+            - a show row, so a change of it moves the revision and the rows are
+            written again in it. */
+        setShownTimeFormat (timeFormatOf (snapshot));
 
         if (const auto* node = snapshot.find ("/godot/document/revision"))
             if (const auto sole = node->soleValue(); sole.has_value() && sole->isInt64())

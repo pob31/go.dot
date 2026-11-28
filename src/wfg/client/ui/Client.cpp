@@ -48,6 +48,7 @@
 
 #include <wfg/client/Client.h>
 
+#include <wfg/client/model/TimeText.h>
 #include <wfg/client/model/Cart.h>
 #include <wfg/client/model/Sends.h>
 #include <wfg/client/model/Video.h>
@@ -3584,6 +3585,16 @@ namespace wfg::client
 
                 shell->runs.show (model::readRuns (*snapshot, clockMilliseconds), mediaTable);
 
+                /*  THE SHOW'S TIME FORMAT CHANGED (§151, BKM): every painter reads
+                    it as it paints, and a panel nothing else moved - an editor's
+                    ruler, the take panel - is told to paint again. */
+                if (const auto format = model::timeFormatOf (*snapshot); format != paintedTimeFormat)
+                {
+                    paintedTimeFormat = format;
+                    model::setShownTimeFormat (format);
+                    shell->repaint();
+                }
+
                 /*  AND THE PANEL AT THE FOOT, on the ONE subject it is open on.
                     Handed the table taken just above rather than asking for its
                     own: §14.16's second rule is one call site per door, and the
@@ -6999,6 +7010,9 @@ namespace wfg::client
                 that many undo or redo records - and the list shows what
                 standing there changed against the picture taken when the
                 panel opened. OK keeps where it stands; Cancel goes back. */
+            //  The time format the panels were last painted in (§151, BKM).
+            model::TimeFormat paintedTimeFormat = model::TimeFormat::seconds;
+
             bool browsingUndo = false;
             int undoOpenedAt = 0;
             model::Picture undoPictureAtOpen;

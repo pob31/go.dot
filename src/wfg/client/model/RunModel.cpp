@@ -18,6 +18,7 @@
 
 #include <wfg/client/model/Rack.h>
 #include <wfg/client/model/Text.h>
+#include <wfg/client/model/TimeText.h>
 #include <wfg/client/model/Timecode.h>
 #include <wfg/engine/cue/GroupMode.h>
 #include <wfg/engine/tree/Node.h>
@@ -58,12 +59,8 @@ namespace wfg::client::model
             if (! value.has_value())
                 return {};
 
-            const auto tenths = static_cast<long long> (*value * 10.0
-                                                          + (*value < 0 ? -0.5 : 0.5));
-            const auto whole = tenths / 10;
-            const auto fraction = tenths % 10;
-
-            return std::to_string (whole) + "." + std::to_string (fraction < 0 ? -fraction : fraction);
+            //  In the show's format (§151, BKM): `12.3`, or `0:12.3`.
+            return readingTime (*value);
         }
 
         //  The separator the pane's words use between two readings: a middle dot, as UTF-8.
@@ -448,6 +445,8 @@ namespace wfg::client::model
 
     std::vector<RunRow> readRuns (const tree::TreeSnapshot& snapshot, long long clockMilliseconds)
     {
+        setShownTimeFormat (timeFormatOf (snapshot));   // §151: the pane's clocks in the show's format
+
         const auto order = words (text (snapshot, "/godot/run/order"));
 
         std::vector<RunRow> rows;
